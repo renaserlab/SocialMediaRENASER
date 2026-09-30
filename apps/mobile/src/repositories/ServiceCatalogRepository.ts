@@ -5,9 +5,9 @@ import type {
   EventoVisible,
   Pagina,
   ServicioPrivado,
-  ServicioPublico,
   ServicioResumen,
 } from '@/lib/serviciosCatalogo';
+import type { FichaPublica } from '@/lib/serviciosDescubrimiento';
 
 /**
  * Z Servicios: el catálogo de quien ofrece servicios, y la ficha pública.
@@ -121,8 +121,12 @@ export const ServiceCatalogRepository = {
     return apiRequest<EventoVisible[]>(`${MIOS}/${encodeURIComponent(id)}/history`);
   },
 
-  /** La ficha pública: solo lo publicado de un prestador activo. */
-  async ficha(id: string): Promise<ServicioPublico> {
-    return apiRequest<ServicioPublico>(`${BASE}/catalog/${encodeURIComponent(id)}`);
+  /**
+   * La ficha pública: solo lo publicado de un prestador activo en una categoría
+   * activa. Desde el Incremento 3 trae también la confianza que Z comprobó, las
+   * reseñas (todavía ninguna), si la tienes guardada y otros servicios con su razón.
+   */
+  async ficha(id: string): Promise<FichaPublica> {
+    return apiRequest<FichaPublica>(`${BASE}/catalog/${encodeURIComponent(id)}`);
   },
 };

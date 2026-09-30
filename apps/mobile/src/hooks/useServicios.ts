@@ -16,6 +16,7 @@ import {
   hayQueRecargarElCatalogo,
   type FalloDelCatalogo,
 } from '@/lib/serviciosCatalogo';
+import { claveDeErrorDelDescubrimiento } from '@/lib/serviciosDescubrimiento';
 import { ServiceProviderRepository } from '@/repositories/ServiceProviderRepository';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -31,7 +32,7 @@ import { ApiError } from '@/services/api';
  * códigos (y un «es tuyo» que habla de un servicio, no de una postulación);
  * lo que no es suyo se traduce como en la admisión.
  */
-export type AmbitoDeServicios = 'admision' | 'catalogo';
+export type AmbitoDeServicios = 'admision' | 'catalogo' | 'descubrimiento';
 
 /** `t` para claves que se arman en tiempo de ejecución (`servicios.estado.draft`). */
 export function useTextosDeServicios(ambito: AmbitoDeServicios = 'admision') {
@@ -45,7 +46,8 @@ export function useTextosDeServicios(ambito: AmbitoDeServicios = 'admision') {
     (error: unknown): string => {
       if (error instanceof ApiError) {
         const porCodigo =
-          (ambito === 'catalogo' ? claveDeErrorDelCatalogo(error.code) : null) ??
+          (ambito === 'descubrimiento' ? claveDeErrorDelDescubrimiento(error.code) : null) ??
+          (ambito !== 'admision' ? claveDeErrorDelCatalogo(error.code) : null) ??
           claveDeErrorDeServicios(error.code);
         if (porCodigo !== null) return f(porCodigo);
         const porEstado = claveDeErrorPorEstado(error.status);
@@ -91,7 +93,7 @@ export function useCerrojo(alCambiar?: () => Promise<void> | void, ambito: Ambit
         return true;
       } catch (error) {
         notify(f('servicios.noSePudo'), textoDelError(error));
-        const recargar = ambito === 'catalogo' ? hayQueRecargarElCatalogo : hayQueRecargar;
+        const recargar = ambito !== 'admision' ? hayQueRecargarElCatalogo : hayQueRecargar;
         if (error instanceof ApiError && recargar(error.status, error.code) && alCambiar) {
           await alCambiar();
         }

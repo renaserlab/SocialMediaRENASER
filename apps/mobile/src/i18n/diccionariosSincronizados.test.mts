@@ -135,6 +135,13 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Servicios, Incremento 3: «Filtros», «título», «prestador» y «Empresa»
+    // se escriben EXACTAMENTE igual en portugués.
+    'servicios.descubrir.filtros.titulo',
+    'servicios.descubrir.filtros.conCuantos',
+    'servicios.descubrir.campo.title',
+    'servicios.descubrir.campo.provider',
+    'servicios.descubrir.tipo.company',
     // Servicios, Incremento 2: el portugués escribe estas palabras EXACTAMENTE
     // igual («Publicado», «Enviada», «Virtual», «Presencial», «Título»,
     // «Prestador», «Sistema», «Publicar», «Suspender», «Todos», «País»…).
