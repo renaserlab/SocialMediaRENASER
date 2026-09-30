@@ -120,6 +120,16 @@ def test_guardar_dos_veces_es_imposible_y_todo_cae_en_cascada(pg) -> None:  # no
     _hacer(pg, "insert into public.saved_services (profile_id, service_id, title_at_save) values (%s, %s, 'Asesoría')", quien, servicio)
     with pytest.raises(psycopg.errors.UniqueViolation):
         _hacer(pg, "insert into public.saved_services (profile_id, service_id, title_at_save) values (%s, %s, 'Asesoría')", quien, servicio)
+    # El título al guardar es lo único que enseña un guardado no disponible:
+    # nunca falta, nunca es solo espacios y nunca pasa de 300.
+    for titulo, error in (
+        (None, psycopg.errors.NotNullViolation),
+        ("   ", psycopg.errors.CheckViolation),
+        ("x" * 301, psycopg.errors.CheckViolation),
+    ):
+        with pytest.raises(error):
+            _hacer(pg, "insert into public.saved_services (profile_id, service_id, title_at_save) values (%s, %s, %s)",
+                   _persona(pg), servicio, titulo)
     # La cuenta de quien guarda se va y su lista con ella.
     _hacer(pg, "delete from auth.users where id = %s", quien)
     assert _uno(pg, "select count(*) from public.saved_services where service_id = %s", servicio) == 0
