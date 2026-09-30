@@ -42,6 +42,9 @@ APLICADAS = {
     "0087_servicios_retirada.sql": "359f330a9ee99d22f3c2f719cb0adf557e58d7e8",
     "0088_servicios_documentos_y_envios.sql": "dfa1616cce9cbcdb4a44cf0a1b6dc619c3cd5f38",
     "0089_baja_de_cuenta_con_historial_anonimo.sql": "dcae3160a27b01a98114b69cc79de868681008f1",
+    # Aplicada en Supabase y verificada sin divergencias el 29/09/2026
+    # (Z_SERVICIOS_ARQUITECTURA.md §32): desde entonces tampoco se edita.
+    "0090_servicios_catalogo_y_publicacion.sql": "9abe063feab11a7f99c2e5c4cdf87989c47e1137",
 }
 
 

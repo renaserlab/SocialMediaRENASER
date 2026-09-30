@@ -25,6 +25,7 @@ import { es } from '../i18n/es.ts';
 import { en } from '../i18n/en.ts';
 import { pt } from '../i18n/pt.ts';
 import { avisoAlCreador, rutaDelAviso } from '../lib/avisosAlCreador.ts';
+import { rutaDelPush } from '../lib/rutaDelPush.ts';
 
 const SRC = join(import.meta.dirname, '..');
 const APP = join(SRC, '..', 'app');
@@ -417,6 +418,22 @@ describe('los avisos del catálogo', () => {
         const destino = rutaDelAviso(tipo, id) as string;
         assert.ok(PATRONES.has(destino.replace('s1', '[]')), `${tipo} → ${destino}`);
       }
+    }
+  });
+
+  it('tocar el PUSH abre la aplicación sin inventar una ruta (la cola no manda destino)', () => {
+    // Limitación documentada (Z_SERVICIOS_ARQUITECTURA.md §32): el push de la
+    // cola de entregas sale sin `data` y `rutaDelPush` solo conoce los
+    // directos; el destino lo da la bandeja. Si un día el push lleva el
+    // servicio, esta prueba tiene que cambiar A LA VEZ que `rutaDelPush`.
+    const cola = readFileSync(join(API, 'notifications', 'push.py'), 'utf8')
+      .replace(/\r\n/g, '\n')
+      .split('async def enviar_de_la_cola(')[1]
+      ?.split('\ndef ')[0] ?? '';
+    assert.ok(cola.includes('"channelId"'), 'no se encontró el envío de la cola');
+    assert.ok(!cola.includes('"data"'), 'la cola ya manda datos: enseñar a rutaDelPush los avisos del catálogo');
+    for (const tipo of tipos) {
+      assert.equal(rutaDelPush({ type: tipo, serviceId: '5b7e2f7a-8d1c-4a55-9d61-0c3f1e2a4b6c' }), null, tipo);
     }
   });
 

@@ -870,17 +870,126 @@ async def test_la_puerta_reconoce_la_0090_completa(entorno) -> None:
              "for each row execute function public.service_categories_dos_niveles()",),
             id="disparador_con_otra_funcion",
         ),
+        pytest.param(
+            ("drop trigger services_saltos on public.services",
+             "create trigger services_saltos after insert or update on public.services "
+             "for each row execute function public.services_salto_valido()"),
+            id="disparador_con_otra_forma",
+        ),
         pytest.param(("alter table public.service_events disable trigger service_events_inmutables",), id="deshabilitado"),
         pytest.param(("drop index public.service_versions_una_publicada",), id="sin_indice_critico"),
+        pytest.param(
+            ("drop index public.service_versions_una_publicada",
+             "create index service_versions_una_publicada on public.service_versions (service_id) "
+             "where status = 'published'"),
+            id="indice_critico_no_unico",
+        ),
         pytest.param(("alter table public.service_versions disable row level security",), id="sin_rls"),
         pytest.param(("alter table public.service_versions drop column location_area",), id="sin_columna"),
         pytest.param(("drop table public.service_events",), id="sin_tabla"),
         pytest.param(("delete from storage.buckets where id = 'service-media'",), id="sin_deposito"),
+        pytest.param(("update storage.buckets set public = true where id = 'service-media'",), id="deposito_publico"),
+        # Un rol que ve `storage.buckets` pero SIN saltarse su RLS y sin
+        # ninguna política: la consulta no falla, simplemente no ve el
+        # depósito. En Supabase el rol de la API (`postgres`) tiene BYPASSRLS.
+        pytest.param(
+            ("alter table storage.buckets enable row level security",
+             "create role puerta_sin_bypass nologin nobypassrls",
+             "grant usage on schema public to puerta_sin_bypass",
+             "grant select on storage.buckets to puerta_sin_bypass",
+             "set local role puerta_sin_bypass"),
+            id="rls_de_storage_sin_bypass",
+        ),
     ],
 )
 async def test_la_puerta_rechaza_una_0090_incompleta(entorno, cambios) -> None:
     _, motor, _ = entorno
     assert await _puerta_con(motor, *cambios) is False
+
+
+async def test_la_puerta_con_un_rol_como_el_de_la_api_en_supabase(entorno) -> None:
+    """El control del caso `rls_de_storage_sin_bypass`: con la RLS de
+    `storage.buckets` activa y sin políticas, como en Supabase, un rol con
+    BYPASSRLS y SELECT (lo que tiene `postgres`, verificado el 29/09/2026) sí
+    ve el depósito. Así el «no» de arriba es por el bypass y no por otra cosa."""
+    _, motor, _ = entorno
+    assert await _puerta_con(
+        motor,
+        "alter table storage.buckets enable row level security",
+        "create role puerta_con_bypass nologin bypassrls",
+        "grant usage on schema public to puerta_con_bypass",
+        "grant select on storage.buckets to puerta_con_bypass",
+        "set local role puerta_con_bypass",
+    ) is True
+
+
+async def test_sin_permiso_sobre_storage_la_puerta_contesta_503_y_no_500(entorno) -> None:
+    """Un rol de verdad, con todo lo de `public` pero SIN `SELECT` sobre
+    `storage.buckets`: la consulta de la puerta falla con 42501. La API real
+    contesta 503 `services_not_ready` en todas las entradas del catálogo, no
+    recuerda el fallo, y en cuanto el permiso existe responde sin reiniciar."""
+    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.security import get_current_user
+    from app.main import create_app
+    from app.shared.database import get_db
+
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    rol, clave = f"api_sin_storage_{uuid.uuid4().hex[:8]}", uuid.uuid4().hex
+    async with motor.begin() as c:
+        await c.execute(text(f"create role {rol} login password '{clave}' bypassrls"))
+        for sql in (
+            f"grant usage on schema public, auth to {rol}",
+            f"grant select, insert, update, delete on all tables in schema public to {rol}",
+            f"grant select on all tables in schema auth to {rol}",
+        ):
+            await c.execute(text(sql))
+        # La precondición: sin ella la prueba pasaría por otro motivo.
+        assert (await c.execute(text(
+            "select has_table_privilege(:r, 'storage.buckets', 'select')"), {"r": rol})).scalar() is False
+    restringido = create_async_engine(motor.url.set(username=rol, password=clave))
+    sesiones = async_sessionmaker(restringido, expire_on_commit=False)
+    otra = create_app()
+
+    async def _db():
+        async with sesiones() as db:
+            yield db
+
+    otra.dependency_overrides[get_db] = _db
+    otra.dependency_overrides[get_current_user] = app.dependency_overrides[get_current_user]
+    try:
+        # La consulta de la puerta, sola, falla por permisos…
+        async with restringido.connect() as c:
+            with pytest.raises(DBAPIError) as fallo:
+                await c.execute(esquema._LO_QUE_NECESITA_EL_CATALOGO)
+        assert getattr(fallo.value.orig, "sqlstate", None) == "42501", fallo.value
+        # …y la puerta real dice que no, sin recordarlo.
+        esquema.olvidar()
+        async with sesiones() as db:
+            assert await esquema.hay_catalogo(db) is False
+        assert "catalogo" not in esquema._cache
+        # La API: 503 controlado en el prestador, el público y administración.
+        for uid, ruta in ((perfil, MIOS), (perfil, CATEGORIAS), (perfil, f"{FICHA}/{uuid.uuid4()}"), (jefa, BANDEJA)):
+            async with _cliente(otra, uid) as http:
+                r = await http.get(ruta)
+            assert r.status_code == 503 and r.json()["error"]["code"] == "services_not_ready", (ruta, r.text)
+        # Con el permiso, sin reiniciar nada, contesta.
+        async with motor.begin() as c:
+            await c.execute(text(f"grant select on storage.buckets to {rol}"))
+        async with _cliente(otra, perfil) as http:
+            r = await http.get(MIOS)
+        assert r.status_code == 200, r.text
+        assert esquema._cache.get("catalogo") is True
+    finally:
+        otra.dependency_overrides.clear()
+        await restringido.dispose()
+        esquema.olvidar()
+        async with motor.begin() as c:
+            await c.execute(text(f"drop owned by {rol}"))
+            await c.execute(text(f"drop role {rol}"))
 
 
 async def test_la_puerta_sin_la_0090_dice_no_preparado(entorno, monkeypatch) -> None:
