@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -952,12 +952,23 @@ async def retirar_servicio(
 # --------------------------------------------------------------------------- #
 # Lo que ve cada uno
 # --------------------------------------------------------------------------- #
+#: Lo que pasa EN EL MISMO INSTANTE que otra cosa, y va antes que ella.
+#: Publicar supera la anterior y retirar el servicio retira la versión
+#: abierta: los dos sucesos llevan la misma hora, y desempatar solo por el id
+#: (aleatorio) los enseñaba cada vez en un orden.
+_ANTES_EN_EL_MISMO_INSTANTE = ("superseded", "withdrawn")
+
+
 async def historial(db: AsyncSession, servicio_id: str) -> list[ServiceEvent]:
     return list(
         await db.scalars(
             select(ServiceEvent)
             .where(ServiceEvent.service_id == servicio_id)
-            .order_by(ServiceEvent.created_at, ServiceEvent.id)
+            .order_by(
+                ServiceEvent.created_at,
+                case((ServiceEvent.action.in_(_ANTES_EN_EL_MISMO_INSTANTE), 0), else_=1),
+                ServiceEvent.id,
+            )
         )
     )
 

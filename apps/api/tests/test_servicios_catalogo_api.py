@@ -746,6 +746,37 @@ async def test_la_auditoria_no_copia_textos_libres(entorno) -> None:
     assert all(f[1] is None for f in filas)
 
 
+async def test_lo_que_pasa_en_el_mismo_instante_sale_siempre_en_el_mismo_orden(entorno) -> None:
+    """Publicar supera la anterior en el MISMO instante. Con los ids elegidos
+    para que el desempate por id ponga «publicada» primero, el historial tiene
+    que enseñar igualmente «superada» antes: si no, cada lectura podía
+    salir en un orden distinto (lo destapó el recorrido integral)."""
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _publicado(app, perfil, jefa, moderador))["id"]
+    version = await _uno(
+        motor, "select id::text from public.service_versions where service_id = cast(:s as uuid)", s=ident
+    )
+    for evento, accion, quien, rol in (
+        ("00000000-0000-4000-8000-000000000001", "published", jefa, "admin"),
+        ("ffffffff-ffff-4fff-bfff-ffffffffffff", "superseded", None, "system"),
+    ):
+        await _sembrar(
+            motor,
+            "insert into public.service_events (id, service_id, version_id, action, from_status, to_status, "
+            "actor_id, actor_role, created_at) values (cast(:e as uuid), cast(:s as uuid), cast(:v as uuid), :a, "
+            "'approved', 'published', cast(:q as uuid), :r, timestamptz '2999-01-01 00:00:00+00')",
+            e=evento, s=ident, v=version, a=accion, q=quien, r=rol,
+        )
+    async with _cliente(app, jefa) as http:
+        completo = (await http.get(f"{BANDEJA}/{ident}/history")).json()
+    assert [e["action"] for e in completo[-2:]] == ["superseded", "published"]
+    async with _cliente(app, perfil) as http:
+        visible = (await http.get(f"{MIOS}/{ident}/history")).json()
+    assert [e["action"] for e in visible[-2:]] == ["superseded", "published"]
+
+
 async def test_un_aviso_que_falla_no_deshace_la_decision(entorno, monkeypatch) -> None:
     app, motor, _ = entorno
     jefa, moderador = await _equipo(motor)
