@@ -1,6 +1,7 @@
 """La migración 0092: la disponibilidad y la agenda del prestador (Incremento 4).
 
-1. ESTÁTICA: es la última y sigue a la 0091, una sola transacción que
+1. ESTÁTICA: es la última y sigue a la 0091, está APLICADA (su huella en
+   `APLICADAS`: no se edita más), una sola transacción que
    comprueba lo anterior antes de crear nada, no concede permisos ni toca otra
    tabla, la única extensión es `btree_gist`, sus límites son los de
    `agenda_politica`, y no trae nada de reservas, retenciones ni dinero.
@@ -16,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import threading
 import time
@@ -25,6 +27,7 @@ import pytest
 from app.modules.services import agenda_politica as limites
 from tests.test_migraciones_reales import MIGRACIONES
 from tests.test_servicios_migracion_0090 import (
+    APLICADAS,
     SIN_POSTGRES,
     _falla,
     _foto,
@@ -59,6 +62,16 @@ def test_es_la_ultima_y_sigue_a_la_0091() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
     assert nombres[-1] == ARCHIVO.name
     assert nombres[-2].startswith("0091_")
+
+
+def test_esta_aplicada_y_ya_no_se_edita() -> None:
+    """Aplicada a mano en Supabase y verificada en solo lectura, sin
+    divergencias, el 30/09/2026: su huella git está en `APLICADAS` y el
+    fichero, byte a byte (salvo los finales de línea), tiene que seguir
+    dándola. Ni siquiera su cabecera, que dice «SIN APLICAR», se toca."""
+    contenido = ARCHIVO.read_bytes().replace(b"\r\n", b"\n")
+    huella = hashlib.sha1(f"blob {len(contenido)}\0".encode() + contenido).hexdigest()
+    assert APLICADAS.get(ARCHIVO.name) == huella == "eba1a48199c91b53f7e42f1623bb845211fe27c7"
 
 
 def test_es_una_unica_transaccion_que_comprueba_antes_de_crear() -> None:

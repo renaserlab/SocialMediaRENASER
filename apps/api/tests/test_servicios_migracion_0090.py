@@ -50,6 +50,11 @@ APLICADAS = {
     # entonces tampoco se edita. Su cabecera dice «SIN APLICAR» a propósito,
     # como la de la 0090: cambiarla sería editar lo aplicado.
     "0091_servicios_guardados.sql": "d867002671b75413a5edd3e478cf76d879b28521",
+    # Ejecutada a mano en Supabase y verificada en solo lectura, sin
+    # divergencias, el 30/09/2026 (Z_SERVICIOS_ARQUITECTURA.md §61): desde
+    # entonces tampoco se edita. Su cabecera dice «SIN APLICAR» a propósito,
+    # como la de la 0090 y la 0091: cambiarla sería editar lo aplicado.
+    "0092_servicios_disponibilidad_y_agenda.sql": "eba1a48199c91b53f7e42f1623bb845211fe27c7",
 }
 
 
