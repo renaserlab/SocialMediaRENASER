@@ -77,7 +77,8 @@ import {
 const AQUI = fileURLToPath(new URL('.', import.meta.url));
 
 function fuente(...partes: string[]): string {
-  return readFileSync(join(AQUI, '..', ...partes), 'utf8');
+  // Sin `\r`: con `core.autocrlf` en Windows el fuente llega con CRLF.
+  return readFileSync(join(AQUI, '..', ...partes), 'utf8').replace(/\r\n/g, '\n');
 }
 
 /** El código sin comentarios: lo que el fichero HACE, no lo que explica. */
