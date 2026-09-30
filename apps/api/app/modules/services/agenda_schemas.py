@@ -126,7 +126,8 @@ class HorarioRead(BaseModel):
     time: str
     end_time: str
     utc_offset: str
-    #: Capacidad TEÓRICA (personas por horario). Aún no se descuenta nada.
+    #: Capacidad TEÓRICA (personas por horario). Lo ya ocupado quita el
+    #: horario entero cuando se llena, pero nunca se enseña un «quedan» (E5).
     capacity: int
 
     @classmethod
@@ -318,6 +319,11 @@ class CalendarioRead(BaseModel):
     #: Solo en la vista previa del prestador: por qué el público no ve horarios.
     #: Lo decide el dominio: la consulta pública nunca los rellena.
     issues: list[str] = []
+    #: Solo en lo público: si este servidor deja RETENER un horario de este
+    #: servicio ahora (`FEATURE_SERVICE_BOOKING`, la 0093, un precio que se
+    #: contrata y una modalidad que se confirma sola). Sin eso, la app no
+    #: ofrece continuar.
+    booking_available: bool = False
 
     @classmethod
     def desde(cls, c: dominio.Calendario) -> "CalendarioRead":

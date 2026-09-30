@@ -45,6 +45,8 @@ from app.modules.services.agenda_router import router as services_schedule_route
 from app.modules.services.catalogo_router import admin_router as services_catalog_admin_router
 from app.modules.services.catalogo_router import router as services_catalog_router
 from app.modules.services.descubrimiento_router import router as services_discovery_router
+from app.modules.services.reserva_router import admin_router as services_booking_admin_router
+from app.modules.services.reserva_router import router as services_booking_router
 from app.modules.services.router import admin_router as services_admin_router
 from app.modules.services.router import router as services_router
 from app.modules.learning.router import router as learning_router
@@ -225,6 +227,12 @@ def create_app() -> FastAPI:
     # La agenda (Incremento 4): `/services/provider/services/{id}/schedule…`
     # y `/services/catalog/{id}/availability…`. Tampoco choca.
     app.include_router(services_schedule_router, prefix=prefix)
+    # La reserva (Incremento 5): `/services/catalog/{id}/holds`,
+    # `/services/holds/…`, `/services/me/bookings…`, `/services/provider/bookings…`
+    # y `/admin/services/{holds,bookings}`. Tampoco choca. Además de
+    # `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` (apagada).
+    app.include_router(services_booking_router, prefix=prefix)
+    app.include_router(services_booking_admin_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

@@ -31,7 +31,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +40,7 @@ from app.modules.services import agenda_calculo as calc
 from app.modules.services import agenda_politica as limites
 from app.modules.services import catalogo
 from app.modules.services import catalogo_estados as estados
-from app.modules.services import descubrimiento
+from app.modules.services import descubrimiento, esquema
 from app.modules.services.admision import ClaveReutilizada
 from app.modules.services.agenda_models import (
     AGENDA_ACTIVA,
@@ -272,11 +272,41 @@ async def _bloqueos(
     )
 
 
+async def ocupaciones(
+    db: AsyncSession, servicio_id: str, *, ahora: datetime, excepto: str | None = None
+) -> tuple[calc.Ocupacion, ...]:
+    """LO YA OCUPADO (Incremento 5): cada retención VIVA y cada reserva, por
+    venir. Una retención `active` cuyo vencimiento ya pasó NO ocupa aunque el
+    barrido no haya pasado: el vencimiento lo decide la hora, no la limpieza.
+    Sin la 0093 no hay nada que ocupe. `excepto` es la retención propia
+    (al confirmar, la que se revalida no se cuenta contra sí misma)."""
+    if not await esquema.hay_reservas(db):
+        return ()
+    from app.modules.services.reserva_models import OCUPAN, RETENCION_CONSUMIDA, ServiceHold
+
+    consulta = select(ServiceHold.starts_at, ServiceHold.occupied_from, ServiceHold.occupied_until).where(
+        ServiceHold.service_id == servicio_id,
+        ServiceHold.status.in_(OCUPAN),
+        ServiceHold.occupied_until > ahora,
+        or_(ServiceHold.status == RETENCION_CONSUMIDA, ServiceHold.expires_at > ahora),
+    )
+    if excepto is not None:
+        consulta = consulta.where(ServiceHold.id != excepto)
+    filas = (await db.execute(consulta.order_by(ServiceHold.starts_at, ServiceHold.id))).all()
+    return tuple(calc.Ocupacion(_utc(s), _utc(d), _utc(h)) for s, d, h in filas)
+
+
 async def _datos(
-    db: AsyncSession, agenda: ServiceSchedule, servicio: calc.Servicio, *, ahora: datetime, politica: limites.Politica
+    db: AsyncSession,
+    agenda: ServiceSchedule,
+    servicio: calc.Servicio,
+    *,
+    ahora: datetime,
+    politica: limites.Politica,
+    excepto: str | None = None,
 ) -> calc.Datos:
-    """Todo lo que el cálculo necesita desde HOY hasta el HORIZONTE, en tres
-    lecturas acotadas."""
+    """Todo lo que el cálculo necesita desde HOY hasta el HORIZONTE, en
+    cuatro lecturas acotadas (la cuarta, lo ya ocupado)."""
     z = _zona_de(agenda)
     hoy = calc.hoy(z, ahora)
     ultima = calc.ultima_fecha(z, ahora, politica)
@@ -299,6 +329,7 @@ async def _datos(
             for e in excepciones
         ),
         bloqueos=tuple(calc.Bloqueo(_utc(b.starts_at), _utc(b.ends_at)) for b in bloqueos),
+        ocupaciones=await ocupaciones(db, agenda.service_id, ahora=ahora, excepto=excepto),
     )
 
 

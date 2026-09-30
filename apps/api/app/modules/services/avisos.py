@@ -33,6 +33,9 @@ logger = logging.getLogger("renaser.services")
 ENTIDAD = "service_application"
 #: El catálogo (Incremento 2): el aviso apunta al SERVICIO, no a la versión.
 ENTIDAD_SERVICIO = "service"
+#: La reserva (Incremento 5): el aviso apunta a la RESERVA. No es `booking`:
+#: ese nombre es de la agenda de sesiones del prototipo (0025).
+ENTIDAD_RESERVA = "service_booking"
 
 # A quien postula.
 REVISION_INICIADA = "service_application_review_started"
@@ -64,6 +67,12 @@ SERVICIO_PUBLICADO_EN_SUSPENSO = "service_catalog_published_suspended"
 SERVICIO_ENVIADO = "service_catalog_submitted"
 SERVICIO_REENVIADO = "service_catalog_resubmitted"
 SERVICIO_RETIRADO_EN_REVISION = "service_catalog_withdrawn_review"
+
+# LA RESERVA (Incremento 5). A quien contrata, y al prestador. Sin la fecha,
+# la dirección ni la nota: quien lo abre lee el detalle en la reserva.
+RESERVA_CONFIRMADA = "service_booking_confirmed"
+RESERVA_RECIBIDA = "service_booking_received"
+TIPOS_DE_LA_RESERVA = frozenset({RESERVA_CONFIRMADA, RESERVA_RECIBIDA})
 
 TIPOS_DEL_CATALOGO = frozenset(
     {
@@ -97,6 +106,7 @@ TIPOS = frozenset(
         RETIRADA_EN_REVISION,
     }
     | TIPOS_DEL_CATALOGO
+    | TIPOS_DE_LA_RESERVA
 )
 
 #: Tope de destinatarios del equipo. Hoy hay uno; esto evita que un error de

@@ -39,7 +39,11 @@ from app.modules.services import (
     service,
     states,
 )
-from app.modules.services.models import PESO_MAXIMO_DE_DOCUMENTO
+from app.modules.services.models import (
+    PESO_MAXIMO_DE_DOCUMENTO,
+    POLITICA_CONDICIONES_DE_CONTRATACION,
+    POLITICA_TERMINOS_DEL_PRESTADOR,
+)
 from app.modules.services.schemas import (
     BorradorActualizar,
     CorreccionesSolicitar,
@@ -525,12 +529,15 @@ async def retirar_postulacion(
 @admin_router.get("/policies", response_model=list[PoliticaRead])
 async def versiones_de_condiciones(
     country: str | None = Query(default=None, pattern=r"^[A-Z]{2}$"),
+    kind: str = Query(default=POLITICA_TERMINOS_DEL_PRESTADOR, pattern=r"^(provider_terms|booking_terms)$"),
     _funcion: str = Depends(funcion_de_revision),
     _disponible: None = Depends(servicios_disponibles),
     db: AsyncSession = Depends(get_db),
 ) -> list[PoliticaRead]:
-    """Todas las versiones (borrador, publicada, superadas) de las condiciones."""
-    return [PoliticaRead.desde(p) for p in await politicas.versiones(db, pais=country)]
+    """Todas las versiones (borrador, publicada, superadas) de las condiciones:
+    las del prestador (de fábrica) o las de CONTRATACIÓN (`kind=booking_terms`,
+    Incremento 5)."""
+    return [PoliticaRead.desde(p) for p in await politicas.versiones(db, pais=country, tipo=kind)]
 
 
 @admin_router.post(
@@ -561,6 +568,45 @@ async def crear_borrador_de_condiciones(
             db, accion="service_policy.draft_created", entidad="service_policy",
             entidad_id=politica.id, actor_id=current_user.id, funcion=states.ADMINISTRACION,
             datos={"country": politica.country_code, "version": politica.version},
+        )
+    await db.commit()
+    if not nueva:
+        response.status_code = status.HTTP_200_OK
+    return PoliticaRead.desde(politica)
+
+
+@admin_router.post(
+    "/policies/booking-terms/draft",
+    response_model=PoliticaRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_borrador_de_condiciones_de_contratacion(
+    cuerpo: PoliticaBorradorCrear,
+    response: Response,
+    current_user: AuthUser = Depends(get_current_user),
+    _funcion: str = Depends(funcion_de_decision),
+    _disponible: None = Depends(servicios_disponibles),
+    db: AsyncSession = Depends(get_db),
+) -> PoliticaRead:
+    """LAS CONDICIONES DE CONTRATACIÓN (Incremento 5): las acepta quien
+    contrata un servicio. Las ESCRIBE Y PUBLICA la empresa; sin una publicada
+    para el país del prestador no se confirma ninguna reserva. Sin parámetros.
+    Editar, previsualizar y publicar son las rutas de siempre, por su id."""
+    politica, nueva = await politicas.borrador(
+        db,
+        pais=cuerpo.country_code,
+        categoria=cuerpo.category,
+        titulo=cuerpo.title,
+        texto=cuerpo.body,
+        parametros=cuerpo.parameters,
+        autor_id=current_user.id,
+        tipo=POLITICA_CONDICIONES_DE_CONTRATACION,
+    )
+    if nueva:
+        await admision.auditar(
+            db, accion="service_policy.draft_created", entidad="service_policy",
+            entidad_id=politica.id, actor_id=current_user.id, funcion=states.ADMINISTRACION,
+            datos={"country": politica.country_code, "version": politica.version, "kind": politica.kind},
         )
     await db.commit()
     if not nueva:

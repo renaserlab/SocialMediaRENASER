@@ -353,6 +353,18 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("A service was withdrawn from review", "The provider withdrew it before publication."),
         "pt": ("Um serviço foi retirado da revisão", "O prestador o retirou antes da publicação."),
     },
+    # Z Servicios, Incremento 5: la reserva. Sin fecha, hora, importe ni
+    # dirección: quien lo abre lee el detalle en la reserva.
+    "service_booking_confirmed": {
+        "es": ("Tu reserva está confirmada", "Ábrela para ver el detalle."),
+        "en": ("Your booking is confirmed", "Open it to see the details."),
+        "pt": ("Sua reserva está confirmada", "Abra-a para ver os detalhes."),
+    },
+    "service_booking_received": {
+        "es": ("Tienes una reserva nueva", "Ábrela para ver el detalle."),
+        "en": ("You have a new booking", "Open it to see the details."),
+        "pt": ("Você tem uma nova reserva", "Abra-a para ver os detalhes."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

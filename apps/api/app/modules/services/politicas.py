@@ -37,6 +37,7 @@ from app.modules.services.models import (
     POLITICA_BORRADOR,
     POLITICA_PUBLICADA,
     POLITICA_SUPERADA,
+    POLITICA_CONDICIONES_DE_CONTRATACION,
     POLITICA_TERMINOS_DEL_PRESTADOR,
     TIPOS_DE_CREDENCIAL,
     TIPOS_DE_DOCUMENTO,
@@ -84,9 +85,16 @@ def _ahora() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def validar_parametros(parametros: dict | None) -> dict:
-    """Solo lo conocido, con valores que existen. Nada se completa por defecto."""
+def validar_parametros(parametros: dict | None, tipo: str = POLITICA_TERMINOS_DEL_PRESTADOR) -> dict:
+    """Solo lo conocido, con valores que existen. Nada se completa por defecto.
+
+    Las condiciones de CONTRATACIÓN (Incremento 5) no tienen parámetros: son
+    un texto que se acepta, y nada del código depende de lo que digan."""
     parametros = dict(parametros or {})
+    if tipo == POLITICA_CONDICIONES_DE_CONTRATACION:
+        if parametros:
+            raise ParametrosInvalidos(details={"unknown": sorted(parametros)})
+        return {}
     desconocidos = set(parametros) - {
         "required_documents",
         "required_credentials",
@@ -207,6 +215,7 @@ async def borrador(
     texto: str,
     parametros: dict | None,
     autor_id: str,
+    tipo: str = POLITICA_TERMINOS_DEL_PRESTADOR,
 ) -> tuple[ServicePolicy, bool]:
     """El borrador de ese país y categoría, o uno nuevo. IDEMPOTENTE.
 
@@ -222,11 +231,11 @@ async def borrador(
     if (await db.connection()).dialect.name == "postgresql":
         await db.execute(
             text("select pg_advisory_xact_lock(hashtextextended(:clave, 0))"),
-            {"clave": f"service_policies:{POLITICA_TERMINOS_DEL_PRESTADOR}:{pais}:{categoria or ''}"},
+            {"clave": f"service_policies:{tipo}:{pais}:{categoria or ''}"},
         )
     existente = await db.scalar(
         select(ServicePolicy).where(
-            ServicePolicy.kind == POLITICA_TERMINOS_DEL_PRESTADOR,
+            ServicePolicy.kind == tipo,
             ServicePolicy.country_code == pais,
             ServicePolicy.category.is_(None) if categoria is None else ServicePolicy.category == categoria,
             ServicePolicy.status == POLITICA_BORRADOR,
@@ -236,14 +245,14 @@ async def borrador(
         return existente, False
     ultima = await db.scalar(
         select(func.max(ServicePolicy.version)).where(
-            ServicePolicy.kind == POLITICA_TERMINOS_DEL_PRESTADOR,
+            ServicePolicy.kind == tipo,
             ServicePolicy.country_code == pais,
             ServicePolicy.category.is_(None) if categoria is None else ServicePolicy.category == categoria,
         )
     )
     ahora = _ahora()
     politica = ServicePolicy(
-        kind=POLITICA_TERMINOS_DEL_PRESTADOR,
+        kind=tipo,
         country_code=pais,
         category=categoria,
         version=(ultima or 0) + 1,
@@ -251,7 +260,7 @@ async def borrador(
         title=titulo,
         body=texto,
         body_sha256=huella(texto),
-        parameters=validar_parametros(parametros),
+        parameters=validar_parametros(parametros, tipo),
         created_by=autor_id,
         created_at=ahora,
         updated_at=ahora,
@@ -265,7 +274,7 @@ async def borrador(
         # primero. Se devuelve el que ganó, como si ya estuviera.
         ganador = await db.scalar(
             select(ServicePolicy).where(
-                ServicePolicy.kind == POLITICA_TERMINOS_DEL_PRESTADOR,
+                ServicePolicy.kind == tipo,
                 ServicePolicy.country_code == pais,
                 ServicePolicy.category.is_(None) if categoria is None else ServicePolicy.category == categoria,
                 ServicePolicy.status == POLITICA_BORRADOR,
@@ -288,7 +297,7 @@ async def editar_borrador(
         politica.body = str(cambios["body"])
         politica.body_sha256 = huella(politica.body)
     if "parameters" in cambios:
-        politica.parameters = validar_parametros(cambios["parameters"])  # type: ignore[arg-type]
+        politica.parameters = validar_parametros(cambios["parameters"], politica.kind)  # type: ignore[arg-type]
     politica.updated_at = _ahora()
     await db.flush()
     return politica

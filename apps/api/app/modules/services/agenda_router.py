@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.services import agenda as dominio
 from app.modules.services import agenda_politica as limites
-from app.modules.services import esquema
+from app.modules.services import esquema, reserva
 from app.modules.services.agenda_schemas import (
     AgendaConfigurar,
     AgendaPrivadaRead,
@@ -293,13 +293,20 @@ async def disponibilidad(
 ) -> CalendarioRead:
     """Las fechas con horarios POSIBLES de un servicio público, desde hoy y
     como mucho hasta el horizonte, de 31 días en 31. Un horario que se ve no
-    queda apartado: no hay reservas todavía."""
-    return CalendarioRead.desde(
+    queda apartado: se aparta al RETENERLO (Incremento 5), y
+    `booking_available` dice si este servidor lo permite hoy."""
+    calendario = CalendarioRead.desde(
         await dominio.calendario_publico(
             db, servicio_id=_id(service_id), mira=_mira(current_user), desde=from_date, hasta=to_date,
             modalidad=modality,
         ),
     )
+    calendario.booking_available = (
+        esquema.reserva_encendida()
+        and await esquema.hay_reservas(db)
+        and await reserva.se_puede_apartar(db, service_id)
+    )
+    return calendario
 
 
 @router.get(f"{DISPONIBILIDAD}/{{day}}", response_model=PaginaDeHorariosRead)

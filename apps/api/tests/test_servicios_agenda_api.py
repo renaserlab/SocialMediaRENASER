@@ -49,6 +49,8 @@ DE_DINERO_Y_RESERVAS = (
     "bookings", "orders", "entitlements", "event_orders", "event_ticket_holds", "event_ticket_hold_items",
     "product_orders", "payment_transactions", "payment_events", "owner_transfers", "owner_sale_reserves",
     "refund_requests", "product_refunds",
+    # Las de la reserva de Servicios (0093): la agenda no escribe en ellas.
+    "service_holds", "service_orders", "service_bookings",
 )
 
 
@@ -345,8 +347,10 @@ async def test_lo_publico_solo_trae_horarios_y_respeta_el_horizonte(mundo) -> No
     calendario = r.json()
     assert set(calendario) == {
         "timezone", "status", "modality", "duration_minutes", "today", "last_date", "from_date", "to_date",
-        "days", "next", "issues",
+        "days", "next", "issues", "booking_available",
     }
+    # La contratación (Incremento 5) tiene su propia bandera, apagada aquí.
+    assert calendario["booking_available"] is False
     assert calendario["issues"] == [] and calendario["status"] == "active"
     assert calendario["timezone"] == "America/Lima" and calendario["modality"] == "virtual"
     assert calendario["from_date"] == _hoy().isoformat() and len(calendario["days"]) >= 29

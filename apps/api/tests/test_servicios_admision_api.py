@@ -381,11 +381,32 @@ RUTAS_DE_LA_AGENDA = {
     ("GET", "/services/catalog/{service_id}/availability/{day}"),
 }
 
+#: La reserva (Incremento 5, 0093): doce, y el borrador de las condiciones de
+#: contratación en administración.
+RUTAS_DE_LA_RESERVA = {
+    ("POST", "/services/catalog/{service_id}/holds"),
+    ("GET", "/services/holds/{hold_id}"),
+    ("POST", "/services/holds/{hold_id}/release"),
+    ("GET", "/services/holds/{hold_id}/checkout"),
+    ("POST", "/services/holds/{hold_id}/confirm"),
+    ("GET", "/services/me/bookings"),
+    ("GET", "/services/me/bookings/{booking_id}"),
+    ("GET", "/services/provider/bookings"),
+    ("GET", "/services/provider/bookings/{booking_id}"),
+    ("GET", "/admin/services/holds"),
+    ("GET", "/admin/services/bookings"),
+    ("POST", "/admin/services/holds/expire"),
+    ("POST", "/admin/services/policies/booking-terms/draft"),
+}
 
-def test_estan_exactamente_las_rutas_de_los_incrementos_1_a_4() -> None:
+
+def test_estan_exactamente_las_rutas_de_los_incrementos_1_a_5() -> None:
     rutas = {(m, p[len(API):]) for m, p in _rutas(create_app()) if "/services" in p}
-    assert len(RUTAS_DE_LA_AGENDA) == 14
-    assert rutas == RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO | RUTAS_DE_LA_AGENDA
+    assert len(RUTAS_DE_LA_AGENDA) == 14 and len(RUTAS_DE_LA_RESERVA) == 13
+    assert rutas == (
+        RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO | RUTAS_DE_LA_AGENDA
+        | RUTAS_DE_LA_RESERVA
+    )
 
 
 def test_ninguna_ruta_de_la_aplicacion_esta_duplicada() -> None:

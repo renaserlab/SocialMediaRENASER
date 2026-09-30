@@ -17,10 +17,14 @@ ES LA ÚNICA AUTORIDAD para cuatro cosas, y nadie más las repite:
   * GENERAR LOS HORARIOS de una franja: cada uno ocupa preparación +
     duración + descanso, y ese bloque ENTERO cabe en la franja y no toca un
     cierre ni un bloqueo. Sin intervalo propio van uno detrás de otro; con él,
-    son inicios alternativos (elegir uno excluirá a los que se le cruzan
-    cuando existan las reservas, en el Incremento 5).
-  * LA CAPACIDAD TEÓRICA: la de la franja, nunca más que la del servicio. Aquí
-    no se descuenta nada: no hay reservas ni retenciones.
+    son inicios alternativos.
+  * LA CAPACIDAD TEÓRICA: la de la franja, nunca más que la del servicio.
+  * LO QUE YA ESTÁ OCUPADO (Incremento 5): cada retención viva y cada reserva
+    ocupa su SESIÓN (su inicio) con la separación que tenía al retenerse. Un
+    horario desaparece si su bloque ENTERO toca otra sesión, o si su propia
+    sesión ya no tiene plazas. Es la MISMA regla que impone la 0093 (dos
+    sesiones distintas no se pisan; una plaza no se da dos veces): lo que
+    aquí se ofrece es lo que la base dejará retener.
 
 LOS CRUCES NO SE DECIDEN AQUÍ: los impide la base (restricciones de exclusión
 de la 0092). Si aun así llegaran franjas que se pisan, se juntan: nunca se
@@ -175,6 +179,17 @@ class Bloqueo:
 
 
 @dataclass(frozen=True)
+class Ocupacion:
+    """Una SESIÓN ya ocupada: su inicio, lo que ocupa (con la preparación y
+    el descanso congelados al retener) y cuántas plazas tiene tomadas."""
+
+    inicio: datetime
+    desde: datetime
+    hasta: datetime
+    plazas: int = 1
+
+
+@dataclass(frozen=True)
 class Franja:
     inicio: int
     fin: int
@@ -188,6 +203,8 @@ class Horario:
     inicio: datetime
     fin: datetime
     capacidad: int
+    #: Plazas ya tomadas en ESA sesión (retenciones vivas y reservas).
+    ocupadas: int = 0
 
 
 @dataclass(frozen=True)
@@ -199,6 +216,8 @@ class Datos:
     reglas: tuple[Regla, ...]
     excepciones: tuple[Excepcion, ...]
     bloqueos: tuple[Bloqueo, ...]
+    #: Lo ya ocupado (Incremento 5). Vacío sin la 0093.
+    ocupaciones: tuple[Ocupacion, ...] = ()
 
 
 # --------------------------------------------------------------------------- #
@@ -289,6 +308,40 @@ def _se_cruza(inicio: datetime, fin: datetime, tramos: list[tuple[datetime, date
     return i >= 0 and tramos[i][1] > inicio
 
 
+def _sesiones(ocupaciones: tuple[Ocupacion, ...], dia0: datetime, dia1: datetime) -> dict[datetime, tuple]:
+    """Las sesiones que tocan el día: inicio → (desde, hasta, plazas). Dos
+    ocupaciones del MISMO inicio son la misma sesión (sus plazas se suman)."""
+    sesiones: dict[datetime, tuple] = {}
+    for o in ocupaciones:
+        if o.desde >= dia1 or o.hasta <= dia0:
+            continue
+        previa = sesiones.get(o.inicio)
+        if previa is None:
+            sesiones[o.inicio] = (o.desde, o.hasta, o.plazas)
+        else:
+            sesiones[o.inicio] = (min(previa[0], o.desde), max(previa[1], o.hasta), previa[2] + o.plazas)
+    return sesiones
+
+
+def _otra_sesion_se_cruza(
+    inicio: datetime, fin: datetime, propia: datetime, otras: list[tuple], inicios: list[datetime]
+) -> bool:
+    """¿`[inicio, fin)` toca una sesión que NO empieza en `propia`? Las
+    sesiones distintas no se pisan entre sí (lo impone la 0093): ordenadas por
+    su comienzo, sus finales también crecen, así que basta mirar hacia atrás
+    desde la última que empieza antes de `fin` hasta la primera que acaba
+    antes de `inicio`."""
+    i = bisect_left(inicios, fin) - 1
+    while i >= 0:
+        desde, hasta, sesion = otras[i]
+        if hasta <= inicio:
+            return False
+        if sesion != propia:
+            return True
+        i -= 1
+    return False
+
+
 def horarios_del_dia(
     fecha: date,
     datos: Datos,
@@ -319,6 +372,9 @@ def horarios_del_dia(
         + [(b.inicio, b.fin) for b in datos.bloqueos if b.inicio < dia1 and b.fin > dia0]
     )
     inicios_fuera = [t0 for t0, _ in fuera]
+    sesiones = _sesiones(datos.ocupaciones, dia0, dia1)
+    otras = sorted((d, h, s) for s, (d, h, _) in sesiones.items())
+    inicios_otras = [d for d, _, _ in otras]
     antes = timedelta(minutes=c.preparacion)
     atencion = timedelta(minutes=s.duracion)
     despues = timedelta(minutes=c.descanso)
@@ -333,8 +389,12 @@ def horarios_del_dia(
         while inicio + atencion + despues <= cierra:
             if desde <= inicio <= hasta and not _se_cruza(
                 inicio - antes, inicio + atencion + despues, fuera, inicios_fuera
+            ) and not _otra_sesion_se_cruza(
+                inicio - antes, inicio + atencion + despues, inicio, otras, inicios_otras
             ):
-                salida.append(Horario(fecha, inicio, inicio + atencion, capacidad))
+                ocupadas = sesiones[inicio][2] if inicio in sesiones else 0
+                if ocupadas < capacidad:
+                    salida.append(Horario(fecha, inicio, inicio + atencion, capacidad, ocupadas))
             inicio += paso
     salida.sort(key=lambda h: h.inicio)
     # Dos franjas de distinta capacidad pueden dar el mismo inicio: uno solo.
@@ -404,6 +464,7 @@ __all__ = [
     "Excepcion",
     "Franja",
     "Horario",
+    "Ocupacion",
     "Regla",
     "Servicio",
     "desplazamiento",
