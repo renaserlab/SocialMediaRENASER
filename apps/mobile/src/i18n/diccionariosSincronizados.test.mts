@@ -141,6 +141,8 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Servicios, Incremento 5: «Reservas» se escribe igual en portugués.
+    'servicios.reserva.admin.vista.bookings',
     // Servicios, Incremento 4: «Configurar agenda», «Cancelar», «Motivo»,
     // «sábado» y «domingo» se escriben EXACTAMENTE igual en portugués; el
     // resto es formato puro.

@@ -141,6 +141,9 @@ export type Calendario = {
   days: { date: string; count: number }[];
   next: Horario | null;
   issues: string[];
+  /** Si este servidor deja APARTAR un horario de este servicio ahora
+   *  (Incremento 5). Sin él, la app no ofrece continuar. */
+  booking_available?: boolean;
 };
 
 export type PaginaDeHorarios = {

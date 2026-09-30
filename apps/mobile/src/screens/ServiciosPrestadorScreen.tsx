@@ -163,6 +163,16 @@ export function ServiciosPrestadorScreen() {
           onPress={() => router.push('/servicios/prestador/catalogo' as never)}
         />
       ) : null}
+      {/* Y las reservas de sus servicios (Incremento 5). */}
+      {solicitud.provider.status === 'active' ? (
+        <ListRow
+          title={f('servicios.reserva.delPrestador')}
+          subtitle={f('servicios.reserva.delPrestadorEntrada')}
+          leftIcon="calendar"
+          rightIcon="chevron-right"
+          onPress={() => router.push('/servicios/prestador/reservas' as never)}
+        />
+      ) : null}
 
       {solicitud.applicant_message ? (
         <View style={[tarjeta, { borderColor: colors.primary }]}>

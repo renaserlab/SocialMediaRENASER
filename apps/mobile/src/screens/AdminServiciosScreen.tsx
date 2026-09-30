@@ -120,12 +120,26 @@ export function AdminServiciosScreen() {
           />
         ))}
       </View>
-      <Button
-        label={f('servicios.admin.condiciones')}
-        variant="ghost"
-        icon="file-text"
-        onPress={() => router.push('/admin/servicios/condiciones' as never)}
-      />
+      <View style={styles.fila}>
+        <Button
+          label={f('servicios.admin.condiciones')}
+          variant="ghost"
+          icon="file-text"
+          onPress={() => router.push('/admin/servicios/condiciones' as never)}
+        />
+        <Button
+          label={f('servicios.admin.condicionesDeContratacion')}
+          variant="ghost"
+          icon="file-text"
+          onPress={() => router.push('/admin/servicios/condiciones-de-contratacion' as never)}
+        />
+        <Button
+          label={f('servicios.admin.reservas')}
+          variant="ghost"
+          icon="calendar"
+          onPress={() => router.push('/admin/servicios/reservas' as never)}
+        />
+      </View>
 
       {fallo !== null ? (
         <EstadoDeServicios fallo={fallo} onRetry={() => void cargar()} />

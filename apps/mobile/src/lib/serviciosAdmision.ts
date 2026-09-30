@@ -270,6 +270,9 @@ export type EventoAdmin = {
   created_at: string | null;
 };
 
+/** Las condiciones del PRESTADOR (Inc. 1) o las de CONTRATACIÓN (Inc. 5). */
+export type TipoDePolitica = 'provider_terms' | 'booking_terms';
+
 export type Politica = {
   id: string;
   kind: string;

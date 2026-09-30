@@ -31,6 +31,7 @@ import {
   type FormularioDeCondiciones,
   type Politica,
   type Terminos,
+  type TipoDePolitica,
 } from '@/lib/serviciosAdmision';
 import { leerFallo, useCerrojo, useTextosDeServicios } from '@/hooks/useServicios';
 import { ServiceAdmissionRepository } from '@/repositories/ServiceAdmissionRepository';
@@ -48,8 +49,13 @@ import { useAppTheme } from '@/theme/useAppTheme';
  *   decide el servidor; aquí se enseña su respuesta.
  * - NADA SE SIEMBRA: sin una versión publicada, nadie puede enviar su
  *   postulación, y es lo correcto hasta que la empresa escriba el texto.
+ *
+ * La MISMA pantalla sirve las condiciones de CONTRATACIÓN (`booking_terms`,
+ * Incremento 5), las que acepta quien contrata: un texto sin parámetros. Sin
+ * una publicada para el país del prestador, ninguna reserva se confirma.
  */
-export function AdminServiciosCondicionesScreen() {
+export function AdminServiciosCondicionesScreen({ tipo = 'provider_terms' }: { tipo?: TipoDePolitica } = {}) {
+  const deContratacion = tipo === 'booking_terms';
   const { colors } = useAppTheme();
   const router = useRouter();
   const { f } = useTextosDeServicios();
@@ -63,11 +69,11 @@ export function AdminServiciosCondicionesScreen() {
   const cargar = useCallback(async () => {
     setFallo(null);
     try {
-      setPoliticas(await ServiceAdmissionRepository.condiciones());
+      setPoliticas(await ServiceAdmissionRepository.condiciones(null, tipo));
     } catch (error) {
       setFallo(leerFallo(error));
     }
-  }, []);
+  }, [tipo]);
 
   useFocusEffect(
     useCallback(() => {
@@ -77,7 +83,7 @@ export function AdminServiciosCondicionesScreen() {
   const { ocupado, correr } = useCerrojo(cargar);
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/admin/servicios' as never));
-  const titulo = f('servicios.politica.titulo');
+  const titulo = f(deContratacion ? 'servicios.politica.tituloContratacion' : 'servicios.politica.titulo');
 
   if (fallo !== null) {
     return (
@@ -103,9 +109,11 @@ export function AdminServiciosCondicionesScreen() {
 
   const guardar = () => {
     if (formulario === null) return;
-    const { peticion, fallos: encontrados } = peticionDeCondiciones(formulario);
+    const { peticion: leida, fallos: encontrados } = peticionDeCondiciones(formulario);
     setFallos(encontrados);
-    if (peticion === null) return;
+    if (leida === null) return;
+    // Las de contratación no llevan parámetros (el servidor rechaza cualquiera).
+    const peticion = deContratacion ? { ...leida, parameters: {} } : leida;
     void correr(async () => {
       if (editando) {
         await ServiceAdmissionRepository.editarBorrador(editando.id, {
@@ -114,7 +122,7 @@ export function AdminServiciosCondicionesScreen() {
           parameters: peticion.parameters,
         });
       } else {
-        const creada = await ServiceAdmissionRepository.crearBorrador(peticion);
+        const creada = await ServiceAdmissionRepository.crearBorrador(peticion, tipo);
         // Si ya había un borrador de ese país, el servidor devuelve ESE, sin
         // tocarlo: se dice, para que nadie crea que se guardó lo escrito.
         if (creada.title !== peticion.title || creada.body !== peticion.body) {
@@ -151,7 +159,7 @@ export function AdminServiciosCondicionesScreen() {
     <AppScreen contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="caption" color={colors.textMuted}>
-        {f('servicios.politica.intro')}
+        {f(deContratacion ? 'servicios.politica.introContratacion' : 'servicios.politica.intro')}
       </Text>
 
       {formulario === null ? (
@@ -190,6 +198,8 @@ export function AdminServiciosCondicionesScreen() {
             multiline
             error={error('texto')}
           />
+          {deContratacion ? null : (
+          <>
           <Text weight="600">{f('servicios.politica.repostulacion')}</Text>
           <View style={styles.acciones} accessibilityRole="radiogroup">
             {REPOSTULACIONES.map((opcion) => (
@@ -244,6 +254,8 @@ export function AdminServiciosCondicionesScreen() {
               />
             ))}
           </View>
+          </>
+          )}
           <View style={styles.acciones}>
             <Button label={f('servicios.politica.guardarBorrador')} icon="save" loading={ocupado} disabled={ocupado} onPress={guardar} />
             <Button label={f('servicios.retirar.cancelar')} variant="ghost" onPress={() => setFormulario(null)} />
@@ -268,7 +280,7 @@ export function AdminServiciosCondicionesScreen() {
           state="empty"
           icon="file-text"
           title={f('servicios.politica.ninguna')}
-          description={f('servicios.politica.ningunaCuerpo')}
+          description={f(deContratacion ? 'servicios.politica.ningunaContratacionCuerpo' : 'servicios.politica.ningunaCuerpo')}
         />
       ) : (
         politicas.map((p) => (

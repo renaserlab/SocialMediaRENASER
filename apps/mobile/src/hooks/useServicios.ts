@@ -18,6 +18,7 @@ import {
 } from '@/lib/serviciosCatalogo';
 import { claveDeErrorDelDescubrimiento } from '@/lib/serviciosDescubrimiento';
 import { claveDeErrorDeLaAgenda } from '@/lib/serviciosAgenda';
+import { claveDeErrorDeLaReserva } from '@/lib/serviciosReserva';
 import { ServiceProviderRepository } from '@/repositories/ServiceProviderRepository';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -33,7 +34,7 @@ import { ApiError } from '@/services/api';
  * códigos (y un «es tuyo» que habla de un servicio, no de una postulación);
  * lo que no es suyo se traduce como en la admisión.
  */
-export type AmbitoDeServicios = 'admision' | 'catalogo' | 'descubrimiento' | 'agenda';
+export type AmbitoDeServicios = 'admision' | 'catalogo' | 'descubrimiento' | 'agenda' | 'reserva';
 
 /** `t` para claves que se arman en tiempo de ejecución (`servicios.estado.draft`). */
 export function useTextosDeServicios(ambito: AmbitoDeServicios = 'admision') {
@@ -49,6 +50,7 @@ export function useTextosDeServicios(ambito: AmbitoDeServicios = 'admision') {
         const porCodigo =
           (ambito === 'descubrimiento' ? claveDeErrorDelDescubrimiento(error.code) : null) ??
           (ambito === 'agenda' ? claveDeErrorDeLaAgenda(error.code) : null) ??
+          (ambito === 'reserva' ? claveDeErrorDeLaReserva(error.code) ?? claveDeErrorDeLaAgenda(error.code) : null) ??
           (ambito !== 'admision' ? claveDeErrorDelCatalogo(error.code) : null) ??
           claveDeErrorDeServicios(error.code);
         if (porCodigo !== null) return f(porCodigo);

@@ -5,7 +5,8 @@
  * Que cada vista tiene ruta y se alcanza desde otra (servicio propio →
  * agenda → ajustes, semana, excepciones, bloqueos y vista previa; ficha →
  * horarios), que el acceso a la agenda solo sale si el servidor lo permite,
- * que «Atrás» respeta la pila, que ninguna vista reserva, retiene ni cobra,
+ * que «Atrás» respeta la pila, que ninguna vista de la agenda reserva,
+ * retiene ni cobra (desde el Incremento 5, «Horarios» aparta, y solo eso),
  * que no se inventa ningún horario ni se convierte ninguna zona, que el
  * motivo de un bloqueo no sale de la agenda del prestador, que ningún texto
  * está en duro y que los controles se anuncian bien.
@@ -154,21 +155,40 @@ describe('cada vista se comporta', () => {
 
 // =========================================================================== //
 describe('lo decide el servidor, y nada se reserva', () => {
-  it('ninguna vista reserva, retiene, contrata ni cobra', () => {
+  it('ninguna vista de la agenda reserva, retiene, contrata ni cobra', () => {
+    // Desde el Incremento 5, «Horarios» APARTA (y solo eso): se prueba aparte,
+    // abajo. Todo lo demás de la agenda sigue sin tocar la reserva.
+    const agenda = [
+      ...PANTALLAS.filter((p) => p !== 'HorariosDelServicioScreen').map(pantalla),
+      ...COMPONENTES.map(componente),
+    ].join('\n');
     // En cualquier parte (también dentro de un nombre: `crearReserva`)…
     const dinero = /reserv|booking|checkout|payment|pagar|contratar|stripe/i;
     // …y como palabra entera lo que se esconde en otras («borderColor», «placeholder»).
     const palabras = /\b(holds?|orders?)\b/i;
-    const limpio = TODO.replace(/servicios\.agenda\.(sinReservas|sinReservasPublico)/g, '');
+    const limpio = agenda.replace(/servicios\.agenda\.(sinReservas|sinReservasPublico)/g, '');
     assert.ok(!dinero.test(limpio), limpio.match(dinero)?.[0]);
     assert.ok(!palabras.test(limpio), limpio.match(palabras)?.[0]);
     assert.ok(dinero.test('crearReserva(') && palabras.test('slot hold') && !palabras.test('borderColor placeholder'));
+  });
+
+  it('«Horarios» solo APARTA, y solo si el servidor dice que se puede (Incremento 5)', () => {
     const publica = pantalla('HorariosDelServicioScreen');
-    // Lo público solo LEE: ni una escritura del repositorio.
+    // Lo público no escribe en la agenda.
     assert.ok(!/ServiceScheduleRepository\.(configurar|crear|editar|borrar)/.test(publica));
-    assert.ok(!/<Button/.test(publica), 'no hay botón final: elegir solo guarda en la ruta');
+    // Elegir sigue siendo solo la ruta; lo único que escribe es APARTAR.
     assert.match(publica, /router\.setParams\(rutaDelHorarioElegido\(/);
+    assert.deepEqual(
+      [...publica.matchAll(/ServiceBookingRepository\.(\w+)\(/g)].map((m) => m[1]),
+      ['retener'],
+    );
+    assert.ok(!/confirmar|pagar|stripe|payment|checkout/i.test(publica));
+    // El botón existe SOLO con `booking_available` del servidor.
+    assert.match(publica, /setSePuedeContinuar\(calendario\.booking_available === true\)/);
+    assert.match(publica, /\{sePuedeContinuar \? \(\s*<Button/);
+    // Sin él, se sigue diciendo que elegido no es apartado.
     assert.match(publica, /servicios\.agenda\.noApartado/);
+    assert.match(publica, /servicios\.reserva\.elegidoNoApartado/);
   });
 
   it('ningún horario ni zona se calcula en el teléfono', () => {

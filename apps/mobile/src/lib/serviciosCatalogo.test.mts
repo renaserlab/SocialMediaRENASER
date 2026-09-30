@@ -40,6 +40,7 @@ registerHooks({
 
 const C = await import('./serviciosCatalogo.ts');
 const { claveDeErrorDeServicios } = await import('./serviciosAdmision.ts');
+const { claveDeErrorDeLaReserva } = await import('./serviciosReserva.ts');
 
 const API = join(import.meta.dirname, '..', '..', '..', 'api', 'app', 'modules', 'services');
 const servidor = (fichero: string) => readFileSync(join(API, fichero), 'utf8');
@@ -178,8 +179,12 @@ describe('ningún código del catálogo llega crudo a la pantalla', () => {
       for (const m of servidor(fichero).matchAll(/\bcode ?= ?"([a-z_]+)"/g)) codigos.add(m[1] as string);
     }
     assert.ok(codigos.size >= 24, `solo ${codigos.size} códigos leídos`);
+    // `esquema.py` guarda también la puerta de la reserva (Incremento 5).
     const sinTexto = [...codigos].filter(
-      (c) => C.claveDeErrorDelCatalogo(c) === null && claveDeErrorDeServicios(c) === null,
+      (c) =>
+        C.claveDeErrorDelCatalogo(c) === null &&
+        claveDeErrorDeServicios(c) === null &&
+        claveDeErrorDeLaReserva(c) === null,
     );
     assert.deepEqual(sinTexto, [], `sin texto en el teléfono: ${sinTexto.join(', ')}`);
     // Y ninguno del mapa del teléfono es inventado.

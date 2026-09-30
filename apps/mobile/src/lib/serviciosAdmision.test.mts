@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { es } from '../i18n/es.ts';
+import { claveDeErrorDeLaReserva } from './serviciosReserva.ts';
 import {
   ACCIONES,
   CAMPOS_OBSERVABLES,
@@ -171,7 +172,11 @@ describe('ningún código del servidor llega crudo a la pantalla', () => {
       for (const m of servidor(fichero).matchAll(/code ?= ?"([a-z_]+)"/g)) codigos.add(m[1] as string);
     }
     assert.ok(codigos.size >= 40, `solo ${codigos.size} códigos leídos`);
-    const sinTexto = [...codigos].filter((c) => claveDeErrorDeServicios(c) === null);
+    // `esquema.py` también guarda la puerta de la RESERVA (Incremento 5): su
+    // código solo lo contestan rutas de la reserva, y lo traduce su módulo.
+    const sinTexto = [...codigos].filter(
+      (c) => claveDeErrorDeServicios(c) === null && claveDeErrorDeLaReserva(c) === null,
+    );
     assert.deepEqual(sinTexto, [], `sin texto en el teléfono: ${sinTexto.join(', ')}`);
   });
 

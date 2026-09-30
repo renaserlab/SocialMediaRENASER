@@ -6,6 +6,7 @@ import {
   type EventoAdmin,
   type PaginaDeSolicitudes,
   type Politica,
+  type TipoDePolitica,
   type SolicitudAdmin,
   type Terminos,
   type TipoDePrestador,
@@ -129,20 +130,26 @@ export const ServiceAdmissionRepository = {
     return apiRequest<SolicitudAdmin>(`${una(id)}/${destino}`, json(cuerpo, clave));
   },
 
-  // --- Condiciones del prestador --------------------------------------------
-  async condiciones(pais?: string | null): Promise<Politica[]> {
+  // --- Condiciones: del prestador y de contratación (Incremento 5) ----------
+  async condiciones(pais?: string | null, tipo: TipoDePolitica = 'provider_terms'): Promise<Politica[]> {
+    const q = new URLSearchParams({ kind: tipo });
     const p = limpio(pais);
-    return apiRequest<Politica[]>(`${BASE}/policies${p ? `?country=${encodeURIComponent(p)}` : ''}`);
+    if (p) q.set('country', p);
+    return apiRequest<Politica[]>(`${BASE}/policies?${q.toString()}`);
   },
 
   /** Crea el borrador de un país, o devuelve el que ya hay (sin tocarlo). */
-  async crearBorrador(peticion: {
-    country_code: string;
-    title: string;
-    body: string;
-    parameters: Record<string, unknown>;
-  }): Promise<Politica> {
-    return apiRequest<Politica>(`${BASE}/policies/provider-terms/draft`, json(peticion));
+  async crearBorrador(
+    peticion: {
+      country_code: string;
+      title: string;
+      body: string;
+      parameters: Record<string, unknown>;
+    },
+    tipo: TipoDePolitica = 'provider_terms',
+  ): Promise<Politica> {
+    const ruta = tipo === 'booking_terms' ? 'booking-terms' : 'provider-terms';
+    return apiRequest<Politica>(`${BASE}/policies/${ruta}/draft`, json(peticion));
   },
 
   async editarBorrador(

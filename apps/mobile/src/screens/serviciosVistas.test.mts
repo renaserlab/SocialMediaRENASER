@@ -280,12 +280,14 @@ describe('los repositorios hablan con rutas que existen', () => {
     ['POST', '/admin/services/applications/{application_id}/suspend'],
     ['GET', '/admin/services/policies'],
     ['POST', '/admin/services/policies/provider-terms/draft'],
+    // Incremento 5: las condiciones de CONTRATACIÓN, con la misma pantalla.
+    ['POST', '/admin/services/policies/booking-terms/draft'],
     ['PATCH', '/admin/services/policies/{policy_id}'],
     ['GET', '/admin/services/policies/{policy_id}/preview'],
     ['POST', '/admin/services/policies/{policy_id}/publish'],
   ];
 
-  it('el servidor tiene las 35 rutas que usa el teléfono, y ninguna más', () => {
+  it('el servidor tiene las 36 rutas que usa el teléfono, y ninguna más', () => {
     const usadas = new Set(USADAS.map(([m, r]) => `${m} ${r}`));
     const faltan = [...usadas].filter((r) => !rutasDelServidor.has(r));
     assert.deepEqual(faltan, [], `el teléfono llama a rutas que no existen: ${faltan.join(', ')}`);
@@ -297,7 +299,7 @@ describe('los repositorios hablan con rutas que existen', () => {
     for (const tramo of ['/terms', '/documents', '/replace', '/view', '/credentials', '/submit', '/resubmit', '/withdraw', '/history']) {
       assert.ok(prestador.includes(tramo), `prestador: ${tramo}`);
     }
-    for (const tramo of ['/accept', '/observe', '/verify', '/reject', 'start-review', 'request-changes', 'approve', 'suspend', '/policies', '/preview', '/publish', 'provider-terms/draft']) {
+    for (const tramo of ['/accept', '/observe', '/verify', '/reject', 'start-review', 'request-changes', 'approve', 'suspend', '/policies', '/preview', '/publish', "'provider-terms'", "'booking-terms'", '/draft']) {
       assert.ok(admin.includes(tramo), `administración: ${tramo}`);
     }
   });

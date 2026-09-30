@@ -204,6 +204,12 @@ export function ServiciosScreen() {
         rightLabel={f('servicios.descubrir.guardados.abrir')}
         onRightPress={() => router.push('/servicios/guardados' as never)}
       />
+      <Button
+        label={f('servicios.reserva.misReservas')}
+        variant="ghost"
+        icon="calendar"
+        onPress={() => router.push('/servicios/reservas' as never)}
+      />
       <Text variant="title" accessibilityRole="header">
         {f('servicios.descubrir.pregunta')}
       </Text>

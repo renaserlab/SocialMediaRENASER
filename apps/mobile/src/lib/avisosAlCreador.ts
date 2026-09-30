@@ -22,7 +22,8 @@ export type AvisoAlCreador = {
     | 'eye-off'
     | 'image'
     | 'clock'
-    | 'inbox';
+    | 'inbox'
+    | 'calendar';
   /**
    * Clave del texto de debajo cuando el servidor NO manda título ni motivo.
    * Los avisos de Servicios van con `payload` vacío a propósito: el detalle se
@@ -73,6 +74,10 @@ const AVISOS: Record<string, AvisoAlCreador> = {
   service_catalog_submitted: { titulo: 'notif.servicioCatalogoEnviadoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoEnviadoBody' },
   service_catalog_resubmitted: { titulo: 'notif.servicioCatalogoReenviadoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoReenviadoBody' },
   service_catalog_withdrawn_review: { titulo: 'notif.servicioCatalogoRetiradoEquipoTitle', icono: 'inbox', cuerpo: 'notif.servicioCatalogoRetiradoEquipoBody' },
+  // La reserva (Incremento 5). A quien contrata, y al prestador. Sin fecha,
+  // dirección ni nota: el detalle se lee en la reserva.
+  service_booking_confirmed: { titulo: 'notif.servicioReservaConfirmadaTitle', icono: 'calendar', cuerpo: 'notif.servicioReservaConfirmadaBody' },
+  service_booking_received: { titulo: 'notif.servicioReservaRecibidaTitle', icono: 'calendar', cuerpo: 'notif.servicioReservaRecibidaBody' },
 };
 
 /** El título y el icono de un aviso al creador, o `null` si no lo es. */
@@ -164,6 +169,11 @@ export function rutaDelAviso(
     case 'service_catalog_resubmitted':
     case 'service_catalog_withdrawn_review':
       return id ? `/admin/servicios/catalogo/${id}` : '/admin/servicios/catalogo';
+    // La reserva: quien contrata, a SU reserva; el prestador, a la de su bandeja.
+    case 'service_booking_confirmed':
+      return id ? `/servicios/reservas/${id}` : '/servicios/reservas';
+    case 'service_booking_received':
+      return id ? `/servicios/prestador/reservas/${id}` : '/servicios/prestador/reservas';
     // «Juan está transmitiendo en vivo»: al directo, siga o no en emisión.
     case 'live_started':
       return id ? `/live/${id}` : null;

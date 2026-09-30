@@ -5,9 +5,14 @@ import type { FalloDelCatalogo, ServicioPrivado } from '@/lib/serviciosCatalogo'
 import { leerFalloDelCatalogo } from '@/hooks/useServicios';
 import { ServiceCatalogRepository } from '@/repositories/ServiceCatalogRepository';
 
-/** El identificador de la ruta (`[serviceId]`, `[versionId]`, `[providerId]`), o vacío. */
-export function useParametroDeRuta(nombre: 'serviceId' | 'versionId' | 'providerId'): string {
-  const parametros = useLocalSearchParams<{ serviceId?: string; versionId?: string; providerId?: string }>();
+type ParametroDeRuta = 'serviceId' | 'versionId' | 'providerId' | 'holdId' | 'bookingId';
+
+/**
+ * El identificador de la ruta (`[serviceId]`, `[versionId]`, `[providerId]`,
+ * `[holdId]`, `[bookingId]`), o vacío.
+ */
+export function useParametroDeRuta(nombre: ParametroDeRuta): string {
+  const parametros = useLocalSearchParams<Partial<Record<ParametroDeRuta, string>>>();
   const valor: unknown = parametros[nombre];
   return typeof valor === 'string' ? valor : '';
 }
