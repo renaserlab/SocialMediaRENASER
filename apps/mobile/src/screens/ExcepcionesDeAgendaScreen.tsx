@@ -75,6 +75,8 @@ export function ExcepcionesDeAgendaScreen() {
   const a = agenda;
   const ofrecidas = a.service.offered_modalities;
   const abrir = (e: Excepcion | null) => {
+    // Cada alta, su clave (ver HorarioSemanalScreen).
+    clave.current = nuevaClave();
     setError(null);
     setEditando(e ?? 'nueva');
     setCampos(e ? excepcionDesde(e) : excepcionVacia(ofrecidas[0] ?? null));

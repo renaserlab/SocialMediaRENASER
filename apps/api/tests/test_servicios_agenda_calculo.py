@@ -349,3 +349,104 @@ def test_una_regla_de_las_nueve_es_a_las_nueve_antes_y_despues_del_cambio() -> N
     (b,) = calc.horarios_del_dia(despues, datos, modalidad="virtual", desde=desde, hasta=hasta)
     # El mismo reloj local, distinto instante UTC: no se suma un desplazamiento a mano.
     assert (a.inicio.hour, b.inicio.hour) == (14, 13)
+
+
+# =========================================================================== #
+# Coste: una consulta anónima no puede ocupar la API
+# =========================================================================== #
+def test_unir_y_buscar_da_lo_mismo_que_mirar_uno_por_uno() -> None:
+    azar = random.Random(930)
+    base = datetime(2026, 10, 1, tzinfo=UTC)
+    minuto = lambda n: base + timedelta(minutes=n)  # noqa: E731
+    comprobados = 0
+    for _ in range(300):
+        tramos = []
+        for _ in range(azar.randrange(0, 12)):
+            a = azar.randrange(0, 600)
+            tramos.append((minuto(a), minuto(a + azar.randrange(1, 90))))
+        unidos = calc._unir(tramos)
+        assert all(a[1] < b[0] for a, b in zip(unidos, unidos[1:]))
+        inicios = [t0 for t0, _ in unidos]
+        for _ in range(20):
+            a = azar.randrange(0, 700)
+            inicio, fin = minuto(a), minuto(a + azar.randrange(1, 60))
+            ingenuo = any(inicio < t1 and t0 < fin for t0, t1 in tramos)
+            assert calc._se_cruza(inicio, fin, unidos, inicios) is ingenuo
+            comprobados += 1
+    assert comprobados == 6000
+
+
+def test_el_peor_caso_de_una_consulta_publica_es_barato() -> None:
+    """Franjas de 24 h cada 5 minutos, 198 bloqueos pequeños que no tocan
+    nada y dos de 31 días que lo tapan todo: 31 días de calendario y el
+    próximo horario, que recorre los 60 sin encontrar. Antes de unir y
+    filtrar los bloqueos por día tardaba 0,24 s de CPU (medido); ahora,
+    unos 12 ms. El límite deja mucho margen y sigue cazando lo de antes."""
+    import time
+
+    ahora = datetime(2026, 10, 1, 5, 0, tzinfo=UTC)
+    pequenos = [
+        calc.Bloqueo(ahora - timedelta(days=40, minutes=10 * i), ahora - timedelta(days=40, minutes=10 * i - 5))
+        for i in range(198)
+    ]
+    grandes = [calc.Bloqueo(ahora, ahora + timedelta(days=31)), calc.Bloqueo(ahora + timedelta(days=31), ahora + timedelta(days=62))]
+    datos = _datos(
+        duracion=5, intervalo=5, reglas=[_regla(d, "00:00", "24:00") for d in range(1, 8)], bloqueos=pequenos + grandes,
+    )
+    politica = limites.Politica(antelacion_minutos=120, horizonte_dias=60)
+    hoy = calc.hoy(LIMA, ahora)
+    mejor = float("inf")
+    for _ in range(3):
+        t = time.perf_counter()
+        dias = calc.dias(datos, modalidad="virtual", desde_fecha=hoy, hasta_fecha=hoy + timedelta(days=30),
+                         ahora=ahora, politica=politica)
+        proximo = calc.proximo(datos, modalidad="virtual", ahora=ahora, politica=politica)
+        mejor = min(mejor, time.perf_counter() - t)
+    assert dias == {} and proximo is None
+    assert mejor < 0.12, f"{mejor:.3f} s"
+
+
+# =========================================================================== #
+# Fechas y horas que llegan a la API (hallazgos de la revisión)
+# =========================================================================== #
+def test_las_24_de_la_vispera_de_un_salto_a_medianoche_es_el_final_de_ese_dia() -> None:
+    """Santiago de Chile adelanta el reloj a las 24:00 del primer sábado de
+    septiembre: las 00:00 del domingo no existen. «Hasta el sábado a las
+    24:00» es el final de ese sábado (el salto), no un 422."""
+    from app.modules.services import agenda
+
+    santiago = calc.zona("America/Santiago")
+    sabado = date(2026, 9, 5)
+    assert not calc.existe(sabado + timedelta(days=1), 0, santiago)
+    fin = agenda._momento_local("2026-09-05", "24:00", santiago, date(2026, 9, 1), admite_24=True)
+    assert fin == datetime(2026, 9, 6, 4, 0, tzinfo=UTC)
+    # Y una hora dentro del salto de Nueva York va al salto, igual que en la semana.
+    inicio = agenda._momento_local("2026-03-08", "02:30", NY, date(2026, 3, 1), admite_24=False)
+    assert inicio == datetime(2026, 3, 8, 7, 0, tzinfo=UTC)
+
+
+def test_una_fecha_extrema_es_un_422_y_nunca_desborda() -> None:
+    from app.modules.services import agenda
+
+    hoy = date(2026, 10, 1)
+    for fecha, hora, admite in (("9999-12-31", "24:00", True), ("0001-01-01", "00:00", False),
+                                ("2028-01-01", "10:00", False), ("2026-08-01", "10:00", False)):
+        with pytest.raises(agenda.FechaInvalida):
+            agenda._momento_local(fecha, hora, calc.zona("Asia/Tokyo"), hoy, admite_24=admite)
+    # Lo razonable, sí.
+    assert agenda._momento_local("2026-10-02", "10:00", LIMA, hoy, admite_24=False) == datetime(2026, 10, 2, 15, 0, tzinfo=UTC)
+
+
+def test_un_rango_que_empieza_fuera_del_horizonte_no_desborda() -> None:
+    from app.modules.services import agenda
+
+    hoy, ultima = date(2026, 10, 1), date(2026, 11, 30)
+    for desde, hasta in (("9999-12-31", None), ("9999-12-02", None), ("2026-12-01", None), ("2026-09-30", None)):
+        with pytest.raises(agenda.FueraDelHorizonte):
+            agenda._rango(desde, hasta, hoy, ultima)
+    with pytest.raises(agenda.FueraDelHorizonte):
+        agenda._rango("2026-11-20", "2026-12-05", hoy, ultima)
+    with pytest.raises(agenda.RangoInvalido):
+        agenda._rango("2026-10-05", "9999-12-31", hoy, ultima)
+    assert agenda._rango(None, None, hoy, ultima) == (hoy, date(2026, 10, 31))
+    assert agenda._rango("2026-11-20", None, hoy, ultima) == (date(2026, 11, 20), ultima)

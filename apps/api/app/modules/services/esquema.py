@@ -385,11 +385,13 @@ TABLAS_DE_LA_AGENDA = (
 #:  * las claves primarias y las cinco ajenas en cascada, validadas;
 #:  * las RESTRICCIONES DE EXCLUSIÓN escritas tal cual: SON la autoridad de los
 #:    cruces, y el código no vuelve a comprobarlos. Sin ellas, dos franjas
-#:    cruzadas se guardarían en silencio. Y los catorce CHECK, validados;
+#:    cruzadas se guardarían en silencio. Y los dieciocho CHECK, validados y
+#:    por su definición (una huella de todos juntos);
 #:  * los índices con su definición (el único de la `Idempotency-Key`,
 #:    parcial), válidos y listos;
-#:  * los cuatro disparadores activos, con su función y su forma, y la función
-#:    de la zona sin SECURITY DEFINER, con su `search_path` y su cuerpo;
+#:  * los cuatro disparadores activos, con su función, su forma, sus
+#:    argumentos y sus columnas, y la función de la zona sin SECURITY DEFINER,
+#:    con su `search_path` y su cuerpo;
 #:  * `btree_gist`, RLS sin políticas, y nadie de fuera con permisos: ni `anon`
 #:    ni `authenticated` (tampoco por PUBLIC), en una tabla, en una columna ni
 #:    en la función.
@@ -468,13 +470,15 @@ _LO_QUE_NECESITA_LA_AGENDA = text(
        'EXCLUDE USING gist (service_id WITH =, on_date WITH =, '
        'int4range(COALESCE(start_minute, 0), COALESCE(end_minute, 1440)) WITH &&)')
     ),
-    disparadores(tabla, nombre, funcion, tipo) as (values
-      ('service_schedules', 'service_schedules_zona_valida', 'servicios_agenda_zona_valida()', 23),
-      ('service_schedules', 'service_schedules_solo_en_cascada', 'servicios_borrado_solo_en_cascada()', 11),
+    disparadores(tabla, nombre, funcion, tipo, argumentos, columnas) as (values
+      ('service_schedules', 'service_schedules_zona_valida', 'servicios_agenda_zona_valida()', 23,
+       '', 'timezone'),
+      ('service_schedules', 'service_schedules_solo_en_cascada', 'servicios_borrado_solo_en_cascada()', 11,
+       'services\000service_id\000', ''),
       ('service_schedule_events', 'service_schedule_events_inmutables',
-       'servicios_catalogo_historial_inmutable()', 19),
+       'servicios_catalogo_historial_inmutable()', 19, '', ''),
       ('service_schedule_events', 'service_schedule_events_solo_en_cascada',
-       'servicios_borrado_solo_en_cascada()', 11)
+       'servicios_borrado_solo_en_cascada()', 11, 'services\000service_id\000', '')
     )
     select
       -- Cada columna con su tipo y su NOT NULL, y ni una más.
@@ -517,6 +521,13 @@ _LO_QUE_NECESITA_LA_AGENDA = text(
                 'service_schedule_events_accion', 'service_schedule_events_rol',
                 'service_schedule_events_clave'
               )) = 18
+      -- Y POR SU DEFINICIÓN: los dieciocho juntos, sin espacios de más, con la
+      -- huella de la 0092. Uno aflojado con el mismo nombre no pasa.
+      and (select md5(string_agg(c.conname || ':' || regexp_replace(pg_catalog.pg_get_constraintdef(c.oid), '\s+', ' ', 'g'),
+                                 '|' order by c.conname))
+             from pg_catalog.pg_constraint c
+            where c.contype = 'c' and c.conrelid in (select t from tablas))
+          = 'a01cc1bfaa992194f415ea0611b67642'
       -- `pg_get_indexdef` siempre nombra la tabla con su esquema.
       and (select count(*) from pg_catalog.pg_index i
             where i.indrelid in (select t from tablas)
@@ -537,7 +548,14 @@ _LO_QUE_NECESITA_LA_AGENDA = text(
              join pg_catalog.pg_trigger g
                on g.tgrelid = to_regclass('public.' || e.tabla) and g.tgname = e.nombre
             where not g.tgisinternal and g.tgenabled in ('O', 'A')
-              and g.tgfoid = to_regprocedure('public.' || e.funcion) and g.tgtype = e.tipo) = 4
+              and g.tgfoid = to_regprocedure('public.' || e.funcion) and g.tgtype = e.tipo
+              -- Con sus argumentos (de qué madre cuelga) y sus columnas
+              -- (`update of timezone`).
+              and pg_catalog.encode(g.tgargs, 'escape') = e.argumentos
+              and coalesce((select string_agg(a.attname::text, ',' order by k.n)
+                              from unnest(g.tgattr::int2[]) as k(n)
+                              join pg_catalog.pg_attribute a on a.attrelid = g.tgrelid and a.attnum = k.n), '')
+                  = e.columnas) = 4
       and exists (
         select 1 from pg_catalog.pg_proc p
          where p.oid = to_regprocedure('public.servicios_agenda_zona_valida()')

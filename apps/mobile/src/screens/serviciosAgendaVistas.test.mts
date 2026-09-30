@@ -237,3 +237,32 @@ describe('accesibilidad y textos', () => {
     }
   });
 });
+
+// =========================================================================== //
+describe('lo que encontró la revisión independiente', () => {
+  it('elegir un horario no vuelve a cargar el calendario ni la lista', () => {
+    const selector = componente('SelectorDeHorarios');
+    assert.match(selector, /const primeraFecha = useRef\(fechaInicial\);/);
+    assert.match(selector, /const primera = primeraFecha\.current \?\? c\?\.next\?\.date \?\? null;/);
+    assert.match(selector, /\}, \[pedirCalendario, pedirDia\]\);/);
+    assert.ok(!/\[pedirCalendario, pedirDia, fechaInicial\]/.test(selector));
+  });
+
+  it('solo vale la última respuesta: un día viejo no se pinta bajo otro', () => {
+    const selector = componente('SelectorDeHorarios');
+    assert.match(selector, /const n = \+\+vigenteDia\.current;/);
+    assert.equal((selector.match(/if \(n !== vigenteDia\.current\) return;/g) ?? []).length, 2);
+    assert.match(selector, /const n = \+\+vigenteCalendario\.current;/);
+    assert.equal((selector.match(/if \(n !== vigenteCalendario\.current\) return null;/g) ?? []).length, 2);
+  });
+
+  it('«Fechas anteriores» retrocede 31 días sin pasar de hoy', () => {
+    assert.match(componente('SelectorDeHorarios'), /const atras = sumarDias\(calendario\.from_date \?\? '', -31\);/);
+  });
+
+  it('cada alta abre con su propia clave', () => {
+    for (const nombre of ['HorarioSemanalScreen', 'ExcepcionesDeAgendaScreen', 'BloqueosDeAgendaScreen']) {
+      assert.match(pantalla(nombre), /clave\.current = nuevaClave\(\);\s*setError\(null\);/, nombre);
+    }
+  });
+});

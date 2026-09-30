@@ -347,12 +347,47 @@ async def _registrar(
     await db.flush()
 
 
+def _lo_mismo(previo: ServiceScheduleEvent, esperado: dict) -> None:
+    """Repetir con la misma `Idempotency-Key` es repetir LO MISMO. Con otro
+    contenido es otra alta que llega con una clave ya usada: 409, y no un 200
+    que haría creer que se guardó. Se compara con lo que dejó el historial,
+    sin los identificadores."""
+    guardado = {k: v for k, v in (previo.details or {}).items() if not k.endswith("_id")}
+    if guardado != esperado:
+        raise ClaveReutilizada(details={"action": previo.action})
+
+
+def _estado_sql(error: IntegrityError) -> str | None:
+    """El SQLSTATE del error de la base, venga del controlador que venga."""
+    for causa in (error.orig, getattr(error.orig, "__cause__", None)):
+        estado = getattr(causa, "sqlstate", None) or getattr(causa, "pgcode", None)
+        if estado:
+            return estado
+    return None
+
+
 def _cruce(error: IntegrityError) -> bool:
     """¿Lo rechazó una restricción de exclusión (23P01)? Solo eso es un cruce."""
-    for causa in (error.orig, getattr(error.orig, "__cause__", None)):
-        if getattr(causa, "sqlstate", None) == "23P01" or getattr(causa, "pgcode", None) == "23P01":
-            return True
-    return False
+    return _estado_sql(error) == "23P01"
+
+
+async def _con_zona_de_la_base(db: AsyncSession, fila: ServiceSchedule) -> None:
+    """Guarda la configuración. La zona la validó `calc.zona` (tzdata); el
+    disparador de la 0092 la valida contra la base de zonas de PostgreSQL. Si
+    las dos bases no coinciden (una zona recién creada en una y no en la
+    otra), es un 422, nunca un 500: el disparador es el único que responde
+    `check_violation` SIN nombre de restricción."""
+    try:
+        async with db.begin_nested():
+            db.add(fila)
+            await db.flush()
+    except IntegrityError as error:
+        sin_nombre = not any(
+            getattr(causa, "constraint_name", None) for causa in (error.orig, getattr(error.orig, "__cause__", None))
+        )
+        if _estado_sql(error) == "23514" and sin_nombre:
+            raise ZonaInvalida() from None
+        raise
 
 
 async def _guardar(db: AsyncSession, fila) -> None:  # noqa: ANN001
@@ -479,7 +514,9 @@ async def _privada(
     salida.excepciones = await _excepciones(db, servicio.id, salida.hoy)
     salida.bloqueos = await _bloqueos(db, servicio.id, ahora)
     if agenda.status == AGENDA_EN_PAUSA:
+        # En pausa nadie ve horarios: no hay «próximo» que enseñar.
         salida.motivos.append("schedule_paused")
+        return salida
     referencia = _servicio_de(hechos.referencia)
     if referencia is None:
         salida.motivos.append("service_incomplete")
@@ -531,8 +568,9 @@ async def configurar(
     }
     agenda = await agenda_de(db, servicio.id)
     if agenda is None:
-        db.add(ServiceSchedule(service_id=servicio.id, created_by=usuario_id, created_at=ahora, updated_at=ahora, **nuevo))
-        await db.flush()
+        await _con_zona_de_la_base(
+            db, ServiceSchedule(service_id=servicio.id, created_by=usuario_id, created_at=ahora, updated_at=ahora, **nuevo)
+        )
         await _registrar(db, servicio_id=servicio.id, accion="schedule_created", usuario_id=usuario_id, detalles=nuevo, ahora=ahora)
         return Escrito(creado=True)
 
@@ -558,7 +596,7 @@ async def configurar(
     for campo, (_, valor) in cambios.items():
         setattr(agenda, campo, valor)
     agenda.updated_at = ahora
-    await db.flush()
+    await _con_zona_de_la_base(db, agenda)
     await _registrar(
         db, servicio_id=servicio.id, accion="schedule_updated", usuario_id=usuario_id,
         detalles={"changes": cambios}, ahora=ahora,
@@ -590,11 +628,16 @@ async def crear_regla(
     ahora = ahora or _ahora()
     servicio = await _para_escribir(db, usuario_id, servicio_id)
     await _exigir_agenda(db, servicio.id)
-    if await _por_clave(db, servicio.id, clave, "rule_created") is not None:
-        return Escrito(creado=False, repetido=True)
     if not 1 <= dia <= 7:
         raise HoraInvalida()
     a, b = _franja(inicio, fin)
+    previo = await _por_clave(db, servicio.id, clave, "rule_created")
+    if previo is not None:
+        _lo_mismo(previo, {
+            "weekday": dia, "start": calc.hora(a), "end": calc.hora(b), "modality": modalidad,
+            "capacity": 1 if capacidad is None else capacidad, "active": activa,
+        })
+        return Escrito(creado=False, repetido=True)
     hechos = await hechos_de(db, servicio.id)
     cuantas = await db.scalar(
         select(func.count()).select_from(ServiceScheduleRule).where(ServiceScheduleRule.service_id == servicio.id)
@@ -654,6 +697,9 @@ async def editar_regla(
     if "modality" in cambios or activando:
         regla.modality = _modalidad(cambios.get("modality", regla.modality), hechos)
     if "capacity" in cambios or activando:
+        if "capacity" in cambios and cambios["capacity"] is None:
+            # Un nulo explícito no es «uno»: es un error de quien llama.
+            raise CapacidadInvalida(details={"max": hechos.capacidad_maxima})
         regla.capacity = _capacidad(cambios.get("capacity", regla.capacity), hechos)
     if "active" in cambios:
         if cambios["active"] is None:
@@ -728,9 +774,13 @@ async def crear_excepcion(
     ahora = ahora or _ahora()
     servicio = await _para_escribir(db, usuario_id, servicio_id)
     agenda = await _exigir_agenda(db, servicio.id)
-    if await _por_clave(db, servicio.id, clave, "exception_created") is not None:
-        return Escrito(creado=False, repetido=True)
     hoy = calc.hoy(_zona_de(agenda), ahora)
+    excepcion = ServiceScheduleException(service_id=servicio.id, created_at=ahora, updated_at=ahora)
+    _aplicar_excepcion(excepcion, datos, await hechos_de(db, servicio.id), hoy)
+    previo = await _por_clave(db, servicio.id, clave, "exception_created")
+    if previo is not None:
+        _lo_mismo(previo, {k: v for k, v in _excepcion_en_detalle(excepcion).items() if k != "exception_id"})
+        return Escrito(creado=False, repetido=True)
     cuantas = await db.scalar(
         select(func.count())
         .select_from(ServiceScheduleException)
@@ -738,8 +788,6 @@ async def crear_excepcion(
     )
     if cuantas >= limites.EXCEPCIONES_MAXIMAS:
         raise LimiteAlcanzado(details={"max": limites.EXCEPCIONES_MAXIMAS})
-    excepcion = ServiceScheduleException(service_id=servicio.id, created_at=ahora, updated_at=ahora)
-    _aplicar_excepcion(excepcion, datos, await hechos_de(db, servicio.id), hoy)
     await _guardar(db, excepcion)
     await _registrar(
         db, servicio_id=servicio.id, accion="exception_created", usuario_id=usuario_id,
@@ -768,6 +816,10 @@ async def editar_excepcion(
         raise FechaInvalida()
     antes = _excepcion_en_detalle(excepcion)
     datos = {**antes, **cambios}
+    if datos.get("kind") == CERRADA:
+        # Lo que cierra no lleva modalidad ni capacidad: las de antes (de una
+        # apertura) no se arrastran. Solo cuenta lo que llegue explícito.
+        datos["modality"], datos["capacity"] = cambios.get("modality"), cambios.get("capacity")
     _aplicar_excepcion(excepcion, datos, await hechos_de(db, servicio.id), hoy)
     despues = _excepcion_en_detalle(excepcion)
     if despues == antes:
@@ -802,14 +854,19 @@ def _bloqueo_en_detalle(b: ServiceScheduleBlock) -> dict:
     return {"block_id": b.id, "starts_at": _utc(b.starts_at).isoformat(), "ends_at": _utc(b.ends_at).isoformat()}
 
 
-def _momento_local(fecha: str | None, hora_: str | None, z, *, admite_24: bool) -> datetime:  # noqa: ANN001
+def _momento_local(fecha: str | None, hora_: str | None, z, hoy: date, *, admite_24: bool) -> datetime:  # noqa: ANN001
+    """Fecha y hora locales de la agenda → instante. ACOTADAS ANTES de
+    convertir: un «9999-12-31 24:00» desbordaría el calendario (un 500). Una
+    hora que no existe ese día (el reloj salta) se lleva al salto, como en la
+    semana: «hasta las 24:00» la víspera de un cambio a medianoche es el final
+    de ese día."""
     dia = _fecha(fecha)
+    margen = limites.BLOQUEO_MAXIMO_DIAS + 1
+    if not hoy - timedelta(days=margen) <= dia <= hoy + timedelta(days=limites.ADELANTO_MAXIMO_DIAS + margen):
+        raise FechaInvalida()
     minuto = calc.minuto_de(hora_, admite_24=admite_24)
     if minuto is None:
         raise HoraInvalida()
-    if not calc.existe(dia, minuto, z):
-        # La hora no existe ese día (el reloj salta): que la elija bien.
-        raise FechaInvalida(details={"reason": "nonexistent_local_time"})
     return calc.instante(dia, minuto, z)
 
 
@@ -819,11 +876,15 @@ async def crear_bloqueo(
     ahora = ahora or _ahora()
     servicio = await _para_escribir(db, usuario_id, servicio_id)
     agenda = await _exigir_agenda(db, servicio.id)
-    if await _por_clave(db, servicio.id, clave, "block_created") is not None:
-        return Escrito(creado=False, repetido=True)
     z = _zona_de(agenda)
-    inicio = _momento_local(datos.get("start_date"), datos.get("start_time"), z, admite_24=False)
-    fin = _momento_local(datos.get("end_date"), datos.get("end_time"), z, admite_24=True)
+    hoy = calc.hoy(z, ahora)
+    inicio = _momento_local(datos.get("start_date"), datos.get("start_time"), z, hoy, admite_24=False)
+    fin = _momento_local(datos.get("end_date"), datos.get("end_time"), z, hoy, admite_24=True)
+    previo = await _por_clave(db, servicio.id, clave, "block_created")
+    if previo is not None:
+        # El motivo no está en el historial (es privado): se comparan los instantes.
+        _lo_mismo(previo, {"starts_at": inicio.isoformat(), "ends_at": fin.isoformat()})
+        return Escrito(creado=False, repetido=True)
     if fin <= inicio or fin <= ahora or fin - inicio > timedelta(days=limites.BLOQUEO_MAXIMO_DIAS):
         raise BloqueoInvalido()
     if inicio > ahora + timedelta(days=limites.ADELANTO_MAXIMO_DIAS):
@@ -916,12 +977,17 @@ def _estado(agenda: ServiceSchedule | None) -> str:
 def _rango(desde: str | None, hasta: str | None, hoy: date, ultima: date) -> tuple[date, date]:
     """El rango pedido, o el de siempre: desde hoy, tantos días como se
     consultan de una vez. Lo abusivo es un 422 estable."""
+    fuera = FueraDelHorizonte(details={"today": hoy.isoformat(), "last_date": ultima.isoformat()})
     inicio = _fecha(desde, RangoInvalido) if desde else hoy
+    # EL INICIO SE ACOTA ANTES DE SUMARLE NADA: «9999-12-31» + 30 días
+    # desbordaría el calendario (un 500 en una ruta pública).
+    if inicio < hoy or inicio > ultima:
+        raise fuera
     fin = _fecha(hasta, RangoInvalido) if hasta else min(inicio + timedelta(days=limites.DIAS_POR_CONSULTA - 1), ultima)
     if fin < inicio or (fin - inicio).days + 1 > limites.DIAS_POR_CONSULTA:
         raise RangoInvalido(details={"max_days": limites.DIAS_POR_CONSULTA})
-    if inicio < hoy or fin > ultima:
-        raise FueraDelHorizonte(details={"today": hoy.isoformat(), "last_date": ultima.isoformat()})
+    if fin > ultima:
+        raise fuera
     return inicio, fin
 
 

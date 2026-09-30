@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -62,16 +62,27 @@ export function SelectorDeHorarios({
   const [horarios, setHorarios] = useState<Horario[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [cargandoDia, setCargandoDia] = useState(false);
+  // LA FECHA DE LA RUTA SOLO AL ENTRAR: elegir un horario la cambia, y eso no
+  // puede volver a cargar el calendario ni devolver la lista a la página 1.
+  const primeraFecha = useRef(fechaInicial);
+  // SOLO VALE LA ÚLTIMA PETICIÓN: si se toca un día y enseguida otro, la
+  // respuesta del primero no puede pintarse bajo el segundo (ni elegirse con
+  // la fecha del segundo).
+  const vigenteCalendario = useRef(0);
+  const vigenteDia = useRef(0);
 
   const pedirCalendario = useCallback(
     async (desde: string | null, hasta: string | null) => {
+      const n = ++vigenteCalendario.current;
       setFallo(null);
       setFueraDeRango(false);
       try {
         const c = await cargarCalendario(desde, hasta);
+        if (n !== vigenteCalendario.current) return null;
         setCalendario(c);
         return c;
       } catch (error) {
+        if (n !== vigenteCalendario.current) return null;
         if (error instanceof ApiError && error.code === 'service_availability_out_of_horizon') {
           setFueraDeRango(true);
         } else {
@@ -85,12 +96,15 @@ export function SelectorDeHorarios({
 
   const pedirDia = useCallback(
     async (dia: string, desde: string | null) => {
+      const n = ++vigenteDia.current;
       setCargandoDia(true);
       try {
         const p = await cargarDia(dia, desde);
+        if (n !== vigenteDia.current) return;
         setHorarios((ya) => (desde && ya ? juntarHorarios(ya, p.items) : p.items));
         setCursor(p.next_cursor);
       } catch (error) {
+        if (n !== vigenteDia.current) return;
         if (error instanceof ApiError && error.code === 'service_availability_out_of_horizon') {
           setFueraDeRango(true);
           setHorarios([]);
@@ -98,7 +112,7 @@ export function SelectorDeHorarios({
           setFallo(leerFalloDelCatalogo(error));
         }
       } finally {
-        setCargandoDia(false);
+        if (n === vigenteDia.current) setCargandoDia(false);
       }
     },
     [cargarDia],
@@ -108,13 +122,13 @@ export function SelectorDeHorarios({
     void (async () => {
       const c = await pedirCalendario(null, null);
       // La primera fecha: la que llegó en la ruta o la del próximo horario.
-      const primera = fechaInicial ?? c?.next?.date ?? null;
+      const primera = primeraFecha.current ?? c?.next?.date ?? null;
       if (primera) {
         setFecha(primera);
         void pedirDia(primera, null);
       }
     })();
-  }, [pedirCalendario, pedirDia, fechaInicial]);
+  }, [pedirCalendario, pedirDia]);
 
   const elegirFecha = (dia: string) => {
     setFecha(dia);
@@ -232,7 +246,11 @@ export function SelectorDeHorarios({
             label={f('servicios.agenda.anteriores')}
             variant="ghost"
             icon="chevron-left"
-            onPress={() => irA(calendario.today ?? calendario.from_date ?? '')}
+            onPress={() => {
+              // 31 días atrás, sin pasar de hoy.
+              const atras = sumarDias(calendario.from_date ?? '', -31);
+              irA(calendario.today && atras < calendario.today ? calendario.today : atras);
+            }}
           />
         ) : null}
         {siguiente ? (

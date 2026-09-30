@@ -124,6 +124,8 @@ export function BloqueosDeAgendaScreen() {
           label={f('servicios.agenda.anadirBloqueo')}
           icon="plus"
           onPress={() => {
+            // Cada alta, su clave (ver HorarioSemanalScreen).
+            clave.current = nuevaClave();
             setError(null);
             setCampos(bloqueoVacio());
           }}

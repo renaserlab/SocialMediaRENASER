@@ -70,6 +70,9 @@ export function HorarioSemanalScreen() {
   const a = agenda;
   const ofrecidas = a.service.offered_modalities;
   const abrir = (regla: Regla | null) => {
+    // Cada alta, su clave: la de un intento anterior (que quizá se guardó sin
+    // que llegara la respuesta) no puede servir para otro contenido.
+    clave.current = nuevaClave();
     setError(null);
     setEditando(regla ?? 'nueva');
     setCampos(regla ? reglaDesde(regla) : reglaVacia(ofrecidas[0] ?? null));

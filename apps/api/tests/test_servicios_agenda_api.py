@@ -713,3 +713,109 @@ async def test_con_la_bandera_apagada_nada_de_la_agenda_responde(mundo, monkeypa
         async with _cliente(app, quien) as http:
             r = await http.request(metodo, ruta, json={})
         assert r.status_code == 503 and _codigo(r) == "services_disabled", (metodo, ruta, r.text)
+
+
+# =========================================================================== #
+# 7. Lo que encontró la revisión independiente
+# =========================================================================== #
+async def test_fechas_extremas_son_422_y_nunca_500(mundo) -> None:
+    app, motor, _ = mundo
+    perfil, servicio, _, _ = await _publicado_con_agenda(app, motor)
+    for ruta, uid in ((_publica(servicio), None), (f"{_agenda(servicio)}/preview", perfil)):
+        for params in ({"from": "9999-12-31"}, {"from": "9999-12-02"}, {"from": _dia(0), "to": "9999-12-31"}):
+            r = await _pedir(app, "GET", ruta, uid, **params)
+            assert r.status_code == 422, (ruta, params, r.text)
+    for cuerpo in (
+        {"start_date": _dia(1), "start_time": "10:00", "end_date": "9999-12-31", "end_time": "24:00"},
+        {"start_date": "0001-01-01", "start_time": "00:00", "end_date": _dia(1), "end_time": "10:00"},
+    ):
+        r = await _pedir(app, "POST", f"{_agenda(servicio)}/blocks", perfil, cuerpo)
+        assert r.status_code == 422 and _codigo(r) == "service_schedule_date_invalid", (cuerpo, r.text)
+
+
+async def test_una_zona_que_la_base_no_conoce_es_422(mundo, monkeypatch) -> None:
+    """Python (tzdata) y PostgreSQL tienen cada uno su base de zonas. Si una
+    zona existe en la primera y no en la segunda, el disparador la rechaza y
+    la API lo dice con un 422, no con un 500."""
+    from app.modules.services import agenda_calculo as calc
+
+    app, motor, _ = mundo
+    jefa, moderador = await _equipo(motor)
+    categoria = (await _categoria(app, jefa))["id"]
+    perfil = await _prestador(motor)
+    servicio = await _hasta(app, perfil, jefa, moderador, categoria, "draft", duration_minutes=60)
+    original = calc.zona
+    monkeypatch.setattr(calc, "zona", lambda n: original("America/Lima") if n == "America/Atlantida" else original(n))
+    for _ in range(2):  # al crear la agenda y al cambiarla
+        r = await _pedir(app, "PUT", _agenda(servicio), perfil, {"timezone": "America/Atlantida", "confirm_timezone_change": True})
+        assert r.status_code == 422 and _codigo(r) == "service_schedule_timezone_invalid", r.text
+        assert (await _pedir(app, "PUT", _agenda(servicio), perfil, {"timezone": "America/Lima"})).status_code in (200, 201)
+
+
+async def test_en_pausa_no_hay_proximo_horario(mundo) -> None:
+    app, motor, _ = mundo
+    perfil, servicio, _, _ = await _publicado_con_agenda(app, motor)
+    assert (await _pedir(app, "GET", _agenda(servicio), perfil)).json()["next_available"] is not None
+    r = await _pedir(app, "PUT", _agenda(servicio), perfil, {"timezone": "America/Lima", "buffer_after_minutes": 15, "status": "paused"})
+    assert r.json()["next_available"] is None and "schedule_paused" in r.json()["issues"]
+
+
+async def test_la_misma_clave_con_otro_contenido_es_409(mundo) -> None:
+    app, motor, _ = mundo
+    perfil, servicio, _, _ = await _publicado_con_agenda(app, motor)
+    for ruta, a, b in (
+        ("rules", {"weekday": 2, "start": "13:00", "end": "14:00", "modality": "virtual"},
+         {"weekday": 2, "start": "15:00", "end": "16:00", "modality": "virtual"}),
+        ("exceptions", {"date": _dia(20), "kind": "closed"}, {"date": _dia(21), "kind": "closed"}),
+        ("blocks", {"start_date": _dia(3), "start_time": "10:00", "end_date": _dia(3), "end_time": "11:00"},
+         {"start_date": _dia(3), "start_time": "12:00", "end_date": _dia(3), "end_time": "13:00"}),
+    ):
+        clave = f"clave-{uuid.uuid4().hex}"
+        assert (await _pedir(app, "POST", f"{_agenda(servicio)}/{ruta}", perfil, a, clave)).status_code == 201
+        r = await _pedir(app, "POST", f"{_agenda(servicio)}/{ruta}", perfil, b, clave)
+        assert r.status_code == 409 and _codigo(r) == "idempotency_key_reused", (ruta, r.text)
+        assert (await _pedir(app, "POST", f"{_agenda(servicio)}/{ruta}", perfil, a, clave)).status_code == 200
+    # El motivo es privado y no está en el historial: con los mismos instantes,
+    # repetir con otro motivo es repetir (y no crea otro bloqueo).
+    clave = f"clave-{uuid.uuid4().hex}"
+    cuerpo = {"start_date": _dia(4), "start_time": "10:00", "end_date": _dia(4), "end_time": "11:00", "reason": "Uno"}
+    assert (await _pedir(app, "POST", f"{_agenda(servicio)}/blocks", perfil, cuerpo, clave)).status_code == 201
+    r = await _pedir(app, "POST", f"{_agenda(servicio)}/blocks", perfil, {**cuerpo, "reason": "Otro"}, clave)
+    assert r.status_code == 200 and [b["reason"] for b in r.json()["blocks"] if b["start_date"] == _dia(4)] == ["Uno"]
+
+
+async def test_un_patch_solo_cambia_lo_que_llega(mundo) -> None:
+    app, motor, _ = mundo
+    perfil, servicio, _, _ = await _publicado_con_agenda(app, motor)
+    regla = (await _pedir(app, "GET", _agenda(servicio), perfil)).json()["rules"][0]["id"]
+    r = await _pedir(app, "PATCH", f"{_agenda(servicio)}/rules/{regla}", perfil, {"capacity": None})
+    assert r.status_code == 422 and _codigo(r) == "service_schedule_capacity_invalid", r.text
+    r = await _pedir(app, "POST", f"{_agenda(servicio)}/exceptions", perfil,
+                     {"date": _dia(15), "kind": "extra", "start": "15:00", "end": "16:00", "modality": "virtual"})
+    extra = next(e for e in r.json()["exceptions"] if e["kind"] == "extra")
+    r = await _pedir(app, "PATCH", f"{_agenda(servicio)}/exceptions/{extra['id']}", perfil, {"kind": "closed"})
+    assert r.status_code == 200, r.text
+    cerrada = next(e for e in r.json()["exceptions"] if e["id"] == extra["id"])
+    assert (cerrada["kind"], cerrada["start"], cerrada["end"], cerrada["modality"], cerrada["capacity"]) == (
+        "closed", "15:00", "16:00", None, None,
+    )
+
+
+async def test_la_puerta_mira_la_definicion_de_los_check_y_los_disparadores(mundo) -> None:
+    _, motor, _ = mundo
+    for cambios in (
+        # Un CHECK aflojado con el MISMO nombre.
+        ("alter table public.service_schedule_blocks drop constraint service_schedule_blocks_motivo",
+         "alter table public.service_schedule_blocks add constraint service_schedule_blocks_motivo "
+         "check (reason is null or length(trim(reason)) between 1 and 2000)"),
+        # El disparador de la zona, sin su `update of timezone`.
+        ("drop trigger service_schedules_zona_valida on public.service_schedules",
+         "create trigger service_schedules_zona_valida before insert or update on public.service_schedules "
+         "for each row execute function public.servicios_agenda_zona_valida()"),
+        # El de la cascada, colgando de otra madre.
+        ("drop trigger service_schedule_events_solo_en_cascada on public.service_schedule_events",
+         "create trigger service_schedule_events_solo_en_cascada before delete on public.service_schedule_events "
+         "for each row execute function public.servicios_borrado_solo_en_cascada('service_versions', 'service_id')"),
+    ):
+        assert await _puerta_de_agenda(motor, *cambios) is False, cambios
+    assert await _puerta_de_agenda(motor) is True

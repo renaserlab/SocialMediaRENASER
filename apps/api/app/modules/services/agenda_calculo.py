@@ -35,6 +35,7 @@ franja: nunca se solapan, y en la noche del cambio sale el que corresponde.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -269,8 +270,23 @@ def franjas_del_dia(
 # --------------------------------------------------------------------------- #
 # Horarios
 # --------------------------------------------------------------------------- #
-def _se_cruza(inicio: datetime, fin: datetime, tramos: list[tuple[datetime, datetime]]) -> bool:
-    return any(inicio < t1 and t0 < fin for t0, t1 in tramos)
+def _unir(tramos: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    """Los tramos, ordenados y sin solaparse: los que se tocan o se pisan, en uno."""
+    salida: list[tuple[datetime, datetime]] = []
+    for t0, t1 in sorted(tramos):
+        if salida and t0 <= salida[-1][1]:
+            salida[-1] = (salida[-1][0], max(salida[-1][1], t1))
+        else:
+            salida.append((t0, t1))
+    return salida
+
+
+def _se_cruza(inicio: datetime, fin: datetime, tramos: list[tuple[datetime, datetime]], inicios: list[datetime]) -> bool:
+    """¿`[inicio, fin)` toca algún tramo? `tramos` viene de `_unir` (ordenados
+    y disjuntos, así que sus finales también crecen) e `inicios` son sus
+    inicios: basta mirar el último que empieza antes de `fin`."""
+    i = bisect_left(inicios, fin) - 1
+    return i >= 0 and tramos[i][1] > inicio
 
 
 def horarios_del_dia(
@@ -293,8 +309,16 @@ def horarios_del_dia(
     franjas, cerradas = franjas_del_dia(fecha, datos.reglas, datos.excepciones, modalidad)
     if not franjas:
         return []
-    fuera = [(instante(fecha, a, c.zona), instante(fecha, b, c.zona)) for a, b in cerradas]
-    fuera += [(b.inicio, b.fin) for b in datos.bloqueos]
+    # LO QUE CIERRA, SOLO EL DE ESTE DÍA Y UNIDO: los bloqueos que no tocan la
+    # fecha (con un día de margen) no se miran, y cada horario se comprueba
+    # con una búsqueda binaria. Sin esto, 200 bloqueos por 288 inicios por 91
+    # días eran millones de comparaciones en una consulta anónima.
+    dia0, dia1 = instante(fecha, 0, c.zona) - timedelta(days=1), instante(fecha, 1440, c.zona) + timedelta(days=1)
+    fuera = _unir(
+        [(instante(fecha, a, c.zona), instante(fecha, b, c.zona)) for a, b in cerradas]
+        + [(b.inicio, b.fin) for b in datos.bloqueos if b.inicio < dia1 and b.fin > dia0]
+    )
+    inicios_fuera = [t0 for t0, _ in fuera]
     antes = timedelta(minutes=c.preparacion)
     atencion = timedelta(minutes=s.duracion)
     despues = timedelta(minutes=c.descanso)
@@ -307,7 +331,9 @@ def horarios_del_dia(
         capacidad = min(f.capacidad, s.capacidad)
         inicio = abre + antes
         while inicio + atencion + despues <= cierra:
-            if desde <= inicio <= hasta and not _se_cruza(inicio - antes, inicio + atencion + despues, fuera):
+            if desde <= inicio <= hasta and not _se_cruza(
+                inicio - antes, inicio + atencion + despues, fuera, inicios_fuera
+            ):
                 salida.append(Horario(fecha, inicio, inicio + atencion, capacidad))
             inicio += paso
     salida.sort(key=lambda h: h.inicio)
