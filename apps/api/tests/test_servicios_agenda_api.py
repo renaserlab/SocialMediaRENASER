@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.modules.services import esquema
+from app.shared.database import get_db
 from tests.test_baja_de_cuenta_postgres import API, SIN_POSTGRES, _cliente, _filas, _persona, _sembrar, _uno
 from tests.test_servicios_catalogo_api import ADMIN, BANDEJA, MIOS, _accion, _equipo, _prestador
 from tests.test_servicios_descubrimiento_api import (  # noqa: F401 - montajes compartidos
@@ -599,53 +600,95 @@ async def _puerta_de_agenda(motor, *cambios: str) -> bool:
             esquema.olvidar()
 
 
+_REGLAS, _EXCEPCIONES = "public.service_schedule_rules", "public.service_schedule_exceptions"
+_BLOQUEOS, _EVENTOS = "public.service_schedule_blocks", "public.service_schedule_events"
+
+#: CADA FORMA de que la 0092 falte, esté a medias o esté aflojada. La puerta
+#: tiene que cerrarse ante TODAS, y la API contestar 503 `services_not_ready`,
+#: nunca 500.
+ALTERACIONES_DE_LA_0092 = (
+    # Tablas y columnas: ausentes o de más.
+    (f"drop table {_BLOQUEOS}",),
+    (f"drop table {_EVENTOS}",),
+    (f"alter table {_BLOQUEOS} drop column reason",),
+    ("alter table public.service_schedules add column extra integer not null default 0",),
+    # Tipo y nulabilidad.
+    (f"alter table {_BLOQUEOS} alter column starts_at type timestamp",),
+    (f"alter table {_REGLAS} alter column weekday type integer",),
+    (f"alter table {_REGLAS} alter column modality drop not null",),
+    (f"delete from {_BLOQUEOS}", f"alter table {_BLOQUEOS} alter column reason set not null"),
+    # Las exclusiones, la autoridad de los cruces: ausente o distinta.
+    (f"alter table {_REGLAS} drop constraint service_schedule_rules_sin_cruces",),
+    (f"alter table {_REGLAS} drop constraint service_schedule_rules_sin_cruces",
+     f"alter table {_REGLAS} add constraint service_schedule_rules_sin_cruces exclude using gist "
+     "(service_id with =, weekday with =, int4range(start_minute, end_minute) with &&) where (false)"),
+    (f"alter table {_EXCEPCIONES} drop constraint service_schedule_exceptions_sin_cruces",
+     f"alter table {_EXCEPCIONES} add constraint service_schedule_exceptions_sin_cruces exclude using gist "
+     "(service_id with =, on_date with =, int4range(start_minute, end_minute) with &&)"),
+    # CHECK: ausente, distinto, o el MISMO sin validar.
+    (f"alter table {_REGLAS} drop constraint service_schedule_rules_franja",),
+    (f"alter table {_BLOQUEOS} drop constraint service_schedule_blocks_motivo",
+     f"alter table {_BLOQUEOS} add constraint service_schedule_blocks_motivo check (reason is null) not valid"),
+    (f"alter table {_BLOQUEOS} drop constraint service_schedule_blocks_orden",
+     f"alter table {_BLOQUEOS} add constraint service_schedule_blocks_orden check (starts_at < ends_at) not valid"),
+    # Claves ajenas: otra acción, o la misma sin validar.
+    (f"alter table {_BLOQUEOS} drop constraint service_schedule_blocks_service_id_fkey",
+     f"alter table {_BLOQUEOS} add constraint service_schedule_blocks_service_id_fkey "
+     "foreign key (service_id) references public.service_schedules(service_id) on delete restrict"),
+    (f"alter table {_BLOQUEOS} drop constraint service_schedule_blocks_service_id_fkey",
+     f"alter table {_BLOQUEOS} add constraint service_schedule_blocks_service_id_fkey "
+     "foreign key (service_id) references public.service_schedules(service_id) on delete cascade not valid"),
+    # Índices: otro, inválido o a medias; también los de las claves primarias
+    # y los de las exclusiones (sin él, la exclusión no protege).
+    ("drop index public.service_schedule_events_una_por_clave",
+     f"create index service_schedule_events_una_por_clave on {_EVENTOS} "
+     "(service_id, idempotency_key) where idempotency_key is not null"),
+    ("update pg_catalog.pg_index set indisvalid = false "
+     "where indexrelid = 'public.service_schedule_blocks_de_la_agenda'::regclass",),
+    ("update pg_catalog.pg_index set indisready = false "
+     "where indexrelid = 'public.service_schedule_rules_de_la_agenda'::regclass",),
+    ("update pg_catalog.pg_index set indisvalid = false "
+     "where indexrelid = 'public.service_schedule_rules_sin_cruces'::regclass",),
+    ("update pg_catalog.pg_index set indisready = false "
+     "where indexrelid = 'public.service_schedule_exceptions_sin_cruces'::regclass",),
+    ("update pg_catalog.pg_index set indisready = false "
+     "where indexrelid = 'public.service_schedule_rules_pkey'::regclass",),
+    # Disparadores: ausente, deshabilitado (también «solo en réplica») o con
+    # otra forma (otro momento, otra función).
+    ("drop trigger service_schedules_zona_valida on public.service_schedules",),
+    (f"alter table {_EVENTOS} disable trigger service_schedule_events_inmutables",),
+    ("alter table public.service_schedules enable replica trigger service_schedules_solo_en_cascada",),
+    (f"drop trigger service_schedule_events_inmutables on {_EVENTOS}",
+     f"create trigger service_schedule_events_inmutables after update on {_EVENTOS} "
+     "for each row execute function public.servicios_catalogo_historial_inmutable()"),
+    ("drop trigger service_schedules_zona_valida on public.service_schedules",
+     "create trigger service_schedules_zona_valida before insert or update of timezone on public.service_schedules "
+     "for each row execute function public.servicios_catalogo_historial_inmutable()"),
+    # La función de la zona: otro cuerpo, SECURITY DEFINER u otro search_path.
+    ("create or replace function public.servicios_agenda_zona_valida() returns trigger language plpgsql "
+     "set search_path = public, pg_temp as $$ begin return new; end; $$",),
+    ("alter function public.servicios_agenda_zona_valida() security definer",),
+    ("alter function public.servicios_agenda_zona_valida() set search_path = public",),
+    # La extensión.
+    ("drop extension btree_gist cascade",),
+    # RLS, políticas y permisos (de tabla, de columna y de la función; a
+    # PUBLIC, anon o authenticated).
+    (f"alter table {_BLOQUEOS} disable row level security",),
+    (f"create policy abierta on {_BLOQUEOS} for select to authenticated using (true)",),
+    (f"grant select on {_BLOQUEOS} to anon",),
+    (f"grant select on {_EVENTOS} to public",),
+    (f"grant insert on {_REGLAS} to authenticated",),
+    (f"grant select (reason) on {_BLOQUEOS} to authenticated",),
+    ("grant execute on function public.servicios_agenda_zona_valida() to authenticated",),
+    ("grant execute on function public.servicios_agenda_zona_valida() to public",),
+)
+
+
 async def test_la_puerta_de_la_agenda_mira_lo_que_hace_falta(mundo) -> None:
     _, motor, _ = mundo
     assert await _puerta_de_agenda(motor) is True
-    reglas, excepciones = "public.service_schedule_rules", "public.service_schedule_exceptions"
-    for cambios in (
-        ("drop table public.service_schedule_blocks",),
-        ("alter table public.service_schedule_blocks drop column reason",),
-        ("alter table public.service_schedules add column extra integer not null default 0",),
-        ("alter table public.service_schedule_rules alter column modality drop not null",),
-        ("alter table public.service_schedule_blocks alter column starts_at type timestamp",),
-        # Las exclusiones: la autoridad de los cruces.
-        (f"alter table {reglas} drop constraint service_schedule_rules_sin_cruces",),
-        (f"alter table {reglas} drop constraint service_schedule_rules_sin_cruces",
-         f"alter table {reglas} add constraint service_schedule_rules_sin_cruces exclude using gist "
-         "(service_id with =, weekday with =, int4range(start_minute, end_minute) with &&) where (false)"),
-        (f"alter table {excepciones} drop constraint service_schedule_exceptions_sin_cruces",
-         f"alter table {excepciones} add constraint service_schedule_exceptions_sin_cruces exclude using gist "
-         "(service_id with =, on_date with =, int4range(start_minute, end_minute) with &&)"),
-        (f"alter table {reglas} drop constraint service_schedule_rules_franja",),
-        ("alter table public.service_schedule_blocks drop constraint service_schedule_blocks_motivo",
-         "alter table public.service_schedule_blocks add constraint service_schedule_blocks_motivo "
-         "check (reason is null) not valid"),
-        # Claves e índices.
-        ("alter table public.service_schedule_blocks drop constraint service_schedule_blocks_service_id_fkey",
-         "alter table public.service_schedule_blocks add constraint service_schedule_blocks_service_id_fkey "
-         "foreign key (service_id) references public.service_schedules(service_id) on delete restrict"),
-        ("drop index public.service_schedule_events_una_por_clave",
-         "create index service_schedule_events_una_por_clave on public.service_schedule_events "
-         "(service_id, idempotency_key) where idempotency_key is not null"),
-        ("update pg_catalog.pg_index set indisvalid = false "
-         "where indexrelid = 'public.service_schedule_blocks_de_la_agenda'::regclass",),
-        # Disparadores y la función de la zona.
-        ("drop trigger service_schedules_zona_valida on public.service_schedules",),
-        ("alter table public.service_schedule_events disable trigger service_schedule_events_inmutables",),
-        ("create or replace function public.servicios_agenda_zona_valida() returns trigger language plpgsql "
-         "set search_path = public, pg_temp as $$ begin return new; end; $$",),
-        ("alter function public.servicios_agenda_zona_valida() security definer",),
-        ("drop extension btree_gist cascade",),
-        # RLS, políticas y permisos.
-        ("alter table public.service_schedule_blocks disable row level security",),
-        ("create policy abierta on public.service_schedule_blocks for select to authenticated using (true)",),
-        ("grant select on public.service_schedule_blocks to anon",),
-        ("grant select on public.service_schedule_events to public",),
-        ("grant select (reason) on public.service_schedule_blocks to authenticated",),
-        ("grant execute on function public.servicios_agenda_zona_valida() to authenticated",),
-    ):
-        assert await _puerta_de_agenda(motor, *cambios) is False, cambios
+    abiertas = [cambios for cambios in ALTERACIONES_DE_LA_0092 if await _puerta_de_agenda(motor, *cambios) is not False]
+    assert abiertas == []
     assert await _puerta_de_agenda(motor, "grant all on public.service_schedule_blocks to service_role") is True
     # La consulta compara identificadores, no nombres escritos: no depende del
     # `search_path` de la conexión.
@@ -653,6 +696,55 @@ async def test_la_puerta_de_la_agenda_mira_lo_que_hace_falta(mundo) -> None:
         async with conexion.begin():
             await conexion.execute(text("set local search_path = pg_catalog"))
             assert await conexion.scalar(esquema._LO_QUE_NECESITA_LA_AGENDA) is True
+
+
+def _siempre(sesion: AsyncSession):  # noqa: ANN202
+    async def _la_misma():  # noqa: ANN202
+        yield sesion
+
+    return _la_misma
+
+
+async def test_con_la_0092_alterada_la_api_contesta_503_y_nunca_500(mundo) -> None:
+    """La misma lista, ahora por HTTP: con la base alterada (en una transacción
+    que se deshace al terminar), el prestador y el público reciben 503
+    `services_not_ready` y nada se escribe. Nunca un 500."""
+    app, motor, _ = mundo
+    perfil, servicio, _, _ = await _publicado_con_agenda(app, motor)
+    peticiones = (
+        ("GET", _agenda(servicio), perfil, None),
+        ("POST", f"{_agenda(servicio)}/rules", perfil, {"weekday": 3, "start": "15:00", "end": "16:00", "modality": "virtual"}),
+        ("GET", _publica(servicio), None, None),
+        ("GET", f"{_publica(servicio)}/{_dia(1)}", None, None),
+    )
+    normal = app.dependency_overrides[get_db]
+    respuestas = []
+    try:
+        for cambios in ALTERACIONES_DE_LA_0092:
+            esquema.olvidar()
+            async with motor.connect() as conexion:
+                transaccion = await conexion.begin()
+                sesion = AsyncSession(bind=conexion, expire_on_commit=False)
+                app.dependency_overrides[get_db] = _siempre(sesion)
+                try:
+                    for sql in cambios:
+                        await conexion.execute(text(sql))
+                    for metodo, ruta, uid, cuerpo in peticiones:
+                        r = await _pedir(app, metodo, ruta, uid, cuerpo, f"clave-{uuid.uuid4().hex}")
+                        respuestas.append((r.status_code, _codigo(r)))
+                        assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), (cambios, metodo, ruta, r.text)
+                finally:
+                    app.dependency_overrides[get_db] = normal
+                    await sesion.close()
+                    await transaccion.rollback()
+                    esquema.olvidar()
+    finally:
+        app.dependency_overrides[get_db] = normal
+    assert len(respuestas) == len(ALTERACIONES_DE_LA_0092) * len(peticiones)
+    # Deshecho lo alterado, la agenda responde y no quedó ninguna regla nueva.
+    agenda = (await _pedir(app, "GET", _agenda(servicio), perfil)).json()
+    assert agenda["configured"] is True and all(r["start"] != "15:00" for r in agenda["rules"])
+    assert (await _pedir(app, "GET", _publica(servicio), None)).status_code == 200
 
 
 async def test_un_error_al_mirar_la_0092_es_503_y_no_se_recuerda(mundo, monkeypatch) -> None:

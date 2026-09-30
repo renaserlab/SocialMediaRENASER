@@ -388,7 +388,8 @@ TABLAS_DE_LA_AGENDA = (
 #:    cruzadas se guardarían en silencio. Y los dieciocho CHECK, validados y
 #:    por su definición (una huella de todos juntos);
 #:  * los índices con su definición (el único de la `Idempotency-Key`,
-#:    parcial), válidos y listos;
+#:    parcial), y TODOS los de las cinco tablas (también los de las claves
+#:    primarias y las exclusiones) válidos, listos y vivos;
 #:  * los cuatro disparadores activos, con su función, su forma, sus
 #:    argumentos y sus columnas, y la función de la zona sin SECURITY DEFINER,
 #:    con su `search_path` y su cuerpo;
@@ -544,6 +545,12 @@ _LO_QUE_NECESITA_LA_AGENDA = text(
                 'CREATE INDEX service_schedule_events_del_servicio ON public.service_schedule_events '
                 'USING btree (service_id, created_at DESC, id DESC)'
               )) = 5
+      -- Y TODOS los índices de las cinco tablas, también los de las claves
+      -- primarias y los de las exclusiones, válidos, listos y vivos: una
+      -- exclusión con su índice a medias no impide los cruces.
+      and not exists (select 1 from pg_catalog.pg_index i
+                       where i.indrelid in (select t from tablas)
+                         and not (i.indisvalid and i.indisready and i.indislive))
       and (select count(*) from disparadores e
              join pg_catalog.pg_trigger g
                on g.tgrelid = to_regclass('public.' || e.tabla) and g.tgname = e.nombre
