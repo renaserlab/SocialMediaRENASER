@@ -986,27 +986,11 @@ async def ultima_observacion(db: AsyncSession, servicio_id: str) -> ServiceEvent
     )
 
 
-async def publico(db: AsyncSession, servicio_id: str) -> tuple[Service, ServiceVersion, ServiceProvider, ServiceCategory]:
-    """LO ÚNICO QUE VE EL PÚBLICO: un servicio publicado, de un prestador
-    activo, con su versión publicada. Todo lo demás —borrador, suspendido,
-    retirado, inexistente— es el mismo 404."""
-    fila = (
-        await db.execute(
-            select(Service, ServiceVersion, ServiceProvider, ServiceCategory)
-            .join(ServiceVersion, ServiceVersion.service_id == Service.id)
-            .join(ServiceProvider, ServiceProvider.id == Service.provider_id)
-            .join(ServiceCategory, ServiceCategory.id == Service.category_id)
-            .where(
-                Service.id == servicio_id,
-                Service.status.in_(tuple(estados.VISIBLE_AL_PUBLICO)),
-                ServiceVersion.status == estados.PUBLICADA,
-                ServiceProvider.status == PRESTADOR_ACTIVO,
-            )
-        )
-    ).first()
-    if fila is None:
-        raise ServicioNoEncontrado()
-    return fila[0], fila[1], fila[2], fila[3]
+# LO ÚNICO QUE VE EL PÚBLICO lo decide ahora UNA función,
+# `descubrimiento.condiciones_publicas()` (Incremento 3): la ficha, el
+# catálogo, la búsqueda, el perfil del prestador y los guardados la comparten.
+# Aquí vivía otra copia, sin la categoría activa, y dos copias acaban diciendo
+# cosas distintas.
 
 
 #: Cada columna del contenido → el campo que se señala (`requisitos.CAMPOS`).
@@ -1098,7 +1082,6 @@ __all__ = [
     "prestador_activo",
     "publicada",
     "publicar",
-    "publico",
     "reactivar",
     "retirar_servicio",
     "retirar_version",

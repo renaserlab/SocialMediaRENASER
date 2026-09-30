@@ -22,7 +22,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import AuthUser, get_current_user
+from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.services import (
     catalogo,
     catalogo_imagenes as imagenes,
@@ -48,13 +48,13 @@ from app.modules.services.catalogo_schemas import (
     ServicioCrear,
     ServicioMotivo,
     ServicioPrivadoRead,
-    ServicioPublicoRead,
     VersionAprobar,
     VersionPublicar,
     VersionRead,
     VersionRetirar,
     BorradorEditar,
 )
+from app.modules.services.descubrimiento_schemas import FichaPublicaRead
 from app.modules.services.router import _clave, funcion_de_decision, funcion_de_revision
 from app.shared.database import get_db
 
@@ -328,15 +328,18 @@ async def historial_propio(
 # =========================================================================== #
 # PÚBLICO: la ficha de un servicio publicado
 # =========================================================================== #
-@router.get("/catalog/{service_id}", response_model=ServicioPublicoRead)
+@router.get("/catalog/{service_id}", response_model=FichaPublicaRead)
 async def ficha_publica(
     service_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
     _disponible: None = Depends(catalogo_disponible),
     db: AsyncSession = Depends(get_db),
-) -> ServicioPublicoRead:
-    """Solo lo publicado de un prestador activo. Borrador, suspendido, retirado
-    o inexistente: el mismo 404."""
-    return await vistas.publica(db, service_id)
+) -> FichaPublicaRead:
+    """Solo lo publicado de un prestador activo en una categoría activa.
+    Borrador, suspendido, retirado, inexistente o de alguien bloqueado: el
+    mismo 404. Con la confianza que Z comprobó, las reseñas (todavía
+    ninguna), si quien mira lo guardó, y otros servicios con su razón."""
+    return await vistas.publica(db, service_id, mira=current_user.id if current_user else None)
 
 
 # =========================================================================== #

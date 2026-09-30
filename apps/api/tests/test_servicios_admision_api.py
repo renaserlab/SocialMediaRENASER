@@ -349,10 +349,23 @@ RUTAS_DEL_CATALOGO = {
     ("POST", "/admin/services/categories/{category_id}/deactivate"),
 }
 
+#: Las del descubrimiento (Incremento 3): el catálogo público, sus categorías,
+#: las sugerencias, el perfil del prestador y los guardados.
+RUTAS_DEL_DESCUBRIMIENTO = {
+    ("GET", "/services/catalog"),
+    ("GET", "/services/public-categories"),
+    ("GET", "/services/suggestions"),
+    ("GET", "/services/providers/{provider_id}"),
+    ("GET", "/services/providers/{provider_id}/services"),
+    ("POST", "/services/catalog/{service_id}/save"),
+    ("DELETE", "/services/catalog/{service_id}/save"),
+    ("GET", "/services/saved"),
+}
 
-def test_estan_exactamente_las_rutas_del_incremento_1_y_del_catalogo() -> None:
+
+def test_estan_exactamente_las_rutas_del_incremento_1_del_catalogo_y_del_descubrimiento() -> None:
     rutas = {(m, p[len(API):]) for m, p in _rutas(create_app()) if "/services" in p}
-    assert rutas == RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO
+    assert rutas == RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO
 
 
 def test_ninguna_ruta_de_la_aplicacion_esta_duplicada() -> None:

@@ -397,7 +397,12 @@ async def test_recorrido_completo_desde_la_admision_hasta_el_publico(entorno) ->
     ficha = await _ficha(app, ident)
     assert ficha.status_code == 200, ficha.text
     publico = ficha.json()
-    assert publico["title"] == CONTENIDO["title"] and publico["provider"] == {"display_name": "Ana"}
+    assert publico["title"] == CONTENIDO["title"] and publico["provider"]["display_name"] == "Ana"
+    # Del prestador, SOLO lo autorizado (Incremento 3): su id público, el
+    # nombre, el tipo y lo que Z comprobó en ESTA admisión real.
+    assert set(publico["provider"]) == {"id", "display_name", "provider_type", "trust"}
+    assert publico["provider"]["trust"]["identity_verified"] is True
+    assert publico["provider"]["trust"]["credential_verified"] is True
     assert publico["includes"] == ["Revisión de facturas", "Plan mensual con fechas de pago"]
     assert publico["price"] == {"model": "fixed", "amount_minor": 12000, "currency": "PEN"}
     assert publico["images"][0]["url"] and publico["images"][0]["is_cover"]
