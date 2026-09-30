@@ -230,6 +230,79 @@ async def exigir_catalogo(db: AsyncSession) -> None:
         raise ServiciosSinMigracion()
 
 
+# --------------------------------------------------------------------------- #
+# Los guardados (Incremento 3, migración 0091)
+# --------------------------------------------------------------------------- #
+#: LO QUE LA 0091 IMPONE Y EL CÓDIGO DA POR HECHO: la clave (perfil, servicio)
+#: que hace que guardar dos veces sea guardar una, las dos claves ajenas en
+#: cascada, sus dos índices y RLS. No el número de la migración.
+_LO_QUE_NECESITAN_LOS_GUARDADOS = text(
+    """
+    select
+      exists (
+        select 1 from pg_catalog.pg_index i
+         where i.indexrelid = to_regclass('public.saved_services_pkey')
+           and i.indrelid = to_regclass('public.saved_services')
+           and i.indisprimary and i.indisunique and i.indnatts = 2
+           and (select array_agg(a.attname::text order by k.ord)
+                  from unnest(i.indkey) with ordinality k(attnum, ord)
+                  join pg_catalog.pg_attribute a
+                    on a.attrelid = i.indrelid and a.attnum = k.attnum)
+               = array['profile_id', 'service_id']
+      )
+      and (
+        select count(*) from pg_catalog.pg_constraint c
+         where c.conrelid = to_regclass('public.saved_services')
+           and c.contype = 'f' and c.confdeltype = 'c'
+           and c.confrelid in (to_regclass('public.profiles'), to_regclass('public.services'))
+      ) = 2
+      and to_regclass('public.saved_services_mios') is not null
+      and to_regclass('public.saved_services_del_servicio') is not null
+      and coalesce(
+        (select c.relrowsecurity from pg_catalog.pg_class c
+          where c.oid = to_regclass('public.saved_services')),
+        false
+      )
+    """
+)
+
+
+def _columnas_de_los_guardados(sync) -> bool:  # noqa: ANN001
+    from app.modules.services import descubrimiento_models
+
+    inspector = inspect(sync)
+    if not inspector.has_table("saved_services"):
+        return False
+    hay = {c["name"] for c in inspector.get_columns("saved_services")}
+    tabla = descubrimiento_models.Base.metadata.tables["saved_services"]
+    return {c.name for c in tabla.columns} <= hay
+
+
+async def hay_guardados(db: AsyncSession) -> bool:
+    """¿Tiene la base la 0091 COMPLETA? Ante la duda, no. Como el catálogo:
+    el «sí» y el «no» se recuerdan hasta reiniciar; un error al mirar, no."""
+    if "guardados" not in _cache:
+        try:
+            conexion = await db.connection()
+            completa = await conexion.run_sync(_columnas_de_los_guardados)
+            if completa and conexion.dialect.name == "postgresql":
+                completa = bool(await db.scalar(_LO_QUE_NECESITAN_LOS_GUARDADOS))
+        except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
+            logger.warning("Servicios: no se pudo comprobar la 0091; los guardados contestan 503.", exc_info=True)
+            return False
+        _cache["guardados"] = completa
+        if not completa:
+            logger.warning("Servicios: falta la 0091 completa. Guardar contesta 503.")
+    return _cache["guardados"]
+
+
+async def exigir_guardados(db: AsyncSession) -> None:
+    """El catálogo y, además, la 0091."""
+    await exigir_catalogo(db)
+    if not await hay_guardados(db):
+        raise ServiciosSinMigracion()
+
+
 __all__ = [
     "COLUMNAS_DE_LA_0088",
     "ServiciosApagados",
@@ -238,8 +311,10 @@ __all__ = [
     "TABLAS_DE_ADMISION",
     "encendido",
     "exigir_catalogo",
+    "exigir_guardados",
     "exigir_servicios",
     "hay_admision",
     "hay_catalogo",
+    "hay_guardados",
     "olvidar",
 ]

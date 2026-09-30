@@ -58,10 +58,11 @@ SQL = _sin_comentarios(TEXTO)
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0089() -> None:
+def test_sigue_a_la_0089_y_la_sigue_la_0091() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0089_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0089_")
+    assert nombres[posicion + 1].startswith("0091_")
 
 
 @pytest.mark.parametrize("nombre", sorted(APLICADAS))
