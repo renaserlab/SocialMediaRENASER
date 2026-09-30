@@ -744,3 +744,37 @@ razón.
 Disponibilidad, agenda, reservas, contratación, pagos, mensajes por reserva,
 check-in, sesiones, incidencias, devoluciones, crear o responder reseñas y
 finanzas. La ficha no tiene botón de contratar.
+
+## Servicios · Incremento 4: disponibilidad y agenda (30/09/2026)
+
+Backend real y detrás de `FEATURE_SERVICES` (apagada). Usa la 0092, **escrita
+y SIN APLICAR**: en una base sin ella, la entrada a la agenda no aparece
+(`can_manage_schedule` es falso), la ficha no enseña la sección de
+disponibilidad y las rutas contestan 503 `services_not_ready`. Ninguna vista se
+alcanza solo escribiendo la URL: lo vigila `serviciosAgendaVistas.test.mts`.
+
+Mis servicios › un servicio › «Disponibilidad y agenda» (solo si el servidor
+dice que puede) › ajustes, horario semanal, excepciones, bloqueos o vista
+previa. Y Servicios › ficha › «Ver horarios».
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Resumen de la agenda: zona, duración, separación, modalidad, estado, próximo horario y por qué el público aún no ve horarios | `AgendaDelServicioScreen` (`app/servicios/prestador/catalogo/[serviceId]/agenda/index.tsx`) | `GET /services/provider/services/{id}/schedule` |
+| 2 | Ajustes: zona, activa o en pausa, preparación, descanso e intervalo | `AjustesDeAgendaScreen` (`…/agenda/ajustes`) | `PUT …/schedule` |
+| 3 | Horario semanal | `HorarioSemanalScreen` (`…/agenda/semanal`) | `POST …/rules`, `PATCH`/`DELETE …/rules/{id}` |
+| 4 | Excepciones y días no disponibles | `ExcepcionesDeAgendaScreen` (`…/agenda/excepciones`) | `POST …/exceptions`, `PATCH`/`DELETE …/exceptions/{id}` |
+| 5 | Bloqueos (motivo privado) | `BloqueosDeAgendaScreen` (`…/agenda/bloqueos`) | `POST …/blocks`, `DELETE …/blocks/{id}` |
+| 6 | Vista previa de los horarios | `VistaPreviaDeAgendaScreen` (`…/agenda/vista-previa`) | `GET …/schedule/preview`, `GET …/preview/{fecha}` |
+| 7 | Disponibilidad dentro de la ficha | `DisponibilidadEnLaFicha` (en `FichaDeServicioScreen`) | `GET /services/catalog/{id}/availability` |
+| 8–9 | Selector de fecha y horarios de una fecha | `HorariosDelServicioScreen` (`app/servicios/horarios/[serviceId].tsx`) con `SelectorDeHorarios` | `GET …/availability`, `GET …/availability/{fecha}` |
+| 10 | Estados vacíos: sin agenda, sin horarios ese día o en esas fechas, en pausa, no disponible y fuera de lo consultable | En `SelectorDeHorarios` y la sección de la ficha | Los mismos |
+
+Elegir un horario solo lo guarda en la ruta (`fecha`, `inicio`, `hora`,
+`modalidad`) para el Incremento 5: no hay botón de reservar, confirmar ni pagar,
+y se dice que el horario no queda apartado.
+
+### Lo que sigue sin existir, a propósito
+
+Reservas, retenciones, contratación, pagos, mensajes por reserva, check-in,
+sesiones, incidencias, devoluciones, reseñas que crear, finanzas y calendarios
+externos. La ficha sigue sin botón de contratar.

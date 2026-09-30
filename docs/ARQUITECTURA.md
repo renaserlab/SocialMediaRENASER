@@ -92,9 +92,13 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. Al 29/09/2026 la
-última **escrita y aplicada** es la **0091** (servicios guardados, Incremento 3
-de Servicios), ejecutada a mano y verificada ese día en solo lectura **sin
+antes de usarla, y sigue funcionando cuando no lo está. Al 30/09/2026 la
+última **escrita** es la **0092** (disponibilidad y agenda, Incremento 4 de
+Servicios), **SIN APLICAR**: probada solo contra PostgreSQL local, y al
+aplicarla hay que reiniciar la API; ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §50–§57](Z_SERVICIOS_ARQUITECTURA.md). La
+última **aplicada** es la **0091** (servicios guardados, Incremento 3 de
+Servicios), ejecutada a mano y verificada el 29/09/2026 en solo lectura **sin
 divergencias**; ver [`Z_SERVICIOS_ARQUITECTURA.md` §49](Z_SERVICIOS_ARQUITECTURA.md).
 La **0090** (catálogo y publicación de servicios) también está aplicada y
 verificada (§32 del mismo documento). La anterior,
@@ -155,7 +159,9 @@ Todas nacen apagadas y se encienden por entorno.
 | `feature_product_sales` | Comprar un producto físico. **Encenderla sola no basta**: ver `pedidos.por_que_no_se_puede_vender`. |
 | `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
-| `feature_services` | Z Servicios: la admisión de prestadores, el catálogo y el descubrimiento (Incrementos 1–3). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni reservas**, que no existen. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
+| `feature_services` | Z Servicios: la admisión de prestadores, el catálogo, el descubrimiento y la agenda (Incrementos 1–4). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni reservas**, que no existen: la agenda enseña horarios posibles y no aparta ninguno. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
+| `services_agenda_notice_minutes` | Antelación mínima de un horario de Servicios. **120** (provisional del documento de reglas; decisión E1). |
+| `services_agenda_horizon_days` | Hasta cuántos días por delante se ofrecen horarios. **60** (provisional; decisión E2). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
 | `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |
 

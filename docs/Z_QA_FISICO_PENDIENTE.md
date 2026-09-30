@@ -1560,3 +1560,85 @@ Antes de empezar:
       navegan (categorías, «Ver todas»), como botones.
 - [ ] En inglés y portugués no queda ningún texto en español ni códigos.
 - [ ] En web y móvil, la hoja de filtros se desplaza y se cierra.
+
+## Z Servicios · Incremento 4 — disponibilidad y agenda (30/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono**, y la 0092 **todavía
+no está aplicada**. Las pruebas automáticas cubren el cálculo, la API contra
+PostgreSQL (con carreras reales) y el código de las pantallas. Falta el
+teléfono.
+
+Antes de empezar:
+
+- **Aplicar la 0092** en la base del QA, verificarla (`Z_SERVICIOS_ARQUITECTURA.md`
+  §56–§57) y **reiniciar la API**: la puerta recuerda el «no».
+- La API de ese entorno corre el código de `Edson` y tiene
+  `FEATURE_SERVICES=true` **solo allí**.
+- Un prestador aprobado con un servicio publicado (virtual, 60 min) y otro en
+  borrador; un segundo prestador; una persona sin prestador; y el teléfono en
+  otra zona horaria para una de las pruebas.
+
+### Con la bandera apagada o sin la 0092
+
+- [ ] Con la bandera apagada, nada cambia: ni la entrada a la agenda ni la
+      sección de disponibilidad en la ficha. Cursos, Eventos y Productos,
+      igual que antes.
+- [ ] Con la bandera encendida y SIN la 0092: el servicio propio no enseña
+      «Disponibilidad y agenda» y la ficha no enseña la sección; nada se rompe.
+
+### El prestador
+
+- [ ] Mis servicios › un servicio › «Disponibilidad y agenda»: «Tu agenda
+      todavía no está configurada» y «Configurar agenda».
+- [ ] Ajustes: la zona NO viene elegida sola; elegir «America/Lima»,
+      descanso 15; guardar. El resumen enseña zona, duración, separación,
+      modalidad y estado.
+- [ ] Horario semanal: añadir lunes 09:00–12:00. Añadir otra de 11:00 a
+      13:00 el lunes: «Se cruza con otra franja de ese día». 12:00–14:00 sí.
+- [ ] Una hora como 09:07, o un fin antes del inicio, se avisa antes de
+      enviar. Un servicio individual no pide capacidad.
+- [ ] Desactivar una franja y volver a activarla; quitar una (pide
+      confirmación).
+- [ ] Excepciones: cerrar un día entero; en otra fecha, sustituir el horario
+      por 15:00–18:00; en otra, añadir una franja. Otra excepción en el día
+      cerrado se rechaza. La explicación de la precedencia se entiende.
+- [ ] Bloqueos: bloquear 10:30–10:35 con un motivo; la lista lo enseña con
+      «Motivo privado». Quitarlo pide confirmación.
+- [ ] Vista previa: lo que vería una persona, y arriba por qué el público aún
+      no lo ve (en el borrador: «El servicio todavía no es público»).
+- [ ] Cambiar la zona con franjas: pide confirmación y lo explica; los
+      bloqueos conservan su hora exacta (cambia la hora local que se lee).
+- [ ] Doble toque en «Guardar» o en «Añadir»: una sola vez.
+- [ ] Un prestador suspendido abre la agenda pero no la cambia; un servicio
+      retirado ya no ofrece la entrada.
+
+### Quien busca un servicio
+
+- [ ] La ficha enseña «Disponibilidad» con el próximo horario y la zona;
+      «Ver horarios» abre el selector. Sin agenda: «Este servicio todavía no
+      tiene horarios publicados». En pausa: «no está ofreciendo horarios».
+- [ ] El selector: los días sin horarios, apagados; elegir un día enseña sus
+      horarios (09:00 y 10:15 con 60 min y 15 de descanso). «Fechas
+      siguientes» avanza sin pasar del horizonte.
+- [ ] Un horario bloqueado o en un día cerrado no aparece; un horario a menos
+      de dos horas, tampoco.
+- [ ] Elegir un horario lo marca y enseña «Horario elegido … Todavía no se
+      puede contratar desde Z: este horario no queda apartado». No hay botón
+      de reservar ni de pagar. «Atrás» vuelve a la ficha.
+- [ ] Con el teléfono en otra zona: las horas son las de la agenda y se avisa
+      de la del teléfono.
+- [ ] Suspender el servicio con la pantalla abierta: al recargar, «Este
+      servicio no está disponible ahora».
+- [ ] Alguien bloqueado con el prestador no ve la ficha ni los horarios.
+- [ ] El motivo de un bloqueo no aparece en ninguna parte fuera de la agenda
+      del prestador.
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: cada fecha se anuncia con su día y cuántos
+      horarios tiene (o «sin horarios», apagada); cada horario, «De 09:00 a
+      10:00», y el elegido como seleccionado; las opciones de día, tipo,
+      zona y modalidad se anuncian como opciones.
+- [ ] Todas las áreas táctiles se tocan con el pulgar (fechas y horarios de
+      al menos 44 puntos).
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos.

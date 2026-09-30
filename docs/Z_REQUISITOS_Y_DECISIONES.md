@@ -2587,3 +2587,83 @@ reserva, cancelaciones, check-in, sesiones, incidencias, devoluciones, reseñas
 que crear, finanzas ni transferencias. Ni IA, ni motores externos de
 búsqueda, ni un segundo recomendador. La ficha no tiene botón de contratar.
 El push de un aviso sigue abriendo solo la aplicación (tarea abierta).
+
+## Z Servicios, Incremento 4 — disponibilidad y agenda del prestador (30/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte IV (§50 en adelante). **Implementado y probado en `Edson`; pendiente de
+aplicar y verificar la migración 0092 y de realizar el QA físico.** La 0092 NO
+está aplicada. Nada de lo que sigue se presenta como política definitiva si la
+empresa no lo confirmó.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Configurar cuándo se ofrece cada servicio | Una agenda por servicio: zona IANA, activa o en pausa, preparación, descanso e intervalo entre inicios |
+| Reglas semanales | Día, franja de 5 en 5 minutos (hasta las 24:00), modalidad, capacidad y activa o no. Dos activas del mismo día no se cruzan: lo impide la base |
+| Duración real y separación | La duración es la de la versión publicada (o, sin ella, la que se prepara); cada horario ocupa preparación + duración + descanso, y ese bloque entero cabe en la franja |
+| Excepciones por fecha | Cerrar el día, cerrar una franja, añadir una franja o sustituir la semana ese día. Dos excepciones de la misma fecha no se pisan |
+| Bloqueos manuales | Un intervalo real con motivo privado (hasta 200 caracteres) que solo ve el prestador |
+| Capacidad | Individual: uno. Grupal: hasta la capacidad de la versión. Solo teórica: nada se descuenta |
+| Zona horaria | IANA con lugar, elegida (no se toma la del teléfono); instantes en UTC; conversión en un solo sitio del servidor; horario de verano probado |
+| Consulta pública | Fechas con horarios (de 31 días en 31) y horarios de una fecha, solo de lo público y dentro de la antelación y el horizonte |
+| Historial mínimo | Cada cambio de la agenda deja su línea (sin el motivo de los bloqueos) |
+| Terminar al enseñar un horario | Elegir un horario solo lo guarda en la ruta de la app. Ninguna reserva, retención, pedido ni cobro |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **La agenda es del servicio**, no de una versión ni del prestador: editar la
+   descripción no la toca. La duración, la modalidad y la capacidad se leen de
+   la versión publicada cada vez.
+2. **Precedencia**: lo que cierra (bloqueo, día cerrado, franja cerrada) gana
+   siempre; después, las excepciones de la fecha (`replace` sustituye la
+   semana; `extra` solo suma lo que el día no tenía); después, la semana; y la
+   configuración general (duración, separación, intervalo, antelación y
+   horizonte).
+3. **Una franja no cruza la medianoche**: termina como tarde a las 24:00. Una
+   atención de 23:00 a 01:00 son dos franjas y no genera un horario que las
+   junte.
+4. **Horario de verano**: una hora local que no existe se lleva al salto; una
+   que se repite, a la primera vez. Los horarios se cuentan en tiempo real.
+5. **Un borrador puede preparar su agenda**; el público solo la ve cuando el
+   servicio es público.
+6. **Cambiar la zona se confirma**: la semana y las excepciones pasan a leerse
+   en la nueva; los bloqueos no se mueven.
+7. **Un prestador suspendido** ve su agenda pero no la cambia; un servicio
+   **retirado**, tampoco.
+8. **Modalidad**: la de la versión publicada y la de la que se prepara; el
+   público solo ve la publicada.
+9. **Con un intervalo menor que la duración**, los horarios son inicios
+   alternativos que se solapan: elegir uno excluirá a los que se le cruzan
+   cuando existan las reservas (Incremento 5).
+10. **Sin panel de administración de agendas**: el blueprint lo pide para las
+    reservas (A04), que no existen. Moderación y administración reciben el
+    mismo 404 que cualquiera que no sea el dueño.
+11. **Sin avisos ni auditoría general**: cambiar la agenda propia deja su
+    historial, no un aviso ni una línea de `audit_events`.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| E1 | **Antelación mínima** para mostrar un horario | 2 horas (el provisional del documento de reglas, 4.5), configurable con `SERVICES_AGENDA_NOTICE_MINUTES` |
+| E2 | **Horizonte**: hasta cuántos días por delante | 60 días (provisional de 4.6), configurable con `SERVICES_AGENDA_HORIZON_DAYS` |
+| E3 | **Si el prestador elige su antelación y su horizonte** (el blueprint P03 lo sugiere) | No: son de la plataforma |
+| E4 | **Feriados**: si Z carga los del país o los marca cada prestador | Cada prestador los marca como «Cerrar todo el día» |
+| E5 | **Enseñar la capacidad al público** («hasta N personas») | La API la devuelve; la app no la enseña. Nunca un «quedan» |
+| E6 | **Cómo se enseña la hora a quien está en otra zona** | Horas de la agenda, con su zona, y un aviso si el teléfono está en otra |
+| E7 | **Límites de uso** (50 reglas, 200 excepciones y 200 bloqueos por venir, un bloqueo de 31 días como mucho, 366 días de adelanto, 31 días por consulta, 96 horarios por página) | Los técnicos de `agenda_politica.py` |
+| E8 | **Recursos y varios profesionales** de una empresa (sala, equipo, `providerMember`) | No existen: la agenda es del servicio |
+| E9 | **Calendarios externos** (Google, Outlook) | Fuera de este incremento |
+| E10 | **«Avísame cuando haya horarios»** | No existe; se dice que no hay horarios |
+| E11 | **Qué pasa con las reservas al cambiar la agenda** | No hay reservas. El Incremento 5 tendrá que decidir (el blueprint pide no alterar las existentes) |
+| E12 | **Si cerrar una franja parte la franja o solo quita los horarios que toca** | Solo los quita: la rejilla sigue la del inicio de la franja (09–17 con 45 min y cerrado 12–13 da 11:15 y después 13:30, no 13:00). Con dos reglas (09–12 y 13–17), sí sale 13:00. Cambiarlo es restar lo cerrado de las franjas antes de generar |
+
+### Límites del Incremento 4
+
+No hay reservas, retenciones, contratación, pedidos, aceptación de
+condiciones, direcciones, cobros, Stripe, saldos, devoluciones, disputas,
+recordatorios, asistencia, reseñas, posventa ni calendarios externos. El
+Incremento 5 **no se empezó**. El push de un aviso sigue abriendo solo la
+aplicación (tarea abierta).

@@ -1,10 +1,12 @@
-# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2) y descubrimiento (Incremento 3)
+# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2), descubrimiento (Incremento 3) y agenda (Incremento 4)
 
 Qué se construyó, qué impone la base, qué se decidió en cerrado y qué sigue
 esperando a una persona. La Parte I se escribió el 29/09/2026 al cerrar el
 Incremento 1 en la rama `Edson`; la **Parte II** (§18 en adelante), el mismo
 día, con el Incremento 2 implementado y probado; la **Parte III** (§33 en
-adelante), también ese día, con el Incremento 3 implementado y probado.
+adelante), también ese día, con el Incremento 3 implementado y probado; y la
+**Parte IV** (§50 en adelante), el 30/09/2026, con el Incremento 4
+implementado y probado y la 0092 **sin aplicar**.
 
 ## Estado
 
@@ -18,10 +20,12 @@ adelante), también ese día, con el Incremento 3 implementado y probado.
 | **Migración 0090** | **APLICADA** en Supabase el 29/09/2026 y verificada ese día en solo lectura: **sin divergencias** (§32). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
 | **Incremento 3 (descubrimiento y confianza)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§49). Catálogo público, búsqueda, filtros, orden, perfil público del prestador, señales de confianza, guardados y sugerencias con su razón |
 | **Migración 0091** | **APLICADA** a mano en Supabase y verificada el 29/09/2026 en solo lectura: **sin divergencias** (§49). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita |
-| **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa. Los pagos de la plataforma siguen **apagados** |
+| **Incremento 4 (disponibilidad y agenda)** | **implementado y probado; pendiente de aplicar y verificar la migración 0092 y de realizar el QA físico** (§50). Agenda por servicio, semana, excepciones, bloqueos privados y horarios calculados por el servidor |
+| **Migración 0092** | **ESCRITA Y SIN APLICAR.** Probada solo contra PostgreSQL local (§58). Al aplicarla, reiniciar la API (§56) |
+| **Pagos, reservas** | **no existen**, y ninguna tabla los anticipa: la agenda enseña horarios posibles y no aparta ninguno. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
-| **QA físico** | pendiente de los tres incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
+| **QA físico** | pendiente de los cuatro incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
 
 ## 1. Lo que NO es
 
@@ -1632,7 +1636,9 @@ puertas, el cursor atado a su orden, la 0091 y el orden del historial.
 
 ## 48. Punto exacto para empezar el Incremento 4
 
-**No se empezó el Incremento 4.** Antes, una persona tiene que:
+**El Incremento 4 se implementó el 30/09/2026 (Parte IV, §50).** Lo que
+sigue es lo que se pedía antes de empezarlo; lo que falta de ello sigue en
+pie. Antes, una persona tenía que:
 
 1. ~~Aplicar la 0091 y verificarla~~ **Hecho el 29/09/2026** (§49, sin
    divergencias). Queda desplegar `Edson` cuando se apruebe: el despliegue
@@ -1797,3 +1803,405 @@ APLICAR» a propósito: cambiarla sería editar lo aplicado (§26).
   Servicios (D6).
 - El **push** de un aviso todavía no lleva al destino (§32).
 - **No se empezó el Incremento 4** (§48).
+
+# Parte IV · Incremento 4: disponibilidad y agenda del prestador
+
+Escrito el 30/09/2026 en la rama `Edson`. **Implementado y probado; pendiente
+de aplicar y verificar la migración 0092 y de realizar el QA físico.** No se
+usa la palabra «cerrado» hasta que la 0092 esté aplicada, verificada con el rol
+real de la API, registrada como aplicada y se repita el recorrido de cierre.
+
+## 50. Estado del Incremento 4
+
+| | |
+|---|---|
+| **Qué hace** | Un prestador activo configura, para cada servicio, cuándo lo ofrece: zona horaria, semana, excepciones de fecha, bloqueos, preparación, descanso e intervalo. Una persona consulta fechas y horarios reales, calculados por el servidor. Termina al enseñar un horario |
+| **Migración 0092** | **ESCRITA Y SIN APLICAR.** Probada solo contra PostgreSQL local (§55). Aplicarla es de una persona (§56) |
+| **Sin la 0092** | Las 14 rutas nuevas contestan **503 `services_not_ready`**, sin escribir nada; la ficha no enseña la sección de disponibilidad y el servicio propio no ofrece la agenda. Los Incrementos 1–3 siguen igual |
+| **`FEATURE_SERVICES`** | **apagada.** Con ella apagada, las 14 rutas contestan 503 `services_disabled` sin mirar la base |
+| **Reservas, retenciones, dinero** | **ninguno.** Ninguna tabla, ruta ni pantalla del incremento crea una reserva, una retención, un pedido o un cobro (§54) |
+| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
+| **QA físico** | **pendiente**: `Z_QA_FISICO_PENDIENTE.md`, «Incremento 4» |
+| **Incremento 5** | **no se empezó** |
+
+## 51. El modelo (5 tablas, 0092)
+
+**La agenda es del servicio.** `services` es la identidad estable (0090):
+editar la descripción abre una versión nueva y no toca ni una regla. Lo que sí
+vive en la versión —duración, modalidad y capacidad— se lee de la **publicada**
+cada vez que se calculan horarios (en la vista previa, de la que se prepara si
+aún no hay publicada). Así, publicar una versión con otra duración cambia los
+horarios sin reescribir la agenda, y nada de la agenda depende de qué versión
+se edite. Se descartó colgarla del prestador (una empresa ofrece servicios con
+duraciones y horarios distintos) y de la versión (cada edición la destruiría).
+
+| Tabla | Para qué |
+|---|---|
+| `service_schedules` | Una por servicio: zona IANA, `active`/`paused`, preparación y descanso (0–240 min, de 5 en 5) e intervalo entre inicios (opcional) |
+| `service_schedule_rules` | La semana: día ISO (1–7), franja en minutos del día LOCAL (de 5 en 5, hasta 1440 = 24:00), modalidad, capacidad y activa |
+| `service_schedule_exceptions` | Una FECHA local: `closed` (sin franja, el día entero; con franja, esa franja), `extra` (añade) o `replace` (sustituye la semana ese día). Solo lo que abre lleva modalidad y capacidad |
+| `service_schedule_blocks` | Un intervalo REAL (`timestamptz`) con motivo PRIVADO (1–200). Cambiar la zona no lo mueve |
+| `service_schedule_events` | El historial: 10 acciones, actor sin clave ajena (S10), detalles sin el motivo, `Idempotency-Key` única por servicio. Solo se añade |
+
+**Lo que impone la base**:
+- las CHECK de forma (zona «Área/Lugar» sin `Etc/`, franjas, rejilla,
+  capacidad, tipos, estados), con `is not null` escrito donde un nulo
+  dejaría pasar la regla;
+- **dos restricciones de exclusión**, que son la autoridad de los cruces:
+  - dos reglas **activas** del mismo servicio y día no se pisan (tocarse sí:
+    09–12 y 12–15);
+  - dos excepciones de la misma fecha no se pisan, y el día cerrado entero
+    ocupa las 24 horas.
+- un disparador que valida que la zona **existe** en la base de zonas;
+- el historial que no se reescribe (la función de la 0090);
+- el borrado de la agenda y su historial solo en cascada con el servicio (la
+  función de la 0086).
+
+**Por qué exclusiones y no una comprobación en el código.** Una restricción de
+exclusión vale con cualquier aislamiento y sin cerrojos: dos escrituras a la
+vez no pueden dejar dos franjas cruzadas. Necesita `btree_gist` (comparar el
+servicio y el día con `=` dentro del índice GiST), que Supabase ofrece y la
+0092 crea en `extensions`, como `pg_trgm` en la 0040. El código no vuelve a
+comprobar cruces: traduce el error de la base (`23P01`) a un 409. Además, cada
+escritura bloquea primero la fila del servicio, así que dos altas cruzadas
+llegan en fila y la segunda recibe el 409 limpio (sin cerrojo, PostgreSQL
+puede resolver la carrera con un interbloqueo en vez de una violación; la
+prueba de dos conexiones lo documenta).
+
+**Lo que no se guarda**: los horarios. Se calculan al pedirlos (§52). No hay
+reservas, retenciones ni «slots» materializados.
+
+## 52. El cálculo: una sola autoridad
+
+`agenda_calculo.py` es una función pura, sin base de datos, y la **única**
+que:
+
+- **convierte zonas**: `zoneinfo` con la base `tzdata`, fijada en
+  `requirements.txt` para que Windows y el contenedor calculen con la misma.
+  Nunca se suma un desplazamiento a mano;
+- **decide las franjas de una fecha**, con esta **precedencia**:
+  1. lo que **cierra** gana siempre: un bloqueo, una fecha cerrada entera o
+     una franja cerrada;
+  2. las **excepciones de esa fecha**: `replace` sustituye la semana ese día;
+     `extra` añade solo lo que el día no tenía;
+  3. la **regla semanal** de ese día;
+  4. la **configuración general**: duración, preparación, descanso,
+     intervalo, antelación y horizonte;
+- **genera los horarios**: cada uno ocupa preparación + duración + descanso, y
+  ese bloque ENTERO cabe en su franja y no toca un cierre ni un bloqueo. Sin
+  intervalo propio van uno detrás de otro (09:00–12:00, 60 min y 15 de
+  descanso: **09:00 y 10:15**, nunca 11:00 ni 11:30). Con intervalo, son
+  inicios alternativos. La rejilla sale del inicio de la franja y no se mueve
+  por un bloqueo;
+- **calcula la capacidad teórica**: la de la franja, nunca más que la de la
+  versión (individual: una). No se descuenta nada.
+
+**Zonas horarias.** La agenda guarda su zona IANA; la semana y las
+excepciones son horas locales; los bloqueos, instantes UTC. La API recibe
+fechas «AAAA-MM-DD» y horas «HH:MM» locales de la agenda, y devuelve cada
+horario con su instante UTC, su fecha y horas locales y su desplazamiento.
+- **Horario de verano**: una hora local que no existe (el reloj salta) se
+  lleva al primer instante que sí existe; una que se repite es la primera
+  vez. Los horarios se cuentan en tiempo real desde el inicio de la franja:
+  en la noche del salto, una franja de 00:00 a 04:00 da 00:00, 01:00 y 03:00;
+  en la del retroceso, cinco, con dos «01:00» y su desplazamiento. Perú no
+  tiene horario de verano; se prueba con Nueva York.
+- **Medianoche**: una franja termina como tarde a las 24:00 (el día
+  siguiente a las 00:00) y un horario pertenece al día en que empieza.
+- **Cambiar la zona** de una agenda con semana o excepciones exige
+  `confirm_timezone_change` (409 `service_schedule_timezone_unconfirmed` sin
+  él); los bloqueos conservan su instante.
+
+**Antelación y horizonte** (`agenda_politica.Politica`): 120 minutos y 60 días,
+los provisionales del documento de reglas (4.5 y 4.6), configurables por
+entorno. Son los únicos números de negocio; los demás límites son técnicos y
+viven en `agenda_politica.py` (y en las CHECK de la 0092, comparadas con ellos
+por una prueba).
+
+## 53. Quién puede qué, y lo público
+
+- **El dueño** del servicio, con prestador **activo** y servicio **no
+  retirado**, escribe. Un **borrador** puede preparar su agenda. Un prestador
+  suspendido la ve (`can_edit: false`) y no la cambia (403
+  `service_provider_not_active`); un servicio retirado, 409 `service_retired`.
+- **Lo ajeno es 404** (`service_not_found`), también para moderación y
+  administración: no hay panel de agendas ajenas (el blueprint lo pide para
+  las reservas, A04, que no existen).
+- **El servicio propio dice si puede preparar su agenda**
+  (`can_manage_schedule` en `ServicioPrivadoRead`, campo nuevo y opcional):
+  prestador activo, no retirado y la 0092 en la base. La app no enseña la
+  entrada sin él.
+- **Lo público** solo sale de un servicio que cumple `condiciones_publicas()`
+  (vía `descubrimiento.publico`, con los bloqueos entre personas), con agenda
+  **activa**, en la modalidad de la versión publicada, desde «ahora +
+  antelación» hasta el horizonte. Si deja de ser público, su disponibilidad
+  es el mismo 404. Nunca salen reglas, excepciones, bloqueos, motivos,
+  identificadores internos ni por qué no hay horarios (`issues` va vacío en lo
+  público; solo la vista previa del prestador lo trae).
+- **El motivo de un bloqueo** solo aparece en la agenda del propio prestador:
+  ni en lo público, ni en el historial (el registro lo impide), ni en la
+  auditoría, ni en un aviso, ni en un error.
+
+## 54. La API (14 rutas) y la puerta
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /services/provider/services/{id}/schedule` | La agenda entera, con lo que falta para que el público vea horarios (`issues`), el próximo horario y los límites |
+| `PUT …/schedule` | Crearla (201) o sustituir su configuración (200). Igual dos veces, un solo evento |
+| `POST …/schedule/rules` · `PATCH`/`DELETE …/rules/{r}` | La semana. Alta con `Idempotency-Key` |
+| `POST …/schedule/exceptions` · `PATCH`/`DELETE …/exceptions/{e}` | Las excepciones. Alta con `Idempotency-Key` |
+| `POST …/schedule/blocks` · `DELETE …/blocks/{b}` | Los bloqueos. Alta con `Idempotency-Key` |
+| `GET …/schedule/preview` · `GET …/preview/{fecha}` | Lo que vería una persona, aunque el servicio no sea público, con sus `issues` |
+| `GET /services/catalog/{id}/availability` | Fechas con horarios (de 31 días en 31, dentro del horizonte) y el próximo |
+| `GET /services/catalog/{id}/availability/{fecha}` | Los horarios de una fecha, paginados por cursor (48 por página, 96 como mucho) |
+
+Cada escritura devuelve la agenda entera recién leída. Códigos estables (y con
+texto en la app): `service_schedule_missing`, `…_timezone_invalid`,
+`…_timezone_unconfirmed`, `…_settings_invalid`, `…_time_invalid`,
+`…_exception_invalid`, `…_modality_invalid`, `…_capacity_invalid`,
+`…_overlap`, `…_date_invalid`, `…_block_invalid`, `…_limit_reached`,
+`…_item_not_found`, `…_block_in_use` (reservado para el Incremento 5: el
+guardia `_contrataciones_que_protege` devuelve cero porque no hay
+contrataciones), `service_availability_range_invalid`, `…_out_of_horizon` y
+`…_modality_invalid`.
+
+**Ninguna ruta crea una reserva.** Una prueba cuenta las filas de `bookings`,
+`orders`, `entitlements`, `event_orders`, las retenciones de eventos, los
+pedidos de productos, pagos, transferencias y devoluciones antes y después de
+todo el recorrido: no cambian.
+
+**La puerta de la 0092** (`esquema.hay_agenda`) mira por DEFINICIÓN, con
+identificadores y no con nombres escritos (no depende del `search_path`):
+- cada columna con su tipo y su NOT NULL, y ninguna de más;
+- las claves primarias y las cinco ajenas en cascada, validadas;
+- las dos exclusiones **tal cual**, y las 18 CHECK validadas;
+- los cinco índices por su definición (el de la clave, único y parcial),
+  válidos y listos;
+- los cuatro disparadores con su función y su forma;
+- la función de la zona sin SECURITY DEFINER, con su `search_path` y su
+  cuerpo (su huella se calcula sin retornos de carro, por si el editor de
+  Supabase los trae);
+- `btree_gist`, RLS sin políticas y ningún permiso efectivo para `anon` ni
+  `authenticated` (tampoco por PUBLIC) en tabla, columna o función.
+
+Sin la 0092 completa, 503 `services_not_ready`; un error al mirar cierra la
+puerta sin recordarlo. **Recuerda el «sí» y el «no» hasta reiniciar: tras
+aplicar la 0092 hay que reiniciar la API.**
+
+## 55. Vistas y navegación
+
+Mis servicios › un servicio › **Disponibilidad y agenda** (solo con
+`can_manage_schedule`) › ajustes, horario semanal, excepciones, bloqueos y
+vista previa. Servicios › ficha › **Disponibilidad** › «Ver horarios» ›
+selector de fecha y horarios. Todas con «Atrás» que respeta la pila y un
+respaldo a la pantalla de la que se vino. El detalle, en
+`Z_MATRIZ_DE_VISTAS.md`.
+
+- **La app no decide**: no calcula horarios ni convierte zonas; pinta la hora
+  local que manda el servidor, dice la zona de la agenda y avisa si el
+  teléfono está en otra. Los formularios avisan antes de lo evidente con los
+  límites que manda el servidor (`limits`).
+- **Estados vacíos**: agenda sin configurar, en pausa, sin horarios ese día o
+  en esas fechas, fuera de lo consultable y «no disponible ahora» (dejó de
+  ser público).
+- **Elegir un horario solo lo guarda en la ruta** (`fecha`, `inicio`, `hora`,
+  `modalidad`: el contrato `horarioElegidoDesdeRuta` para el Incremento 5).
+  No hay botón de reservar, confirmar ni pagar, y se dice que el horario no
+  queda apartado. Ningún texto dice «reservado», «confirmado» ni «último
+  cupo» (lo vigila una prueba).
+- Textos en es, en y pt con las mismas claves y los mismos huecos.
+
+## 56. Cómo aplicar la 0092
+
+1. Comprobar que la base tiene la 0086–0091 (la 0092 se niega sin ellas) y
+   que ofrece `btree_gist` (`select * from pg_available_extensions where
+   name = 'btree_gist'`; Supabase la ofrece).
+2. Pegar el fichero ENTERO en el editor SQL de Supabase y ejecutarlo: es una
+   sola transacción, comprueba lo anterior antes de crear nada y verifica lo
+   que dejó; si algo falla, no queda nada.
+3. **Reiniciar la API** (o desplegar `Edson`, que la reinicia): la puerta
+   recuerda el «no».
+4. Verificar (§57) en una sesión de solo lectura.
+5. Registrar su huella en `APLICADAS` (`test_servicios_migracion_0090.py`),
+   como la 0090 y la 0091, y repetir el recorrido de cierre.
+
+**Rollback**: el que dice la cabecera del fichero (borra la agenda de cada
+servicio; nada más depende de ella) y reiniciar la API.
+
+## 57. Verificar la 0092 (solo lectura)
+
+En una transacción `BEGIN READ ONLY`, tras comprobar que una escritura se
+rechaza, y terminando con `ROLLBACK`:
+
+```sql
+-- 1. La puerta, con el rol de la API: tiene que decir true.
+--    (la consulta de esquema.hay_agenda, _LO_QUE_NECESITA_LA_AGENDA)
+-- 2. Las cinco tablas, con RLS y sin políticas.
+select c.relname, c.relrowsecurity,
+       (select count(*) from pg_policy p where p.polrelid = c.oid) as politicas
+  from pg_class c
+ where c.oid in ('public.service_schedules'::regclass, 'public.service_schedule_rules'::regclass,
+                 'public.service_schedule_exceptions'::regclass, 'public.service_schedule_blocks'::regclass,
+                 'public.service_schedule_events'::regclass);
+-- 3. Las dos exclusiones, tal cual.
+select conrelid::regclass, conname, pg_get_constraintdef(oid)
+  from pg_constraint where contype = 'x' and conname like 'service_schedule_%';
+-- 4. Nadie de fuera con permisos (tiene que dar 0 filas).
+select table_name, grantee, privilege_type from information_schema.table_privileges
+ where table_schema = 'public' and table_name like 'service_schedule%'
+   and grantee in ('anon', 'authenticated', 'PUBLIC');
+-- 5. btree_gist y la función de la zona.
+select extname, extnamespace::regnamespace from pg_extension where extname = 'btree_gist';
+select proname, prosecdef, proconfig from pg_proc where proname = 'servicios_agenda_zona_valida';
+-- 6. Vacías recién aplicada.
+select (select count(*) from public.service_schedules) as agendas,
+       (select count(*) from public.service_schedule_events) as eventos;
+```
+
+Y comparar el esquema entero con una referencia local 0001–0092, como en §49.
+
+## 58. Pruebas, mutaciones y revisión (30/09/2026)
+
+### Pruebas nuevas
+
+| Fichero | Qué comprueba | Casos |
+|---|---|---|
+| `test_servicios_agenda_calculo.py` | Zonas válidas y no (`UTC-5`, `Etc/GMT+5`…); horas de 5 en 5 y 24:00; Lima UTC−5 todo el año; horario de verano de Nueva York (hora que no existe y que se repite; las dos noches del cambio); el ejemplo de 09–12 con 60 + 15 → 09:00 y 10:15; preparación; intervalo; 300 configuraciones al azar sin bloques fuera de su franja ni solapados; capacidad; modalidad; cada tipo de excepción y su precedencia; bloqueos (también contra la separación y cruzando la medianoche); antelación; horizonte; semanas que cruzan mes y año; el próximo horario; unir y buscar igual que uno por uno; el coste del peor caso; fechas extremas; las 24:00 de Santiago | **49** |
+| `test_servicios_migracion_0092.py` | Última y tras la 0091; una transacción que comprueba antes de crear; sin permisos, borrados ni otras tablas; `btree_gist` como única extensión; sin reservas ni dinero; sus límites son los de la política; cerrada (RLS, políticas, permisos también de columna y de función); **igual al ORM por definición** (el ORM creado en otro esquema); cruces en serie y **con dos conexiones a la vez**; datos imposibles (incluido el hueco del nulo); la zona; el historial; la cascada; sobre la 0091 con datos; reejecutarla; fallo a mitad; incompleta; sin la 0091 | **18** |
+| `test_servicios_agenda_api.py` | El recorrido del prestador en un borrador; la semana; las excepciones y su precedencia; el bloqueo privado; la clave repetida; el cambio de zona; lo público (campos, límites, 422 estables, cursor); pausa, sin agenda, suspendido, prestador suspendido, categoría, bloqueo entre personas; lo ajeno (otro prestador, sin prestador, administración, moderación) y sin sesión; prestador suspendido y servicio retirado; **carreras reales** (reglas, excepciones, misma clave ×4, crear y retirar a la vez, consultar mientras se edita); ninguna reserva ni dinero; la puerta (27 alteraciones y sus controles), un error al mirarla, sin la 0092, bandera apagada; los hallazgos de la revisión | **27** |
+| `serviciosAgenda.test.mts` | Valores y códigos iguales al servidor; el repositorio pide exactamente las 14 rutas; claves en tres idiomas con los mismos huecos; ningún texto de reserva, cupo ni pago; formularios con los límites del servidor; fechas sin zonas; la hora repetida del cambio; el horario elegido solo como valor de la ruta | **17** |
+| `serviciosAgendaVistas.test.mts` | Cada vista con ruta y alcanzable; el acceso solo con `can_manage_schedule`; «Atrás»; la ficha sin sección si falla; cargas, errores, cerrojo, claves; estados vacíos; nada de reservas ni zonas en el teléfono; el motivo solo en bloqueos; sin escrituras directas; accesibilidad; textos | **33** |
+
+También se actualizaron, sin cambiar lo que vigilan: el inventario de rutas
+(`test_servicios_admision_api.py`: 14 más), las tablas y claves de Servicios
+(`test_servicios_migracion_0086.py`), el orden de la 0091, la última migración
+(`test_migraciones_reales.py`) y las traducciones iguales a propósito.
+
+### Mutaciones
+
+**31 de 31 muertas**. Cada una se aplicó sola, con sus pruebas dirigidas en
+verde antes de mutar (ninguna muere por una prueba ya rota), y se restauró el
+original siempre. Las pruebas de la base corrieron contra un PostgreSQL 17
+desechable aparte.
+
+| # | Mutación | La mata |
+|---|---|---|
+| M01 | Permitir un cruce: la exclusión de las reglas nunca aplica (`where (active and false)`) | dos reglas activas no se cruzan |
+| M02 | Ignorar la separación (preparación y descanso) | el ejemplo de 09–12 con 15 min; 300 configuraciones |
+| M03 | Aceptar inicio igual al fin (en el dominio y en la base) | la semana sin franjas imposibles |
+| M04 | Ignorar una excepción (el día cerrado entero) | cerrar la fecha entera gana a todo |
+| M05 | Exponer el motivo privado de un bloqueo en el historial | el bloqueo es privado |
+| M06 | Aceptar una modalidad que el servicio no ofrece | la semana sin franjas imposibles |
+| M07 | Saltarse la zona horaria (leer las horas locales como UTC) | Lima UTC−5; «las nueve, antes y después del cambio» |
+| M08 | Generar un horario que termina fuera de la franja | 300 configuraciones; el ejemplo |
+| M09 | Ignorar la suspensión del servicio | en pausa, sin configurar o no público |
+| M10 | Permitir un rango público ilimitado | lo público respeta el horizonte |
+| M11 | Permitir una capacidad que el servicio no admite | la semana sin franjas imposibles |
+| M12 | Aceptar una escritura duplicada (la clave no se mira) | la misma clave; la misma clave ×4 a la vez |
+| M13 | Abrir la puerta con RLS apagada | la puerta de la agenda |
+| M14 | Abrir la puerta con un permiso indebido | la puerta de la agenda |
+| M15 | Crear una reserva (una fila de `bookings`) al consultar los horarios | nada crea una reserva ni mueve dinero |
+| M16 | Ignorar los bloqueos al generar | un bloqueo choca también con la separación |
+| M17 | «Sustituir» no sustituye la semana | sustituir la semana ese día |
+| M18 | Saltarse la antelación y el horizonte | la antelación; el horizonte |
+| M19 | Un prestador suspendido sigue escribiendo | el prestador suspendido ve pero no toca |
+| M20 | Un servicio retirado sigue escribiendo | ídem |
+| M21 | La consulta pública enseña por qué no hay horarios | lo público solo trae horarios |
+| M22 | La puerta no mira la definición de las exclusiones | la puerta de la agenda |
+| M23 | El móvil enseña la agenda sin preguntar al servidor | vistas: solo con `can_manage_schedule` |
+| M24 | El móvil reserva algo al elegir un horario | vistas: lo público solo lee |
+| M25 | El móvil calcula la hora en su propia zona | vistas: ninguna zona en el teléfono |
+| M26 | Volver a mirar todos los bloqueos uno por uno (coste) | el peor caso de una consulta pública |
+| M27 | Sumar al inicio del rango antes de acotarlo (desborda) | el rango no desborda; fechas extremas |
+| M28 | La clave repetida no mira el contenido | la misma clave con otro contenido es 409 |
+| M29 | La zona que la base rechaza vuelve a ser un 500 | una zona que la base no conoce es 422 |
+| M30 | En pausa se sigue anunciando el próximo horario | en pausa no hay próximo |
+| M31 | La puerta no mira la definición de los CHECK | la puerta mira la definición |
+
+**M21 sobrevivió en la primera pasada, y era EQUIVALENTE**: invertía
+`con_motivos` en la ruta pública, pero el dominio nunca rellena motivos en la
+consulta pública, así que el parámetro no decidía nada. Se quitó la condición
+redundante (`d5edbd2`) y la mutación pasó a atacar al dominio, donde muere.
+
+### Revisión independiente
+
+Una revisión de solo lectura, sobre los cuatro primeros commits, dio **12
+hallazgos: ninguno bloqueante ni alto**. Cada uno se reprodujo con una prueba
+que falla contra el código anterior (11 del backend y 4 del móvil, todas en
+rojo) y pasa con la corrección:
+
+| # | Severidad | Hallazgo | Estado |
+|---|---|---|---|
+| 1 | medio | `from=9999-12-31` desbordaba el calendario: 500 en una ruta pública | corregido: el inicio se acota antes de sumar |
+| 2 | medio | Elegir un horario volvía a cargar el selector (y perdía la página) | corregido: la fecha de la ruta solo al entrar |
+| 3 | medio | Una respuesta vieja de un día podía pintarse bajo otro y elegirse con su fecha | corregido: solo vale la última petición |
+| 4 | medio | 200 bloqueos × 288 inicios × 91 días: 0,24 s de CPU por consulta anónima | corregido: filtrar por día, unir y bisección (12 ms) |
+| 5 | bajo | Un bloqueo con fechas extremas desbordaba (500) | corregido: fechas acotadas antes de convertir |
+| 6 | bajo | Una zona que tzdata conoce y PostgreSQL no: 500 | corregido: 422 `service_schedule_timezone_invalid` |
+| 7 | bajo | En pausa se anunciaba un «próximo horario» | corregido |
+| 8 | bajo | La `Idempotency-Key` no iba atada al contenido | corregido: otro contenido es 409; la app renueva la clave al abrir el formulario. El motivo privado no se compara (no está en el historial) |
+| 9 | bajo | «24:00» se rechazaba la víspera de un cambio de hora a medianoche | corregido: una hora que no existe va al salto |
+| 10 | bajo | Un PATCH arrastraba valores (capacidad nula → 1; `closed` con la modalidad de antes) | corregido |
+| 11 | bajo | La puerta no miraba la definición de los CHECK ni los argumentos de los disparadores | corregido |
+| 12 | bajo | Cerrar una franja no reanuda la rejilla | **decisión de la empresa** (E12); se documenta, no se cambia |
+
+Además, al redactar los riesgos apareció el 6 por separado, y la batería
+completa encontró que la prueba de la última migración seguía en la 0091.
+
+### Validación final
+
+Sobre el código final (`d5edbd2`), el 30/09/2026:
+
+| Comprobación | Resultado |
+|---|---|
+| Backend completo **con** PostgreSQL 17 (0001–0092 desde cero) | **4079 pasan**, 0 fallan, 0 omitidas (14 min 31 s) |
+| Backend completo **sin** PostgreSQL | **3019 pasan**, 1060 omitidas (las que necesitan la base), 0 fallan (8 min 6 s) |
+| Servicios y migraciones con PostgreSQL (`-k "servicios or migraciones_reales"`, tras la revisión) | **501 pasan**, 0 fallan |
+| Móvil completo (131 baterías) | **3484 de 3484** |
+| `tsc --noEmit` | limpio |
+| Expo Doctor | 18/18 |
+| Exportación web | correcta; las 7 rutas nuevas están en el paquete |
+| Paridad de idiomas | es, en y pt con las mismas 159 claves de la agenda y los mismos huecos |
+| Rutas de la API | 513 (499 + 14), **ninguna duplicada** |
+| `git diff --check` | limpio |
+| Búsqueda de secretos en todo el cambio | limpia |
+| Escrituras directas desde el móvil | ninguna (`supabase`, `.from(`, `.rpc(`: 0) |
+| Mutaciones | **31 de 31** |
+| `FEATURE_SERVICES` | **apagada** (por defecto `False`) |
+| Código | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
+
+## 59. Riesgos
+
+- **La 0092 sin aplicar**: la agenda no existe en ninguna base gestionada.
+  Aplicarla exige `btree_gist` (la 0092 lo comprueba antes de crear nada) y
+  **reiniciar la API** después.
+- **Dos bases de zonas**: el cálculo usa `tzdata` (Python) y el disparador de
+  la base, la de PostgreSQL. Una zona tiene que existir en las dos. Si alguna
+  vez discrepan (una zona nueva en una y no en la otra), la API la rechaza con
+  un 422, nunca con un 500; y una agenda guardada con una zona que el cálculo
+  no conozca no enseña horarios.
+- **Las franjas no cruzan la medianoche**: una atención nocturna larga
+  necesita dos franjas y no genera un horario que las junte.
+- **Un intervalo menor que la duración** da horarios que se solapan; hasta el
+  Incremento 5 no hay reservas que los excluyan.
+- **Rendimiento**: cada consulta lee la agenda entera (acotada: 50 reglas,
+  200 excepciones y 200 bloqueos por venir) y calcula como mucho 31 días. El
+  próximo horario recorre hasta el horizonte. Con el volumen previsto es
+  inmediato; si creciera, el siguiente paso sería guardar el próximo horario,
+  no materializar la agenda.
+- **Sin auditoría general**: los cambios de agenda quedan en su historial, no
+  en `audit_events`.
+- **C15** (D6) sigue pendiente antes de encender Servicios, y el **push**
+  sigue sin llevar al destino (§32).
+
+## 60. Estado y punto exacto de continuación
+
+- **Incremento 4 de Z Servicios implementado y probado; pendiente de aplicar
+  y verificar la migración 0092 y de realizar el QA físico.**
+- `FEATURE_SERVICES` sigue **apagada**; **no hubo despliegue**.
+- **C15** pendiente antes de encender; el **push** sin destino; las
+  decisiones E1–E11 de la empresa (`Z_REQUISITOS_Y_DECISIONES.md`).
+- **No se empezó el Incremento 5.** Parte de: un servicio público, su agenda
+  activa, el horario elegido en la ruta (`horarioElegidoDesdeRuta`) y el
+  guardia de los bloqueos (`_contrataciones_que_protege`), que tendrá que
+  contar sus reservas.
