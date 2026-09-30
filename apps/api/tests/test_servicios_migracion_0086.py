@@ -407,13 +407,19 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
         "and table_name like 'service\\_%%'",
     )}
     # Las seis de la 0086 y la de los envíos congelados (0088).
-    # 0088: los envíos; 0090: el catálogo (`services` no casa con `service_%`).
+    # 0088: los envíos; 0090: el catálogo (`services` no casa con `service_%`);
+    # 0092: la agenda.
     assert tablas == set(MODELOS) | {
         "service_provider_application_submissions",
         "service_categories",
         "service_versions",
         "service_version_images",
         "service_events",
+        "service_schedules",
+        "service_schedule_rules",
+        "service_schedule_exceptions",
+        "service_schedule_blocks",
+        "service_schedule_events",
     }
     # Reejecutar la 0086 sobre una base que ya tiene la 0087 le devuelve su
     # función de saltos de ocho estados: por eso la 0087 dice que, si pasa,
@@ -498,6 +504,12 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         ("service_version_images", "service_versions", "c"),
         ("service_events", "services", "c"),
         ("service_events", "service_versions", "c"),
+        # 0092: la agenda cuelga del servicio y cae en cascada con él.
+        ("service_schedules", "services", "c"),
+        ("service_schedule_rules", "service_schedules", "c"),
+        ("service_schedule_exceptions", "service_schedules", "c"),
+        ("service_schedule_blocks", "service_schedules", "c"),
+        ("service_schedule_events", "services", "c"),
     }
     assert ajenas == esperadas
     # Quién actuó NO tiene clave ajena: un `set null` sería reescribir historia.

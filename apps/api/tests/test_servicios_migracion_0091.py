@@ -1,6 +1,6 @@
 """La migración 0091: los servicios guardados (Incremento 3).
 
-1. ESTÁTICA: es la última y sigue a la 0090, es una sola transacción que
+1. ESTÁTICA: sigue a la 0090 (y la sigue la 0092), es una sola transacción que
    comprueba lo anterior antes de crear nada, no concede permisos ni toca otra
    tabla, y no trae nada de dinero, reservas ni popularidad.
 2. CONTRA POSTGRESQL: cerrada (RLS, cero políticas, cero privilegios), igual
@@ -36,10 +36,11 @@ SQL = re.sub(r"--[^\n]*", "", TEXTO)
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0090() -> None:
+def test_sigue_a_la_0090_y_la_sigue_la_0092() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0090_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0090_")
+    assert nombres[posicion + 1].startswith("0092_")
 
 
 def test_es_una_unica_transaccion_que_comprueba_antes_de_crear() -> None:

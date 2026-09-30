@@ -230,6 +230,15 @@ class Settings(BaseSettings):
     services_catalog_max_duration_minutes: int = 1440
     services_catalog_max_images: int = 8
 
+    #: LA AGENDA DE SERVICIOS (Incremento 4). Los dos valores son los
+    #: PROVISIONALES del documento de reglas de la reserva (4.5 y 4.6), no una
+    #: decision tomada aqui: cuanta antelacion minima pide un horario y hasta
+    #: cuantos dias por delante se ofrece. Configurables y documentados
+    #: (`docs/Z_SERVICIOS_ARQUITECTURA.md`); los demas limites de la agenda son
+    #: tecnicos y viven en `services/agenda_politica.py`.
+    services_agenda_notice_minutes: int = 120
+    services_agenda_horizon_days: int = 60
+
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:
     #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay
