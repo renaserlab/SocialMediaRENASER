@@ -362,10 +362,30 @@ RUTAS_DEL_DESCUBRIMIENTO = {
     ("GET", "/services/saved"),
 }
 
+#: La agenda (Incremento 4): doce del prestador y dos públicas.
+_AGENDA = "/services/provider/services/{service_id}/schedule"
+RUTAS_DE_LA_AGENDA = {
+    ("GET", _AGENDA),
+    ("PUT", _AGENDA),
+    ("POST", f"{_AGENDA}/rules"),
+    ("PATCH", f"{_AGENDA}/rules/{{rule_id}}"),
+    ("DELETE", f"{_AGENDA}/rules/{{rule_id}}"),
+    ("POST", f"{_AGENDA}/exceptions"),
+    ("PATCH", f"{_AGENDA}/exceptions/{{exception_id}}"),
+    ("DELETE", f"{_AGENDA}/exceptions/{{exception_id}}"),
+    ("POST", f"{_AGENDA}/blocks"),
+    ("DELETE", f"{_AGENDA}/blocks/{{block_id}}"),
+    ("GET", f"{_AGENDA}/preview"),
+    ("GET", f"{_AGENDA}/preview/{{day}}"),
+    ("GET", "/services/catalog/{service_id}/availability"),
+    ("GET", "/services/catalog/{service_id}/availability/{day}"),
+}
 
-def test_estan_exactamente_las_rutas_del_incremento_1_del_catalogo_y_del_descubrimiento() -> None:
+
+def test_estan_exactamente_las_rutas_de_los_incrementos_1_a_4() -> None:
     rutas = {(m, p[len(API):]) for m, p in _rutas(create_app()) if "/services" in p}
-    assert rutas == RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO
+    assert len(RUTAS_DE_LA_AGENDA) == 14
+    assert rutas == RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO | RUTAS_DE_LA_AGENDA
 
 
 def test_ninguna_ruta_de_la_aplicacion_esta_duplicada() -> None:

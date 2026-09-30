@@ -41,6 +41,7 @@ from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
 from app.modules.products.router import admin_router as products_admin_router
 from app.modules.products.router import router as products_router
+from app.modules.services.agenda_router import router as services_schedule_router
 from app.modules.services.catalogo_router import admin_router as services_catalog_admin_router
 from app.modules.services.catalogo_router import router as services_catalog_router
 from app.modules.services.descubrimiento_router import router as services_discovery_router
@@ -221,6 +222,9 @@ def create_app() -> FastAPI:
     # categorías públicas, las sugerencias, `/services/providers/{id}` y los
     # guardados. No choca con nada de lo anterior.
     app.include_router(services_discovery_router, prefix=prefix)
+    # La agenda (Incremento 4): `/services/provider/services/{id}/schedule…`
+    # y `/services/catalog/{id}/availability…`. Tampoco choca.
+    app.include_router(services_schedule_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

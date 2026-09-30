@@ -15,7 +15,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.modules.services import catalogo, catalogo_estados as estados, catalogo_imagenes as imagenes
+from app.modules.services import catalogo, catalogo_estados as estados, catalogo_imagenes as imagenes, esquema
 from app.modules.services.catalogo_models import (
     Service,
     ServiceCategory,
@@ -41,7 +41,7 @@ from app.modules.services.catalogo_schemas import (
     VersionEnListaRead,
     VersionRead,
 )
-from app.modules.services.models import ServiceProvider
+from app.modules.services.models import PRESTADOR_ACTIVO, ServiceProvider
 from app.modules.services.service import CursorInvalido, _cursor_partido
 
 LIMITE_MAXIMO = 50
@@ -189,6 +189,11 @@ async def privada(db: AsyncSession, servicio: Service, prestador: ServiceProvide
         can_withdraw=abierta is not None and abierta.status in estados.RETIRABLES,
         can_open_draft=abierta is None and servicio.status != estados.SERVICIO_RETIRADO,
         publicly_visible=await _visible(db, servicio, vigente),
+        can_manage_schedule=(
+            prestador.status == PRESTADOR_ACTIVO
+            and servicio.status != estados.SERVICIO_RETIRADO
+            and await esquema.hay_agenda(db)
+        ),
     )
 
 

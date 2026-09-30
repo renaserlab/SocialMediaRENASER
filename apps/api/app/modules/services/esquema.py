@@ -367,17 +367,260 @@ async def exigir_guardados(db: AsyncSession) -> None:
         raise ServiciosSinMigracion()
 
 
+# --------------------------------------------------------------------------- #
+# La agenda (Incremento 4, migración 0092)
+# --------------------------------------------------------------------------- #
+TABLAS_DE_LA_AGENDA = (
+    "service_schedules",
+    "service_schedule_rules",
+    "service_schedule_exceptions",
+    "service_schedule_blocks",
+    "service_schedule_events",
+)
+
+#: LO QUE LA 0092 IMPONE Y EL CÓDIGO DA POR HECHO, por DEFINICIÓN:
+#:
+#:  * cada columna con su tipo y su NOT NULL, y NINGUNA MÁS (una columna
+#:    obligatoria de sobra haría que cada alta fuera un 500);
+#:  * las claves primarias y las cinco ajenas en cascada, validadas;
+#:  * las RESTRICCIONES DE EXCLUSIÓN escritas tal cual: SON la autoridad de los
+#:    cruces, y el código no vuelve a comprobarlos. Sin ellas, dos franjas
+#:    cruzadas se guardarían en silencio. Y los catorce CHECK, validados;
+#:  * los índices con su definición (el único de la `Idempotency-Key`,
+#:    parcial), válidos y listos;
+#:  * los cuatro disparadores activos, con su función y su forma, y la función
+#:    de la zona sin SECURITY DEFINER, con su `search_path` y su cuerpo;
+#:  * `btree_gist`, RLS sin políticas, y nadie de fuera con permisos: ni `anon`
+#:    ni `authenticated` (tampoco por PUBLIC), en una tabla, en una columna ni
+#:    en la función.
+#:
+#: No el número de la migración.
+_LO_QUE_NECESITA_LA_AGENDA = text(
+    r"""
+    with
+    tablas(t) as (
+      select to_regclass('public.' || n)
+        from (values ('service_schedules'), ('service_schedule_rules'), ('service_schedule_exceptions'),
+                     ('service_schedule_blocks'), ('service_schedule_events')) v(n)
+    ),
+    columnas(tabla, columna, tipo, obligatoria) as (values
+      ('service_schedules', 'service_id', 'uuid', true),
+      ('service_schedules', 'timezone', 'text', true),
+      ('service_schedules', 'status', 'text', true),
+      ('service_schedules', 'buffer_before_minutes', 'integer', true),
+      ('service_schedules', 'buffer_after_minutes', 'integer', true),
+      ('service_schedules', 'slot_interval_minutes', 'integer', false),
+      ('service_schedules', 'created_by', 'uuid', false),
+      ('service_schedules', 'created_at', 'timestamp with time zone', true),
+      ('service_schedules', 'updated_at', 'timestamp with time zone', true),
+      ('service_schedule_rules', 'id', 'uuid', true),
+      ('service_schedule_rules', 'service_id', 'uuid', true),
+      ('service_schedule_rules', 'weekday', 'smallint', true),
+      ('service_schedule_rules', 'start_minute', 'integer', true),
+      ('service_schedule_rules', 'end_minute', 'integer', true),
+      ('service_schedule_rules', 'modality', 'text', true),
+      ('service_schedule_rules', 'capacity', 'integer', true),
+      ('service_schedule_rules', 'active', 'boolean', true),
+      ('service_schedule_rules', 'created_at', 'timestamp with time zone', true),
+      ('service_schedule_rules', 'updated_at', 'timestamp with time zone', true),
+      ('service_schedule_exceptions', 'id', 'uuid', true),
+      ('service_schedule_exceptions', 'service_id', 'uuid', true),
+      ('service_schedule_exceptions', 'on_date', 'date', true),
+      ('service_schedule_exceptions', 'kind', 'text', true),
+      ('service_schedule_exceptions', 'start_minute', 'integer', false),
+      ('service_schedule_exceptions', 'end_minute', 'integer', false),
+      ('service_schedule_exceptions', 'modality', 'text', false),
+      ('service_schedule_exceptions', 'capacity', 'integer', false),
+      ('service_schedule_exceptions', 'created_at', 'timestamp with time zone', true),
+      ('service_schedule_exceptions', 'updated_at', 'timestamp with time zone', true),
+      ('service_schedule_blocks', 'id', 'uuid', true),
+      ('service_schedule_blocks', 'service_id', 'uuid', true),
+      ('service_schedule_blocks', 'starts_at', 'timestamp with time zone', true),
+      ('service_schedule_blocks', 'ends_at', 'timestamp with time zone', true),
+      ('service_schedule_blocks', 'reason', 'text', false),
+      ('service_schedule_blocks', 'created_at', 'timestamp with time zone', true),
+      ('service_schedule_events', 'id', 'uuid', true),
+      ('service_schedule_events', 'service_id', 'uuid', true),
+      ('service_schedule_events', 'action', 'text', true),
+      ('service_schedule_events', 'actor_id', 'uuid', false),
+      ('service_schedule_events', 'actor_role', 'text', true),
+      ('service_schedule_events', 'details', 'jsonb', true),
+      ('service_schedule_events', 'idempotency_key', 'text', false),
+      ('service_schedule_events', 'created_at', 'timestamp with time zone', true)
+    ),
+    primarias(tabla, columna) as (values
+      ('service_schedules', 'service_id'), ('service_schedule_rules', 'id'),
+      ('service_schedule_exceptions', 'id'), ('service_schedule_blocks', 'id'),
+      ('service_schedule_events', 'id')
+    ),
+    claves(tabla, columna, madre, columna_madre) as (values
+      ('service_schedules', 'service_id', 'services', 'id'),
+      ('service_schedule_rules', 'service_id', 'service_schedules', 'service_id'),
+      ('service_schedule_exceptions', 'service_id', 'service_schedules', 'service_id'),
+      ('service_schedule_blocks', 'service_id', 'service_schedules', 'service_id'),
+      ('service_schedule_events', 'service_id', 'services', 'id')
+    ),
+    exclusiones(tabla, nombre, definicion) as (values
+      ('service_schedule_rules', 'service_schedule_rules_sin_cruces',
+       'EXCLUDE USING gist (service_id WITH =, weekday WITH =, '
+       'int4range(start_minute, end_minute) WITH &&) WHERE (active)'),
+      ('service_schedule_exceptions', 'service_schedule_exceptions_sin_cruces',
+       'EXCLUDE USING gist (service_id WITH =, on_date WITH =, '
+       'int4range(COALESCE(start_minute, 0), COALESCE(end_minute, 1440)) WITH &&)')
+    ),
+    disparadores(tabla, nombre, funcion, tipo) as (values
+      ('service_schedules', 'service_schedules_zona_valida', 'servicios_agenda_zona_valida()', 23),
+      ('service_schedules', 'service_schedules_solo_en_cascada', 'servicios_borrado_solo_en_cascada()', 11),
+      ('service_schedule_events', 'service_schedule_events_inmutables',
+       'servicios_catalogo_historial_inmutable()', 19),
+      ('service_schedule_events', 'service_schedule_events_solo_en_cascada',
+       'servicios_borrado_solo_en_cascada()', 11)
+    )
+    select
+      -- Cada columna con su tipo y su NOT NULL, y ni una más.
+      (select count(*) from columnas e
+         join pg_catalog.pg_attribute a
+           on a.attrelid = to_regclass('public.' || e.tabla) and a.attname = e.columna
+          and a.attnum > 0 and not a.attisdropped
+        where pg_catalog.format_type(a.atttypid, a.atttypmod) = e.tipo and a.attnotnull = e.obligatoria
+      ) = 43
+      and (select count(*) from pg_catalog.pg_attribute a
+            where a.attrelid in (select t from tablas) and a.attnum > 0 and not a.attisdropped) = 43
+      and (select count(*) from primarias e
+             join pg_catalog.pg_index i on i.indrelid = to_regclass('public.' || e.tabla)
+             join pg_catalog.pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+            where i.indisprimary and i.indisvalid and i.indnatts = 1 and a.attname = e.columna) = 5
+      and (select count(*) from claves e
+             join pg_catalog.pg_constraint c
+               on c.conrelid = to_regclass('public.' || e.tabla)
+              and c.confrelid = to_regclass('public.' || e.madre)
+             join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+             join pg_catalog.pg_attribute m on m.attrelid = c.confrelid and m.attnum = c.confkey[1]
+            where c.contype = 'f' and c.confdeltype = 'c' and c.convalidated
+              and cardinality(c.conkey) = 1 and a.attname = e.columna and m.attname = e.columna_madre) = 5
+      -- LAS EXCLUSIONES, TAL CUAL: son la autoridad de los cruces.
+      and (select count(*) from exclusiones e
+             join pg_catalog.pg_constraint c
+               on c.conrelid = to_regclass('public.' || e.tabla) and c.conname = e.nombre
+            where c.contype = 'x' and c.convalidated
+              and pg_catalog.pg_get_constraintdef(c.oid) = e.definicion) = 2
+      and (select count(*) from pg_catalog.pg_constraint c
+            where c.contype = 'c' and c.convalidated and c.conrelid in (select t from tablas)
+              and c.conname in (
+                'service_schedules_zona', 'service_schedules_estado', 'service_schedules_preparacion',
+                'service_schedules_descanso', 'service_schedules_intervalo',
+                'service_schedule_rules_dia', 'service_schedule_rules_franja',
+                'service_schedule_rules_modalidad', 'service_schedule_rules_capacidad',
+                'service_schedule_exceptions_tipo', 'service_schedule_exceptions_franja',
+                'service_schedule_exceptions_abrir_con_franja', 'service_schedule_exceptions_lo_que_abre',
+                'service_schedule_blocks_orden', 'service_schedule_blocks_motivo',
+                'service_schedule_events_accion', 'service_schedule_events_rol',
+                'service_schedule_events_clave'
+              )) = 18
+      -- `pg_get_indexdef` siempre nombra la tabla con su esquema.
+      and (select count(*) from pg_catalog.pg_index i
+            where i.indrelid in (select t from tablas)
+              and i.indisvalid and i.indisready and i.indislive
+              and pg_catalog.pg_get_indexdef(i.indexrelid) in (
+                'CREATE INDEX service_schedule_rules_de_la_agenda ON public.service_schedule_rules '
+                'USING btree (service_id, weekday, start_minute)',
+                'CREATE INDEX service_schedule_exceptions_de_la_agenda ON public.service_schedule_exceptions '
+                'USING btree (service_id, on_date)',
+                'CREATE INDEX service_schedule_blocks_de_la_agenda ON public.service_schedule_blocks '
+                'USING btree (service_id, ends_at)',
+                'CREATE UNIQUE INDEX service_schedule_events_una_por_clave ON public.service_schedule_events '
+                'USING btree (service_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)',
+                'CREATE INDEX service_schedule_events_del_servicio ON public.service_schedule_events '
+                'USING btree (service_id, created_at DESC, id DESC)'
+              )) = 5
+      and (select count(*) from disparadores e
+             join pg_catalog.pg_trigger g
+               on g.tgrelid = to_regclass('public.' || e.tabla) and g.tgname = e.nombre
+            where not g.tgisinternal and g.tgenabled in ('O', 'A')
+              and g.tgfoid = to_regprocedure('public.' || e.funcion) and g.tgtype = e.tipo) = 4
+      and exists (
+        select 1 from pg_catalog.pg_proc p
+         where p.oid = to_regprocedure('public.servicios_agenda_zona_valida()')
+           and not p.prosecdef
+           and p.proconfig = array['search_path=public, pg_temp']
+           -- Sin retornos de carro: el editor de Supabase puede traerlos.
+           and md5(replace(p.prosrc, E'\r', '')) = 'e672312f003eab63d98616d3d2673c06'
+      )
+      and exists (select 1 from pg_catalog.pg_extension x where x.extname = 'btree_gist')
+      and (select count(*) from pg_catalog.pg_class c
+            where c.oid in (select t from tablas) and c.relrowsecurity) = 5
+      and not exists (select 1 from pg_catalog.pg_policy p where p.polrelid in (select t from tablas))
+      -- Permisos EFECTIVOS: cubren también lo concedido a PUBLIC.
+      and not exists (
+        select 1 from pg_catalog.pg_roles r, tablas
+         where r.rolname in ('anon', 'authenticated')
+           and (pg_catalog.has_table_privilege(
+                  r.oid, tablas.t, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                or pg_catalog.has_any_column_privilege(r.oid, tablas.t, 'SELECT, INSERT, UPDATE, REFERENCES'))
+      )
+      and not exists (
+        select 1 from pg_catalog.pg_roles r
+         where r.rolname in ('anon', 'authenticated')
+           and pg_catalog.has_function_privilege(
+                 r.oid, to_regprocedure('public.servicios_agenda_zona_valida()'), 'EXECUTE')
+      )
+    """
+)
+
+
+def _columnas_de_la_agenda(sync) -> bool:  # noqa: ANN001
+    from app.modules.services import agenda_models
+
+    tablas = agenda_models.Base.metadata.tables
+    inspector = inspect(sync)
+    for tabla in TABLAS_DE_LA_AGENDA:
+        if not inspector.has_table(tabla):
+            return False
+        hay = {c["name"] for c in inspector.get_columns(tabla)}
+        if not {c.name for c in tablas[tabla].columns} <= hay:
+            return False
+    return True
+
+
+async def hay_agenda(db: AsyncSession) -> bool:
+    """¿Tiene la base la 0092 COMPLETA? Ante la duda, no. Como el resto: el
+    «sí» y el «no» se recuerdan hasta reiniciar; un error al mirar, no."""
+    if "agenda" not in _cache:
+        try:
+            conexion = await db.connection()
+            completa = await conexion.run_sync(_columnas_de_la_agenda)
+            if completa and conexion.dialect.name == "postgresql":
+                completa = bool(await db.scalar(_LO_QUE_NECESITA_LA_AGENDA))
+        except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
+            logger.warning("Servicios: no se pudo comprobar la 0092; la agenda contesta 503.", exc_info=True)
+            return False
+        _cache["agenda"] = completa
+        if not completa:
+            logger.warning("Servicios: falta la 0092 completa. La agenda contesta 503.")
+    return _cache["agenda"]
+
+
+async def exigir_agenda(db: AsyncSession) -> None:
+    """El catálogo y, además, la 0092."""
+    await exigir_catalogo(db)
+    if not await hay_agenda(db):
+        raise ServiciosSinMigracion()
+
+
 __all__ = [
     "COLUMNAS_DE_LA_0088",
     "ServiciosApagados",
     "ServiciosSinMigracion",
     "TABLAS_DEL_CATALOGO",
     "TABLAS_DE_ADMISION",
+    "TABLAS_DE_LA_AGENDA",
     "encendido",
+    "exigir_agenda",
     "exigir_catalogo",
     "exigir_guardados",
     "exigir_servicios",
     "hay_admision",
+    "hay_agenda",
     "hay_catalogo",
     "hay_guardados",
     "olvidar",

@@ -416,6 +416,9 @@ class ServicioPrivadoRead(BaseModel):
     can_open_draft: bool
     #: Si ahora mismo lo ve el público.
     publicly_visible: bool
+    #: Si puede preparar su agenda (Incremento 4): prestador activo, servicio
+    #: no retirado y la 0092 en la base. Lo decide el servidor.
+    can_manage_schedule: bool = False
 
 
 class ServicioResumenRead(BaseModel):
