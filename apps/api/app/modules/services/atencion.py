@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.exceptions import ConflictError, ValidationAppError
 from app.modules.services import avisos, descubrimiento
@@ -925,11 +926,22 @@ async def _reserva_libre(db: AsyncSession, reserva_id: str) -> ServiceBooking | 
     return await db.scalar(consulta)
 
 
+async def _ya_recordada(db: AsyncSession, reserva_id: str) -> bool:
+    """¿Se recordó ya ESTE horario? El recordatorio es de un horario: uno
+    anterior al último cambio de horario era del viejo, y el nuevo se recuerda
+    cuando toca."""
+    recordatorios = await _sucesos(db, reserva_id, RESERVA_RECORDADA)
+    if not recordatorios:
+        return False
+    cambios = await _sucesos(db, reserva_id, RESERVA_REPROGRAMADA)
+    return not cambios or _utc(recordatorios[-1].created_at) > _utc(cambios[-1].created_at)
+
+
 async def _recordar(db: AsyncSession, reserva_id: str, *, ahora: datetime, hasta: datetime) -> bool:
     reserva = await _reserva_libre(db, reserva_id)
     if reserva is None or reserva.status != RESERVA_CONFIRMADA:
         return False
-    if not (ahora < _utc(reserva.starts_at) <= hasta) or await _sucesos(db, reserva.id, RESERVA_RECORDADA):
+    if not (ahora < _utc(reserva.starts_at) <= hasta) or await _ya_recordada(db, reserva.id):
         return False
     evento = await reserva_dominio._anotar(
         db, servicio_id=reserva.service_id, accion=RESERVA_RECORDADA, desde=RESERVA_CONFIRMADA,
@@ -965,7 +977,8 @@ async def _cerrar_sola(db: AsyncSession, reserva_id: str, *, ahora: datetime, li
 async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime | None = None) -> Tareas:
     """LOS BARRIDOS, por lotes e idempotentes (repetirlos no hace nada):
 
-      * RECORDAR las reservas que empiezan pronto, una vez cada una;
+      * RECORDAR las reservas que empiezan pronto, una vez por horario (si
+        después cambia de horario, el nuevo se recuerda cuando toca);
       * CERRAR las atenciones terminadas cuyo plazo de confirmación pasó, solo
         con la señal fuerte y sin un caso vivo. Sin la señal fuerte NO se
         cierran: se cuentan, y esperan a quien contrata o a un caso.
@@ -982,7 +995,16 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
     hecho = Tareas()
 
     hasta = ahora + timedelta(hours=politica.recordatorio_horas)
-    ya = select(ServiceBookingEvent.booking_id).where(ServiceBookingEvent.action == RESERVA_RECORDADA)
+    # Ya recordadas: con un recordatorio POSTERIOR a su último cambio de horario
+    # (el de antes de reprogramar era del horario viejo).
+    cambio = aliased(ServiceBookingEvent)
+    ya = select(ServiceBookingEvent.booking_id).where(
+        ServiceBookingEvent.action == RESERVA_RECORDADA,
+        ~select(cambio.id).where(
+            cambio.booking_id == ServiceBookingEvent.booking_id, cambio.action == RESERVA_REPROGRAMADA,
+            cambio.created_at >= ServiceBookingEvent.created_at,
+        ).exists(),
+    )
     por_recordar = list(
         await db.scalars(
             select(ServiceBooking.id)

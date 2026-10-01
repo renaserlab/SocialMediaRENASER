@@ -1910,3 +1910,65 @@ async def test_la_evidencia_de_otro_caso_no_se_abre_por_la_reserva_propia(atenci
     assert r.status_code == 404, r.text
     r = await _pedir(app, "GET", f"{CASOS}/{ajeno['caso']}/entries/{evidencia}/file", mio["jefa"])
     assert r.status_code == 200, r.text
+
+
+async def test_una_reserva_recordada_y_despues_reprogramada_se_vuelve_a_recordar(atencion, monkeypatch) -> None:
+    """El recordatorio es de UN HORARIO. Si después la reserva cambia de
+    horario, el que se envió era del viejo: el nuevo se recuerda cuando toca, y
+    una sola vez."""
+    app, motor, _ = atencion
+    # Con la antelación de fábrica (24 h, igual que la ventana del recordatorio) lo ya
+    # recordado no se reprograma; con una antelación menor, sí.
+    monkeypatch.setattr(get_settings(), "services_booking_reschedule_min_hours", 1)
+    h = await _reservado(app, motor)
+    reserva, jefa = h["reserva"]["id"], h["jefa"]
+    await _pedir(app, "POST", TAREAS, jefa)  # lo que dejaron otras pruebas
+    await _llevar(motor, reserva, minutos=10 * 60)
+    assert (await _pedir(app, "POST", TAREAS, jefa)).json()["reminded"] == 1
+    nueva, _ = await _otro_horario(app, h)
+    r = await _hacer(app, "client", h, "reschedule", {"hold_id": nueva})
+    assert r.status_code == 200, r.text
+    # El horario nuevo queda lejos: todavía no toca.
+    assert (await _pedir(app, "POST", TAREAS, jefa)).json()["reminded"] == 0
+    # Cuando se acerca, se recuerda OTRA VEZ; y repetir el barrido no recuerda una tercera.
+    await _llevar(motor, reserva, minutos=10 * 60)
+    assert (await _pedir(app, "POST", TAREAS, jefa)).json()["reminded"] == 1
+    assert (await _pedir(app, "POST", TAREAS, jefa)).json()["reminded"] == 0
+    assert (await _sucesos(motor, reserva)).count("booking_reminded") == 2
+    recordatorios = [a[1] for a in await _avisos(motor, reserva) if "reminder" in a[1]]
+    assert sorted(set(recordatorios)) == ["service_booking_reminder_client", "service_booking_reminder_provider"]
+
+
+async def test_una_fila_que_falla_no_tumba_el_barrido_y_se_reintenta(atencion, monkeypatch) -> None:
+    """El barrido confirma fila a fila: si una falla, se deshace ELLA SOLA, las
+    demás se cierran, la respuesta lo cuenta y la siguiente pasada la reintenta."""
+    from app.modules.services import atencion as dominio
+
+    app, motor, _ = atencion
+    primera = await _atendida(app, motor, hasta="completed")
+    jefa = primera["jefa"]
+    segunda = await _atendida(app, motor, hasta="completed", jefa=jefa, moderador=primera["moderador"])
+    await _pedir(app, "POST", TAREAS, jefa)
+    await _retrasar(motor, "service_attendances", "completed_at", "booking_id", primera["reserva"]["id"], horas=40)
+    await _retrasar(motor, "service_attendances", "completed_at", "booking_id", segunda["reserva"]["id"], horas=30)
+    original = dominio._cerrar_sola
+
+    async def con_una_rota(db, reserva_id, **kw):
+        hecho = await original(db, reserva_id, **kw)
+        if reserva_id == primera["reserva"]["id"]:
+            raise RuntimeError("fallo a mitad, con la atención ya cerrada en esta transacción")
+        return hecho
+
+    monkeypatch.setattr(dominio, "_cerrar_sola", con_una_rota)
+    r = await _pedir(app, "POST", TAREAS, jefa)
+    assert r.status_code == 200 and (r.json()["closed"], r.json()["skipped"]) == (1, 1), r.text
+    # La que falló NO quedó a medias (ni cerrada, ni con su aviso); la otra, cerrada.
+    assert (await _ver(app, "client", primera))["care"]["attendance"]["status"] == "completed"
+    assert "attendance_closed" not in await _sucesos(motor, primera["reserva"]["id"])
+    assert "service_review_available_client" not in [a[1] for a in await _avisos(motor, primera["reserva"]["id"])]
+    assert (await _ver(app, "client", segunda))["care"]["attendance"]["status"] == "closed"
+    # La siguiente pasada la reintenta, y la cierra una vez.
+    monkeypatch.setattr(dominio, "_cerrar_sola", original)
+    r = await _pedir(app, "POST", TAREAS, jefa)
+    assert (r.json()["closed"], r.json()["skipped"]) == (1, 0), r.text
+    assert (await _sucesos(motor, primera["reserva"]["id"])).count("attendance_closed") == 1
