@@ -4,7 +4,7 @@
    comprueba lo anterior antes de cambiar nada; ADITIVA (tres columnas, cuatro
    CHECK, una función y un disparador, todo en `service_bookings`); no
    concede, no borra, no trae dinero; sus claves, sus cotas y su versión son
-   las de `reserva_politica`; y todavía NO consta como aplicada.
+   las de `reserva_politica`; y CONSTA COMO APLICADA: ya no se edita.
 2. CONTRA POSTGRESQL: cerrada; una reserva nueva nace con su fotografía o no
    nace; LA HUELLA QUE CALCULA LA API ES LA QUE EXIGE LA BASE; una fotografía
    corrupta, sin huella o de otra versión no entra; NO SE EDITA, NO SE VACÍA Y
@@ -81,10 +81,16 @@ def test_es_la_ultima_y_sigue_a_la_0094() -> None:
     assert nombres[-2].startswith("0094_")
 
 
-def test_todavia_no_consta_como_aplicada() -> None:
-    """Se registra en `APLICADAS` cuando se aplique en Supabase y se verifique,
-    no antes: hasta entonces se puede corregir."""
-    assert ARCHIVO.name not in APLICADAS
+def test_consta_como_aplicada_y_ya_no_se_edita() -> None:
+    """APLICADA en Supabase y verificada en solo lectura el 01/10/2026 (18:05
+    UTC), sin divergencias: su huella consta en `APLICADAS` y el fichero es
+    ese, byte a byte. Su cabecera sigue diciendo «SIN APLICAR», como las
+    anteriores: cambiarla sería editar lo aplicado."""
+    import hashlib
+
+    assert APLICADAS[ARCHIVO.name] == "9e46e8bfdc5e2e55034bad6a76bbcdb4cbc2dd1b"
+    contenido = ARCHIVO.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha1(f"blob {len(contenido)}\0".encode() + contenido).hexdigest() == APLICADAS[ARCHIVO.name]
     assert "-- SIN APLICAR." in TEXTO
 
 

@@ -71,6 +71,15 @@ APLICADAS = {
     # corrige ahí porque cambiarla sería editar lo aplicado. En producción una
     # migración aplicada no se deshace: se corrige hacia delante, con otra.
     "0094_servicios_atencion_y_cierre.sql": "1ed10ac846a363a99f458c0055239c75f8661dfc",
+    # Ejecutada a mano en Supabase (PostgreSQL 17.6) y verificada en solo
+    # lectura, sin divergencias, el 01/10/2026 a las 18:05 UTC (13:05 en
+    # Lima; Z_SERVICIOS_ARQUITECTURA.md §118): desde entonces tampoco se
+    # edita. Es la versión FINAL: una sola transacción dejó sus tres
+    # columnas, sus cuatro CHECK, su función y su disparador, y ninguna fila.
+    # Su cabecera dice «SIN APLICAR» a propósito, como las anteriores:
+    # cambiarla sería editar lo aplicado. No se deshace: se corrige hacia
+    # delante, con otra.
+    "0095_servicios_politica_operativa_congelada.sql": "9e46e8bfdc5e2e55034bad6a76bbcdb4cbc2dd1b",
 }
 
 

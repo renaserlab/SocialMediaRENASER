@@ -1297,7 +1297,8 @@ SIN_LA_0095 = (
 
 
 async def test_sobre_una_base_sin_la_0095_la_reserva_y_la_atencion_esperan(atencion, monkeypatch) -> None:
-    """LA SITUACIÓN DE PRODUCCIÓN HOY: la 0086–0094 aplicadas y la 0095 no.
+    """UNA BASE CON LA 0086–0094 Y SIN LA 0095 (así estuvo Supabase hasta que
+    se aplicó, el 01/10/2026).
     Los modelos ya leen la fotografía de la política: sin sus columnas, TODO
     lo de la reserva y lo de la atención contesta 503 `services_not_ready`,
     nunca 500, y no se escribe nada. El catálogo sigue. LOS HORARIOS PÚBLICOS
