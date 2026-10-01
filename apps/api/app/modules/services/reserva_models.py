@@ -32,6 +32,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     CHAR,
+    JSON,
     BigInteger,
     CheckConstraint,
     Date,
@@ -45,6 +46,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.modules.events.models import _uuid
@@ -146,6 +148,42 @@ def _horario() -> str:
 def _texto(columna: str, maximo: int, *, nulo: bool = False) -> str:
     base = f"length(trim({columna})) between 1 and {maximo}"
     return f"{columna} is null or {base}" if nulo else base
+
+
+#: La fotografía de la política: JSONB en PostgreSQL, JSON en SQLite, y `None`
+#: es NULL (no el `null` de JSON): así se reconoce una reserva sin ella.
+_fotografia = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
+
+
+def _politica_forma() -> str:
+    """Un objeto con las claves de `CAMPOS_CONGELADOS` y ninguna más, cada una
+    un entero dentro de sus cotas. Lo desconocido no pasa (`coalesce`)."""
+    claves = ", ".join(f"'{c}'" for c in limites.CAMPOS_CONGELADOS)
+    campos = "".join(
+        f" and jsonb_typeof(operating_policy -> '{c}') = 'number'"
+        f" and (operating_policy ->> '{c}') ~ '^[0-9]+$'"
+        f" and (operating_policy -> '{c}') between '{minimo}'::jsonb and '{maximo}'::jsonb"
+        for c, (_, (minimo, maximo)) in limites.CAMPOS_CONGELADOS.items()
+    )
+    return (
+        "operating_policy is null or coalesce(jsonb_typeof(operating_policy) = 'object'"
+        f" and operating_policy - array[{claves}] = '{{}}'::jsonb{campos}, false)"
+    )
+
+
+def _politica_huella() -> str:
+    """La huella es LA de la fotografía: el SHA-256 de su forma canónica, la
+    misma que calcula `reserva_politica.huella_de_la_fotografia`."""
+    claves = sorted(limites.CAMPOS_CONGELADOS)
+    canonica = "'{\"schema_version\":' || operating_policy_version::text || ',\"values\":{\"" + claves[0] + "\":'"
+    canonica += f" || (operating_policy ->> '{claves[0]}')"
+    for c in claves[1:]:
+        canonica += f" || ',\"{c}\":' || (operating_policy ->> '{c}')"
+    canonica += " || '}}'"
+    return (
+        "operating_policy_sha256 is null or coalesce("
+        f"operating_policy_sha256 = encode(sha256(convert_to({canonica}, 'UTF8')), 'hex'), false)"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -316,6 +354,14 @@ class ServiceBooking(Base):
     location_area_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    #: LA POLÍTICA OPERATIVA CONGELADA (0095): los plazos y topes vigentes al
+    #: confirmar, la versión de su estructura y su huella. Se escriben con la
+    #: reserva y no cambian (la reserva no se reescribe). NULAS las tres solo
+    #: en una reserva anterior a la 0095. Se leen con
+    #: `reserva_politica.PoliticaDeAtencion.de_la_reserva`, y con nada más.
+    operating_policy: Mapped[dict | None] = mapped_column(_fotografia, nullable=True)
+    operating_policy_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    operating_policy_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -337,6 +383,19 @@ class ServiceBooking(Base):
         ),
         CheckConstraint(_horario(), name="service_bookings_horario"),
         CheckConstraint("seat between 1 and capacity", name="service_bookings_plaza"),
+        # La fotografía, entera o ninguna, y de una estructura conocida.
+        CheckConstraint(
+            "(operating_policy is null) = (operating_policy_version is null)"
+            " and (operating_policy is null) = (operating_policy_sha256 is null)",
+            name="service_bookings_politica_completa",
+        ),
+        CheckConstraint(
+            f"operating_policy_version is null or operating_policy_version = {limites.VERSION_DE_LA_FOTOGRAFIA}",
+            name="service_bookings_politica_version",
+        ),
+        # Sus claves, sus valores y su huella: en JSONB, solo PostgreSQL.
+        CheckConstraint(_politica_forma(), name="service_bookings_politica_forma").ddl_if(dialect="postgresql"),
+        CheckConstraint(_politica_huella(), name="service_bookings_politica_huella").ddl_if(dialect="postgresql"),
         UniqueConstraint("booking_code", name="service_bookings_codigo_unico"),
         UniqueConstraint("order_id", name="service_bookings_un_pedido"),
         UniqueConstraint("hold_id", name="service_bookings_una_retencion"),

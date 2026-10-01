@@ -1,7 +1,7 @@
 """La atención y la posventa de Servicios por la API real, contra PostgreSQL
 (Incremento 6).
 
-Con la base 0001–0094 desechable, el Storage en memoria y `FEATURE_SERVICES`
+Con la base 0001–0095 desechable, el Storage en memoria y `FEATURE_SERVICES`
 y `FEATURE_SERVICE_BOOKING` encendidas SOLO aquí. Cada reserva se contrata por
 el flujo real del Incremento 5; el tiempo se mueve llevando LA RESERVA (no el
 reloj del servidor) a donde hace falta.
@@ -30,7 +30,6 @@ from app.core.config import get_settings
 from app.modules.services import esquema, posventa
 from app.shared.database import get_db
 from tests.test_baja_de_cuenta_postgres import API, SIN_POSTGRES, _borrar_cuenta, _cliente, _filas, _persona, _sembrar, _uno
-from tests.test_migraciones_reales import MIGRACIONES
 from tests.test_servicios_admision_api import PDF, PNG
 from tests.test_servicios_agenda_api import _agenda, _codigo, _dia, _pedir
 from tests.test_servicios_descubrimiento_api import (  # noqa: F401 - montajes compartidos
@@ -543,11 +542,13 @@ async def test_si_reprogramar_falla_la_reserva_original_sigue_en_pie(atencion, m
     r = await _hacer(app, "client", h, "reschedule", {"hold_id": nueva})
     assert r.status_code == 409 and _codigo(r) == "service_booking_reschedule_too_late", r.text
     assert "reschedule" not in await _acciones(app, "client", h)
-    # Con otra política (es configurable), sí.
+    # CAMBIAR LA POLÍTICA DESPUÉS NO LA RESCATA: esta reserva se confirmó con
+    # 24 horas, y con esas se decide (0095). La que se confirme ahora, con 2.
     monkeypatch.setattr(get_settings(), "services_booking_reschedule_min_hours", 2)
-    assert "reschedule" in await _acciones(app, "client", h)
+    assert "reschedule" not in await _acciones(app, "client", h)
     r = await _hacer(app, "client", h, "reschedule", {"hold_id": nueva})
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409 and _codigo(r) == "service_booking_reschedule_too_late", r.text
+    assert r.json()["error"]["details"]["hours"] == 24
 
 
 async def test_no_se_reprograma_a_otra_version_del_servicio(atencion) -> None:
@@ -1284,24 +1285,30 @@ async def test_con_la_0094_alterada_lo_nuevo_contesta_503_y_nunca_500(atencion) 
     assert (await _acciones(app, "client", h)) == ["cancel", "reschedule"]
 
 
-def _sin_transaccion(sql: str) -> str:
-    return re.sub(r"(?m)^\s*(begin|commit);\s*$", "", sql)
+#: Lo que añade la 0095, quitado (para volver, sin confirmarlo, a la 0094).
+SIN_LA_0095 = (
+    "drop trigger service_bookings_con_politica on public.service_bookings",
+    "drop function public.servicios_reserva_con_politica()",
+    "alter table public.service_bookings "
+    "drop constraint service_bookings_politica_completa, drop constraint service_bookings_politica_version, "
+    "drop constraint service_bookings_politica_forma, drop constraint service_bookings_politica_huella, "
+    "drop column operating_policy, drop column operating_policy_version, drop column operating_policy_sha256",
+)
 
 
-async def test_sobre_una_base_solo_con_la_0093_la_reserva_sigue_y_la_atencion_espera(atencion) -> None:
-    """LA SITUACIÓN DE PRODUCCIÓN HOY: la 0093 aplicada y la 0094 no. La
-    reserva del Incremento 5 funciona entera; el detalle no trae `care` (la app
-    no ofrece ninguna acción) y lo nuevo contesta 503, nunca 500. Se llega ahí
-    DESHACIENDO la 0094 con el procedimiento de su cabecera, dentro de una
+async def test_sobre_una_base_sin_la_0095_la_reserva_y_la_atencion_esperan(atencion) -> None:
+    """LA SITUACIÓN DE PRODUCCIÓN HOY: la 0086–0094 aplicadas y la 0095 no.
+    Los modelos ya leen la fotografía de la política: sin sus columnas, TODO
+    lo de la reserva y lo de la atención contesta 503 `services_not_ready`,
+    nunca 500, y no se escribe nada. El catálogo y la agenda siguen, y la
+    agenda ofrece sus horarios (sin contar retenciones, como antes de la
+    0093). Se llega ahí quitando lo que añade la 0095, dentro de una
     transacción que no se confirma."""
     app, motor, _ = atencion
     h = await _reservado(app, motor)
-    migracion = (MIGRACIONES / "0094_servicios_atencion_y_cierre.sql").read_text(encoding="utf-8").replace("\r\n", "\n")
-    la_0093 = (MIGRACIONES / "0093_servicios_reserva_y_contratacion.sql").read_text(encoding="utf-8")
-    inicio = migracion.index("-- ROLLBACK")
-    fin = migracion.index("-- Y DESPUÉS, reejecutar la 0093 entera", inicio)
-    deshacer = "\n".join(l[2:] for l in migracion[inicio:fin].splitlines() if l.startswith("--   "))
-    deshacer = deshacer[deshacer.index("drop trigger service_bookings_coherentes_al_cambiar"):]
+    libre = (await _horarios(app, h["servicio"], _dia(9)))[0]["starts_at"]
+    cuentas = ("select (select count(*) from public.service_bookings), (select count(*) from public.service_holds), "
+               "(select count(*) from public.service_booking_events), (select count(*) from public.service_orders)")
     normal = app.dependency_overrides[get_db]
     esquema.olvidar()
     try:
@@ -1310,34 +1317,36 @@ async def test_sobre_una_base_solo_con_la_0093_la_reserva_sigue_y_la_atencion_es
             sesion = AsyncSession(bind=conexion, expire_on_commit=False)
             app.dependency_overrides[get_db] = _siempre(sesion)
             try:
-                # Lo que otras pruebas dejaron de este incremento, fuera (no se confirma).
-                await conexion.execute(text("set local session_replication_role = replica"))
-                await conexion.execute(text(
-                    "delete from public.service_booking_events where action not in ('hold_created', "
-                    "'hold_released', 'hold_expired', 'booking_confirmed') or actor_role not in ('client', 'system')"))
-                await conexion.execute(text("update public.service_bookings set status = 'confirmed' "
-                                            "where status <> 'confirmed'"))
-                await conexion.execute(text("set local session_replication_role = origin"))
-                raw = await conexion.get_raw_connection()
-                await raw.driver_connection.execute(_sin_transaccion(deshacer))
-                await raw.driver_connection.execute(_sin_transaccion(la_0093))
-                assert await esquema.hay_reservas(sesion) is True
+                for sql in SIN_LA_0095:
+                    await conexion.execute(text(sql))
+                antes = (await conexion.execute(text(cuentas))).one()
+                assert await esquema.hay_reservas(sesion) is False
                 assert await esquema.hay_atencion(sesion) is False
                 esquema.olvidar()
-                # LA RESERVA SIGUE: la lista, el detalle (sin `care`) y la bandeja del prestador.
-                assert (await _pedir(app, "GET", MIS_RESERVAS, h["cliente"])).status_code == 200
-                detalle = await _pedir(app, "GET", f"{MIS_RESERVAS}/{h['reserva']['id']}", h["cliente"])
-                assert detalle.status_code == 200 and detalle.json()["care"] is None, detalle.text
-                suya = await _pedir(app, "GET", f"{DEL_PRESTADOR}/{h['reserva']['id']}", h["perfil"])
-                assert suya.status_code == 200 and suya.json()["care"] is None
-                # LO NUEVO ESPERA.
+                # LA RESERVA ESPERA: ni se lee ni se aparta ni se contrata.
+                for metodo, ruta, quien in (
+                    ("GET", MIS_RESERVAS, h["cliente"]),
+                    ("GET", f"{MIS_RESERVAS}/{h['reserva']['id']}", h["cliente"]),
+                    ("GET", DEL_PRESTADOR, h["perfil"]),
+                    ("GET", f"{DEL_PRESTADOR}/{h['reserva']['id']}", h["perfil"]),
+                    ("GET", f"{RETENCIONES}/{h['retencion']}/checkout", h["cliente"]),
+                    ("POST", f"{RETENCIONES}/{h['retencion']}/confirm", h["cliente"]),
+                ):
+                    r = await _llamar(app, metodo, ruta, quien)
+                    assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), (ruta, r.text)
+                r = await _retener(app, h["cliente"], h["servicio"], libre)
+                assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), r.text
+                # LA ATENCIÓN, TAMBIÉN.
                 for metodo, ruta, quien in _todas_las_rutas(h):
                     r = await _llamar(app, metodo, ruta, quien)
                     assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), (ruta, r.text)
+                # EL CATÁLOGO Y LA AGENDA SIGUEN.
+                assert (await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}", None)).status_code == 200
+                assert libre in [x["starts_at"] for x in await _horarios(app, h["servicio"], _dia(9))]
                 r = await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/reviews", None)
                 assert r.status_code == 200 and r.json()["available"] is False
-                assert await _en_la_ficha(app, h["servicio"]) == (
-                    {"count": 0, "average": None}, {"count": 0, "average": None})
+                # NADA SE ESCRIBIÓ.
+                assert (await conexion.execute(text(cuentas))).one() == antes
             finally:
                 app.dependency_overrides[get_db] = normal
                 await sesion.close()
@@ -1835,20 +1844,27 @@ async def test_sin_otra_persona_que_decida_no_se_ofrece_apelar(atencion) -> None
 
 
 async def test_las_apelaciones_son_configurables_y_pueden_ser_ninguna(atencion, monkeypatch) -> None:
+    """Cuántas veces se apela es DE LA RESERVA: lo que valía cuando se
+    confirmó (0095). Cambiarlo después no se lo da ni se lo quita."""
     app, motor, _ = atencion
-    h = await _con_caso(app, motor)
-    await _persona(motor, "admin")
-    assert (await _resolver(app, h["jefa"], h["caso"])).status_code == 200
-    assert "appeal_incident" in await _acciones(app, "client", h)
+    cuerpo = {"body": "No estoy de acuerdo con la decisión tomada."}
+    # Confirmada SIN apelaciones: no se apela, aunque después se admitan.
     monkeypatch.setattr(get_settings(), "services_incident_appeals_max", 0)
-    assert "appeal_incident" not in await _acciones(app, "client", h)
-    r = await _hacer(app, "client", h, "incident/appeal", {"body": "No estoy de acuerdo con la decisión tomada."})
-    assert r.status_code == 409 and _codigo(r) == "service_incident_appeal_not_allowed", r.text
-    # Y nunca más de una: es lo que admite la base.
+    sin = await _con_caso(app, motor)
+    await _persona(motor, "admin")
+    assert (await _resolver(app, sin["jefa"], sin["caso"])).status_code == 200
+    # (Y nunca más de una: 7 se acota a lo que admite la base.)
     monkeypatch.setattr(get_settings(), "services_incident_appeals_max", 7)
-    assert (await _hacer(app, "client", h, "incident/appeal",
-                         {"body": "No estoy de acuerdo con la decisión tomada."})).status_code == 200
-    assert "appeal_incident" not in await _acciones(app, "provider", h)
+    assert "appeal_incident" not in await _acciones(app, "client", sin)
+    r = await _hacer(app, "client", sin, "incident/appeal", cuerpo)
+    assert r.status_code == 409 and _codigo(r) == "service_incident_appeal_not_allowed", r.text
+    # Confirmada CON una: se apela, aunque después se quiten.
+    con = await _con_caso(app, motor)
+    assert (await _resolver(app, con["jefa"], con["caso"])).status_code == 200
+    monkeypatch.setattr(get_settings(), "services_incident_appeals_max", 0)
+    assert "appeal_incident" in await _acciones(app, "client", con)
+    assert (await _hacer(app, "client", con, "incident/appeal", cuerpo)).status_code == 200
+    assert "appeal_incident" not in await _acciones(app, "provider", con)
 
 
 async def test_cancelada_el_prestador_ya_no_ve_lo_que_le_conto_quien_contrato(atencion) -> None:

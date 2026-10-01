@@ -885,7 +885,8 @@ async def resenar(
         raise ResenaNoPermitida()
     resena = ServiceReview(
         booking_id=c.reserva.id, service_id=c.reserva.service_id, author_id=cliente_id, **contenido,
-        status=RESENA_PENDIENTE if c.politica.resena_con_moderacion_previa else RESENA_PUBLICADA,
+        # La moderación previa es de Z y de AHORA, no de la reserva: no se congela.
+        status=RESENA_PENDIENTE if limites.resenas_con_moderacion_previa() else RESENA_PUBLICADA,
         created_at=c.ahora, updated_at=c.ahora,
     )
     db.add(resena)

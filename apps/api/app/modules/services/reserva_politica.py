@@ -13,12 +13,20 @@ Dos clases de número, y no se mezclan:
     el lote del barrido y cuánto se espera un cerrojo. Los mismos que impone
     la 0093 donde la base los conoce.
 
+DE LOS PROVISIONALES, LOS QUE DECIDEN QUÉ SE PUEDE HACER CON UNA RESERVA YA
+CONFIRMADA SE CONGELAN CON ELLA (0095, G18): `PoliticaDeAtencion`. Lo que
+vale antes de que haya reserva (la retención, qué se confirma solo), lo que es
+un aviso (el recordatorio) y lo que es de la moderación de Z (la moderación
+previa de una reseña) se sigue leyendo de la configuración al actuar.
+
 Y UNA PREGUNTA: ¿se puede cobrar un servicio? Hoy NO, y la respuesta vive
 solo aquí (`cobro_disponible`).
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 from app.core.config import Settings, get_settings
@@ -107,9 +115,62 @@ _COTAS_DE_LA_ATENCION = {
 }
 
 
+def _acotado(ajustes: Settings, nombre: str) -> int:
+    minimo, maximo = _COTAS_DE_LA_ATENCION[nombre]
+    return min(max(int(getattr(ajustes, nombre)), minimo), maximo)
+
+
+# --------------------------------------------------------------------------- #
+# LA POLÍTICA OPERATIVA DE UNA RESERVA (0095, G18): se congela al confirmarla
+# --------------------------------------------------------------------------- #
+#: La estructura de la fotografía. Otra estructura es otra versión, con su
+#: migración: la base solo admite las que conoce.
+VERSION_DE_LA_FOTOGRAFIA = 1
+
+#: LO QUE SE CONGELA, y nada más: lo que decide qué se puede hacer con una
+#: reserva YA confirmada y hasta cuándo. El ajuste del que sale al confirmar →
+#: el atributo. En la fotografía, la clave es el ajuste sin `services_`.
+_CONGELADO = {
+    "services_attention_checkin_minutes": "llegada_minutos",
+    "services_attention_confirmation_hours": "confirmacion_horas",
+    "services_attention_tolerance_minutes": "tolerancia_minutos",
+    "services_booking_reschedule_max": "reprogramaciones",
+    "services_booking_reschedule_min_hours": "reprogramar_horas_antes",
+    "services_incident_appeal_days": "apelacion_dias",
+    "services_incident_appeals_max": "apelaciones",
+    "services_incident_window_hours": "caso_horas",
+    "services_review_window_days": "resena_dias",
+}
+#: La clave de la fotografía → (atributo, cotas). Las mismas que impone la 0095.
+CAMPOS_CONGELADOS: dict[str, tuple[str, tuple[int, int]]] = {
+    ajuste.removeprefix("services_"): (atributo, _COTAS_DE_LA_ATENCION[ajuste])
+    for ajuste, atributo in _CONGELADO.items()
+}
+#: La clave del plazo de confirmación: el barrido la busca en la base.
+CLAVE_DE_LA_CONFIRMACION = "attention_confirmation_hours"
+
+
+class FotografiaInvalida(Exception):
+    """La política guardada con una reserva no es de fiar: otra estructura,
+    una clave o un valor que no toca, o una huella que no es la suya. NO SE
+    SUSTITUYE por la de ahora: con esa reserva no se hace nada."""
+
+
+def huella_de_la_fotografia(version: int, valores: dict[str, int]) -> str:
+    """La huella de una fotografía: SHA-256 de su forma canónica (claves en
+    orden, sin espacios). La 0095 calcula la misma y no guarda otra."""
+    canonica = json.dumps({"schema_version": version, "values": valores}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonica.encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class PoliticaDeAtencion:
-    """Lo configurable de la atención, ya leído y acotado. TODO PROVISIONAL."""
+    """LA POLÍTICA OPERATIVA DE UNA RESERVA: los plazos y los topes con los
+    que se decide qué se puede hacer con ella. TODOS PROVISIONALES.
+
+    SE CONGELA AL CONFIRMAR. `vigente()` es la de AHORA: la lee quien confirma
+    una reserva, para guardarla con ella. Todo lo que pasa después lee
+    `de_la_reserva()`: cambiar la configuración no cambia una reserva hecha."""
 
     #: Cuántos minutos antes de la hora se abre la llegada (código, iniciar).
     llegada_minutos: int
@@ -120,36 +181,61 @@ class PoliticaDeAtencion:
     #: Cuántas veces reprograma quien contrata, y con cuánta antelación.
     reprogramaciones: int
     reprogramar_horas_antes: int
-    recordatorio_horas: int
     #: Cuánto hay para abrir un caso, y para apelar su resolución.
     caso_horas: int
     apelacion_dias: int
     apelaciones: int
-    #: Cuánto hay para reseñar, y si una reseña espera a moderación.
+    #: Cuánto hay para reseñar.
     resena_dias: int
-    resena_con_moderacion_previa: bool
+    #: Falso en la vigente y en una reserva ANTERIOR A LA 0095, que no tiene
+    #: fotografía: se rige por la de ahora, como cuando se confirmó.
+    congelada: bool = False
 
     @classmethod
-    def de(cls, ajustes: Settings | None = None) -> "PoliticaDeAtencion":
+    def vigente(cls, ajustes: Settings | None = None) -> "PoliticaDeAtencion":
+        """La de la configuración de AHORA, leída y acotada."""
         a = ajustes or get_settings()
+        return cls(**{atributo: _acotado(a, ajuste) for ajuste, atributo in _CONGELADO.items()})
 
-        def acotado(nombre: str) -> int:
-            minimo, maximo = _COTAS_DE_LA_ATENCION[nombre]
-            return min(max(int(getattr(a, nombre)), minimo), maximo)
+    def fotografia(self) -> dict[str, int]:
+        """Lo que se guarda con la reserva: los valores, por su clave."""
+        return {clave: getattr(self, atributo) for clave, (atributo, _) in CAMPOS_CONGELADOS.items()}
 
-        return cls(
-            llegada_minutos=acotado("services_attention_checkin_minutes"),
-            tolerancia_minutos=acotado("services_attention_tolerance_minutes"),
-            confirmacion_horas=acotado("services_attention_confirmation_hours"),
-            reprogramaciones=acotado("services_booking_reschedule_max"),
-            reprogramar_horas_antes=acotado("services_booking_reschedule_min_hours"),
-            recordatorio_horas=acotado("services_booking_reminder_hours"),
-            caso_horas=acotado("services_incident_window_hours"),
-            apelacion_dias=acotado("services_incident_appeal_days"),
-            apelaciones=acotado("services_incident_appeals_max"),
-            resena_dias=acotado("services_review_window_days"),
-            resena_con_moderacion_previa=bool(a.services_reviews_premoderation),
-        )
+    @classmethod
+    def de_la_reserva(cls, reserva) -> "PoliticaDeAtencion":  # noqa: ANN001 - una `ServiceBooking`
+        """LA de ESA reserva: la que se congeló al confirmarla, comprobada
+        (estructura, claves, valores y huella). Es la ÚNICA lectura de la
+        fotografía. Una reserva anterior a la 0095 no la tiene, y NO SE LE
+        INVENTA: se rige por la vigente y lo dice (`congelada` es falso)."""
+        foto, version, huella = reserva.operating_policy, reserva.operating_policy_version, \
+            reserva.operating_policy_sha256
+        if foto is None and version is None and huella is None:
+            return cls.vigente()
+        if version != VERSION_DE_LA_FOTOGRAFIA or not isinstance(foto, dict) or set(foto) != set(CAMPOS_CONGELADOS):
+            raise FotografiaInvalida()
+        valores = {}
+        for clave, (atributo, (minimo, maximo)) in CAMPOS_CONGELADOS.items():
+            valor = foto[clave]
+            if type(valor) is not int or not minimo <= valor <= maximo:
+                raise FotografiaInvalida()
+            valores[atributo] = valor
+        if huella != huella_de_la_fotografia(version, foto):
+            raise FotografiaInvalida()
+        return cls(**valores, congelada=True)
+
+
+# LO QUE NO SE CONGELA, y se lee de la configuración al actuar: no dice qué
+# puede hacer nadie con una reserva hecha.
+def recordatorio_horas(ajustes: Settings | None = None) -> int:
+    """Con cuántas horas de antelación se recuerda una reserva. Es un aviso,
+    no un plazo de nadie."""
+    return _acotado(ajustes or get_settings(), "services_booking_reminder_hours")
+
+
+def resenas_con_moderacion_previa(ajustes: Settings | None = None) -> bool:
+    """Si una reseña NUEVA espera a moderación antes de verse. Es de la
+    moderación de Z, no de la reserva: vale para toda reseña que se escribe."""
+    return bool((ajustes or get_settings()).services_reviews_premoderation)
 
 
 #: Los adaptadores de cobro de Servicios. NINGUNO: no existe ninguno.
@@ -173,11 +259,14 @@ def cobro_disponible(ajustes: Settings | None = None) -> bool:
 __all__ = [
     "ADAPTADORES_DE_COBRO",
     "ALFABETO_DEL_CODIGO",
+    "CAMPOS_CONGELADOS",
+    "CLAVE_DE_LA_CONFIRMACION",
     "CODIGO_DE_ASISTENCIA_CIFRAS",
     "COMENTARIO_DE_RESENA",
     "DESCRIPCION_DEL_CASO",
     "ENTRADA_MAXIMA",
     "EVIDENCIAS_POR_PARTE",
+    "FotografiaInvalida",
     "INTENTOS_DEL_CODIGO",
     "LOTE_DE_TAREAS",
     "LOTE_MAXIMO_DE_TAREAS",
@@ -194,5 +283,9 @@ __all__ = [
     "REFERENCIA_MAXIMA",
     "RESERVAS_MAXIMAS_POR_PAGINA",
     "RESERVAS_POR_PAGINA",
+    "VERSION_DE_LA_FOTOGRAFIA",
     "cobro_disponible",
+    "huella_de_la_fotografia",
+    "recordatorio_horas",
+    "resenas_con_moderacion_previa",
 ]

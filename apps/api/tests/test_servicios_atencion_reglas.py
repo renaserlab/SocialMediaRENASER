@@ -4,16 +4,24 @@
 una reserva; `plazos`, sus momentos; `estado_del_efecto`, lo único que decide
 en qué queda un efecto económico solicitado. Aquí se recorren con objetos de
 mentira: cada estado, cada papel y cada límite de tiempo.
+
+Y LA POLÍTICA OPERATIVA DE UNA RESERVA (0095, G18): su fotografía tiene solo
+lo contractual, su huella es canónica y reproducible, y el lector comprueba
+estructura, claves, valores y huella. Una que no es de fiar NO se sustituye
+por la vigente; una reserva anterior a la 0095 se rige por la vigente, y lo
+dice.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
+from app.core.config import Settings, get_settings
 from app.modules.services import atencion
 from app.modules.services import reserva_politica as limites
 from app.modules.services.atencion_models import ESTADOS_DE_ATENCION, ESTADOS_DE_CASO, ESTADOS_DEL_EFECTO
@@ -23,8 +31,7 @@ FIN = INICIO + timedelta(minutes=60)
 CLIENTE, PERFIL = "c" * 8, "p" * 8
 POLITICA = limites.PoliticaDeAtencion(
     llegada_minutos=15, tolerancia_minutos=15, confirmacion_horas=24, reprogramaciones=1,
-    reprogramar_horas_antes=24, recordatorio_horas=24, caso_horas=48, apelacion_dias=5, apelaciones=1, resena_dias=30,
-    resena_con_moderacion_previa=True,
+    reprogramar_horas_antes=24, caso_horas=48, apelacion_dias=5, apelaciones=1, resena_dias=30,
 )
 
 
@@ -254,19 +261,22 @@ def test_la_politica_se_lee_de_la_configuracion_con_sus_cotas(monkeypatch) -> No
     from app.core.config import get_settings
 
     ajustes = get_settings()
-    de_fabrica = limites.PoliticaDeAtencion.de()
+    de_fabrica = limites.PoliticaDeAtencion.vigente()
     assert (de_fabrica.llegada_minutos, de_fabrica.tolerancia_minutos, de_fabrica.confirmacion_horas) == (15, 15, 24)
     assert (de_fabrica.reprogramaciones, de_fabrica.reprogramar_horas_antes, de_fabrica.caso_horas) == (1, 24, 48)
-    assert (de_fabrica.apelacion_dias, de_fabrica.resena_dias, de_fabrica.resena_con_moderacion_previa) == (5, 30, True)
+    assert (de_fabrica.apelacion_dias, de_fabrica.apelaciones, de_fabrica.resena_dias) == (5, 1, 30)
+    # Lo que NO es de la reserva (un aviso y la moderación) se lee aparte.
+    assert (limites.recordatorio_horas(), limites.resenas_con_moderacion_previa()) == (24, True)
     monkeypatch.setattr(ajustes, "services_booking_reschedule_max", 3)
     monkeypatch.setattr(ajustes, "services_reviews_premoderation", False)
-    cambiada = limites.PoliticaDeAtencion.de()
-    assert cambiada.reprogramaciones == 3 and cambiada.resena_con_moderacion_previa is False
+    assert limites.PoliticaDeAtencion.vigente().reprogramaciones == 3
+    assert limites.resenas_con_moderacion_previa() is False
     # Un valor absurdo no rompe nada: se acota.
     monkeypatch.setattr(ajustes, "services_attention_tolerance_minutes", -5)
     monkeypatch.setattr(ajustes, "services_review_window_days", 10 ** 9)
-    acotada = limites.PoliticaDeAtencion.de()
-    assert acotada.tolerancia_minutos >= 0 and acotada.resena_dias < 10 ** 6
+    monkeypatch.setattr(ajustes, "services_booking_reminder_hours", 10 ** 9)
+    acotada = limites.PoliticaDeAtencion.vigente()
+    assert acotada.tolerancia_minutos >= 0 and acotada.resena_dias < 10 ** 6 and limites.recordatorio_horas() <= 168
 
 
 def test_un_efecto_economico_nunca_queda_ejecutado(monkeypatch) -> None:
@@ -298,3 +308,137 @@ def test_los_motivos_de_cada_parte_y_de_la_moderacion_son_listas_cerradas() -> N
     # Una reseña no se esconde «por negativa»: ese motivo no existe.
     assert not [m for m in posventa.MOTIVOS_DE_MODERACION if "negativ" in m or "rating" in m]
     assert atencion.MOTIVOS_DE_CANCELACION == ("change_of_plans", "unavailable", "operational", "other")
+
+
+# =========================================================================== #
+# La política operativa de UNA reserva: su fotografía y su lector (0095, G18)
+# =========================================================================== #
+VERSION = limites.VERSION_DE_LA_FOTOGRAFIA
+#: LA POLÍTICA A: la de fábrica (la «política operativa v1» del alcance, provisional).
+A = {ajuste: Settings.model_fields[ajuste].default for ajuste in limites._CONGELADO}
+#: LA POLÍTICA B: todo distinto.
+B = {
+    "services_attention_checkin_minutes": 120,
+    "services_attention_confirmation_hours": 1,
+    "services_attention_tolerance_minutes": 60,
+    "services_booking_reschedule_max": 3,
+    "services_booking_reschedule_min_hours": 2,
+    "services_incident_appeal_days": 1,
+    "services_incident_appeals_max": 0,
+    "services_incident_window_hours": 1,
+    "services_review_window_days": 1,
+}
+
+
+def _foto(politica: dict) -> dict:
+    return {ajuste.removeprefix("services_"): valor for ajuste, valor in politica.items()}
+
+
+FOTO_A, FOTO_B = _foto(A), _foto(B)
+HUELLA_A = limites.huella_de_la_fotografia(VERSION, FOTO_A)
+HUELLA_B = limites.huella_de_la_fotografia(VERSION, FOTO_B)
+
+
+def _poner(monkeypatch, politica: dict, **mas) -> None:
+    """Cambia la configuración GLOBAL, como haría la empresa."""
+    for ajuste, valor in {**politica, **mas}.items():
+        monkeypatch.setattr(get_settings(), ajuste, valor)
+
+
+def _fila(foto=FOTO_A, version=VERSION, huella=None, **extra):
+    """Lo que el lector mira de una `ServiceBooking`."""
+    if huella is None and isinstance(foto, dict) and version is not None:
+        huella = limites.huella_de_la_fotografia(version, foto)
+    return SimpleNamespace(id="reserva", operating_policy=foto, operating_policy_version=version,
+                           operating_policy_sha256=huella, **extra)
+
+
+def test_la_fotografia_tiene_lo_contractual_y_nada_mas() -> None:
+    assert sorted(limites.CAMPOS_CONGELADOS) == sorted(FOTO_A) == [
+        "attention_checkin_minutes", "attention_confirmation_hours", "attention_tolerance_minutes",
+        "booking_reschedule_max", "booking_reschedule_min_hours", "incident_appeal_days", "incident_appeals_max",
+        "incident_window_hours", "review_window_days",
+    ]
+    assert FOTO_A == {
+        "attention_checkin_minutes": 15, "attention_confirmation_hours": 24, "attention_tolerance_minutes": 15,
+        "booking_reschedule_max": 1, "booking_reschedule_min_hours": 24, "incident_appeal_days": 5,
+        "incident_appeals_max": 1, "incident_window_hours": 48, "review_window_days": 30,
+    }
+    assert limites.PoliticaDeAtencion.vigente().fotografia() == FOTO_A
+    # Solo enteros: ni textos, ni la configuración del sistema.
+    assert all(type(v) is int for v in FOTO_A.values())
+    # LO QUE NO ES DE LA RESERVA no está: ni el aviso previo, ni la moderación,
+    # ni lo de antes de reservar, ni nada técnico.
+    for ajeno in ("reminder", "premoderation", "hold", "instant", "notice", "horizon", "batch", "lock"):
+        assert not any(ajeno in clave for clave in limites.CAMPOS_CONGELADOS), ajeno
+    assert not hasattr(limites.PoliticaDeAtencion.vigente(), "recordatorio_horas")
+    assert not hasattr(limites.PoliticaDeAtencion.vigente(), "resena_con_moderacion_previa")
+
+
+def test_la_huella_es_canonica_y_reproducible() -> None:
+    # Fija: quien cambie la forma canónica (o una clave) se entera aquí, porque
+    # dejaría de coincidir con la de las reservas ya guardadas.
+    assert HUELLA_A == "dc91b8babbc87259fc13f037255fbca83a7f0e8f3e4944e731378f50294c5e8a"
+    # No depende del orden en que vengan las claves.
+    assert limites.huella_de_la_fotografia(VERSION, dict(reversed(list(FOTO_A.items())))) == HUELLA_A
+    assert limites.huella_de_la_fotografia(VERSION, json.loads(json.dumps(FOTO_A))) == HUELLA_A
+    # Y cambia con cualquier valor, y con la versión de la estructura.
+    vistas = {HUELLA_A, HUELLA_B, limites.huella_de_la_fotografia(VERSION + 1, FOTO_A)}
+    for clave in FOTO_A:
+        vistas.add(limites.huella_de_la_fotografia(VERSION, {**FOTO_A, clave: FOTO_A[clave] + 1}))
+    assert len(vistas) == 3 + len(FOTO_A)
+
+
+def test_el_lector_devuelve_la_de_la_reserva_y_no_mira_la_configuracion(monkeypatch) -> None:
+    _poner(monkeypatch, B)
+    leida = limites.PoliticaDeAtencion.de_la_reserva(_fila(FOTO_A))
+    assert leida.congelada is True and leida.fotografia() == FOTO_A
+    assert (leida.reprogramar_horas_antes, leida.reprogramaciones, leida.tolerancia_minutos) == (24, 1, 15)
+    assert (leida.llegada_minutos, leida.confirmacion_horas, leida.caso_horas) == (15, 24, 48)
+    assert (leida.apelacion_dias, leida.apelaciones, leida.resena_dias) == (5, 1, 30)
+    assert limites.PoliticaDeAtencion.vigente().fotografia() == FOTO_B
+    assert atencion.politica_de(_fila(FOTO_A)) == leida
+
+
+@pytest.mark.parametrize("fila", [
+    _fila({**FOTO_A, "attention_tolerance_minutes": 16}, huella=HUELLA_A),   # un valor tocado
+    _fila(FOTO_B, huella=HUELLA_A),                                         # sustituida por otra
+    _fila(FOTO_A, huella="a" * 64),                                         # otra huella
+    _fila(FOTO_A, huella=HUELLA_A.upper()),
+    _fila({c: v for c, v in FOTO_A.items() if c != "review_window_days"}),  # falta una clave
+    _fila({**FOTO_A, "cancellation_fee_percent": 50}),                      # sobra una
+    _fila({**FOTO_A, "attention_tolerance_minutes": "15"}),                 # un texto
+    _fila({**FOTO_A, "attention_tolerance_minutes": 15.0}),                 # no entero
+    _fila({**FOTO_A, "attention_tolerance_minutes": True}),
+    _fila({**FOTO_A, "attention_tolerance_minutes": None}),
+    _fila({**FOTO_A, "attention_tolerance_minutes": -1}),                   # fuera de su cota
+    _fila({**FOTO_A, "incident_appeals_max": 2}),
+    _fila(FOTO_A, version=2),                                               # una estructura que no conoce
+    _fila(FOTO_A, version=0),
+    _fila([FOTO_A], huella=HUELLA_A),
+    _fila("x", huella=HUELLA_A),
+    # A medias: la fotografía sin su huella, o sin su versión, o la huella sola.
+    SimpleNamespace(id="r", operating_policy=FOTO_A, operating_policy_version=VERSION, operating_policy_sha256=None),
+    SimpleNamespace(id="r", operating_policy=FOTO_A, operating_policy_version=None, operating_policy_sha256=HUELLA_A),
+    SimpleNamespace(id="r", operating_policy=None, operating_policy_version=None, operating_policy_sha256=HUELLA_A),
+    SimpleNamespace(id="r", operating_policy=None, operating_policy_version=VERSION, operating_policy_sha256=None),
+])
+def test_una_fotografia_que_no_es_de_fiar_no_se_usa_ni_se_sustituye(fila, monkeypatch) -> None:
+    """Con una fotografía tocada, incompleta o de otra estructura no se decide
+    nada: ni con ella ni con la vigente."""
+    _poner(monkeypatch, B)
+    with pytest.raises(limites.FotografiaInvalida):
+        limites.PoliticaDeAtencion.de_la_reserva(fila)
+    with pytest.raises(atencion.AccionNoDisponible) as error:
+        atencion.politica_de(fila)
+    assert error.value.code == "service_booking_action_not_available"
+    assert error.value.details == {"reason": "operating_policy"}
+
+
+def test_una_reserva_anterior_a_la_0095_se_rige_por_la_vigente_y_lo_dice(monkeypatch) -> None:
+    anterior = _fila(None, None, None)
+    leida = limites.PoliticaDeAtencion.de_la_reserva(anterior)
+    assert leida.congelada is False and leida.fotografia() == FOTO_A
+    _poner(monkeypatch, B)
+    despues = limites.PoliticaDeAtencion.de_la_reserva(anterior)
+    assert despues.congelada is False and despues.fotografia() == FOTO_B

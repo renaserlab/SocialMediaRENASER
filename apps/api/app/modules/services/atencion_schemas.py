@@ -166,8 +166,10 @@ class CambioDeHorarioRead(BaseModel):
 
 
 class PlazosRead(BaseModel):
-    """Los momentos y los límites, con la política de AHORA (provisional). Es
-    lo que la app enseña ANTES de cancelar o de cambiar el horario."""
+    """Los momentos y los límites, con la política DE ESTA RESERVA (la que se
+    congeló al confirmarla; sus valores, provisionales). Es lo que la app
+    enseña ANTES de cancelar o de cambiar el horario. La política en sí no
+    viaja: solo lo que resulta de ella."""
 
     cancel_until: datetime
     reschedule_until: datetime
@@ -322,8 +324,7 @@ class ExpedienteRead(BaseModel):
     @classmethod
     def desde(cls, x: posventa.Expediente, *, usuario_id: str) -> "ExpedienteRead":
         caso = x.caso
-        politica = limites.PoliticaDeAtencion.de()
-        plazos = dominio.plazos(x.reserva, None, caso, politica)
+        plazos = dominio.plazos(x.reserva, None, caso, dominio.politica_de(x.reserva))
         return cls(
             id=caso.id, booking_id=caso.booking_id, status=caso.status, reason=caso.reason,
             description=caso.description, opened_by_me=caso.opened_by == usuario_id,

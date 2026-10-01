@@ -25,8 +25,10 @@ reportar una ausencia deja escrito que su efecto económico «no aplica».
 `estado_del_efecto` es la única función que lo decide, y ningún estado que
 devuelve dice que algo se ejecutó.
 
-LOS PLAZOS son provisionales y configurables (`reserva_politica`): ninguno es
-una decisión tomada aquí.
+LOS PLAZOS son provisionales (`reserva_politica`): ninguno es una decisión
+tomada aquí. Y SON LOS DE CADA RESERVA: se congelaron al confirmarla (0095), y
+aquí todo se decide con `politica_de(reserva)`. Cambiar la configuración solo
+cambia las reservas que se confirmen después.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -171,6 +173,21 @@ class PrestadorSuspendido(ConflictError):
 
 
 # --------------------------------------------------------------------------- #
+# La política de UNA reserva: la que se congeló al confirmarla
+# --------------------------------------------------------------------------- #
+def politica_de(reserva: ServiceBooking) -> limites.PoliticaDeAtencion:
+    """LA política operativa de ESA reserva (0095): la vigente cuando se
+    confirmó, no la de ahora. Todo lo que se decide sobre una reserva pasa por
+    aquí. Si la guardada no es de fiar, con esa reserva no se hace nada (409):
+    NO se sustituye por la vigente."""
+    try:
+        return limites.PoliticaDeAtencion.de_la_reserva(reserva)
+    except limites.FotografiaInvalida:
+        avisos.logger.error("[servicios] la política guardada de la reserva %s no es válida", reserva.id)
+        raise AccionNoDisponible(details={"reason": "operating_policy"}) from None
+
+
+# --------------------------------------------------------------------------- #
 # El dinero: lo que se solicita y su estado. Nunca «ejecutado».
 # --------------------------------------------------------------------------- #
 def estado_del_efecto(pedido: ServiceOrder | None, efecto: str) -> str:
@@ -194,7 +211,7 @@ def estado_del_efecto(pedido: ServiceOrder | None, efecto: str) -> str:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class Plazos:
-    """Los momentos de una reserva, con la política de ahora."""
+    """Los momentos de una reserva, con SU política (`politica_de`)."""
 
     llegada_desde: datetime
     ausencia_desde: datetime
@@ -396,7 +413,7 @@ async def cuidado(
 ) -> Cuidado:
     """Todo lo de la atención de una reserva, para quien la mira."""
     ahora = ahora or _ahora()
-    politica = limites.PoliticaDeAtencion.de()
+    politica = politica_de(reserva)
     atencion = await db.get(ServiceAttendance, reserva.id)
     caso = await caso_de(db, reserva.id)
     resena = await db.scalar(select(ServiceReview).where(ServiceReview.booking_id == reserva.id))
@@ -440,6 +457,7 @@ class Contexto:
     ahora: datetime
     #: La línea que ya dejó ESTA MISMA petición, si se repite.
     previo: ServiceBookingEvent | None
+    #: La de ESTA reserva, leída de su fila ya bloqueada.
     politica: limites.PoliticaDeAtencion
 
 
@@ -512,7 +530,7 @@ async def abrir(
         or (huella is not None and (previo.details or {}).get("request_sha256") != huella)
     ):
         raise ClaveReutilizada(details={"action": previo.action})
-    return Contexto(reserva, prestador, rol, usuario_id, clave, ahora, previo, limites.PoliticaDeAtencion.de())
+    return Contexto(reserva, prestador, rol, usuario_id, clave, ahora, previo, politica_de(reserva))
 
 
 async def _atencion(db: AsyncSession, reserva_id: str) -> ServiceAttendance | None:
@@ -954,10 +972,12 @@ async def _recordar(db: AsyncSession, reserva_id: str, *, ahora: datetime, hasta
     return True
 
 
-async def _cerrar_sola(db: AsyncSession, reserva_id: str, *, ahora: datetime, limite: datetime) -> bool:
+async def _cerrar_sola(db: AsyncSession, reserva_id: str, *, ahora: datetime) -> bool:
     reserva = await _reserva_libre(db, reserva_id)
     if reserva is None:
         return False
+    # EL PLAZO ES EL DE ESTA RESERVA, leído y comprobado otra vez.
+    limite = ahora - timedelta(hours=politica_de(reserva).confirmacion_horas)
     atencion = await _atencion(db, reserva.id)
     if (
         atencion is None or atencion.status != TERMINADA or not atencion.started_with_code
@@ -974,14 +994,41 @@ async def _cerrar_sola(db: AsyncSession, reserva_id: str, *, ahora: datetime, li
     return True
 
 
+async def _confirmacion_vencida(db: AsyncSession, ahora: datetime):  # noqa: ANN202 - una condición SQL
+    """«Terminada, y su plazo de confirmación ya pasó», CON EL PLAZO DE SU
+    RESERVA (el que se congeló al confirmarla). Los plazos distintos que hay
+    entre las terminadas son muy pocos (uno por cada cambio de configuración):
+    se leen y cada atención se compara con el suyo. Una reserva anterior a la
+    0095, con el vigente. Es solo el filtro de lo que se trae: `_cerrar_sola`
+    vuelve a comprobarlo con la fotografía verificada."""
+    horas = ServiceBooking.operating_policy[limites.CLAVE_DE_LA_CONFIRMACION].as_integer()
+    distintas = await db.scalars(
+        select(horas).distinct().select_from(ServiceAttendance)
+        .join(ServiceBooking, ServiceBooking.id == ServiceAttendance.booking_id)
+        .where(ServiceAttendance.status == TERMINADA, ServiceBooking.operating_policy.is_not(None))
+    )
+    vigente = limites.PoliticaDeAtencion.vigente().confirmacion_horas
+    return and_(
+        ServiceAttendance.status == TERMINADA,
+        or_(
+            and_(ServiceBooking.operating_policy.is_(None),
+                 ServiceAttendance.completed_at <= ahora - timedelta(hours=vigente)),
+            *[and_(horas == h, ServiceAttendance.completed_at <= ahora - timedelta(hours=int(h)))
+              for h in distintas if h is not None],
+        ),
+    )
+
+
 async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime | None = None) -> Tareas:
     """LOS BARRIDOS, por lotes e idempotentes (repetirlos no hace nada):
 
       * RECORDAR las reservas que empiezan pronto, una vez por horario (si
-        después cambia de horario, el nuevo se recuerda cuando toca);
-      * CERRAR las atenciones terminadas cuyo plazo de confirmación pasó, solo
-        con la señal fuerte y sin un caso vivo. Sin la señal fuerte NO se
-        cierran: se cuentan, y esperan a quien contrata o a un caso.
+        después cambia de horario, el nuevo se recuerda cuando toca). Con
+        cuánta antelación es un aviso, no un plazo de nadie: la de AHORA;
+      * CERRAR las atenciones terminadas cuyo plazo de confirmación pasó (EL
+        DE CADA RESERVA, congelado al confirmarla), solo con la señal fuerte
+        y sin un caso vivo. Sin la señal fuerte NO se cierran: se cuentan, y
+        esperan a quien contrata o a un caso.
 
     CADA FILA SE CONFIRMA ANTES DE PASAR A LA SIGUIENTE: una que falle no
     tumba el lote, y el barrido no deja un lote entero de reservas
@@ -991,10 +1038,9 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
     la empresa. No mueve dinero."""
     ahora = ahora or _ahora()
     lote = max(1, min(int(lote or limites.LOTE_DE_TAREAS), limites.LOTE_MAXIMO_DE_TAREAS))
-    politica = limites.PoliticaDeAtencion.de()
     hecho = Tareas()
 
-    hasta = ahora + timedelta(hours=politica.recordatorio_horas)
+    hasta = ahora + timedelta(hours=limites.recordatorio_horas())
     # Ya recordadas: con un recordatorio POSTERIOR a su último cambio de horario
     # (el de antes de reprogramar era del horario viejo).
     cambio = aliased(ServiceBookingEvent)
@@ -1013,8 +1059,8 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
             .order_by(ServiceBooking.starts_at, ServiceBooking.id).limit(lote)
         )
     )
-    limite = ahora - timedelta(hours=politica.confirmacion_horas)
-    vencida = and_(ServiceAttendance.status == TERMINADA, ServiceAttendance.completed_at <= limite)
+    vencida = await _confirmacion_vencida(db, ahora)
+    de_su_reserva = (ServiceBooking, ServiceBooking.id == ServiceAttendance.booking_id)
     con_caso_vivo = (
         select(ServiceIncident.id)
         .where(ServiceIncident.booking_id == ServiceAttendance.booking_id, ServiceIncident.status.in_(CASOS_VIVOS))
@@ -1024,14 +1070,14 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
     # tienen un caso vivo se quedarían para siempre a la cabeza del lote.
     vencidas = list(
         await db.scalars(
-            select(ServiceAttendance.booking_id)
+            select(ServiceAttendance.booking_id).join(*de_su_reserva)
             .where(vencida, ServiceAttendance.started_with_code.is_(True), ~con_caso_vivo)
             .order_by(ServiceAttendance.completed_at, ServiceAttendance.booking_id).limit(lote)
         )
     )
     hecho.sin_verificar = int(
         await db.scalar(
-            select(func.count()).select_from(ServiceAttendance)
+            select(func.count()).select_from(ServiceAttendance).join(*de_su_reserva)
             .where(vencida, ServiceAttendance.started_with_code.is_(False))
         ) or 0
     )
@@ -1048,7 +1094,7 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
             hecho.saltadas += 1
     for reserva_id in vencidas:
         try:
-            cerrada = await _cerrar_sola(db, reserva_id, ahora=ahora, limite=limite)
+            cerrada = await _cerrar_sola(db, reserva_id, ahora=ahora)
             await db.commit()
             hecho.cerradas += int(cerrada)
         except Exception:  # noqa: BLE001
@@ -1102,6 +1148,7 @@ __all__ = [
     "iniciar",
     "pedir_codigo",
     "plazos",
+    "politica_de",
     "reportar_ausencia",
     "reprogramar",
     "reserva_de",

@@ -981,14 +981,14 @@ _SQL_DE_LA_RESERVA = (
     """
 )
 
-#: LA 0093 TAL COMO LA DEJA LA 0094 (Incremento 6): las mismas tablas y
+#: LA 0093 TAL COMO LA DEJA LA 0094 (Incremento 6), sobre `_SQL_DE_LA_RESERVA`
+#: (que describe la 0093 sola, y sola ya no vale): las mismas tablas y
 #: columnas (la 0094 no añade ninguna), y SOLO esto distinto:
 #:   * los 42 CHECK con otra huella (la reserva admite `cancelled`; el
 #:     historial, las acciones y los roles de la atención);
 #:   * dos funciones con otro cuerpo (la reserva se cancela y se reprograma;
 #:     una retención consumida se libera) y una más;
 #:   * un disparador diferido más en `service_bookings`.
-#: La reserva vale con una forma O con la otra, y con ninguna más.
 _DE_LA_0093_A_LA_0094 = (
     ("'6c4de3c313d93485fa1dd96dd23ea773'", "'c625385d331ce267a4a07e3427201512'"),
     ("('servicios_retencion_salto_valido()', 'c6e5fc3f207d179c3cfaf83a5eec674d'),",
@@ -1008,16 +1008,64 @@ _DE_LA_0093_A_LA_0094 = (
 )
 
 
-def _con_la_0094(sql: str) -> str:
-    for de, a in _DE_LA_0093_A_LA_0094:
+#: Y TAL COMO LA DEJA LA 0095 (la política operativa congelada, G18), sobre la
+#: forma anterior. SOLO esto distinto, todo en `service_bookings`:
+#:   * tres columnas más (la fotografía, su versión y su huella), anulables y
+#:     SIN valor predeterminado;
+#:   * cuatro CHECK más (otra huella de todos juntos): la fotografía entera o
+#:     ninguna, de una versión conocida, con sus claves y sus cotas, y con LA
+#:     huella que le corresponde;
+#:   * un disparador y una función más: una reserva nueva nace con ella.
+#: Que la fotografía no se edite lo impone `service_bookings_inmutables`
+#: (0093, con el cuerpo de la 0094), que ya se comprueba aquí por su huella.
+_DE_LA_0094_A_LA_0095 = (
+    ("      ('service_bookings', 'confirmed_at', 'timestamp with time zone', true),",
+     "      ('service_bookings', 'confirmed_at', 'timestamp with time zone', true),\n"
+     "      ('service_bookings', 'operating_policy', 'jsonb', false),\n"
+     "      ('service_bookings', 'operating_policy_version', 'integer', false),\n"
+     "      ('service_bookings', 'operating_policy_sha256', 'text', false),"),
+    ("a.attnotnull = e.obligatoria\n      ) = 91", "a.attnotnull = e.obligatoria\n      ) = 94"),
+    ("a.attnum > 0 and not a.attisdropped) = 91", "a.attnum > 0 and not a.attisdropped) = 94"),
+    ("where c.contype = 'c' and c.convalidated and c.conrelid in (select t from tablas)) = 42",
+     "where c.contype = 'c' and c.convalidated and c.conrelid in (select t from tablas)) = 46"),
+    ("'c625385d331ce267a4a07e3427201512'", "'b4e7a1eedcc5ca5ad5204467e0a971c5'"),
+    ("      ('service_bookings', 'service_bookings_coherentes', 'servicios_reserva_coherente()', 5, '', true),",
+     "      ('service_bookings', 'service_bookings_coherentes', 'servicios_reserva_coherente()', 5, '', true),\n"
+     "      ('service_bookings', 'service_bookings_con_politica', 'servicios_reserva_con_politica()', 7, '', false),"),
+    ("g.tgdeferrable = e.diferido and g.tginitdeferred = e.diferido) = 16",
+     "g.tgdeferrable = e.diferido and g.tginitdeferred = e.diferido) = 17"),
+    ("where not g.tgisinternal and g.tgrelid in (select t from tablas)) = 16",
+     "where not g.tgisinternal and g.tgrelid in (select t from tablas)) = 17"),
+    ("('servicios_reserva_coherente()', 'e0e28efb6dc74ef022088d8d35316452'),",
+     "('servicios_reserva_coherente()', 'e0e28efb6dc74ef022088d8d35316452'),\n"
+     "      ('servicios_reserva_con_politica()', '53a22da580f82f54370061b561b7e1ed'),"),
+    ("md5(replace(p.prosrc, E'\\r', '')) = e.huella) = 8", "md5(replace(p.prosrc, E'\\r', '')) = e.huella) = 9"),
+    ("      and exists (select 1 from pg_catalog.pg_extension x where x.extname = 'btree_gist')",
+     "      and exists (select 1 from pg_catalog.pg_extension x where x.extname = 'btree_gist')\n"
+     "      -- La fotografía, SIN valor predeterminado: lo nuevo la trae o no entra.\n"
+     "      and not exists (\n"
+     "        select 1 from pg_catalog.pg_attrdef d\n"
+     "          join pg_catalog.pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum\n"
+     "         where d.adrelid = to_regclass('public.service_bookings')\n"
+     "           and a.attname in ('operating_policy', 'operating_policy_version', 'operating_policy_sha256')\n"
+     "      )"),
+)
+
+
+def _con(sql: str, cambios: tuple[tuple[str, str], ...], migracion: str) -> str:
+    for de, a in cambios:
         if sql.count(de) != 1:  # pragma: no cover - lo vigila la batería de la puerta
-            raise RuntimeError(f"La puerta de la reserva cambió y la de la 0094 no la sigue: {de[:60]}")
+            raise RuntimeError(f"La puerta de la reserva cambió y la de la {migracion} no la sigue: {de[:60]}")
         sql = sql.replace(de, a)
     return sql
 
 
-_LO_QUE_NECESITA_LA_RESERVA = text(_SQL_DE_LA_RESERVA)
-_LA_RESERVA_CON_LA_0094 = text(_con_la_0094(_SQL_DE_LA_RESERVA))
+#: LA RESERVA, HOY: la 0093 tal como la dejan la 0094 y la 0095. Es la única
+#: forma que vale: los modelos ya leen las columnas de la 0095, así que sin
+#: ella cualquier consulta de una reserva sería un 500.
+_LO_QUE_NECESITA_LA_RESERVA = text(
+    _con(_con(_SQL_DE_LA_RESERVA, _DE_LA_0093_A_LA_0094, "0094"), _DE_LA_0094_A_LA_0095, "0095")
+)
 
 
 def _columnas_de_la_reserva(sync) -> bool:  # noqa: ANN001
@@ -1035,29 +1083,29 @@ def _columnas_de_la_reserva(sync) -> bool:  # noqa: ANN001
 
 
 async def hay_reservas(db: AsyncSession) -> bool:
-    """¿Tiene la base la 0093 COMPLETA? Ante la duda, no. Como el resto: el
-    «sí» y el «no» se recuerdan hasta reiniciar; un error al mirar, no."""
+    """¿Tiene la base la reserva COMPLETA: la 0093 con lo que le añaden la
+    0094 y la 0095 (la política operativa congelada)? Ante la duda, no. Como
+    el resto: el «sí» y el «no» se recuerdan hasta reiniciar; un error al
+    mirar, no."""
     if "reserva" not in _cache:
         try:
             conexion = await db.connection()
             completa = await conexion.run_sync(_columnas_de_la_reserva)
             if completa and conexion.dialect.name == "postgresql":
-                # La 0093 tal cual, o tal como la deja la 0094. Ninguna más.
-                completa = bool(await db.scalar(_LO_QUE_NECESITA_LA_RESERVA)) or bool(
-                    await db.scalar(_LA_RESERVA_CON_LA_0094)
-                )
+                completa = bool(await db.scalar(_LO_QUE_NECESITA_LA_RESERVA))
         except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
-            logger.warning("Servicios: no se pudo comprobar la 0093; la reserva contesta 503.", exc_info=True)
+            logger.warning("Servicios: no se pudo comprobar la reserva; contesta 503.", exc_info=True)
             return False
         _cache["reserva"] = completa
         if not completa:
-            logger.warning("Servicios: falta la 0093 completa. La reserva contesta 503.")
+            logger.warning("Servicios: falta la 0093 completa, con la 0094 y la 0095. La reserva contesta 503.")
     return _cache["reserva"]
 
 
 async def exigir_reservas(db: AsyncSession) -> None:
     """La agenda (y con ella el catálogo y la admisión), la bandera de la
-    contratación y, además, la 0093. Las banderas, sin tocar la base."""
+    contratación y, además, la reserva completa (0093, 0094 y 0095). Las
+    banderas, sin tocar la base."""
     if not encendido():
         raise ServiciosApagados()
     if not reserva_encendida():
@@ -1088,7 +1136,7 @@ TABLAS_DE_LA_ATENCION = (
 )
 
 #: LO QUE LA 0094 IMPONE Y EL CÓDIGO DA POR HECHO, por DEFINICIÓN. Lo que
-#: cambia de la 0093 lo comprueba `_LA_RESERVA_CON_LA_0094`; aquí, lo nuevo:
+#: cambia de la 0093 lo comprueba `_LO_QUE_NECESITA_LA_RESERVA`; aquí, lo nuevo:
 #:
 #:  * cada columna con su tipo, su NOT NULL y su valor predeterminado, y
 #:    NINGUNA MÁS;
@@ -1328,15 +1376,16 @@ def _columnas_de_la_atencion(sync) -> bool:  # noqa: ANN001
 
 
 async def hay_atencion(db: AsyncSession) -> bool:
-    """¿Tiene la base la 0094 COMPLETA? Lo nuevo, y la 0093 tal como la 0094 la
-    deja. Ante la duda, no. Como el resto: el «sí» y el «no» se recuerdan
-    hasta reiniciar; un error al mirar, no."""
+    """¿Tiene la base la 0094 COMPLETA? Lo nuevo, y la reserva tal como
+    queda hoy (`_LO_QUE_NECESITA_LA_RESERVA`). Ante la duda, no. Como el
+    resto: el «sí» y el «no» se recuerdan hasta reiniciar; un error al mirar,
+    no."""
     if "atencion" not in _cache:
         try:
             conexion = await db.connection()
             completa = await conexion.run_sync(_columnas_de_la_atencion)
             if completa and conexion.dialect.name == "postgresql":
-                completa = bool(await db.scalar(_LA_RESERVA_CON_LA_0094)) and bool(
+                completa = bool(await db.scalar(_LO_QUE_NECESITA_LA_RESERVA)) and bool(
                     await db.scalar(_LO_QUE_NECESITA_LA_ATENCION)
                 )
         except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
@@ -1344,7 +1393,7 @@ async def hay_atencion(db: AsyncSession) -> bool:
             return False
         _cache["atencion"] = completa
         if not completa:
-            logger.warning("Servicios: falta la 0094 completa. La atención contesta 503.")
+            logger.warning("Servicios: falta la 0094 completa, o la reserva sin la 0095. La atención contesta 503.")
     return _cache["atencion"]
 
 

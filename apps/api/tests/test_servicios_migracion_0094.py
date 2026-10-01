@@ -1,6 +1,6 @@
 """La migración 0094: la atención, la posventa y el cierre operativo (Incremento 6).
 
-1. ESTÁTICA: es la última y sigue a la 0093; una sola transacción que
+1. ESTÁTICA: sigue a la 0093 y la sigue la 0095; una sola transacción que
    comprueba lo anterior antes de crear nada; no concede permisos; de la 0093
    solo amplía tres CHECK (ninguna columna nueva en sus tablas); no trae
    pasarela ni dinero, y el efecto económico no admite un estado «ejecutado»;
@@ -18,6 +18,9 @@
    sin cada una de sus dependencias no empieza, su ROLLBACK funciona (y se
    niega con datos) y LA 0093 YA NO SE REEJECUTA ENCIMA: se niega, sin cambiar
    nada.
+
+TODO CON LA BASE HASTA LA 0094: lo que añade la 0095 (una reserva nace con su
+política operativa) tiene su batería, `test_servicios_migracion_0095.py`.
 """
 
 from __future__ import annotations
@@ -70,10 +73,11 @@ COMENTARIO = "Muy clara y puntual, resolvió todas mis dudas."
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0093() -> None:
+def test_sigue_a_la_0093_y_la_sigue_la_0095() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0093_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0093_")
+    assert nombres[posicion + 1].startswith("0095_")
 
 
 def test_es_una_unica_transaccion_que_comprueba_antes_de_crear() -> None:
@@ -228,7 +232,7 @@ def _cancelar(pg, r: dict) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_desde_cero_queda_cerrada(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     for tabla in TABLAS:
         assert _uno(pg, "select relrowsecurity from pg_class where oid = %s::regclass", f"public.{tabla}"), tabla
         assert _uno(pg, "select count(*) from pg_policies where schemaname = 'public' and tablename = %s", tabla) == 0
@@ -262,7 +266,7 @@ def test_es_igual_al_modelo_por_definicion(pg) -> None:  # noqa: F811
 
     from app.modules.services import atencion_models
 
-    _montar(pg)
+    _montar(pg, hasta="0094")
     _hacer(pg, "drop schema if exists orm_0094 cascade")
     _hacer(pg, "create schema orm_0094")
     copia = MetaData(schema="orm_0094")
@@ -315,7 +319,7 @@ def test_es_igual_al_modelo_por_definicion(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_el_historial_admite_lo_de_este_incremento_y_nada_mas(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     evento = ("insert into public.service_booking_events (service_id, booking_id, action, to_status, actor_id, "
@@ -331,7 +335,7 @@ def test_el_historial_admite_lo_de_este_incremento_y_nada_mas(pg) -> None:  # no
 # --- La atención ------------------------------------------------------------ #
 @SIN_POSTGRES
 def test_la_atencion_nace_de_una_reserva_confirmada_y_solo_da_sus_saltos(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     _atender(pg, r["reserva"], "code_issued")
@@ -378,7 +382,7 @@ def test_la_atencion_nace_de_una_reserva_confirmada_y_solo_da_sus_saltos(pg) -> 
 
 @SIN_POSTGRES
 def test_una_inasistencia_se_puede_corregir_y_cerrar_pero_no_reabrir(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     _atender(pg, r["reserva"], "no_show_provider")
@@ -396,7 +400,7 @@ def test_una_inasistencia_se_puede_corregir_y_cerrar_pero_no_reabrir(pg) -> None
 # --- Cancelar --------------------------------------------------------------- #
 @SIN_POSTGRES
 def test_cancelar_libera_el_horario_y_no_queda_a_medias(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     otra = _persona(pg)
@@ -436,7 +440,7 @@ def test_cancelar_libera_el_horario_y_no_queda_a_medias(pg) -> None:  # noqa: F8
 
 @SIN_POSTGRES
 def test_lo_que_ya_empezo_no_se_cancela_ni_se_reprograma(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     for estado in ("in_progress", "completed", "closed", "no_show_client", "no_show_provider"):
         r = _reservada(pg, m, inicio=f"2031-04-0{1 + list(_ATENCION).index(estado)} 15:00+00", cliente=_persona(pg))
@@ -457,7 +461,7 @@ def test_lo_que_ya_empezo_no_se_cancela_ni_se_reprograma(pg) -> None:  # noqa: F
 # --- Reprogramar ------------------------------------------------------------ #
 @SIN_POSTGRES
 def test_reprogramar_mueve_la_reserva_entera_o_no_la_mueve(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     antes = _todas(pg, "select order_id, version_id, title_snapshot, duration_minutes, booking_code, confirmed_at "
@@ -516,7 +520,7 @@ def test_reprogramar_mueve_la_reserva_entera_o_no_la_mueve(pg) -> None:  # noqa:
 # --- El caso ---------------------------------------------------------------- #
 @SIN_POSTGRES
 def test_un_caso_por_reserva_y_solo_sus_saltos(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     caso = _caso(pg, r["reserva"], m["cliente"])
@@ -590,7 +594,7 @@ def test_un_caso_por_reserva_y_solo_sus_saltos(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_el_efecto_economico_es_una_solicitud_y_nunca_dice_que_se_ejecuto(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     caso = _caso(pg, _reservada(pg, m)["reserva"], m["cliente"])
     for estado in ("executed", "refunded", "paid", "completed", "done", "succeeded"):
@@ -614,7 +618,7 @@ def test_el_efecto_economico_es_una_solicitud_y_nunca_dice_que_se_ejecuto(pg) ->
 
 @SIN_POSTGRES
 def test_el_expediente_solo_se_anade(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     caso = _caso(pg, _reservada(pg, m)["reserva"], m["cliente"])
     entrada = ("insert into public.service_incident_entries (incident_id, author_id, author_role, kind, body, "
@@ -652,7 +656,7 @@ def test_el_expediente_solo_se_anade(pg) -> None:  # noqa: F811
 # --- La reseña verificada --------------------------------------------------- #
 @SIN_POSTGRES
 def test_una_resena_es_de_una_atencion_cerrada_de_quien_la_contrato(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     verificada = "Una reseña es de una atención cerrada, de quien la contrató"
@@ -747,7 +751,7 @@ def _cuentas(pg, r: dict) -> dict:  # noqa: F811
 
 @SIN_POSTGRES
 def test_nada_se_borra_suelto(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _con_todo(pg, m)
     antes = _cuentas(pg, r)
@@ -765,7 +769,7 @@ def test_nada_se_borra_suelto(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_la_baja_de_quien_contrata_conserva_el_caso_y_la_resena_sin_su_nombre(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _con_todo(pg, m)
     antes = _cuentas(pg, r)
@@ -785,7 +789,7 @@ def test_la_baja_de_quien_contrata_conserva_el_caso_y_la_resena_sin_su_nombre(pg
 
 @SIN_POSTGRES
 def test_con_una_atencion_por_venir_la_cuenta_de_quien_contrata_no_se_borra(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     _atender(pg, r["reserva"], "code_issued")
@@ -806,7 +810,7 @@ def test_la_baja_de_quien_presta_se_lleva_todo_en_cualquier_orden(pg, ultima) ->
     solo camino de borrado. Aquí se recrea cada clave para que su disparador
     sea el último (PostgreSQL los dispara por el orden de su nombre) y se
     comprueba que la baja no depende de eso."""
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _con_todo(pg, m)
     if ultima is not None:
@@ -834,7 +838,7 @@ def test_la_baja_de_quien_presta_se_lleva_todo_en_cualquier_orden(pg, ultima) ->
 def test_la_resena_apunta_al_servicio_de_su_reserva_sin_borrar_nada(pg) -> None:  # noqa: F811
     """La clave al servicio NO BORRA (un solo camino de borrado: la reserva) y
     se comprueba al confirmar; y el servicio de la reseña es el de su reserva."""
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m, inicio=PASADO)
     _atender(pg, r["reserva"], "closed")
@@ -898,7 +902,7 @@ def test_sobre_la_0093_con_reservas_no_toca_nada_y_despues_se_pueden_atender(pg)
 
 @SIN_POSTGRES
 def test_reejecutarla_deja_exactamente_lo_mismo_tambien_con_datos(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _con_todo(pg, m)
     cancelada = _reservada(pg, m, cliente=_persona(pg))
@@ -1005,7 +1009,7 @@ def test_la_0093_ya_no_se_reejecuta_encima_y_al_negarse_no_cambia_nada(pg) -> No
     aborta: la transacción entera se deshace."""
     import psycopg
 
-    _montar(pg)
+    _montar(pg, hasta="0094")
     m = _mundo(pg)
     r = _reservada(pg, m)
     foto = _foto(pg)

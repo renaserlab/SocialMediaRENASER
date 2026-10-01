@@ -914,6 +914,13 @@ async def confirmar(
 
     await horario_vigente(db, fila, vigente, ahora=ahora)
 
+    # LA POLÍTICA OPERATIVA SE CONGELA AQUÍ (0095): la vigente AHORA, escrita
+    # con la reserva en su mismo INSERT. La construye el servidor (el cuerpo
+    # de la petición no la trae) y un reintento no vuelve a leerla: devuelve
+    # la reserva ya hecha, arriba.
+    foto = limites.PoliticaDeAtencion.vigente().fotografia()
+    huella_de_la_foto = limites.huella_de_la_fotografia(limites.VERSION_DE_LA_FOTOGRAFIA, foto)
+
     nombre = (prestador.display_name or "").strip() or "—"
     titulo = (vigente.title or "").strip() or "—"
     pedido = ServiceOrder(
@@ -964,6 +971,9 @@ async def confirmar(
             location_area_snapshot=(vigente.location_area or "").strip() or None,
             created_at=ahora,
             confirmed_at=ahora,
+            operating_policy=foto,
+            operating_policy_version=limites.VERSION_DE_LA_FOTOGRAFIA,
+            operating_policy_sha256=huella_de_la_foto,
         )
         try:
             async with db.begin_nested():
