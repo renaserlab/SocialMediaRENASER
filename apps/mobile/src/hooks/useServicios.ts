@@ -18,6 +18,7 @@ import {
 } from '@/lib/serviciosCatalogo';
 import { claveDeErrorDelDescubrimiento } from '@/lib/serviciosDescubrimiento';
 import { claveDeErrorDeLaAgenda } from '@/lib/serviciosAgenda';
+import { claveDeErrorDeLaAtencion } from '@/lib/serviciosAtencion';
 import { claveDeErrorDeLaReserva } from '@/lib/serviciosReserva';
 import { ServiceProviderRepository } from '@/repositories/ServiceProviderRepository';
 import type { TranslationKey } from '@/i18n';
@@ -50,7 +51,8 @@ export function useTextosDeServicios(ambito: AmbitoDeServicios = 'admision') {
         const porCodigo =
           (ambito === 'descubrimiento' ? claveDeErrorDelDescubrimiento(error.code) : null) ??
           (ambito === 'agenda' ? claveDeErrorDeLaAgenda(error.code) : null) ??
-          (ambito === 'reserva' ? claveDeErrorDeLaReserva(error.code) ?? claveDeErrorDeLaAgenda(error.code) : null) ??
+          (ambito === 'reserva' ? claveDeErrorDeLaReserva(error.code) ?? claveDeErrorDeLaAtencion(error.code) : null) ??
+          (ambito === 'reserva' ? claveDeErrorDeLaAgenda(error.code) : null) ??
           (ambito !== 'admision' ? claveDeErrorDelCatalogo(error.code) : null) ??
           claveDeErrorDeServicios(error.code);
         if (porCodigo !== null) return f(porCodigo);

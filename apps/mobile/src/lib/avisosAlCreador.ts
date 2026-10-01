@@ -78,6 +78,27 @@ const AVISOS: Record<string, AvisoAlCreador> = {
   // dirección ni nota: el detalle se lee en la reserva.
   service_booking_confirmed: { titulo: 'notif.servicioReservaConfirmadaTitle', icono: 'calendar', cuerpo: 'notif.servicioReservaConfirmadaBody' },
   service_booking_received: { titulo: 'notif.servicioReservaRecibidaTitle', icono: 'calendar', cuerpo: 'notif.servicioReservaRecibidaBody' },
+  // La atención y la posventa (Incremento 6). El final del tipo dice a quién
+  // va: `_client`, `_provider` o `_team`. Sin motivo, hora ni evidencia.
+  service_booking_cancelled_provider: { titulo: 'notif.servicioAtencionCanceladaPrestadorTitle', icono: 'x-circle', cuerpo: 'notif.servicioAtencionCanceladaPrestadorBody' },
+  service_booking_cancelled_client: { titulo: 'notif.servicioAtencionCanceladaClienteTitle', icono: 'x-circle', cuerpo: 'notif.servicioAtencionCanceladaClienteBody' },
+  service_booking_rescheduled_provider: { titulo: 'notif.servicioAtencionReprogramadaTitle', icono: 'calendar', cuerpo: 'notif.servicioAtencionReprogramadaBody' },
+  service_booking_reminder_client: { titulo: 'notif.servicioAtencionRecordatorioClienteTitle', icono: 'clock', cuerpo: 'notif.servicioAtencionRecordatorioClienteBody' },
+  service_booking_reminder_provider: { titulo: 'notif.servicioAtencionRecordatorioPrestadorTitle', icono: 'clock', cuerpo: 'notif.servicioAtencionRecordatorioPrestadorBody' },
+  service_attention_completed_client: { titulo: 'notif.servicioAtencionPorConfirmarTitle', icono: 'check-circle', cuerpo: 'notif.servicioAtencionPorConfirmarBody' },
+  service_attention_absent_client: { titulo: 'notif.servicioAtencionAusenteClienteTitle', icono: 'alert-triangle', cuerpo: 'notif.servicioAtencionAusenteClienteBody' },
+  service_attention_absent_provider: { titulo: 'notif.servicioAtencionAusentePrestadorTitle', icono: 'alert-triangle', cuerpo: 'notif.servicioAtencionAusentePrestadorBody' },
+  service_incident_opened_client: { titulo: 'notif.servicioAtencionCasoAbiertoClienteTitle', icono: 'alert-triangle', cuerpo: 'notif.servicioAtencionCasoAbiertoClienteBody' },
+  service_incident_opened_provider: { titulo: 'notif.servicioAtencionCasoAbiertoPrestadorTitle', icono: 'alert-triangle', cuerpo: 'notif.servicioAtencionCasoAbiertoPrestadorBody' },
+  service_incident_opened_team: { titulo: 'notif.servicioAtencionCasoAbiertoEquipoTitle', icono: 'inbox', cuerpo: 'notif.servicioAtencionCasoAbiertoEquipoBody' },
+  service_incident_updated_client: { titulo: 'notif.servicioAtencionCasoNovedadClienteTitle', icono: 'edit-3', cuerpo: 'notif.servicioAtencionCasoNovedadClienteBody' },
+  service_incident_updated_provider: { titulo: 'notif.servicioAtencionCasoNovedadPrestadorTitle', icono: 'edit-3', cuerpo: 'notif.servicioAtencionCasoNovedadPrestadorBody' },
+  service_incident_resolved_client: { titulo: 'notif.servicioAtencionCasoResueltoClienteTitle', icono: 'check-circle', cuerpo: 'notif.servicioAtencionCasoResueltoClienteBody' },
+  service_incident_resolved_provider: { titulo: 'notif.servicioAtencionCasoResueltoPrestadorTitle', icono: 'check-circle', cuerpo: 'notif.servicioAtencionCasoResueltoPrestadorBody' },
+  service_incident_appealed_team: { titulo: 'notif.servicioAtencionCasoApeladoEquipoTitle', icono: 'inbox', cuerpo: 'notif.servicioAtencionCasoApeladoEquipoBody' },
+  service_review_available_client: { titulo: 'notif.servicioAtencionResenaDisponibleTitle', icono: 'edit-3', cuerpo: 'notif.servicioAtencionResenaDisponibleBody' },
+  service_review_received_provider: { titulo: 'notif.servicioAtencionResenaRecibidaTitle', icono: 'inbox', cuerpo: 'notif.servicioAtencionResenaRecibidaBody' },
+  service_review_replied_client: { titulo: 'notif.servicioAtencionResenaRespondidaTitle', icono: 'inbox', cuerpo: 'notif.servicioAtencionResenaRespondidaBody' },
 };
 
 /** El título y el icono de un aviso al creador, o `null` si no lo es. */
@@ -174,6 +195,33 @@ export function rutaDelAviso(
       return id ? `/servicios/reservas/${id}` : '/servicios/reservas';
     case 'service_booking_received':
       return id ? `/servicios/prestador/reservas/${id}` : '/servicios/prestador/reservas';
+    // La atención (Incremento 6): cada parte, a SU reserva…
+    case 'service_booking_cancelled_client':
+    case 'service_booking_reminder_client':
+    case 'service_attention_completed_client':
+    case 'service_attention_absent_client':
+    case 'service_review_available_client':
+    case 'service_review_replied_client':
+      return id ? `/servicios/reservas/${id}` : '/servicios/reservas';
+    case 'service_booking_cancelled_provider':
+    case 'service_booking_rescheduled_provider':
+    case 'service_booking_reminder_provider':
+    case 'service_attention_absent_provider':
+    case 'service_review_received_provider':
+      return id ? `/servicios/prestador/reservas/${id}` : '/servicios/prestador/reservas';
+    // …lo del caso, a su expediente (el aviso trae la RESERVA)…
+    case 'service_incident_opened_client':
+    case 'service_incident_updated_client':
+    case 'service_incident_resolved_client':
+      return id ? `/servicios/reservas/${id}/caso` : '/servicios/reservas';
+    case 'service_incident_opened_provider':
+    case 'service_incident_updated_provider':
+    case 'service_incident_resolved_provider':
+      return id ? `/servicios/prestador/reservas/${id}/caso` : '/servicios/prestador/reservas';
+    // …y el equipo, al caso (el aviso trae el CASO).
+    case 'service_incident_opened_team':
+    case 'service_incident_appealed_team':
+      return id ? `/admin/servicios/casos/${id}` : '/admin/servicios/casos';
     // «Juan está transmitiendo en vivo»: al directo, siga o no en emisión.
     case 'live_started':
       return id ? `/live/${id}` : null;

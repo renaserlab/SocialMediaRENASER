@@ -5,11 +5,11 @@ import type { FalloDelCatalogo, ServicioPrivado } from '@/lib/serviciosCatalogo'
 import { leerFalloDelCatalogo } from '@/hooks/useServicios';
 import { ServiceCatalogRepository } from '@/repositories/ServiceCatalogRepository';
 
-type ParametroDeRuta = 'serviceId' | 'versionId' | 'providerId' | 'holdId' | 'bookingId';
+type ParametroDeRuta = 'serviceId' | 'versionId' | 'providerId' | 'holdId' | 'bookingId' | 'incidentId';
 
 /**
  * El identificador de la ruta (`[serviceId]`, `[versionId]`, `[providerId]`,
- * `[holdId]`, `[bookingId]`), o vacío.
+ * `[holdId]`, `[bookingId]`, `[incidentId]`), o vacío.
  */
 export function useParametroDeRuta(nombre: ParametroDeRuta): string {
   const parametros = useLocalSearchParams<Partial<Record<ParametroDeRuta, string>>>();
