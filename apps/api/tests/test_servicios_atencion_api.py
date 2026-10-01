@@ -797,6 +797,12 @@ async def test_un_caso_con_su_expediente_privado(atencion) -> None:
         assert f"/object/sign/{posventa.DEPOSITO}/{guardados[0]}?token=" in r.json()["url"]
     r = await _pedir(app, "GET", f"{CASOS}/{caso['id']}/entries/{evidencia['id']}/file", jefa)
     assert r.status_code == 200, r.text
+    # LA RUTA DEL ARCHIVO NO VIAJA: ni a las partes ni a administración. Solo el enlace firmado.
+    expedientes = [await _pedir(app, "GET", f"{_de(rol, h)[0]}/incident", _de(rol, h)[1]) for rol in ("client", "provider")]
+    expedientes.append(await _pedir(app, "GET", f"{CASOS}/{caso['id']}", jefa))
+    for visto in expedientes:
+        assert visto.status_code == 200 and guardados[0] not in visto.text, visto.text
+        assert [e["body"] for e in visto.json()["entries"] if e["kind"] == "evidence"] == [None]
     extrano = await _persona(motor)
     for metodo, sufijo in (("GET", "incident"), ("GET", f"incident/entries/{evidencia['id']}/file")):
         assert (await _pedir(app, metodo, f"{ruta}/{sufijo}", extrano)).status_code == 404
@@ -871,6 +877,7 @@ async def test_resolver_no_es_devolver_dinero(atencion) -> None:
     antes = await _dinero(motor)
     h = await _con_caso(app, motor)
     caso, jefa = h["caso"], h["jefa"]
+    await _persona(motor, "admin")  # hay otra persona que podrá resolver una apelación
     for cuerpo in ({"outcome": "ganó"}, {"attention_effect": "borrar"}, {"financial_effect": "transfer"},
                    {"resolution": " "}):
         r = await _resolver(app, jefa, caso, **cuerpo)
@@ -968,9 +975,12 @@ async def test_una_apelacion_por_caso_y_la_resuelve_otra_persona(atencion) -> No
 async def test_pasado_su_plazo_ya_no_se_apela(atencion) -> None:
     app, motor, _ = atencion
     h = await _con_caso(app, motor)
+    await _persona(motor, "admin")
     assert (await _resolver(app, h["jefa"], h["caso"])).status_code == 200
-    await _retrasar(motor, "service_incidents", "resolved_at", "id", h["caso"], horas=6 * 24)
     base, quien = _de("client", h)
+    # Dentro de su plazo se ofrece; pasado, no (y no por falta de quien lo resuelva).
+    assert (await _pedir(app, "GET", f"{base}/incident", quien)).json()["available_actions"] == ["appeal_incident"]
+    await _retrasar(motor, "service_incidents", "resolved_at", "id", h["caso"], horas=6 * 24)
     assert (await _pedir(app, "GET", f"{base}/incident", quien)).json()["available_actions"] == []
     r = await _hacer(app, "client", h, "incident/appeal", {"body": "No estoy de acuerdo con la decisión tomada."})
     assert r.status_code == 409 and _codigo(r) == "service_incident_appeal_not_allowed", r.text
@@ -1877,3 +1887,26 @@ async def test_la_resena_publica_no_dice_quien_la_escribio(atencion) -> None:
     # Moderación sí sabe de quién es.
     moderando = (await _pedir(app, "GET", RESENAS, h["jefa"], status="published")).json()["items"]
     assert [x["author_id"] for x in moderando if x["booking_id"] == h["reserva"]["id"]] == [h["cliente"]]
+
+
+async def test_la_evidencia_de_otro_caso_no_se_abre_por_la_reserva_propia(atencion) -> None:
+    """Tener una reserva con su caso no da acceso a las evidencias de OTRO
+    caso: la entrada tiene que ser del caso de esa reserva."""
+    app, motor, _ = atencion
+    mio = await _con_caso(app, motor)
+    ajeno = await _con_caso(app, motor, jefa=mio["jefa"], moderador=mio["moderador"])
+    base_ajena, otro = _de("client", ajeno)
+    async with _cliente(app, otro) as http:
+        r = await http.post(f"{base_ajena}/incident/evidence", files={"file": ("a.png", PNG, "image/png")},
+                            headers={"Idempotency-Key": _clave()})
+        assert r.status_code == 201, r.text
+        evidencia = [e for e in r.json()["entries"] if e["kind"] == "evidence"][0]["id"]
+    for rol in ("client", "provider"):
+        base, quien = _de(rol, mio)
+        r = await _pedir(app, "GET", f"{base}/incident/entries/{evidencia}/file", quien)
+        assert r.status_code == 404 and _codigo(r) == "service_incident_not_found", (rol, r.text)
+    # Tampoco administración con el caso equivocado; con el suyo, sí.
+    r = await _pedir(app, "GET", f"{CASOS}/{mio['caso']}/entries/{evidencia}/file", mio["jefa"])
+    assert r.status_code == 404, r.text
+    r = await _pedir(app, "GET", f"{CASOS}/{ajeno['caso']}/entries/{evidencia}/file", mio["jefa"])
+    assert r.status_code == 200, r.text
