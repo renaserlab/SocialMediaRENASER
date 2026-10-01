@@ -408,6 +408,38 @@ async def test_no_se_cancela_lo_que_ya_empezo_ni_lo_ajeno(atencion) -> None:
     assert (await _ver(app, "client", h))["status"] == "confirmed"
 
 
+async def test_nadie_actua_por_la_otra_parte_ni_termina_lo_que_no_empezo(atencion) -> None:
+    app, motor, _ = atencion
+    h = await _atendida(app, motor, hasta="code_issued")
+    # CON EL CÓDIGO EMITIDO PERO SIN EMPEZAR, ni se termina ni se confirma.
+    for rol, accion in (("provider", "complete"), ("client", "confirm")):
+        r = await _hacer(app, rol, h, accion)
+        assert r.status_code == 409 and _codigo(r) == "service_booking_action_not_available", (accion, r.text)
+    # EL PRESTADOR NO HACE LO DE QUIEN CONTRATA por su ruta, ni al revés: lo ajeno es un 404.
+    extrano = await _persona(motor)
+    for accion, cuerpo in (("check-in-code", None), ("confirm", None), ("reschedule", {"hold_id": str(uuid.uuid4())}),
+                           ("review", RESENA)):
+        for quien in (h["perfil"], extrano):
+            r = await _hacer(app, "client", h, accion, cuerpo, quien=quien)
+            assert r.status_code == 404 and _codigo(r) == "service_booking_not_found", (accion, r.text)
+    for accion, cuerpo in (("start", {"code": h["codigo"]}), ("complete", None), ("review/reply", {"reply": "Gracias."})):
+        for quien in (h["cliente"], extrano):
+            r = await _hacer(app, "provider", h, accion, cuerpo, quien=quien)
+            assert r.status_code == 404 and _codigo(r) == "service_booking_not_found", (accion, r.text)
+    assert (await _ver(app, "client", h))["care"]["attendance"]["status"] == "code_issued"
+    # Y EL CASO DE OTROS: ni abrirlo, ni escribir, ni retirarlo, ni apelarlo, ni declarar una ausencia.
+    ajeno = await _con_caso(app, motor, jefa=h["jefa"], moderador=h["moderador"])
+    for rol in ("client", "provider"):
+        for accion, cuerpo in (("incident", {"reason": "other", "description": DESCRIPCION}),
+                               ("incident/entries", {"body": "Hola."}), ("incident/withdraw", None),
+                               ("incident/appeal", {"body": "No estoy de acuerdo con la decisión tomada."}),
+                               ("no-show", None)):
+            r = await _hacer(app, rol, ajeno, accion, cuerpo, quien=extrano)
+            assert r.status_code == 404, (rol, accion, r.text)
+    assert await _uno(motor, "select count(*) from public.service_incident_entries where incident_id = cast(:c as uuid)",
+                      c=ajeno["caso"]) == 0
+
+
 # =========================================================================== #
 # 3. Reprogramar
 # =========================================================================== #
