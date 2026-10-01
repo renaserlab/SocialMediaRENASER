@@ -93,6 +93,11 @@ Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
 antes de usarla, y sigue funcionando cuando no lo está. Al 01/10/2026 la
+última **escrita** es la **0094** (atención, posventa y cierre, Incremento 6
+de Servicios), que **NO está aplicada**: se probó solo contra PostgreSQL
+local, y sin ella la contratación sigue y la atención contesta 503; hay que
+aplicarla **antes** de desplegar el código y reiniciar la API después (ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §96](Z_SERVICIOS_ARQUITECTURA.md)). La
 última **escrita y aplicada** es la **0093** (reserva y contratación,
 Incremento 5 de Servicios): ejecutada a mano en Supabase y verificada en solo
 lectura **sin divergencias**, también con las puertas de esquema y la conexión
@@ -167,12 +172,18 @@ Todas nacen apagadas y se encienden por entorno.
 | `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
 | `feature_services` | Z Servicios: la admisión de prestadores, el catálogo, el descubrimiento, la agenda y la reserva (Incrementos 1–5). **Apagada por defecto** (`False`). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni la contratación**: esta necesita además `feature_service_booking`. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
-| `feature_service_booking` | Contratar Servicios: apartar un horario, confirmar lo **gratuito** y consultar reservas (Incremento 5). **Apagada por defecto.** Necesita `feature_services` y la 0093; apagada, sus rutas contestan 503 `service_booking_disabled` sin mirar la base y los horarios no ofrecen «Continuar». **No cobra nada.** |
+| `feature_service_booking` | Contratar Servicios: apartar un horario, confirmar lo **gratuito** y consultar reservas (Incremento 5), y **atenderlas**: cancelar, reprogramar, asistencia, casos y reseñas (Incremento 6, que además necesita la **0094, sin aplicar**; sin ella, 503 `services_not_ready` solo en lo nuevo). **Apagada por defecto.** Necesita `feature_services` y la 0093; apagada, sus rutas contestan 503 `service_booking_disabled` sin mirar la base y los horarios no ofrecen «Continuar». **No cobra nada.** |
 | `feature_service_payments` | Cobrar un servicio. **Apagada.** Encenderla no basta: no hay adaptador (`ADAPTADORES_DE_COBRO` vacío) y la 0093 solo admite pedidos gratuitos. Lo que tiene precio contesta 503 `service_booking_payments_not_configured`. |
 | `service_payments_provider` | La pasarela de Servicios. **`none`**. |
 | `services_booking_hold_minutes` | Cuánto dura un horario apartado. **10** (provisional; decisión F1). |
 | `services_booking_max_active_holds` | Cuántos horarios apartados a la vez por persona. **3** (provisional; decisión F2). |
 | `services_booking_instant_modalities` | Modalidades que se confirman sin el prestador. **`virtual,in_person`**: a domicilio necesita su aprobación, que no existe (decisión F3). |
+| `services_attention_checkin_minutes` · `services_attention_tolerance_minutes` | Cuándo se abre la llegada de una atención y la tolerancia antes de poder declarar una ausencia. **15** y **15** (provisionales; decisión G3). |
+| `services_attention_confirmation_hours` | Plazo de quien contrata para confirmar; pasado, un barrido cierra la atención **solo** si empezó con el código y no tiene un caso vivo. **24** (provisional; G4). |
+| `services_booking_reschedule_max` · `services_booking_reschedule_min_hours` | Cuántas veces reprograma quien contrata y con qué antelación. **1** y **24** (provisionales; G2). |
+| `services_booking_reminder_hours` | Con cuánta antelación se recuerda una reserva, **si alguien lanza el barrido** (nadie lo llama). **24** (provisional; G12). |
+| `services_incident_window_hours` · `services_incident_appeal_days` · `services_incident_appeals_max` | Plazo para abrir un caso, plazo para apelar y cuántas apelaciones (0 o 1; con una sola persona en administración no se ofrece). **48**, **5** y **1** (provisionales; G7, G8). |
+| `services_review_window_days` · `services_reviews_premoderation` | Plazo para reseñar una atención cerrada y si la reseña espera a moderación. **30** y **`True`** (provisionales; G11). |
 | `services_agenda_notice_minutes` | Antelación mínima de un horario de Servicios. **120** (provisional del documento de reglas; decisión E1). |
 | `services_agenda_horizon_days` | Hasta cuántos días por delante se ofrecen horarios. **60** (provisional; decisión E2). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |

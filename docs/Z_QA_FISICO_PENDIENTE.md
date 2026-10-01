@@ -1757,3 +1757,142 @@ Antes de empezar:
 - [ ] En inglés y portugués no queda ningún texto en español ni códigos
       (`service_…`, `hold_…`), ni un «0» o «Gratis» donde el precio es a
       consultar.
+
+## Z Servicios · Incremento 6 — atención, posventa y cierre (01/10/2026)
+
+**Nada de esta sección está comprobado en un teléfono: el QA físico está
+pendiente.** Y, a diferencia de los incrementos anteriores, **la 0094 NO está
+aplicada** en Supabase: sin ella nada de esto se puede probar fuera de una
+base local. Las pruebas automáticas cubren la migración, el dominio, las
+carreras contra PostgreSQL, la API, el recorrido con la API real reiniciada
+(89 de 89 comprobaciones) y el código de las pantallas
+(`Z_SERVICIOS_ARQUITECTURA.md` §98).
+
+Antes de empezar:
+
+- Aplicar la **0094** en la base del QA y verificarla
+  (`Z_SERVICIOS_ARQUITECTURA.md` §96–§97), **antes** de arrancar el código
+  nuevo, y **reiniciar la API** después: la puerta recuerda el «no».
+- La API de ese entorno corre el código de `Edson` con `FEATURE_SERVICES=true`
+  y `FEATURE_SERVICE_BOOKING=true` **solo allí**. `FEATURE_SERVICE_PAYMENTS`
+  apagada y `SERVICE_PAYMENTS_PROVIDER=none`, como en todas partes.
+- Lo del Incremento 5: condiciones de contratación **de prueba** publicadas y
+  un prestador aprobado con un servicio **gratuito** en línea (60 min) y su
+  agenda.
+- **Dos personas en administración** (para la apelación), una de moderación,
+  el prestador y dos personas sin prestador, con al menos dos teléfonos.
+- Para no esperar: reservar un horario **cercano** (la llegada se abre 15
+  minutos antes) o bajar las ventanas en ese entorno
+  (`SERVICES_ATTENTION_CHECKIN_MINUTES`, `SERVICES_ATTENTION_TOLERANCE_MINUTES`,
+  `SERVICES_ATTENTION_CONFIRMATION_HOURS`). Nadie llama a los barridos: se
+  lanzan a mano desde administración.
+
+### Con una bandera apagada o sin la 0094
+
+- [ ] Sin la 0094 (y con las banderas encendidas): se contrata como en el
+      Incremento 5; la reserva se ve **sin** el panel de la atención y sin
+      botones de cancelar, cambiar el horario ni reportar. La ficha no enseña
+      la sección de reseñas. Nada se cierra ni da error.
+- [ ] Aplicada la 0094 **sin reiniciar** la API: sigue igual. Reiniciada:
+      aparece el panel.
+- [ ] Con `FEATURE_SERVICE_BOOKING` apagada: «Mis reservas» dice que aún no
+      están disponibles; la ficha sigue, sin reseñas.
+
+### Cancelar y cambiar el horario
+
+- [ ] Reserva a varios días: el panel ofrece «Cancelar la reserva» y cambiar
+      el horario, con hasta cuándo se puede cada cosa y «no tiene costo».
+- [ ] Cambiar el horario: lleva a los horarios del servicio, se elige otro, se
+      confirma el cambio. La reserva conserva su **código**, sus condiciones y
+      su precio; el horario anterior vuelve a ofrecerse en el otro teléfono.
+      Un segundo cambio ya no se ofrece.
+- [ ] El prestador recibe el aviso del cambio y, al tocarlo en la bandeja,
+      llega a la reserva.
+- [ ] Cancelar como quien contrata: pide confirmación, deja elegir un motivo;
+      la reserva queda «Cancelada», sin acciones, y el horario vuelve.
+- [ ] Cancelar como prestador: no deja enviar sin explicar por qué. Quien
+      contrata recibe el aviso.
+- [ ] De una reserva **cancelada**, el prestador ya no ve la nota de quien
+      contrató; quien la escribió, sí.
+- [ ] Pasada la hora de inicio, cancelar ya no se ofrece.
+- [ ] Doble toque en «Cancelar» o en «Confirmar el cambio»: una sola vez.
+
+### La atención
+
+- [ ] Quince minutos antes: quien contrata ve «Mostrar mi código de
+      asistencia»; el código tiene seis cifras y es el mismo al volver a
+      pedirlo. En el teléfono del prestador **no aparece**.
+- [ ] El prestador escribe un código equivocado: se le dice, con los intentos
+      que quedan; al quinto, ya no vale ni el bueno.
+- [ ] «Empezar con el código» con el correcto: «En curso». «Empezar sin el
+      código» pide confirmación y lo explica.
+- [ ] El prestador termina: quien contrata recibe el aviso de que falta su
+      confirmación. Confirma: «Cerrada», y aparece la reseña.
+- [ ] Una atención empezada **sin** código y que nadie confirma: tras lanzar
+      «Recordar y cerrar lo pendiente», sigue sin cerrarse y el resultado la
+      cuenta como «sin verificar».
+- [ ] Una empezada **con** código y pasado el plazo: el barrido la cierra una
+      vez; lanzarlo otra vez no hace nada.
+- [ ] Un prestador **suspendido** no ve «Empezar».
+- [ ] Pasada la tolerancia sin que nadie empiece: las dos partes ven «no se
+      presentó»; declararlo pide confirmación y la otra parte recibe el aviso.
+
+### El caso
+
+- [ ] Con la atención empezada: «Reportar un problema con esta atención». Los
+      motivos son los de esa parte; una descripción corta no se envía.
+- [ ] Abierto: la otra parte recibe el aviso y ya no puede abrir otro; puede
+      escribir en ese. Quien contrata ya no puede confirmar.
+- [ ] «Añadir una evidencia»: una foto y un PDF entran; un archivo que no es
+      ni lo uno ni lo otro, no. Abrirla la muestra; el enlace deja de servir a
+      los dos minutos.
+- [ ] Una persona ajena con el enlace de la reserva: «No encontramos esa
+      reserva».
+- [ ] Administración › Servicios › «Casos»: el caso aparece, sin la
+      descripción en la lista. Dentro: el expediente entero. Una **nota
+      interna** no la ve ninguna de las partes.
+- [ ] Resolver: se elige qué se decide, el efecto en la atención y el efecto
+      económico solicitado; el texto deja claro que **no se mueve dinero**. Las
+      dos partes reciben el aviso y ven el estado «no aplica».
+- [ ] Apelar: una parte lo hace una vez. La persona que resolvió ve que la
+      apelación la resuelve otra; la otra persona la resuelve, y solo se le
+      ofrecen los efectos que el servidor acepta. Cerrado, ya no se apela.
+- [ ] Con **una sola** persona en administración, «Apelar la resolución» no
+      se ofrece.
+- [ ] Una persona de administración que es parte de la reserva no puede abrir
+      el expediente desde administración.
+- [ ] «Retirar el caso»: avisa de que ya no podrá abrir otro y de que la otra
+      parte conserva el suyo. Retirado, la otra parte sí puede reportar.
+- [ ] Pasado el plazo para reportar, solo se ofrece el motivo de seguridad.
+
+### La reseña
+
+- [ ] Con la atención cerrada: «Reseña» pide nota, si lo recomienda y un
+      comentario; los ejes son opcionales. Enviada, dice que está en revisión.
+- [ ] Antes de publicarse no aparece en la ficha y el prestador no la ve.
+- [ ] Administración › Servicios › «Reseñas»: publicarla. Aparece en la ficha
+      con su promedio, **sin el nombre** de quien la escribió. Sin reseñas, la
+      ficha dice «todavía no hay reseñas», nunca «0».
+- [ ] El prestador responde una vez; la respuesta se ve en la ficha.
+- [ ] Esconderla pide un motivo de la lista; deja de verse.
+- [ ] Una reserva cancelada o con una inasistencia no ofrece la reseña.
+
+### Avisos, cuenta y registros
+
+- [ ] Cada aviso, en la bandeja, lleva a su reserva o a su caso. El **push
+      abre la aplicación**, no la reserva (pendiente conocido).
+- [ ] Ningún aviso enseña una nota, un motivo, una dirección ni un código.
+- [ ] Quien contrata borra su cuenta con un caso ya pasado: su reseña y el
+      caso quedan sin su nombre; su evidencia ya no se puede abrir y la app lo
+      dice sin cerrarse.
+- [ ] En el panel de Supabase, el depósito `service-incident-evidence` es
+      **privado** y sus archivos no tienen URL pública.
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: las opciones de motivo, resultado y efecto se
+      anuncian como opciones; el código de asistencia se lee cifra a cifra;
+      las estrellas de la reseña dicen su valor.
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos
+      (`service_…`, `incident_…`), ni un «0,0» donde no hay reseñas, ni
+      «devuelto» o «reembolsado» en ningún estado.

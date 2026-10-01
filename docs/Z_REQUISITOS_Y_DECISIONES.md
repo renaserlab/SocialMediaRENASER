@@ -2788,3 +2788,147 @@ No hay cobro, pasarela, estados de pago, comisión, comprobantes,
 devoluciones, cancelación, reprogramación, aceptación del prestador,
 recordatorios, aviso de vencimiento, planificador del barrido, asistencia,
 reseñas de lo contratado ni posventa. **El Incremento 6 no se empezó.**
+
+> *Al 01/10/2026:* el Incremento 6 se implementó después (sección
+> siguiente). F1–F21 siguen pendientes tal como están; F6, F3, F13 y F18
+> se amplían en G1, G2, G14, G12 y G13 sin darse por resueltas.
+
+## Z Servicios, Incremento 6 — atención, cancelación, reprogramación, posventa y cierre (01/10/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte VI (§82 en adelante). **Implementado y probado en local** el 01/10/2026
+en `Edson`. **La migración 0094 NO está aplicada** y el QA físico está
+pendiente. El código sigue **sin desplegar**; `FEATURE_SERVICES`,
+`FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la
+pasarela, `none`. **No se movió dinero** y no se activó ningún pago.
+
+Se hizo con **YAGNI estricto** (instrucción expresa): lo necesario para
+recorrer de principio a fin una atención **gratuita**, segura y verificable.
+Lo demás está listado abajo como **no implementado**. Nada de lo que sigue es
+política definitiva: **G1–G16 son de la empresa**, y todas las anteriores
+(C1–C15, D1–D15, E1–E12, F1–F21) **siguen pendientes tal como estaban**.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Estados pequeños y explícitos, con una sola autoridad | Tres mapas (atención, caso, reseña) en `atencion_models.py`; `atencion.acciones_disponibles` decide qué se puede hacer y las transiciones comprueban lo mismo |
+| La base impone lo crítico | Saltos de la atención y del caso por disparador; reseña solo con atención cerrada; un caso por reserva sin contar los retirados; expediente inmutable; nada se borra suelto; el efecto económico no admite «ejecutado» |
+| Transiciones idempotentes y auditables | `Idempotency-Key` obligatoria; la misma clave con lo mismo es la misma petición; cada transición deja su línea en `service_booking_events`, que solo se añade |
+| `available_actions` calculadas por el dominio | En el detalle de la reserva (`care`) y en el expediente; la app no ofrece nada que no venga ahí |
+| Cancelar | Quien contrata o el prestador (que explica por qué), antes de la hora; el horario se libera en la misma transacción |
+| Reprogramar | Quien contrata, a un horario que ya apartó; mismo contrato; si falla, la reserva original sigue |
+| Asistencia | Código de seis cifras (señal fuerte), empezar con o sin él, terminar, confirmar, cierre automático solo con la señal fuerte |
+| Inasistencia | Declaración de una parte, pasada la tolerancia; se puede discutir con un caso |
+| Incidencias y evidencia privada | Un caso con su expediente; evidencia validada por bytes, en depósito privado, con ruta del servidor y enlace firmado de 120 s |
+| Resolución (sin confundir «resuelto» con «dinero devuelto») | Qué se decidió, por qué, quién, cuándo, efecto en la atención y efecto económico **solicitado** con su estado, por separado |
+| Apelación limitada y configurable | 0 o 1 (`SERVICES_INCIDENT_APPEALS_MAX`), dentro de su plazo; la resuelve otra persona |
+| Reseñas verificadas | Solo de una atención cerrada, una por reserva; promedio `null` sin reseñas; respuesta del prestador; moderación |
+| Avisos | 19 tipos, en es/en/pt, sin datos sensibles e idempotentes |
+| Tareas por lotes | `POST /admin/services/tasks/run`, idempotente; nadie lo llama todavía |
+| Puerta de esquema | Sin la 0094, 503 `services_not_ready`; nunca un 500 |
+| Preparación financiera sin mover dinero | Dos columnas en el caso y una función; ningún estado «ejecutado»; ninguna pasarela |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **Cuatro tablas, y ninguna de cancelaciones, reprogramaciones ni efectos
+   financieros.** Cancelar y reprogramar son un cambio controlado de la
+   reserva más su línea en el historial.
+2. **Reprogramar reutiliza la retención** del Incremento 5: quien contrata
+   aparta el horario nuevo y la reserva se mueve a esa retención.
+3. **El código de asistencia es la señal fuerte.** Sin él, la atención no se
+   cierra sola: hace falta quien contrata, o un caso.
+4. **Una inasistencia es una declaración**, no un fallo: no tiene
+   consecuencias y la otra parte puede discutirla.
+5. **Un caso por reserva, sin contar los retirados.** Quien retira el suyo no
+   le quita el suyo a la otra parte, pero ya no abre otro.
+6. **El tope de evidencias es de cada parte** (10), no del caso.
+7. **Una atención cerrada no se desmiente**, tampoco al resolver una
+   apelación. La apelación puede cambiar lo decidido y el efecto económico
+   solicitado; no el cierre de la atención.
+8. **Apelar solo se ofrece si hay otra persona en administración** que pueda
+   resolverlo. Con una sola, la primera resolución es definitiva.
+9. **Quien es parte de una reserva no lee ni decide** nada de ella desde
+   administración.
+10. **La reseña pública no dice quién la escribió**: no se inventó una
+    identidad pública para quien reseña.
+11. **Moderación previa encendida de fábrica**: una reseña no se ve hasta que
+    administración la publica.
+12. **El efecto económico es una solicitud.** Con todo gratuito, siempre «no
+    aplica». Las ramas «pendiente» y «bloqueado» existen para cuando haya
+    pagos y hoy no se alcanzan.
+13. **El depósito de evidencias entra en la baja de una cuenta**, como los de
+    documentos y de imágenes del catálogo. Por eso la 0094 se aplica **antes**
+    de desplegar el código.
+14. **De una reserva cancelada, el prestador deja de ver** la nota y la
+    dirección de quien contrató.
+
+### Pendiente de la empresa (nuevas)
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| G1 | **Cancelación**: quién, hasta cuándo y con qué consecuencias (amplía F6) | Quien contrata o el prestador (explicando por qué), hasta la hora de inicio, sin consecuencias. Administración no cancela desde la app |
+| G2 | **Reprogramación**: cuántas veces, con cuánta antelación y si el prestador puede pedirla (amplía F6) | Una vez y con 24 h (`SERVICES_BOOKING_RESCHEDULE_MAX`, 0–10; `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS`, 0–720). Solo quien contrata |
+| G3 | **Ventana de llegada y tolerancia** | 15 minutos antes y 15 de tolerancia (`SERVICES_ATTENTION_CHECKIN_MINUTES`, `SERVICES_ATTENTION_TOLERANCE_MINUTES`, 0–240) |
+| G4 | **Plazo de confirmación y cierre automático** | 24 h (`SERVICES_ATTENTION_CONFIRMATION_HOURS`, 1–720); solo se cierra sola con la señal fuerte y sin un caso vivo |
+| G5 | **Qué cuenta como prueba de asistencia** (código, QR, sala, ubicación) | Un código de seis cifras con cinco intentos. Ni QR, ni señales de la sala virtual, ni ubicación |
+| G6 | **Consecuencias de una inasistencia** (para quien contrata y para el prestador) | Ninguna: queda declarada y se puede discutir |
+| G7 | **Plazo y motivos de un caso** | 48 h desde que terminó (`SERVICES_INCIDENT_WINDOW_HOURS`, 1–720); los de seguridad, sin plazo; ocho motivos estables |
+| G8 | **Apelaciones**: cuántas, en qué plazo y quién las resuelve | Una (`SERVICES_INCIDENT_APPEALS_MAX`, 0–1), en 5 días (`SERVICES_INCIDENT_APPEAL_DAYS`, 1–60), y la resuelve **otra** persona |
+| G9 | **Si una apelación puede deshacer una atención dada por realizada** | No: cerrada es final. La apelación cambia la decisión y el efecto económico solicitado |
+| G10 | **Evidencias**: formatos, peso, cuántas y cuánto se conservan | PDF, JPEG, PNG y WebP, 10 MB, 10 por parte; sin plazo de conservación (ver F20 y F21) |
+| G11 | **Reseñas**: plazo, moderación previa, motivos para esconder, **identidad pública de quien reseña**, ejes | 30 días (`SERVICES_REVIEW_WINDOW_DAYS`, 1–365); moderación previa encendida (`SERVICES_REVIEWS_PREMODERATION`); seis motivos; **sin nombre**; cuatro ejes opcionales |
+| G12 | **Recordatorios y quién llama a los barridos** (amplía F13) | Un recordatorio 24 h antes (`SERVICES_BOOKING_REMINDER_HOURS`, 1–168), **solo si alguien lanza el barrido**: nadie lo llama |
+| G13 | **Qué pasa con un efecto económico solicitado cuando haya pagos** (amplía F18) | Nada: hoy siempre «no aplica». El punto de conexión con el adaptador de devoluciones está descrito, no construido |
+| G14 | **La aceptación del prestador** (a domicilio; amplía F3) | Sigue sin existir: a domicilio no se contrata |
+| G15 | **Quién decide en administración y cuántas personas hacen falta** | Solo `admin`. Con una sola persona **no hay apelaciones**: hacen falta dos antes de encender la contratación si se quieren |
+| G16 | **La baja de una cuenta con un caso vivo o con evidencias** (junto a F20 y F21) | La de quien contrata se lleva sus evidencias (el expediente conserva la fila, sin su archivo) y deja el caso y la reseña sin su nombre |
+
+> **F21 sigue pendiente, y ahora pesa más.** La baja de quien presta se sigue
+> llevando sus servicios y, con ellos, sus reservas pasadas, sus pedidos, lo
+> que aceptó quien contrató y, desde este incremento, **sus atenciones, sus
+> casos con sus resoluciones y sus reseñas**. No se modificó la 0090 ni se
+> diseñó una solución: es una decisión legal de la empresa.
+>
+> **Recomendación técnica** (no es una decisión): conservar las reservas, lo
+> aceptado y las resoluciones **anonimizados** (el prestador en `NULL`, como
+> ya se hace con quien contrata), y borrar solo lo personal (la nota, la
+> dirección, las evidencias). Exige alterar la clave de la 0090 y decidir el
+> plazo de conservación.
+
+Siguen siendo de la empresa, además: **C1–C15, D1–D15, E1–E12 y F1–F21**,
+ninguna resuelta en este incremento; **C15** antes de encender Servicios (D6);
+el **destino del push**; **publicar las condiciones de contratación** (F9); y
+el **planificador** (F13, G12).
+
+### No implementado, a propósito (YAGNI)
+
+Mencionado en el alcance y **no necesario** para una atención gratuita
+verificable:
+
+- la **aceptación manual del prestador** (a domicilio sigue sin contratarse);
+- la **reprogramación pedida por el prestador** y la **cancelación directa
+  por administración**;
+- **QR**, señales de entrada a la sala de **100ms** y **geolocalización**
+  como prueba de asistencia;
+- **cambios de alcance** de una atención ya contratada;
+- **pedidos con precio**, cobro, comisión, saldos, el adaptador de
+  devoluciones, webhooks, transferencias y conciliación;
+- un **índice de desempeño** del prestador, **alertas de riesgo** y la nota
+  ajustada;
+- **fotos o archivos en una reseña** y la edición de la respuesta;
+- el **planificador** de los barridos y el **push con destino**;
+- una **pantalla de configuración** de la política (son variables de
+  entorno), el enlace a **mensajes** por reserva y «añadir al calendario».
+
+### Límites del Incremento 6
+
+- **La 0094 no está aplicada.** Sin ella, la contratación sigue y la atención
+  contesta 503.
+- **No hay QA físico.**
+- **Nada mueve dinero** y ningún estado dice que se movió.
+- Lo conocido y no corregido (bajo, ver `Z_SERVICIOS_ARQUITECTURA.md` §99):
+  una reserva ya recordada y después reprogramada no se vuelve a recordar; una
+  atención terminada sin código que nadie confirma se queda `completed`; un
+  caso decidido impide abrir otro, también por seguridad; el prestador ve en
+  el historial que hay una reseña antes de que se publique (no su contenido).

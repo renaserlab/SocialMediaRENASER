@@ -263,7 +263,7 @@ class Settings(BaseSettings):
 
     #: LA ATENCIÓN Y LA POSVENTA DE SERVICIOS (Incremento 6). TODOS
     #: PROVISIONALES: son los de la «política operativa v1» del alcance, no
-    #: decisiones tomadas aquí (`docs/Z_REQUISITOS_Y_DECISIONES.md`, G1–G12).
+    #: decisiones tomadas aquí (`docs/Z_REQUISITOS_Y_DECISIONES.md`, G1–G16).
     #: Se leen y se acotan en `services/reserva_politica.py`.
     #: Minutos antes de la hora en que se abre la llegada, y la tolerancia.
     services_attention_checkin_minutes: int = 15

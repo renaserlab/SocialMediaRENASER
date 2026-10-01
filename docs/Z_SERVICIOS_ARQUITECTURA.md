@@ -1,4 +1,4 @@
-# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2), descubrimiento (Incremento 3), agenda (Incremento 4) y reserva (Incremento 5)
+# Z Servicios: admisión de prestadores (Incremento 1), catálogo (Incremento 2), descubrimiento (Incremento 3), agenda (Incremento 4), reserva (Incremento 5) y atención y posventa (Incremento 6)
 
 Qué se construyó, qué impone la base, qué se decidió en cerrado y qué sigue
 esperando a una persona. La Parte I se escribió el 29/09/2026 al cerrar el
@@ -10,7 +10,9 @@ implementado y probado y, ese mismo día, técnicamente cerrado con la 0092
 aplicada y verificada (§61); y la **Parte V** (§62 en adelante), también el
 30/09/2026, con el Incremento 5 implementado y probado y, tras ejecutarse la
 0093 a mano y verificarse el 01/10/2026 (02:13 UTC), **técnicamente cerrado**
-(§80).
+(§80); y la **Parte VI** (§82 en adelante), el 01/10/2026, con el Incremento 6
+**implementado y probado en local**: su migración, la **0094, no está
+aplicada**.
 
 ## Estado
 
@@ -28,10 +30,12 @@ aplicada y verificada (§61); y la **Parte V** (§62 en adelante), también el
 | **Migración 0092** | **APLICADA** a mano en Supabase y verificada el 30/09/2026 en solo lectura: **sin divergencias** (§61). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita. Al desplegar `Edson`, reiniciar la API |
 | **Incremento 5 (reserva y contratación)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§80). Retener, resumen, condiciones versionadas, confirmar lo gratuito, mis reservas, la bandeja del prestador y la supervisión |
 | **Migración 0093** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (02:13 UTC) en solo lectura: **sin divergencias** (§80). Las cinco puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita. El código que la usa está en `Edson`, **sin desplegar**: producción todavía no la conoce |
+| **Incremento 6 (atención, posventa y cierre)** | **implementado y probado; pendiente de aplicar y verificar la migración 0094 y de realizar el QA físico** (§82–§101). Cancelar, reprogramar, el código de asistencia, empezar, terminar y confirmar, la inasistencia, el caso con su expediente y sus evidencias privadas, la resolución y la apelación, la reseña verificada con su moderación, 19 avisos y los barridos. Con YAGNI estricto: lo no necesario para una atención gratuita no se construyó (§100) |
+| **Migración 0094** | **SIN APLICAR.** Escrita y probada solo contra PostgreSQL local. Sin ella, la contratación sigue y la atención contesta 503 `services_not_ready` (§82). Cómo aplicarla, en §96: **antes de desplegar**, y reiniciando la API después |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
-| **QA físico** | pendiente de los cinco incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
+| **QA físico** | pendiente de los seis incrementos: `docs/Z_QA_FISICO_PENDIENTE.md`, sección de Servicios |
 
 ## 1. Lo que NO es
 
@@ -2456,7 +2460,7 @@ incremento tal como se escribió; donde decía «sin aplicar», manda §80.
 | **Dinero** | **Ninguno.** Solo se contrata lo **gratuito**. Lo que tiene precio se aparta y se detiene: 503 `service_booking_payments_not_configured`, sin pedido ni reserva. «A consultar» y «desde» no se apartan (409). La base **no admite** un pedido con precio, cobro o pasarela |
 | **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
 | **QA físico** | **pendiente** (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 5») |
-| **Incremento 6** | **no se empezó** (§78) |
+| **Incremento 6** | Al escribirse esta parte no se había empezado (§78). Se implementó después, el 01/10/2026: **Parte VI** |
 
 ## 63. El modelo (6 tablas, 0093)
 
@@ -2921,6 +2925,11 @@ todas las rutas y claves de texto existen.
 
 ## 78. Qué queda para el Incremento 6 (no empezado)
 
+> *Al 01/10/2026:* el Incremento 6 se implementó después (Parte VI). De
+> esta lista llegaron cancelar y reprogramar, los recordatorios, la
+> asistencia y el cierre, las reseñas y la posventa; **no** la aceptación
+> del prestador, el cobro ni el planificador (§100).
+
 Cancelar y reprogramar (con su política, F6), la aceptación del prestador y
 lo que queda pendiente de ella (a domicilio, F3), el cobro real (estados de
 pago, pasarela, comisión, costo de pasarela, comprobantes, devoluciones:
@@ -2939,7 +2948,8 @@ de lo contratado y posventa.
 - Condiciones de contratación (`booking_terms`): **ninguna publicada**.
 - Decisiones **F1–F21** de la empresa (`Z_REQUISITOS_Y_DECISIONES.md`); la
   **F21**, resaltada en §81.
-- **No se empezó el Incremento 6.**
+- **No se empezó el Incremento 6** (al cerrarse el 5; se implementó después:
+  Parte VI).
 
 ## 80. Cierre técnico del Incremento 5 (01/10/2026)
 
@@ -3159,7 +3169,684 @@ Nada de esto se resolvió en el cierre, a propósito:
 - **Pagos, Stripe, comisiones, comprobantes y reembolsos**: no existen para
   Servicios, y la base no admite un pedido con precio.
 - **Cancelar y reprogramar, la aceptación manual del prestador, la
-  asistencia, las reseñas y la posventa**: Incremento 6, **no empezado**.
+  asistencia, las reseñas y la posventa**: Incremento 6, **no empezado** al
+  cerrarse el 5. Se implementó después (Parte VI), salvo la aceptación del
+  prestador.
 - **El QA físico** de los Incrementos 1–5 (`Z_QA_FISICO_PENDIENTE.md`).
 - **Desplegar `Edson`**: no hubo push ni despliegue. Al hacerlo, la API
   arranca de nuevo y la puerta mira la base entonces.
+
+# Parte VI · Incremento 6: atención, cancelación, reprogramación, posventa y cierre
+
+Escrito el 01/10/2026 en la rama `Edson`, con el Incremento 6 **implementado y
+probado en local**. **La migración 0094 NO está aplicada**: ni en Supabase ni
+en ningún otro sitio que no sea el PostgreSQL desechable de las pruebas. El
+código está **sin desplegar** (sin push, PR ni merge) y **no mueve dinero**.
+
+Se hizo con **YAGNI estricto**, a petición expresa: solo lo necesario para
+recorrer de principio a fin una atención **gratuita**, segura y verificable.
+Lo que el alcance menciona y no hacía falta para eso **no se implementó** y
+está listado en §100.
+
+## 82. Estado del Incremento 6
+
+| | |
+|---|---|
+| **Qué hace** | Sobre una reserva confirmada (Incremento 5): **cancelarla** o **cambiarle el horario** antes de que empiece; el **código de asistencia** de quien contrata; el prestador **empieza** y **termina**; quien contrata **confirma** (o un barrido la cierra, solo con la señal fuerte); declarar una **inasistencia**; abrir un **caso** con su expediente y sus **evidencias privadas**; administración **resuelve**, una parte **apela** una vez y resuelve otra persona; la **reseña verificada**, la respuesta del prestador y su **moderación**; recordatorios; y 19 avisos |
+| **Migración 0094** | **SIN APLICAR.** Escrita y probada solo en local. Cómo se aplica, en §96; qué se consulta después, en §97 |
+| **Sin la 0094** | La contratación del Incremento 5 **sigue funcionando**: el detalle de una reserva trae `care: null` y la app no ofrece ninguna acción nueva. Las 33 rutas privadas de la atención contestan **503 `services_not_ready`** sin escribir nada; las reseñas públicas contestan 200 con `available: false`; la ficha dice 0 reseñas y promedio `null`. Nunca un 500 |
+| **Banderas** | Las mismas: `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` **apagadas**, `FEATURE_SERVICE_PAYMENTS` **apagada**, `SERVICE_PAYMENTS_PROVIDER=none`. **No hay bandera nueva**: la atención va con la contratación. Apagadas: 503 `services_disabled` / `service_booking_disabled`, antes de mirar la base |
+| **Dinero** | **Ninguno.** Nada se cobra, se devuelve, se retiene ni se transfiere. El «efecto económico» de un caso es una **solicitud** con su estado, y ese estado **no puede decir «ejecutado»** (§90) |
+| **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
+| **QA físico** | **pendiente** (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 6») |
+
+## 83. El modelo (4 tablas, 0094) y lo que cambia de la 0093
+
+Cuatro tablas nuevas, y ninguna más:
+
+| Tabla | Qué es |
+|---|---|
+| `service_attendances` | **La atención** de una reserva (su clave es la de la reserva): el estado, el código de asistencia y sus intentos, cuándo empezó y si fue **con el código** (la señal fuerte), cuándo terminó, la confirmación de quien contrata, el cierre (cuándo y por quién: `client`, `system` o `admin`) y la inasistencia |
+| `service_incidents` | **El caso**: uno por reserva **sin contar los retirados**. Quién lo abrió, el motivo, la descripción, su estado, lo resuelto (`outcome`), el efecto en la atención, el **efecto económico solicitado** y su estado, quién y cuándo resolvió, cuántas resoluciones (0–2) y la apelación |
+| `service_incident_entries` | **El expediente**, que solo se añade: `message`, `evidence`, `resolution`, `appeal` e `internal_note`, con su autor y su función. La evidencia guarda la ruta que genera el servidor, el tipo, el peso y la huella |
+| `service_reviews` | **La reseña verificada**: una por reserva, del servicio de esa reserva, con la nota (1–5), cuatro ejes opcionales, si lo recomienda, el comentario, el estado de moderación y la respuesta del prestador |
+
+**No hay tabla de cancelaciones, de reprogramaciones ni de efectos
+financieros.** Cancelar y reprogramar son un cambio **controlado** de
+`service_bookings` más su línea en `service_booking_events`; el efecto
+económico son dos columnas del caso. No se creó «un cuarto sistema
+financiero».
+
+**Lo que cambia de la 0093, y nada más** (ninguna columna nueva en sus tablas):
+
+- tres CHECK se amplían: el estado de la reserva admite `cancelled`, y el
+  historial admite las acciones y los roles (`provider`, `admin`) de este
+  incremento;
+- `servicios_reserva_inmutable()`: una reserva sigue sin reescribirse, salvo
+  **cancelarla** (cambia el estado y nada más) y **reprogramarla** (cambia su
+  retención y su horario y nada más: la duración, la versión, el precio y lo
+  aceptado no se tocan), y solo si la atención no empezó;
+- `servicios_retencion_salto_valido()`: una retención consumida se **libera**
+  cuando ya no hay una reserva confirmada sobre ella;
+- un disparador **diferido** nuevo (`service_bookings_coherentes_al_cambiar`):
+  al confirmar la transacción, una reserva cancelada no sigue ocupando su
+  horario y una reprogramada no sigue ocupando el anterior.
+
+**Después de la 0094, la 0093 ya no se reejecuta** encima (se niega, cerrada,
+sin cambiar nada): es deliberado y está probado. El orden es siempre
+0093 → 0094.
+
+La base impone, además: los saltos de la atención y del caso (§84), que una
+reseña **solo se guarda con su atención cerrada**, de quien contrató esa
+reserva y del servicio de esa reserva; que el expediente no se edita ni se
+borra suelto; que nada se borra si no es en cascada desde su reserva; RLS
+activa, **cero políticas** y cero permisos para `anon` y `authenticated`; y el
+depósito **privado** `service-incident-evidence` (PDF, JPEG, PNG y WebP,
+10 MB), sin políticas.
+
+De paso se cierra un permiso de la 0086: `servicios_borrado_solo_en_cascada()`
+era ejecutable por PUBLIC (inocuo: una función de disparador no se llama
+directamente).
+
+## 84. Estados: mapas pequeños y explícitos
+
+**La reserva**: `confirmed` → `cancelled` (final). Reprogramar no cambia el
+estado.
+
+**La atención** (`service_attendances.status`; sin fila = no empezó):
+
+| De | A |
+|---|---|
+| (sin fila) | `code_issued` (quien contrata pide su código), `in_progress` (el prestador empieza sin código), `no_show_client` / `no_show_provider` (una ausencia declarada) |
+| `code_issued` | `in_progress`, `closed`, `no_show_*` |
+| `in_progress` | `completed` (el prestador termina), `closed` (quien contrata confirma), `no_show_*` (solo por resolución) |
+| `completed` | `closed` (quien contrata, el barrido o una resolución), `no_show_*` (solo por resolución) |
+| `no_show_client` ↔ `no_show_provider` | entre sí y a `closed`, solo por resolución de administración |
+| `closed` | **final**. Una atención cerrada no se desmiente, tampoco al resolver una apelación |
+
+**El caso** (`service_incidents.status`): `open` → `resolved` | `withdrawn`;
+`resolved` → `appealed`; `appealed` → `closed`. `closed` y `withdrawn` son
+finales. Lo que lo abrió (reserva, quién, motivo, descripción) no se reescribe
+y una resolución no se borra. `open` y `appealed` son los **vivos**: mientras
+haya uno, la atención no se confirma ni se cierra sola.
+
+**La reseña** (`service_reviews.status`): `pending` (a la espera de
+moderación), `published`, `hidden`. Administración publica o esconde; nunca la
+borra ni la reescribe.
+
+**El efecto económico** (`financial_effect_status`): `not_applicable`,
+`pending`, `blocked`. No existe ningún valor que diga que se ejecutó, ni en el
+código ni en la base.
+
+## 85. Lo que se puede hacer lo dice el servidor
+
+`atencion.acciones_disponibles` es la **única autoridad**: calcula, para quien
+mira, qué puede hacer **ahora** con esa reserva, y cada transición comprueba
+exactamente lo mismo. Viaja en el detalle de la reserva (`care.available_actions`)
+y en el expediente del caso. La app **no ofrece nada que no esté ahí** y no
+decide por la hora del teléfono ni por el estado.
+
+| Acción | Quién | Cuándo |
+|---|---|---|
+| `cancel` | quien contrata o el prestador | confirmada, sin empezar y **antes de la hora de inicio** |
+| `reschedule` | quien contrata | confirmada, sin empezar, con la antelación mínima, sin haber agotado sus cambios y si el servicio sigue publicado en **la misma versión** |
+| `issue_code` | quien contrata | desde que se abre la llegada hasta el final de la sesión |
+| `start` | el prestador, **activo** | en esa misma ventana |
+| `complete` | el prestador | en curso |
+| `confirm` | quien contrata | en curso o terminada, **sin un caso vivo** |
+| `report_absence` | cualquiera de los dos | pasada la tolerancia, si no empezó |
+| `open_incident` | cualquiera de los dos | desde la hora de inicio, si no hay un caso vivo o decidido y **no retiró el suyo** |
+| `add_incident_entry` | cualquiera de los dos | con el caso vivo |
+| `withdraw_incident` | quien lo abrió | mientras nadie lo haya resuelto |
+| `appeal_incident` | cualquiera de los dos | resuelto una vez, dentro del plazo, con las apelaciones encendidas y **si hay otra persona que pueda resolverlo** |
+| `review` | quien contrata | atención **cerrada**, sin reseña y dentro del plazo |
+| `reply_review` | el prestador | reseña publicada y sin respuesta |
+
+Además, `care.incident_reasons` dice con qué **motivos** se puede abrir un
+caso ahora (pasado el plazo ordinario, solo `safety`), y el expediente de
+administración dice qué puede hacer quien lo mira (`add_internal_note`,
+`add_incident_entry`, `resolve_incident`) y con qué efectos en la atención
+(`attention_effects`).
+
+## 86. Cancelar y reprogramar
+
+**Cancelar** (`POST …/cancel`): quien contrata o su prestador, antes de la
+hora de inicio y si la atención no empezó. Un motivo de la lista
+(`change_of_plans`, `unavailable`, `operational`, `other`) y una nota; **el
+prestador tiene que explicar por qué**. En una transacción: la reserva pasa a
+`cancelled`, **su horario se libera** (la retención vuelve a `released`) y
+queda la línea del historial. El pedido y lo aceptado **se conservan**. A la
+otra parte se le avisa. Su efecto económico es «no aplica».
+
+**Reprogramar** (`POST /services/me/bookings/{id}/reschedule`): solo quien
+contrata. Primero **aparta** el horario nuevo como en el Incremento 5 (una
+retención suya del mismo servicio) y después pide el cambio con esa retención.
+En una transacción: la retención nueva se consume, la reserva cambia de
+horario y la anterior se libera; si algo falla, **la reserva original sigue en
+pie**. **El contrato no cambia**: mismo pedido, misma reserva y mismo código,
+misma versión, mismo precio, mismas condiciones aceptadas, misma duración y
+modalidad. Si el servicio publicó otra versión, **409
+`service_booking_version_changed`**: no se reprograma a otro contrato. El
+horario nuevo se vuelve a calcular con la agenda de ahora.
+
+Provisionales (decisiones G1 y G2): **una** reprogramación y **24 horas** de
+antelación; cancelar, hasta la hora de inicio y sin consecuencias (lo gratuito
+no tiene ninguna). El prestador **no reprograma** (no se implementó).
+
+## 87. La asistencia: llegar, empezar, terminar, confirmar
+
+- **El código de asistencia.** Desde 15 minutos antes de la hora y hasta el
+  final de la sesión, quien contrata pide su código: **seis cifras**, del
+  servidor; pedirlo otra vez devuelve el mismo. Lo ve en su reserva; **el
+  prestador nunca lo recibe** por ninguna respuesta ni por el historial.
+- **Empezar.** El prestador empieza con el código (lo enseña o lo dicta quien
+  contrata): es la **señal fuerte**. Cinco intentos, comparación en tiempo
+  constante; un intento fallido **se guarda** y contesta 409 con los que
+  quedan; agotados, ni con el bueno. También puede empezar **sin código**: es
+  una declaración suya, la señal débil. Un prestador suspendido no empieza.
+- **Terminar.** El prestador marca la atención como realizada: `completed`. No
+  cierra nada ni libera nada.
+- **Confirmar.** Quien contrata confirma: `closed`, cerrada por `client`.
+- **El cierre automático.** Un barrido (§92) cierra las terminadas cuyo plazo
+  de confirmación pasó (24 h, provisional), **solo si empezaron con el código
+  y no tienen un caso vivo**. Sin la señal fuerte **no se cierran solas**: se
+  cuentan y esperan a quien contrata o a un caso.
+- **La inasistencia.** Pasada la tolerancia (15 min, provisional) y si no
+  empezó, cualquiera de las dos partes declara que la otra no vino. Es una
+  **declaración**, sin efecto económico; a la otra parte se le avisa y puede
+  discutirla abriendo un caso.
+
+No se implementó: QR, señales de sala de 100ms, geolocalización, ni que el
+prestador acepte la reserva (a domicilio sigue sin contratarse).
+
+## 88. El caso: expediente, evidencias, resolución y apelación
+
+- **Abrirlo**: una de las dos partes, desde la hora de inicio, con un motivo
+  de **su** lista y una descripción (20–2000). Motivos: `provider_absent`,
+  `client_absent`, `incomplete`, `different_service`, `quality`, `safety`,
+  `technical`, `other`; nadie se reporta ausente a sí mismo. Plazo: 48 h desde
+  que terminó (provisional); **los de seguridad no tienen plazo**.
+- **Uno por reserva, sin contar los retirados.** Con uno vivo o decidido no se
+  abre otro (tampoco por seguridad: se escribe en ese). Uno **retirado** no lo
+  impide a la otra parte; quien retiró el suyo ya no abre otro en esa reserva
+  (como mucho, dos por reserva).
+- **El expediente** solo se añade: mensajes de las dos partes y de
+  administración, evidencias, la resolución, la apelación y las **notas
+  internas**, que nunca salen de administración.
+- **La evidencia**: PDF o foto, validada **por sus bytes**; va al depósito
+  privado con una ruta que genera el servidor
+  (`<perfil>/<caso>/<uuid>.<ext>`); se sube antes de bloquear nada y, si su
+  fila no se llega a escribir, se borra; el mismo archivo dos veces es el
+  mismo. Hasta **10 por parte**. Se mira con un **enlace firmado que caduca en
+  120 segundos**, que piden las dos partes y administración. Nunca una URL
+  permanente, nunca en un aviso, nunca su ruta en una respuesta.
+- **Resolver** (solo administración): dice **por separado** qué se decidió
+  (`upheld`, `partially_upheld`, `rejected`) y por qué, su efecto en la
+  atención (`none`, `completed`, `provider_no_show`, `client_no_show`), el
+  efecto económico **solicitado** y su estado, quién y cuándo. Un caso abierto
+  queda `resolved`; uno apelado, `closed`. Si el efecto es `completed`, la
+  atención queda cerrada por `admin` y se puede reseñar. **Una atención ya
+  cerrada no se desmiente**: tampoco al resolver la apelación.
+- **Nadie resuelve lo suyo**: quien es parte de la reserva no resuelve, no
+  escribe ni **lee** el expediente de administración (409
+  `service_incident_resolver_conflict`); y quien resolvió no resuelve su
+  apelación.
+- **Apelar**: una vez (o ninguna: `SERVICES_INCIDENT_APPEALS_MAX`, 0–1), de
+  cualquiera de las partes, dentro de 5 días (provisional) y diciendo por qué.
+  **Solo se ofrece si en administración hay otra persona que pueda
+  resolverlo**; con una sola, la resolución es definitiva.
+- **Retirar**: quien lo abrió, mientras nadie lo haya resuelto.
+
+## 89. La reseña verificada y su moderación
+
+De una atención **cerrada**, de quien la contrató, **una por reserva** y
+dentro de 30 días (provisional). «Verificada» no es un campo que alguien pueda
+editar: **la base no guarda una reseña sin su atención cerrada**. Nota de 1 a
+5, cuatro ejes opcionales (cumplimiento, calidad, puntualidad, claridad), si
+lo recomienda y un comentario (20–2000).
+
+- **Moderación previa** (encendida de fábrica, provisional): nace `pending` y
+  nadie más la ve hasta que administración la publica. Apagada, nace
+  publicada.
+- **Lo público**: `GET /services/catalog/{id}/reviews`, sin sesión, con las
+  publicadas y su resumen. **Sin reseñas, el promedio es `null`, no cero.** La
+  ficha y el perfil del prestador dicen cuántas y su promedio.
+- **No dice quién la escribió.** La identidad pública de quien reseña es una
+  decisión pendiente (G11): la reseña pública no lleva ningún identificador de
+  su autor. Solo moderación lo sabe.
+- **El prestador responde una vez**, en público; no se reescribe.
+- **Administración** la publica o la esconde, con un motivo de una lista
+  cerrada al esconder (`personal_data`, `threat`, `hate`, `extortion`,
+  `off_topic`, `other`; **«es negativa» no existe**). No la borra ni la
+  reescribe, queda en el historial, y quien es parte no modera.
+
+## 90. El dinero: nada se mueve, y nada se finge
+
+- Solo se contrata lo gratuito (Incremento 5), así que hoy **todo** efecto
+  económico es `not_applicable`: el de cancelar, el de una inasistencia y el
+  de una resolución.
+- Una resolución puede **solicitar** `full_refund` o `partial_refund`. Su
+  estado lo decide **una sola función** (`atencion.estado_del_efecto`): sin
+  dinero en el pedido, `not_applicable`; con dinero y sin cobro disponible,
+  `blocked`; con dinero y cobro, `pending`, a la espera de un adaptador. Hoy
+  las dos últimas ramas son **inalcanzables**: no hay pedidos con importe.
+- **Ningún estado dice «ejecutado»**: ni el código, ni el contrato de la API
+  (pedirlo es un 422), ni la base (el CHECK no lo admite y la migración se
+  niega a terminar si lo admitiera).
+- No se llama a Stripe ni a ninguna pasarela, no se crea saldo, no se
+  compensa con otro módulo, no hay comisión, webhooks ni transferencias.
+  Tampoco se reutilizó el sistema de devoluciones de Cursos, Eventos o
+  Productos: no hay nada que devolver.
+- `GET /admin/services/incidents?with_financial_effect=true` es la vista de
+  «efectos solicitados»: de **lectura**.
+
+Cuando haya pagos, el punto de conexión es ese estado (`pending`) y el
+adaptador de devoluciones existente; está descrito, no construido (G13).
+
+## 91. Avisos (19 tipos)
+
+En la bandeja y por push, en **es, en y pt**, con el contenido **vacío**
+(`{}`): solo el tipo y la entidad a la que llevan (la reserva, o el caso para
+el equipo). Nunca una dirección, una nota, un motivo, una evidencia ni un
+código. Idempotentes: repetir una petición con su clave no vuelve a avisar.
+
+| Aviso | A quién |
+|---|---|
+| `service_booking_cancelled_provider` / `_client` | a la otra parte de quien cancela |
+| `service_booking_rescheduled_provider` | al prestador |
+| `service_booking_reminder_client` / `_provider` | a las dos partes, una vez |
+| `service_attention_completed_client` | a quien contrata: falta su confirmación |
+| `service_attention_absent_client` / `_provider` | a quien se declaró ausente |
+| `service_incident_opened_client` / `_provider` / `_team` | a la otra parte y a administración |
+| `service_incident_updated_client` / `_provider` | a la otra parte (mensaje, evidencia, retirada, apelación) |
+| `service_incident_resolved_client` / `_provider` | a las dos |
+| `service_incident_appealed_team` | a administración |
+| `service_review_available_client` | a quien contrata, al cerrarse la atención |
+| `service_review_received_provider` | al prestador, cuando la reseña se ve |
+| `service_review_replied_client` | a quien reseñó |
+
+Los avisos llevan a la reserva, al caso o, para el equipo, a la bandeja de
+casos. **El push sigue abriendo solo la aplicación** (pendiente desde el
+Incremento 1): el destino funciona desde la bandeja.
+
+## 92. La API (34 rutas) y la puerta
+
+Todas bajo `/api/v1`. Las de las partes existen dos veces, con el mismo
+contrato: `/services/me/bookings/{id}` (quien contrata) y
+`/services/provider/bookings/{id}` (el prestador).
+
+| Ruta | Quién |
+|---|---|
+| `POST …/cancel` | las dos partes |
+| `POST …/no-show` | las dos partes |
+| `POST …/incident` · `GET …/incident` | las dos partes |
+| `POST …/incident/entries` · `POST …/incident/evidence` | las dos partes |
+| `GET …/incident/entries/{entry_id}/file` | las dos partes (enlace firmado) |
+| `POST …/incident/withdraw` · `POST …/incident/appeal` | las dos partes |
+| `POST /services/me/bookings/{id}/reschedule` · `/check-in-code` · `/confirm` · `/review` | quien contrata |
+| `POST /services/provider/bookings/{id}/start` · `/complete` · `/review/reply` | el prestador |
+| `GET /services/catalog/{service_id}/reviews` | **público** |
+| `GET /admin/services/incidents` · `GET …/{incident_id}` | administración |
+| `POST /admin/services/incidents/{id}/entries` · `GET …/entries/{entry_id}/file` · `POST …/resolve` | administración |
+| `GET /admin/services/reviews` · `POST …/{review_id}/moderate` | administración |
+| `POST /admin/services/tasks/run` | administración (los barridos) |
+
+Y dos rutas del Incremento 5 cambian sin romper a nadie: el detalle de una
+reserva (de quien contrata y del prestador) trae ahora `care` (o `null` sin la
+0094), y la ficha y el perfil públicos traen `reviews: {count, average}`.
+
+**Respuestas**: 401 sin sesión; 403 a quien no es administración (el rol va
+antes que las puertas); **404** para lo ajeno y lo que no existe, sin decir
+cuál; **409** para lo que ya no se puede (con su código estable); **422** para
+lo mal formado y para la falta de `Idempotency-Key`; **503** con las banderas
+apagadas o sin la migración. Una evidencia que el almacén no puede guardar o
+firmar es un **502 `service_evidence_unavailable`**.
+
+**Toda transición lleva `Idempotency-Key`**: la misma clave con lo mismo es la
+misma petición (200, sin repetir nada ni volver a avisar); con otra acción,
+otra reserva u otro contenido, **409 `idempotency_key_reused`**.
+
+**La puerta de la 0094** (`esquema.hay_atencion`) exige la migración
+**completa por definición**: las 57 columnas y ninguna más, las claves con su
+acción al borrar, los 37 CHECK por su huella, los índices por su definición
+(entre ellos el único parcial del caso), los disparadores con su función y
+sus argumentos, los cuerpos de las funciones por su huella, RLS sin
+políticas, ningún permiso de fuera y el depósito privado; y la 0093 tal como
+la 0094 la deja. Ante la duda, no. El «sí» y el «no» se recuerdan hasta
+reiniciar; un error al mirar es un 503 y no se recuerda. **Si se retoca la
+0094 hay que recalcular esas huellas.** `hay_reservas` (Incremento 5) acepta
+la 0093 pura **y** la 0093 enmendada por la 0094, así que el código nuevo
+funciona antes y después de aplicarla.
+
+**Los barridos** (`POST /admin/services/tasks/run`, por lotes de 200, hasta
+1000): recuerdan las reservas que empiezan en las próximas 24 h (una vez cada
+una) y cierran las atenciones que se pueden cerrar. Idempotentes; **cada fila
+se confirma antes de pasar a la siguiente** (no retienen un lote de reservas
+bloqueadas); lo que otra petición tiene bloqueado se salta; lo que no se
+puede cerrar **no ocupa el lote**. **Nadie los llama todavía**: sin cron,
+Lambda ni EventBridge (decisión de la empresa, G12).
+
+## 93. Vistas y navegación (móvil)
+
+| Ruta de la app | Pantalla |
+|---|---|
+| `/servicios/reservas/[bookingId]` | la reserva de quien contrata, ahora con el panel de la atención (`AtencionDeLaReserva`): el código, los plazos, las acciones que manda el servidor, el caso y la reseña |
+| `/servicios/reservas/[bookingId]/cancelar` | cancelar, con lo que implica antes de confirmar |
+| `/servicios/reservas/[bookingId]/reprogramar` | reprogramar: lleva a los horarios del servicio en modo «cambiar horario» y confirma el cambio |
+| `/servicios/reservas/[bookingId]/caso` | abrir el caso o ver su expediente: mensajes, evidencias, retirar, apelar |
+| `/servicios/reservas/[bookingId]/resena` | escribir la reseña |
+| `/servicios/prestador/reservas/[bookingId]` | la reserva del prestador: empezar (con o sin código), terminar, declarar la ausencia, responder a la reseña |
+| `/servicios/prestador/reservas/[bookingId]/cancelar` · `/caso` | lo mismo, para el prestador |
+| `/admin/servicios/casos` · `/casos/[incidentId]` | la bandeja de casos (y la de efectos solicitados) y el expediente entero, con la resolución |
+| `/admin/servicios/resenas` | la moderación de reseñas |
+
+La ficha pública del servicio enseña las reseñas publicadas y su promedio
+(`ListaDeResenasDelServicio`), o «todavía no hay reseñas». Todo en es, en y
+pt. Ninguna pantalla decide por el estado ni por la hora del teléfono: lo que
+se ofrece sale de `available_actions`, `incident_reasons` y
+`attention_effects`.
+
+## 94. Privacidad y permisos
+
+- **Lo ajeno es un 404**: una tercera persona, otro prestador o administración
+  por las rutas de las partes.
+- **El código de asistencia** solo lo ve quien contrata, y solo hasta que la
+  atención empieza. No está en el historial, en los avisos ni en los
+  registros.
+- **Las notas internas** no salen de administración; **la ruta de una
+  evidencia** no sale del servidor.
+- **La nota y la dirección de quien contrata** son para atenderle: de una
+  reserva **cancelada**, el prestador deja de verlas.
+- **La reseña pública** no lleva el identificador de quien la escribió.
+- **Administración**: solo `admin` decide (la moderación de contenidos,
+  `moderator`, no entra). Quien es parte de una reserva no lee, escribe,
+  resuelve ni modera lo suyo.
+- **La bandeja de casos** no enseña la descripción ni nada privado de las
+  partes.
+- **La baja de una cuenta**: la de quien contrata se lleva **sus evidencias**
+  del depósito (el expediente conserva la fila, sin su archivo: pedir su
+  enlace es un 502) y deja la reseña y el caso **sin su nombre**; con una
+  atención por venir, la cuenta no se borra (como en el Incremento 5). La de
+  quien presta sigue llevándose todo lo de sus servicios (**F21, sin
+  resolver**).
+
+## 95. Concurrencia (probada con PostgreSQL de verdad)
+
+**Orden de los cerrojos**: la fila del servicio (solo al cancelar y al
+reprogramar, que tocan su horario) → la fila de la reserva (`FOR NO KEY
+UPDATE`) → las retenciones → el cerrojo de la persona → la búsqueda de la
+clave. Un cerrojo que no llega (55P03) o un interbloqueo (40P01) son **409
+`service_booking_busy`**, nunca un 500.
+
+| Carrera | Resultado |
+|---|---|
+| Cancelar y reprogramar a la vez | gana una; nada queda a medias |
+| Reprogramar dos veces a la vez | se mueve una vez |
+| Reprogramar mientras el prestador bloquea ese día | 409 o se mueve, coherente |
+| Empezar y cancelar a la vez | gana una |
+| Terminar, confirmar y abrir un caso a la vez | ningún 500, estado coherente |
+| Dos resoluciones a la vez | una resuelve; la otra, 409 |
+| Dos reseñas y dos respuestas a la vez | queda una |
+| Barridos a la vez, y mientras quien contrata confirma | cada atención se cierra **una** vez |
+| La misma clave cinco veces a la vez | una sola acción y un solo aviso |
+| Subir una evidencia con la reserva ocupada | 409, y el archivo no se queda |
+
+## 96. Cómo aplicar la 0094
+
+**No está aplicada.** Cuando la empresa lo decida, en este orden:
+
+1. Comprobar que la base tiene la **0086–0093** (la 0094 se niega sin ellas).
+2. **Antes de desplegar el código.** El código nuevo funciona sin la 0094
+   (§82), pero la baja de una cuenta recorre también el depósito
+   `service-incident-evidence`, que **no existe hasta aplicarla**. No se pudo
+   comprobar contra Supabase cómo contesta el listado de un depósito que no
+   existe; si fuera un error, las bajas fallarían (cerradas: no borran nada a
+   medias) hasta aplicar la migración. Aplicando primero la 0094, el riesgo
+   desaparece.
+3. Pegar el fichero **entero** en el editor SQL de Supabase y ejecutarlo: es
+   **una sola transacción**, comprueba lo anterior antes de crear nada y
+   verifica lo que dejó; si algo falla, no queda nada. Es reejecutable.
+4. Verificar (§97) en una sesión de **solo lectura**, también con el rol real
+   de la API (la puerta `hay_atencion` tiene que decir «sí»).
+5. **Reiniciar la API** (o desplegar `Edson`, que la reinicia): la puerta
+   recuerda el «no».
+6. Registrar su huella en `APLICADAS` (`test_servicios_migracion_0090.py`) y
+   repetir el recorrido de cierre.
+7. **Después**, y solo si la empresa lo decide: encender
+   `FEATURE_SERVICE_BOOKING` (con `FEATURE_SERVICES` y con las condiciones de
+   contratación publicadas, F9). Antes: que haya **al menos dos personas** en
+   administración si se quieren apelaciones (G8/G15), y decidir quién llama a
+   los barridos (G12).
+
+**Rollback**: el de la cabecera del fichero, **solo si no hay datos reales**
+(el bloque se niega si alguna tabla tiene filas, si hay una reserva cancelada
+o si el historial ya tiene acciones de este incremento). Después hay que
+**reejecutar la 0093 entera** (devuelve a sus dos funciones el cuerpo de la
+0093) y reiniciar la API. Probado en local. El bloque borra la fila del
+depósito con un `delete from storage.buckets`: las versiones recientes de
+Supabase pueden rechazarlo; en ese caso se quita esa línea y el depósito,
+vacío, se borra desde el panel (**no probado contra Supabase**). Con datos, lo
+que se hace es apagar `FEATURE_SERVICE_BOOKING`, no borrar.
+
+## 97. Verificar la 0094 (solo lectura)
+
+En una transacción `BEGIN READ ONLY`, tras comprobar que una escritura se
+rechaza (25006), y terminando con `ROLLBACK`:
+
+```sql
+-- 1. La puerta, con el rol de la API: tiene que decir true
+--    (las dos consultas de esquema.hay_atencion: _LA_RESERVA_CON_LA_0094 y
+--    _LO_QUE_NECESITA_LA_ATENCION).
+-- 2. Las cuatro tablas, con RLS y sin políticas.
+select c.relname, c.relrowsecurity,
+       (select count(*) from pg_policy p where p.polrelid = c.oid) as politicas
+  from pg_class c
+ where c.relname in ('service_attendances', 'service_incidents', 'service_incident_entries', 'service_reviews')
+   and c.relnamespace = 'public'::regnamespace;
+-- 3. Un caso por reserva sin contar los retirados: único y parcial.
+select pg_get_indexdef('public.service_incidents_una_por_reserva'::regclass);
+-- 4. El efecto económico no admite «ejecutado».
+select pg_get_constraintdef(oid) from pg_constraint where conname = 'service_incidents_estado_del_efecto';
+-- 5. Los tres CHECK ampliados de la 0093.
+select conname, pg_get_constraintdef(oid) from pg_constraint
+ where conname in ('service_bookings_estado', 'service_booking_events_accion', 'service_booking_events_rol');
+-- 6. El disparador diferido nuevo de la reserva.
+select tgname, tgdeferrable, tginitdeferred from pg_trigger
+ where tgname = 'service_bookings_coherentes_al_cambiar';
+-- 7. El depósito, privado, con su peso y sus formatos.
+select id, public, file_size_limit, allowed_mime_types from storage.buckets
+ where id = 'service-incident-evidence';
+-- 8. Nadie de fuera con permisos (0 filas).
+select table_name, grantee, privilege_type from information_schema.table_privileges
+ where table_schema = 'public'
+   and table_name in ('service_attendances', 'service_incidents', 'service_incident_entries', 'service_reviews')
+   and grantee in ('anon', 'authenticated', 'PUBLIC');
+-- 9. Vacías recién aplicada, y ninguna reserva cancelada.
+select (select count(*) from public.service_attendances) as atenciones,
+       (select count(*) from public.service_incidents) as casos,
+       (select count(*) from public.service_reviews) as resenas,
+       (select count(*) from public.service_bookings where status <> 'confirmed') as canceladas;
+```
+
+Y comparar el esquema entero con una referencia local 0001–0094, como en §61
+y §80.
+
+## 98. Pruebas, mutaciones y revisión (01/10/2026)
+
+Todo contra un PostgreSQL 17 **local y desechable** (contenedor de pruebas,
+borrado al terminar). Nada tocó Supabase.
+
+| Qué | Resultado |
+|---|---|
+| **La migración 0094** (`test_servicios_migracion_0094.py`): desde cero, igual al modelo por definición, sobre la 0093 vacía y con reservas, reejecutada con datos, con un fallo a mitad, sin cada dependencia, incompleta, la 0093 que ya no se reejecuta encima, el rollback de la cabecera, los saltos, las bajas en cualquier orden | **32 aprobadas** |
+| **Las reglas puras** (`test_servicios_atencion_reglas.py`): qué se puede hacer en cada momento, los plazos, la política y sus cotas, el efecto económico | **25 aprobadas** |
+| **La API real contra PostgreSQL** (`test_servicios_atencion_api.py`): el recorrido entero, cancelar, reprogramar, la asistencia, los barridos, la inasistencia, el caso, la resolución, la apelación, la reseña, la moderación, permisos, idempotencia, banderas, la puerta, la baja y las carreras | **49 aprobadas**, también **una a una** sobre una base recién montada |
+| **Backend completo con PostgreSQL** | **4276 aprobadas, 0 fallidas, 0 omitidas** |
+| **Backend completo sin PostgreSQL** | **3073 aprobadas, 0 fallidas (1203 omitidas por necesitar PostgreSQL)** |
+| **Móvil completo** (135 baterías) | **3646/3646** |
+| `tsc --noEmit` · Expo Doctor · exportación web (`EXPO_NO_DOTENV=1`) | limpio · 18/18 · correcta |
+| Paridad de traducciones es/en/pt y claves usadas | dentro del móvil completo, en verde |
+| Rutas de la API | 564 operaciones, **0 duplicadas** (134 de Servicios: 100 + 34) |
+| `git diff --check` · secretos en el cambio | limpio · ninguno |
+| **Recorrido con la API real** en su propio proceso | **89/89**, 517 peticiones, cuatro procesos, ningún 500 |
+
+**La primera regresión completa dejó dos pruebas en rojo**, las dos
+inventarios que no conocían el incremento: el de las rutas de Servicios (sin
+las 34 nuevas) y el de los depósitos que barre la baja (sin
+`service-incident-evidence`). Se pusieron al día.
+
+### El recorrido (local, API real)
+
+La API real (uvicorn) en su propio proceso, con las dos banderas encendidas
+**solo ahí**, sesiones HS256 con un secreto de usar y tirar y el almacén de
+pruebas:
+
+- **Sin la 0094**: se contrata como en el Incremento 5; `care` es nulo; las
+  33 rutas privadas contestan 503 `services_not_ready`; las reseñas públicas,
+  `available: false`; la ficha, 0 reseñas y promedio nulo.
+- **Se aplica la 0094 dos veces** con la API en marcha: el mismo proceso
+  **sigue en 503**. Se **reinicia**: la reserva contratada antes ofrece
+  cancelar y reprogramar.
+- **De punta a punta**: reprogramar (misma reserva, mismo código, el horario
+  anterior vuelve), el código, un código equivocado, empezar, terminar,
+  confirmar, la reseña pendiente, publicarla, verla sin sesión y sin autor,
+  responder, esconderla; cancelar cinco veces a la vez con la misma clave;
+  la inasistencia; el caso con su evidencia, su enlace firmado, la nota
+  interna, la resolución con una devolución solicitada («no aplica»), la
+  apelación resuelta por otra persona; retirar un caso sin quitárselo a la
+  otra parte; los barridos con lote de uno y cuatro a la vez; tres carreras.
+- **El dinero**: ninguna tabla de dinero cambió; todos los pedidos siguen
+  gratuitos; ningún efecto dice otra cosa que «no aplica».
+- **Los avisos**: todos con el contenido vacío; el historial y los registros,
+  sin la nota, la descripción del caso, la nota interna ni el código.
+- **Banderas**: con la contratación apagada, 503 `service_booking_disabled`;
+  con Servicios apagado, 503 `services_disabled`.
+
+### Mutaciones dirigidas
+
+En un **árbol de trabajo desechable** (nunca sobre el repositorio) y contra su
+propia base. **54 mutaciones, las 54 muertas.**
+
+- Las del encargo: cancelar lo ajeno o lo empezado; reprogramar sin soltar el
+  horario o a otra versión; empezar antes de tiempo; terminar sin empezar;
+  cada parte actuando por la otra; reseñar sin atención (en el dominio y en la
+  base) o dos veces; la evidencia de otro caso; las notas internas a las
+  partes; el depósito público; la ruta del archivo en la respuesta; un efecto
+  «ejecutado» (en el dominio y en la base); un efecto «pendiente» sobre algo
+  gratuito; una columna de importe; cerrar con un caso vivo (confirmando y en
+  el barrido) o sin la señal fuerte; el prestador viendo el código, un
+  código que no se bloquea y una ausencia antes de la tolerancia; un
+  recordatorio repetido; una clave que repite la acción; anunciar
+  «cancelar» o «confirmar» cuando no toca; dos
+  resoluciones; quien resolvió resolviendo su apelación; saltar la puerta o
+  no mirar sus funciones.
+- Las de cada corrección de la revisión (17) y cuatro de la app.
+
+En la primera pasada murieron 49. **Dos sobrevivieron** y dieron dos pruebas:
+leer la evidencia de otro caso por la reserva propia, y la ruta del archivo
+viajando en el cuerpo de una entrada (se miraba el nombre del campo, no su
+valor). **Tres no se podían juzgar**: su prueba dependía de que otra hubiera
+dejado antes a otra persona en administración; se corrigió y las 49 pruebas de
+la batería pasan también una a una. Repetidas, las cinco mueren.
+
+### Revisión independiente
+
+Una revisión adversarial de solo lectura sobre el cambio entero. **Ningún
+bloqueante; 2 altos, 8 medios y 9 bajos.** Cada alto y cada medio se
+reprodujo con una prueba en rojo antes de corregirlo:
+
+| | Hallazgo | Qué se hizo |
+|---|---|---|
+| A1 | El barrido de cierre se atascaba: lo que no se cierra solo ocupaba el lote para siempre | El lote solo trae lo que se puede cerrar; lo que espera se cuenta aparte |
+| A2 | Retirar un caso quemaba el único caso de la reserva, también para la otra parte | Índice único **parcial** en la 0094 (sin aplicar): uno por reserva sin contar los retirados |
+| M1 | El tope de evidencias era del caso: una parte dejaba a la otra sin poder aportar | Es de cada parte |
+| M2 | Un administrador que es parte leía el expediente con las notas internas | 409 también al leer |
+| M3 | Subir una evidencia con la reserva ocupada era un 500; el barrido retenía el lote | 409 `service_booking_busy`; el barrido confirma cada fila |
+| M4 | El efecto «se realizó» de la primera resolución es irreversible, y la pantalla ofrecía deshacerlo | Se mantiene (cerrada es final, G9) y **el servidor dice** qué efectos acepta |
+| M5 | Con una sola persona en administración, apelar dejaba el caso sin salida | Apelar solo se ofrece si hay otra persona; y es configurable (0 o 1) |
+| M6 | El prestador seguía viendo la nota y la dirección tras la cancelación | Ya no |
+| M7 | La reseña pública llevaba el identificador de quien la escribió | Quitado; solo en moderación |
+| M8 | Con el código desplegado antes de la 0094, la baja recorre un depósito que no existe | **No reproducible sin Supabase.** No se cambió código: se documenta el orden (§96). Si el listado fallara, la baja falla cerrada |
+
+De los bajos se corrigieron tres: una prueba que afirmaba lo que no
+comprobaba, los motivos anunciados fuera de plazo y la pantalla de
+administración que decidía por el estado. Los demás, en §99.
+
+## 99. Riesgos y limitaciones conocidas
+
+- **La 0094 no está aplicada ni verificada en Supabase.** Todo lo de esta
+  parte se probó en local. La puerta fija huellas de los CHECK y de las
+  funciones: es estricta a propósito y **frágil ante cualquier retoque** del
+  fichero (hay que recalcularlas).
+- **Aplicar la 0094 antes de desplegar** (§96, M8).
+- **F21 pesa más**: la baja de quien presta se lleva ahora también
+  atenciones, casos, resoluciones y reseñas.
+- **Con una sola persona en administración no hay apelaciones** (G15).
+- **Una atención cerrada no se desmiente** (G9): si la primera resolución la
+  dio por realizada, la apelación no lo cambia.
+- **Un caso decidido impide abrir otro**, también por seguridad: hay que
+  acudir a administración por fuera.
+- **Sin planificador**: los recordatorios y el cierre automático solo ocurren
+  si alguien lanza el barrido a mano.
+- **Una reserva recordada y después reprogramada no se vuelve a recordar.**
+- **Una atención terminada sin código que nadie confirma se queda
+  `completed`**: pasado el plazo del caso, solo se cierra con un caso de
+  seguridad o confirmando.
+- **El prestador ve en el historial** que existe una reseña antes de que se
+  publique (no su contenido).
+- **La baja de una parte con un caso vivo** borra sus evidencias y deja la
+  fila: el expediente queda incompleto (G16).
+- **Orden de cerrojos**: quien reprograma con una retención de **otro**
+  servicio mientras confirma esa misma retención puede cruzarse consigo
+  mismo; acaba en 409, no en 500.
+- **El rollback en Supabase** puede rechazar el borrado del depósito (§96).
+- **Lo construido de más para lo gratuito** (señalado por la revisión, y
+  dejado porque el encargo lo pide expresamente): el efecto económico
+  solicitado, los ejes de la reseña y la moderación previa, los recordatorios
+  sin planificador y los diez plazos configurables.
+- **C15** (D6) sigue pendiente antes de encender Servicios, y el **push**
+  sigue sin llevar al destino.
+
+## 100. Lo que NO se implementó (YAGNI) y sigue pendiente
+
+Por instrucción expresa, lo que no hacía falta para una atención gratuita
+verificable **no se construyó**:
+
+- la **aceptación manual del prestador** (a domicilio sigue sin contratarse,
+  F3/G14);
+- la **reprogramación pedida por el prestador** y la **cancelación por
+  administración**;
+- **QR**, señales de la sala de **100ms** y **geolocalización**;
+- **cambios de alcance** de una atención contratada;
+- **pedidos con precio**, cobro, comisión, saldos, el adaptador de
+  devoluciones, webhooks, transferencias y conciliación;
+- un **índice de desempeño**, **alertas de riesgo** y la nota ajustada;
+- **fotos en una reseña** y la edición de la respuesta;
+- el **planificador** de los barridos y el **push con destino**;
+- una **pantalla de configuración** de la política, mensajes por reserva y
+  «añadir al calendario».
+
+Y sigue pendiente, sin resolver aquí:
+
+> **F21 · La baja de quien presta se lleva su historia.** Sin cambios: no se
+> tocó la 0090. **Recomendación técnica** (no es una decisión): conservar las
+> reservas, lo aceptado y las resoluciones **anonimizados** y borrar solo lo
+> personal.
+
+- **G1–G16** (`Z_REQUISITOS_Y_DECISIONES.md`), además de C1–C15, D1–D15,
+  E1–E12 y F1–F21: ninguna se dio por resuelta.
+- **Aplicar y verificar la 0094**, y **reiniciar la API**.
+- **El QA físico** de los Incrementos 1–6.
+- **Desplegar `Edson`**: no hubo push ni despliegue.
+
+## 101. Estado y punto exacto de continuación
+
+- **Incremento 6 de Z Servicios implementado y probado; pendiente de aplicar
+  y verificar la migración 0094 y de realizar el QA físico.**
+- `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`
+  **apagadas**; `SERVICE_PAYMENTS_PROVIDER=none`; **no hubo despliegue**, ni
+  push, ni PR, ni merge.
+- **No se movió dinero**, no se escribió en Supabase y no se aplicó la 0094.
+- Siguiente paso, cuando la empresa lo decida: aplicar la 0094 (§96),
+  verificarla (§97) con el verificador de las anteriores adaptado, reiniciar
+  la API y repetir el recorrido.

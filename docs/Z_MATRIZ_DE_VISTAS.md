@@ -807,9 +807,9 @@ contratación».
 | 4 | Condiciones completas (de Z y del servicio), con versión y huella | `CondicionesDeLaContratacionScreen` (`…/[holdId]/condiciones`) | `GET …/checkout` |
 | 5 | Confirmada / con precio, detenida | `ReservaScreen` con `?confirmada=1` / el estado «Todavía no se puede pagar en Z» del resumen | `POST …/confirm` (201 / 503) |
 | 6 | Mis reservas (por venir, pasadas) | `MisReservasScreen` (`app/servicios/reservas/index.tsx`) | `GET /services/me/bookings` |
-| 7–8 | Detalle, lo aceptado e historial | `ReservaScreen` (`app/servicios/reservas/[bookingId].tsx`) | `GET /services/me/bookings/{id}` |
+| 7–8 | Detalle, lo aceptado e historial | `ReservaScreen` (`app/servicios/reservas/[bookingId]/index.tsx`) | `GET /services/me/bookings/{id}` |
 | 9 | Reservas de mis servicios (prestador activo o suspendido) | `ReservasDelPrestadorScreen` (`app/servicios/prestador/reservas/index.tsx`) | `GET /services/provider/bookings` |
-| 10 | Detalle limitado del prestador | `ReservaDelPrestadorScreen` (`…/prestador/reservas/[bookingId]`) | `GET /services/provider/bookings/{id}` |
+| 10 | Detalle limitado del prestador | `ReservaDelPrestadorScreen` (`…/prestador/reservas/[bookingId]/index.tsx`) | `GET /services/provider/bookings/{id}` |
 | 11 | Supervisión de reservas y retenciones (A04) y el barrido | `AdminReservasDeServiciosScreen` (`app/admin/servicios/reservas.tsx`) | `GET /admin/services/bookings`, `GET /admin/services/holds`, `POST /admin/services/holds/expire` |
 | + | Condiciones de contratación | `AdminServiciosCondicionesScreen tipo="booking_terms"` (`app/admin/servicios/condiciones-de-contratacion.tsx`) | `GET /admin/services/policies?kind=booking_terms`, `POST …/booking-terms/draft`, editar, previsualizar y publicar |
 
@@ -826,3 +826,53 @@ Cobro, pasarela, «pendiente de pago», cancelar, reprogramar, la aceptación de
 prestador (a domicilio), recordatorios, aviso de vencimiento, mensajes por
 reserva, asistencia, reseñas de lo contratado, comprobantes, devoluciones y
 finanzas del prestador. El push abre la aplicación, no la reserva.
+
+> *Al 01/10/2026:* cancelar, reprogramar, los recordatorios, la asistencia y
+> las reseñas de lo contratado llegaron con el Incremento 6 (sección
+> siguiente), con la 0094 **sin aplicar**.
+
+## Servicios · Incremento 6: atención, posventa y cierre (01/10/2026)
+
+Backend real detrás de `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` (las dos
+apagadas). Usa la **0094, SIN APLICAR** (`Z_SERVICIOS_ARQUITECTURA.md` §96):
+sin ella, el detalle de una reserva trae `care: null`, ninguna de estas vistas
+ofrece nada y sus rutas contestan 503. El código está sin desplegar y ninguna
+vista se probó en un teléfono (QA físico pendiente). Ninguna se alcanza solo
+escribiendo la URL, y ninguna decide por el estado ni por la hora del
+teléfono: lo vigila `serviciosAtencionVistas.test.mts`.
+
+Servicios › «Mis reservas» › la reserva › cancelar / cambiar el horario /
+mostrar mi código / confirmar / reportar un problema / reseña. Área del
+prestador › «Reservas de mis servicios» › la reserva › empezar / terminar /
+cancelar / el caso / responder. Administración de Servicios › «Casos» y
+«Reseñas».
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | La reserva, con el panel de la atención (código, plazos, acciones, caso, reseña) | `ReservaScreen` + `AtencionDeLaReserva` (`app/servicios/reservas/[bookingId]/index.tsx`) | `GET /services/me/bookings/{id}` (`care`), `POST …/check-in-code`, `POST …/confirm`, `POST …/no-show` |
+| 2 | Cancelar | `CancelarReservaScreen` (`…/[bookingId]/cancelar` y `…/prestador/reservas/[bookingId]/cancelar`) | `POST …/cancel` |
+| 3 | Cambiar el horario | `HorariosDelServicioScreen` en modo `?reprogramar=` y `ReprogramarReservaScreen` (`…/[bookingId]/reprogramar`) | `POST /services/catalog/{id}/holds`, `POST /services/me/bookings/{id}/reschedule` |
+| 4 | El caso: abrirlo, el expediente, evidencias, retirar, apelar | `CasoDeLaReservaScreen` + `ExpedienteDelCaso` (`…/[bookingId]/caso`, para las dos partes) | `POST`/`GET …/incident`, `POST …/incident/entries`, `…/evidence`, `GET …/entries/{id}/file`, `POST …/withdraw`, `…/appeal` |
+| 5 | La reseña | `ResenaDeLaReservaScreen` (`…/[bookingId]/resena`) | `POST /services/me/bookings/{id}/review` |
+| 6 | La reserva del prestador: empezar, terminar, ausencia, responder | `ReservaDelPrestadorScreen` + `AtencionDeLaReserva` (`app/servicios/prestador/reservas/[bookingId]/index.tsx`) | `GET /services/provider/bookings/{id}`, `POST …/start`, `…/complete`, `…/no-show`, `…/review/reply` |
+| 7 | Las reseñas en la ficha pública | `FichaDeServicioScreen` + `ListaDeResenasDelServicio` | `GET /services/catalog/{id}/reviews` |
+| 8 | La bandeja de casos, los efectos solicitados y los barridos | `AdminCasosDeServiciosScreen` (`app/admin/servicios/casos/index.tsx`) | `GET /admin/services/incidents`, `POST /admin/services/tasks/run` |
+| 9 | El expediente entero y la resolución | `AdminCasoDeServiciosScreen` (`app/admin/servicios/casos/[incidentId].tsx`) | `GET /admin/services/incidents/{id}`, `POST …/entries`, `GET …/entries/{id}/file`, `POST …/resolve` |
+| 10 | La moderación de reseñas | `AdminResenasDeServiciosScreen` (`app/admin/servicios/resenas.tsx`) | `GET /admin/services/reviews`, `POST …/{id}/moderate` |
+
+### A dónde llevan los avisos
+
+| Aviso | A quién | Destino |
+|---|---|---|
+| `service_booking_cancelled_*`, `service_booking_rescheduled_provider`, `service_booking_reminder_*`, `service_attention_*`, `service_review_*` | Quien contrata (`_client`) o el prestador (`_provider`) | `/servicios/reservas/{id}` o `/servicios/prestador/reservas/{id}` |
+| `service_incident_opened_*`, `_updated_*`, `_resolved_*` (a las partes) | Quien contrata o el prestador | `…/reservas/{id}/caso` |
+| `service_incident_opened_team`, `service_incident_appealed_team` | Administración | `/admin/servicios/casos/{id}` |
+
+### Lo que sigue sin existir, a propósito
+
+La aceptación del prestador (a domicilio), la reprogramación pedida por el
+prestador, la cancelación por administración, QR, señales de la sala virtual y
+ubicación, cambios de alcance, cobro, comisión, saldos, devoluciones
+ejecutadas, comprobantes, finanzas del prestador, fotos en una reseña, una
+pantalla para configurar la política, mensajes por reserva y «añadir al
+calendario». El push abre la aplicación, no la reserva.
