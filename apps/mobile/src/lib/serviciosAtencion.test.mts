@@ -103,6 +103,15 @@ describe('los valores cerrados son los del servidor', () => {
     assert.deepEqual([...anadidas].sort(), [...A.ACCIONES_DE_LA_ATENCION].sort());
   });
 
+  it('lo que administración puede hacer con un caso lleva los nombres del servidor', () => {
+    const delServidor = [
+      constantes(POSVENTA).get('ANOTAR_EN_INTERNO'),
+      constantes(DOMINIO).get('ESCRIBIR_EN_EL_CASO'),
+      constantes(POSVENTA).get('RESOLVER'),
+    ];
+    assert.deepEqual([...A.ACCIONES_DE_ADMINISTRACION], delServidor);
+  });
+
   it('estados, motivos, efectos, entradas y ejes', () => {
     assert.deepEqual([...A.ESTADOS_DE_LA_RESERVA], tupla(RESERVA, 'ESTADOS_DE_RESERVA'));
     assert.deepEqual([...A.ESTADOS_DE_LA_ATENCION], tupla(MODELOS, 'ESTADOS_DE_ATENCION'));
@@ -142,7 +151,8 @@ describe('los valores cerrados son los del servidor', () => {
     assert.match(POLITICA, new RegExp(`^MOTIVO_MAXIMO = ${L.nota}$`, 'm'));
     assert.match(POLITICA, new RegExp(`^COMENTARIO_DE_RESENA = \\(${L.comentarioMinimo}, ${L.comentario}\\)$`, 'm'));
     assert.match(POLITICA, new RegExp(`^RESPUESTA_MAXIMA = ${L.respuesta}$`, 'm'));
-    assert.match(POLITICA, new RegExp(`^EVIDENCIAS_POR_CASO = ${L.evidencias}$`, 'm'));
+    // El tope de evidencias es de CADA PARTE, no del caso.
+    assert.match(POLITICA, new RegExp(`^EVIDENCIAS_POR_PARTE = ${L.evidencias}$`, 'm'));
     // Las evidencias: los formatos y el peso del depósito privado (0094).
     const migracion = readFileSync(
       join(API, '..', '..', '..', '..', 'supabase', 'migrations', '0094_servicios_atencion_y_cierre.sql'), 'utf8',
@@ -251,6 +261,42 @@ describe('lo que se puede hacer lo dice el SERVIDOR', () => {
       assert.equal(A.puede(undefined, a), false, a);
       assert.equal(A.puedeEnElCaso(null, a), false, a);
     }
+  });
+
+  it('administración: escribe, anota y resuelve solo si el servidor lo dice, y con SUS efectos', () => {
+    const caso = { available_actions: ['add_internal_note', 'add_incident_entry'], attention_effects: [] as string[] };
+    assert.equal(A.puedeAdministrar(caso, 'add_incident_entry'), true);
+    assert.equal(A.puedeAdministrar(caso, 'resolve_incident'), false);
+    assert.equal(A.puedeAdministrar(null, 'add_internal_note'), false);
+    assert.deepEqual(A.efectosQueSeOfrecen(caso), []);
+    assert.deepEqual(A.efectosQueSeOfrecen(null), []);
+    // Con la atención cerrada el servidor solo admite dos: no se ofrece desmentirla.
+    assert.deepEqual(A.efectosQueSeOfrecen({ attention_effects: ['completed', 'none'] }), ['none', 'completed']);
+    // Y uno que la app no conoce no se pinta.
+    assert.deepEqual(A.efectosQueSeOfrecen({ attention_effects: ['none', 'borrar'] }), ['none']);
+    assert.deepEqual(
+      A.efectosQueSeOfrecen({ attention_effects: [...A.EFECTOS_EN_LA_ATENCION] }), [...A.EFECTOS_EN_LA_ATENCION],
+    );
+  });
+
+  it('pasado el plazo ordinario, al abrir un caso solo se ofrece el de seguridad', () => {
+    // LO DICE EL SERVIDOR (`care.incident_reasons`), no la hora del teléfono.
+    const dentro = { incident_reasons: [...A.MOTIVOS_DE_CADA_PARTE.client] };
+    const fuera = { incident_reasons: ['safety'] };
+    assert.deepEqual(A.motivosParaAbrir('client', dentro), [...A.MOTIVOS_DE_CADA_PARTE.client]);
+    assert.deepEqual(A.motivosParaAbrir('client', fuera), ['safety']);
+    assert.deepEqual(A.motivosParaAbrir('provider', fuera), ['safety']);
+    // De lo que mande, solo los de ESA parte y los que la app conoce.
+    assert.deepEqual(A.motivosParaAbrir('provider', { incident_reasons: ['quality', 'technical', 'raro'] }), ['technical']);
+    assert.deepEqual(A.motivosParaAbrir('client', { incident_reasons: [] }), []);
+    // Si el servidor no los manda, los de esa parte: decide él al enviar.
+    for (const sin of [null, undefined, {}]) {
+      assert.deepEqual(A.motivosParaAbrir('client', sin), [...A.MOTIVOS_DE_CADA_PARTE.client]);
+    }
+    // El plazo y la excepción son los del servidor, que usa la misma función para aceptar y para anunciar.
+    assert.match(POSVENTA, /return tuple\(m for m in suyos if m == MOTIVO_DE_SEGURIDAD\) if fuera_de_plazo else suyos/);
+    assert.match(POSVENTA, /if motivo not in motivos_para_abrir\(rol, fuera_de_plazo=c\.ahora > p\.caso_hasta\):/);
+    assert.equal(constantes(MODELOS).get('MOTIVO_DE_SEGURIDAD'), 'safety');
   });
 
   it('nada en la lógica decide por la hora del teléfono ni por el estado', () => {

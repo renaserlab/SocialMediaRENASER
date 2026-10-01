@@ -173,11 +173,36 @@ describe('lo que se ofrece es lo que dice el servidor', () => {
     assert.match(pantalla('ResenaDeLaReservaScreen'), /!puede\(reserva\.care, 'review'\) \? \(\s*<StateView/);
   });
 
-  it('administración resuelve solo un caso vivo, y dice que la apelación es de otra persona', () => {
+  it('administración escribe y resuelve solo lo que el SERVIDOR le deja, y con sus efectos', () => {
     const caso = pantalla('AdminCasoDeServiciosScreen');
-    assert.match(caso, /const vivo = caso !== null && \(caso\.status === 'open' \|\| caso\.status === 'appealed'\);/);
-    assert.match(caso, /\{vivo \? \(\s*<View style=\{\[styles\.tarjeta, \{ borderColor: colors\.primary \}\]\}>/);
-    assert.match(caso, /servicios\.atencion\.admin\.otraPersona/);
+    assert.match(caso, /const vivo = puedeAdministrar\(caso, 'add_incident_entry'\);/);
+    assert.match(caso, /const resuelve = puedeAdministrar\(caso, 'resolve_incident'\);/);
+    assert.match(caso, /const efectos = efectosQueSeOfrecen\(caso\);/);
+    // La tarjeta de resolver, solo a quien puede; a quien no, se le dice por qué.
+    assert.match(caso, /\{resuelve \? \(\s*<View style=\{\[styles\.tarjeta, \{ borderColor: colors\.primary \}\]\}>/);
+    assert.match(caso, /\{vivo && !resuelve \? \(\s*<Text variant="caption" color=\{colors\.textMuted\}>\s*\{f\('servicios\.atencion\.admin\.otraPersona'\)\}/);
+    // Los efectos en la atención son los del servidor, no la lista entera; y no decide por el estado.
+    assert.match(caso, /\{efectos\.map\(\(e\) => \(/);
+    assert.ok(!caso.includes('EFECTOS_EN_LA_ATENCION'));
+    assert.ok(!/caso\.status === 'open'/.test(caso));
+    assert.match(caso, /servicios\.atencion\.admin\.atencionCerrada/);
+    assert.match(caso, /servicios\.atencion\.admin\.efectoDefinitivo/);
+  });
+
+  it('al abrir un caso fuera de plazo solo se ofrece el motivo que el servidor acepta', () => {
+    const caso = pantalla('CasoDeLaReservaScreen');
+    assert.match(caso, /const motivos = motivosParaAbrir\(rol, reserva\?\.care\);/);
+    assert.match(caso, /\{motivos\.map\(\(m\) => \(/);
+    assert.ok(!/MOTIVOS_DE_CADA_PARTE\[rol\]\.map/.test(caso));
+    assert.match(caso, /servicios\.atencion\.caso\.soloSeguridad/);
+  });
+
+  it('una reseña no dice quién la escribió (salvo a moderación)', () => {
+    const logica = readFileSync(join(SRC, 'lib', 'serviciosAtencion.ts'), 'utf8');
+    const resena = logica.slice(logica.indexOf('export type Resena = {'), logica.indexOf('export type Cuidado'));
+    assert.ok(!resena.includes('author_id'));
+    assert.match(logica, /export type ResenaAdmin = Resena & \{[^}]*author_id: string \| null/);
+    assert.ok(!componente('ListaDeResenasDelServicio').includes('author'));
   });
 });
 

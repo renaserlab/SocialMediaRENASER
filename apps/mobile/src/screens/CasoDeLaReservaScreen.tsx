@@ -19,6 +19,7 @@ import {
   FORMATOS_DE_EVIDENCIA,
   LARGOS_DE_LA_ATENCION,
   MOTIVOS_DE_CADA_PARTE,
+  motivosParaAbrir,
   PESO_MAXIMO_DE_EVIDENCIA,
   claveDelMotivoDelCaso,
   llavero,
@@ -83,6 +84,8 @@ export function CasoDeLaReservaScreen({ rol }: { rol: Parte }) {
     }, [cargar]),
   );
   const { ocupado, correr } = useCerrojo(cargar, 'reserva');
+  // Pasado el plazo ordinario solo queda el de seguridad: no se ofrece lo que el servidor rechazará.
+  const motivos = motivosParaAbrir(rol, reserva?.care);
 
   const laReserva = rol === 'client' ? rutaDeLaReserva(id) : rutaDeLaReservaDelPrestador(id);
   const volver = () => (router.canGoBack() ? router.back() : router.replace(laReserva as never));
@@ -194,9 +197,14 @@ export function CasoDeLaReservaScreen({ rol }: { rol: Parte }) {
             <Text variant="caption" color={colors.textMuted}>
               {f('servicios.atencion.caso.hasta', { fecha: momentoLegible(reserva.care?.deadlines.incident_until) })}
             </Text>
+            {motivos.length < MOTIVOS_DE_CADA_PARTE[rol].length ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {f('servicios.atencion.caso.soloSeguridad')}
+              </Text>
+            ) : null}
             <Text weight="700">{f('servicios.atencion.caso.queSucedio')}</Text>
             <View style={styles.fila} accessibilityRole="radiogroup">
-              {MOTIVOS_DE_CADA_PARTE[rol].map((m) => (
+              {motivos.map((m) => (
                 <Chip
                   key={m}
                   rol="radio"

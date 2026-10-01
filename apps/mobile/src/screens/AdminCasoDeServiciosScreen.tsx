@@ -16,17 +16,18 @@ import { toast } from '@/lib/toast';
 import { nuevaClave, type FalloDeCarga } from '@/lib/serviciosAdmision';
 import {
   EFECTOS_ECONOMICOS,
-  EFECTOS_EN_LA_ATENCION,
   LARGOS_DE_LA_ATENCION,
   RESULTADOS_DEL_CASO,
   claveDelEfectoEconomico,
   claveDelEfectoEnLaAtencion,
   claveDelEstadoDeLaReserva,
   claveDelResultado,
+  efectosQueSeOfrecen,
   llavero,
   momentoLegible,
   peticionDeMensaje,
   peticionDeResolucion,
+  puedeAdministrar,
   resolucionVacia,
   type Entrada,
   type ExpedienteAdmin,
@@ -118,7 +119,12 @@ export function AdminCasoDeServiciosScreen() {
       toast(f('servicios.atencion.admin.resuelto'));
     });
 
-  const vivo = caso !== null && (caso.status === 'open' || caso.status === 'appealed');
+  // LO QUE SE PUEDE HACER LO DICE EL SERVIDOR: escribir a las partes mientras el caso
+  // vive, y resolver solo quien puede (la apelación, otra persona) y con los efectos
+  // que va a aceptar (una atención cerrada no se desmiente).
+  const vivo = puedeAdministrar(caso, 'add_incident_entry');
+  const resuelve = puedeAdministrar(caso, 'resolve_incident');
+  const efectos = efectosQueSeOfrecen(caso);
   const tarjeta = [styles.tarjeta, { borderColor: colors.border }];
 
   return (
@@ -179,7 +185,12 @@ export function AdminCasoDeServiciosScreen() {
             />
           </View>
 
-          {vivo ? (
+          {vivo && !resuelve ? (
+            <Text variant="caption" color={colors.textMuted}>
+              {f('servicios.atencion.admin.otraPersona')}
+            </Text>
+          ) : null}
+          {resuelve ? (
             <View style={[styles.tarjeta, { borderColor: colors.primary }]}>
               <Text weight="700">
                 {f(caso.status === 'appealed' ? 'servicios.atencion.admin.resolverApelacion' : 'servicios.atencion.admin.resolver')}
@@ -205,7 +216,7 @@ export function AdminCasoDeServiciosScreen() {
 
               <Text weight="600">{f('servicios.atencion.admin.efectoEnLaAtencion')}</Text>
               <View style={styles.fila} accessibilityRole="radiogroup">
-                {EFECTOS_EN_LA_ATENCION.map((e) => (
+                {efectos.map((e) => (
                   <Chip
                     key={e}
                     rol="radio"
@@ -215,6 +226,10 @@ export function AdminCasoDeServiciosScreen() {
                   />
                 ))}
               </View>
+
+              <Text variant="caption" color={colors.textMuted}>
+                {f(efectos.length < 4 ? 'servicios.atencion.admin.atencionCerrada' : 'servicios.atencion.admin.efectoDefinitivo')}
+              </Text>
 
               <Text weight="600">{f('servicios.atencion.admin.efectoEconomico')}</Text>
               <View style={styles.fila} accessibilityRole="radiogroup">

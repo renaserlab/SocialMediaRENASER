@@ -35,6 +35,9 @@ export const ACCIONES_DE_LA_ATENCION = [
   'reply_review',
 ] as const;
 export type AccionDeLaAtencion = (typeof ACCIONES_DE_LA_ATENCION)[number];
+/** Lo que ADMINISTRACIÓN puede hacer con un caso (su `available_actions`). */
+export const ACCIONES_DE_ADMINISTRACION = ['add_internal_note', 'add_incident_entry', 'resolve_incident'] as const;
+export type AccionDeAdministracion = (typeof ACCIONES_DE_ADMINISTRACION)[number];
 
 export const ESTADOS_DE_LA_RESERVA = ['confirmed', 'cancelled'] as const;
 export const ESTADOS_DE_LA_ATENCION = [
@@ -125,9 +128,9 @@ export type Plazos = {
   cancellation_financial_effect: string;
 };
 
+/** NO dice quién la escribió: la identidad pública de quien reseña está por decidir. */
 export type Resena = {
   id: string;
-  author_id: string | null;
   rating: number;
   fulfillment: number | null;
   quality: number | null;
@@ -145,6 +148,8 @@ export type Resena = {
 
 export type Cuidado = {
   available_actions: string[];
+  /** Los motivos con los que se puede abrir un caso AHORA, según el servidor. */
+  incident_reasons?: string[];
   attendance: Atencion | null;
   cancellation: { by: string; reason: string; note: string | null; at: string; financial_effect_status: string } | null;
   reschedules: { from_starts_at: string; to_starts_at: string; at: string }[];
@@ -209,9 +214,11 @@ export type ExpedienteAdmin = Expediente & {
   starts_at: string;
   booking_status: string;
   resolutions: number;
+  /** Los efectos en la atención que el servidor aceptaría AHORA a quien mira. */
+  attention_effects: string[];
 };
 
-export type ResenaAdmin = Resena & { booking_id: string; service_id: string };
+export type ResenaAdmin = Resena & { booking_id: string; service_id: string; author_id: string | null };
 
 export type ResumenDeResenas = {
   total: number;
@@ -241,6 +248,37 @@ export function puede(cuidado: Cuidado | null | undefined, accion: AccionDeLaAte
 /** Lo mismo, sobre el expediente de un caso. */
 export function puedeEnElCaso(expediente: Pick<Expediente, 'available_actions'> | null, accion: AccionDeLaAtencion): boolean {
   return !!expediente && expediente.available_actions.includes(accion);
+}
+
+/** Lo mismo, para administración: lo que el servidor le deja hacer a quien mira. */
+export function puedeAdministrar(
+  expediente: Pick<ExpedienteAdmin, 'available_actions'> | null,
+  accion: AccionDeAdministracion,
+): boolean {
+  return !!expediente && expediente.available_actions.includes(accion);
+}
+
+/**
+ * Los efectos en la atención que se ofrecen al resolver: LOS QUE DICE EL
+ * SERVIDOR, en el orden de siempre. Una atención cerrada no se desmiente, y
+ * la pantalla no ofrece lo que el servidor va a rechazar.
+ */
+export function efectosQueSeOfrecen(expediente: Pick<ExpedienteAdmin, 'attention_effects'> | null): string[] {
+  const admitidos = expediente?.attention_effects ?? [];
+  return EFECTOS_EN_LA_ATENCION.filter((e) => admitidos.includes(e));
+}
+
+/**
+ * Los motivos que se ofrecen al abrir un caso: LOS QUE DICE EL SERVIDOR
+ * (`care.incident_reasons`), de entre los de esa parte. Pasado el plazo
+ * ordinario el servidor solo manda el de seguridad, y no se ofrece lo que
+ * rechazaría. No se decide por la hora del teléfono. Si el servidor no los
+ * manda, los de esa parte: decide él al enviar.
+ */
+export function motivosParaAbrir(rol: Parte, cuidado: Pick<Cuidado, 'incident_reasons'> | null | undefined): string[] {
+  const suyos: readonly string[] = MOTIVOS_DE_CADA_PARTE[rol];
+  const admitidos = cuidado?.incident_reasons;
+  return admitidos ? suyos.filter((m) => admitidos.includes(m)) : [...suyos];
 }
 
 // --------------------------------------------------------------------------- //
