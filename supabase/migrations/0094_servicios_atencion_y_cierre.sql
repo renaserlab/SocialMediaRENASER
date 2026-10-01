@@ -1,7 +1,8 @@
 -- 0094 · Z Servicios, Incremento 6: atención, cancelación, reprogramación,
 --        posventa y cierre operativo.
 --
--- SIN APLICAR. Escrita el 30/09/2026 y probada solo contra PostgreSQL local:
+-- SIN APLICAR. Escrita el 30/09/2026, corregida el 01/10 tras la revisión
+-- independiente (el caso retirado) y probada solo contra PostgreSQL local:
 -- desde cero (0001–0094), sobre una base con la 0093 vacía y con reservas,
 -- reejecutada, con un fallo a mitad y sin cada una de sus dependencias
 -- (`tests/test_servicios_migracion_0094.py`). Requiere la 0086–0093, ya
@@ -13,8 +14,9 @@
 --   service_attendances      LA ATENCIÓN de una reserva: el código de
 --                            asistencia, el inicio, el fin, la confirmación de
 --                            quien contrata, el cierre y la inasistencia.
---   service_incidents        EL CASO: uno por reserva. El motivo, su estado, lo
---                            que se resolvió y el efecto económico SOLICITADO.
+--   service_incidents        EL CASO: uno por reserva, sin contar los
+--                            retirados. El motivo, su estado, lo que se
+--                            resolvió y el efecto económico SOLICITADO.
 --   service_incident_entries EL EXPEDIENTE: mensajes, evidencias privadas,
 --                            resoluciones y la apelación. Solo se añade.
 --   service_reviews          LA RESEÑA VERIFICADA: una por reserva, y solo de
@@ -95,6 +97,9 @@
 --   commit;
 -- Y DESPUÉS, reejecutar la 0093 entera: devuelve a sus dos funciones el cuerpo
 -- de la 0093 (es reejecutable y no toca datos). Y REINICIAR LA API.
+-- (Si Supabase rechaza el `delete from storage.buckets` —sus versiones
+-- recientes protegen esas tablas—, quitar esa línea del bloque y borrar el
+-- depósito, ya vacío, desde el panel de Storage. No probado contra Supabase.)
 
 begin;
 
@@ -215,7 +220,7 @@ create index if not exists service_attendances_por_cerrar
   where status = 'completed';
 
 -- ------------------------------------------------------------------------- --
--- 4. El caso: uno por reserva.
+-- 4. El caso: uno por reserva, sin contar los retirados.
 -- ------------------------------------------------------------------------- --
 create table if not exists public.service_incidents (
   id uuid primary key default gen_random_uuid(),
@@ -262,7 +267,6 @@ create table if not exists public.service_incidents (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
 
-  constraint service_incidents_una_por_reserva unique (booking_id),
   -- Resuelto significa resuelto del todo: resultado, efectos y momento.
   constraint service_incidents_resuelta
     check (
@@ -291,6 +295,16 @@ create table if not exists public.service_incidents (
 
 create index if not exists service_incidents_por_estado
   on public.service_incidents (status, created_at desc, id desc);
+
+-- UNO POR RESERVA, SIN CONTAR LOS RETIRADOS. Vivo o decidido, solo uno; pero
+-- quien retira el suyo no le quita el suyo a la otra parte.
+create unique index if not exists service_incidents_una_por_reserva
+  on public.service_incidents (booking_id)
+  where status <> 'withdrawn';
+
+-- Todos los de una reserva (también los retirados), del último al primero.
+create index if not exists service_incidents_de_la_reserva
+  on public.service_incidents (booking_id, created_at desc, id desc);
 
 -- ------------------------------------------------------------------------- --
 -- 5. El expediente: solo se añade.
@@ -805,6 +819,17 @@ begin
        and pg_catalog.pg_get_constraintdef(c.oid) like '%review_moderated%'
   ) then
     raise exception 'La 0094 no amplió los CHECK de la reserva y de su historial';
+  end if;
+
+  -- Un caso por reserva sin contar los retirados: único, parcial y válido.
+  if not exists (
+    select 1 from pg_catalog.pg_index i
+     where i.indexrelid = to_regclass('public.service_incidents_una_por_reserva')
+       and i.indrelid = 'public.service_incidents'::regclass
+       and i.indisunique and i.indisvalid
+       and pg_catalog.pg_get_expr(i.indpred, i.indrelid) like '%withdrawn%'
+  ) then
+    raise exception 'La 0094 no dejó la unicidad del caso por reserva';
   end if;
 
   -- El efecto económico NUNCA puede decir que se ejecutó.

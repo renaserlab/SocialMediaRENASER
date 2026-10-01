@@ -1,9 +1,12 @@
 """La posventa de una reserva de Servicios (Incremento 6): el caso, su
 expediente y la reseña verificada.
 
-EL CASO. Uno por reserva. Lo abre una de las dos partes con un motivo cerrado;
-la otra contesta; las dos aportan mensajes y evidencias (privadas); administración
-resuelve; una parte puede apelar UNA vez, y entonces resuelve otra persona.
+EL CASO. Uno por reserva, sin contar los retirados. Lo abre una de las dos
+partes con un motivo cerrado; la otra contesta; las dos aportan mensajes y
+evidencias (privadas); administración resuelve; una parte puede apelar UNA vez
+(o ninguna, según la política), y entonces resuelve otra persona. Quien lo
+abrió puede retirarlo: eso no le quita el suyo a la otra parte, pero quien
+retiró el suyo ya no abre otro en esa reserva.
 
   * EL EXPEDIENTE solo se añade: mensajes, evidencias, resoluciones, la
     apelación y las notas internas (que NUNCA salen de administración).
@@ -111,10 +114,24 @@ MOTIVOS_DE = {
     CLIENTE: tuple(m for m in MOTIVOS if m != "client_absent"),
     PRESTADOR: ("client_absent", MOTIVO_DE_SEGURIDAD, "technical", "other"),
 }
+
+
+def motivos_para_abrir(rol: str, *, fuera_de_plazo: bool) -> tuple[str, ...]:
+    """Los motivos que esa parte puede alegar AHORA. Pasado el plazo
+    ordinario solo queda el de seguridad, que no tiene plazo. Es lo que el
+    servidor acepta y lo que le dice a la app (`care.incident_reasons`)."""
+    suyos = MOTIVOS_DE.get(rol, ())
+    return tuple(m for m in suyos if m == MOTIVO_DE_SEGURIDAD) if fuera_de_plazo else suyos
+
+
 #: Por qué se esconde una reseña: lista cerrada (nunca por ser negativa).
 MOTIVOS_DE_MODERACION = ("personal_data", "threat", "hate", "extortion", "off_topic", "other")
 PUBLICAR = "publish"
 ESCONDER = "hide"
+#: Lo que administración puede hacer con un caso, con el nombre que viaja en
+#: su `available_actions` (escribir a las partes es `add_incident_entry`).
+RESOLVER = "resolve_incident"
+ANOTAR_EN_INTERNO = "add_internal_note"
 
 
 # --------------------------------------------------------------------------- #
@@ -162,7 +179,7 @@ class EfectoNoPermitido(ConflictError):
 
 class DemasiadasEvidencias(ConflictError):
     code = "service_incident_evidence_limit"
-    message = "Este caso ya tiene el máximo de evidencias."
+    message = "Ya aportaste el máximo de evidencias a este caso."
 
 
 class EvidenciaNoDisponible(AppError):
@@ -216,11 +233,14 @@ def _texto(valor: object, campo: str, minimo: int, maximo: int, error=CasoInvali
     return limpio
 
 
-async def _caso_de(db: AsyncSession, reserva_id: str) -> ServiceIncident | None:
-    return await db.scalar(
-        select(ServiceIncident).where(ServiceIncident.booking_id == reserva_id)
-        .execution_options(populate_existing=True)
-    )
+_caso_de = atencion.caso_de
+
+
+async def _caso_previo(db: AsyncSession, previo: ServiceBookingEvent) -> ServiceIncident | None:
+    """El caso sobre el que actuó una petición que ahora se repite (que
+    puede no ser ya el de la reserva: uno retirado deja abrir otro)."""
+    ident = (previo.details or {}).get("incident_id")
+    return await db.get(ServiceIncident, ident, populate_existing=True) if ident else None
 
 
 async def _avisar_del_caso(db: AsyncSession, c: atencion.Contexto, evento_id: str, *, a_cliente: str,
@@ -246,23 +266,31 @@ async def abrir_caso(
     clave: str | None, ahora: datetime | None = None,
 ) -> ServiceIncident:
     """Abre EL caso de una reserva. Un motivo de la lista de esa parte y una
-    descripción. Dentro del plazo, salvo los de seguridad, que se admiten
-    siempre. Mientras esté vivo, la atención no se cierra sola."""
+    descripción. Dentro del plazo, salvo los de seguridad, que no tienen
+    plazo. Mientras esté vivo, la atención no se cierra sola.
+
+    UNO POR RESERVA, sin contar los retirados: si hay uno vivo o decidido,
+    no se abre otro (tampoco por seguridad: se escribe en ese, o se acude a
+    administración). Uno RETIRADO no lo impide, salvo a quien lo retiró."""
     if motivo not in MOTIVOS_DE.get(rol, ()):
         raise CasoInvalido(details={"field": "reason"})
     descripcion = _texto(descripcion, "description", *limites.DESCRIPCION_DEL_CASO)
     huella = reserva_dominio._huella({"reason": motivo, "description": descripcion})
     c = await atencion.abrir(db, usuario_id=usuario_id, reserva_id=reserva_id, rol=rol, clave=clave,
                              accion=CASO_ABIERTO, huella=huella, ahora=ahora)
+    if c.previo is not None:
+        previo = await _caso_previo(db, c.previo)
+        if previo is not None:
+            return previo
     caso = await _caso_de(db, c.reserva.id)
-    if c.previo is not None and caso is not None:
-        return caso
-    if caso is not None:
+    if caso is not None and caso.status != CASO_RETIRADO:
         raise CasoYaExiste(details={"incident_id": caso.id})
+    if await atencion.retiro_el_suyo(db, c.reserva.id, usuario_id):
+        raise CasoYaExiste(details={"reason": "withdrawn"})
     if c.reserva.status != RESERVA_CONFIRMADA or c.ahora < _utc(c.reserva.starts_at):
         raise atencion.AccionNoDisponible(details={"action": atencion.ABRIR_CASO})
     p = atencion.plazos(c.reserva, await db.get(ServiceAttendance, c.reserva.id), None, c.politica)
-    if motivo != MOTIVO_DE_SEGURIDAD and c.ahora > p.caso_hasta:
+    if motivo not in motivos_para_abrir(rol, fuera_de_plazo=c.ahora > p.caso_hasta):
         raise PlazoDelCasoVencido(details={"until": p.caso_hasta.isoformat()})
     caso = ServiceIncident(
         booking_id=c.reserva.id, opened_by=usuario_id, reason=motivo, description=descripcion,
@@ -345,11 +373,14 @@ async def borrar_archivo(ruta: str | None) -> None:
         pass
 
 
-async def _evidencias(db: AsyncSession, caso_id: str) -> int:
+async def _evidencias(db: AsyncSession, caso_id: str, rol: str) -> int:
+    """Cuántas evidencias aportó ESA PARTE. El tope es de cada una: que una
+    llene el suyo no deja a la otra sin poder aportar las suyas."""
     return int(
         await db.scalar(
             select(func.count()).select_from(ServiceIncidentEntry)
-            .where(ServiceIncidentEntry.incident_id == caso_id, ServiceIncidentEntry.kind == EVIDENCIA)
+            .where(ServiceIncidentEntry.incident_id == caso_id, ServiceIncidentEntry.kind == EVIDENCIA,
+                   ServiceIncidentEntry.author_role == rol)
         ) or 0
     )
 
@@ -362,6 +393,7 @@ class Subida:
     sobrante: str | None = None
 
 
+@reserva_dominio.sin_esperas_largas
 async def subir_evidencia(
     db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: str, datos: bytes, declarado: str | None,
     clave: str | None, ahora: datetime | None = None,
@@ -378,8 +410,8 @@ async def subir_evidencia(
     caso = _exigir_vivo(await _caso_de(db, reserva.id))
     contenido, extension = documentos.detectar(datos, declarado)
     suma = hashlib.sha256(datos).hexdigest()
-    if await _evidencias(db, caso.id) >= limites.EVIDENCIAS_POR_CASO:
-        raise DemasiadasEvidencias(details={"max": limites.EVIDENCIAS_POR_CASO})
+    if await _evidencias(db, caso.id, rol) >= limites.EVIDENCIAS_POR_PARTE:
+        raise DemasiadasEvidencias(details={"max": limites.EVIDENCIAS_POR_PARTE})
     ruta = f"{usuario_id}/{caso.id}/{uuid.uuid4()}.{extension}"
     await _guardar_archivo(ruta, datos, contenido)
     try:
@@ -396,8 +428,8 @@ async def subir_evidencia(
         )
         if repetida is not None:
             return Subida(repetida, False, ruta)
-        if await _evidencias(db, caso.id) >= limites.EVIDENCIAS_POR_CASO:
-            raise DemasiadasEvidencias(details={"max": limites.EVIDENCIAS_POR_CASO})
+        if await _evidencias(db, caso.id, rol) >= limites.EVIDENCIAS_POR_PARTE:
+            raise DemasiadasEvidencias(details={"max": limites.EVIDENCIAS_POR_PARTE})
         entrada = ServiceIncidentEntry(
             incident_id=caso.id, author_id=usuario_id, author_role=rol, kind=EVIDENCIA, storage_path=ruta,
             content_type=contenido, byte_size=len(datos), sha256=suma, created_at=c.ahora,
@@ -445,11 +477,13 @@ async def retirar(
     """Quien abrió el caso lo retira, mientras nadie lo haya resuelto."""
     c = await atencion.abrir(db, usuario_id=usuario_id, reserva_id=reserva_id, rol=rol, clave=clave,
                              accion=CASO_RETIRADO_EVENTO, ahora=ahora)
+    if c.previo is not None:
+        previo = await _caso_previo(db, c.previo)
+        if previo is not None:
+            return previo
     caso = await _caso_de(db, c.reserva.id)
     if caso is None:
         raise CasoNoEncontrado()
-    if c.previo is not None:
-        return caso
     if caso.status != CASO_EN_CURSO or caso.opened_by != usuario_id:
         raise CasoNoAdmiteEso(details={"status": caso.status})
     caso.status = CASO_RETIRADO
@@ -467,8 +501,10 @@ async def apelar(
     db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: str, texto: str, clave: str | None,
     ahora: datetime | None = None,
 ) -> ServiceIncident:
-    """UNA apelación por caso, de cualquiera de las partes, dentro de su plazo
-    y con lo que la justifica. La resolverá OTRA persona."""
+    """UNA apelación por caso (o ninguna, según la política), de cualquiera
+    de las partes, dentro de su plazo y con lo que la justifica. La resolverá
+    OTRA persona: si en administración no hay nadie más que pueda, no se
+    apela (sería un caso vivo que nadie puede cerrar)."""
     texto = _texto(texto, "body", limites.DESCRIPCION_DEL_CASO[0], limites.ENTRADA_MAXIMA)
     huella = reserva_dominio._huella({"body": texto})
     c = await atencion.abrir(db, usuario_id=usuario_id, reserva_id=reserva_id, rol=rol, clave=clave,
@@ -481,6 +517,10 @@ async def apelar(
     limite = _utc(caso.resolved_at) + timedelta(days=c.politica.apelacion_dias) if caso.resolved_at else None
     if caso.status != CASO_RESUELTO or caso.resolutions != 1 or limite is None or c.ahora > limite:
         raise ApelacionNoPermitida(details={"status": caso.status})
+    if c.politica.apelaciones < 1:
+        raise ApelacionNoPermitida(details={"reason": "disabled"})
+    if not await atencion.hay_otro_decisor(db, c.reserva, c.prestador, caso):
+        raise ApelacionNoPermitida(details={"reason": "no_other_reviewer"})
     caso.status = CASO_APELADO
     caso.appealed_by = rol
     caso.appealed_at = c.ahora
@@ -506,7 +546,9 @@ class Expediente:
     entradas: list[ServiceIncidentEntry]
     rol: str
     acciones: list[str] = field(default_factory=list)
-    efecto_bloqueado_por: str | None = None
+    #: Solo en administración: los efectos en la atención que el servidor
+    #: aceptaría AHORA a quien mira (ninguno si no puede resolver).
+    efectos: list[str] = field(default_factory=list)
 
 
 async def _entradas(db: AsyncSession, caso_id: str, *, con_notas: bool) -> list[ServiceIncidentEntry]:
@@ -517,12 +559,24 @@ async def _entradas(db: AsyncSession, caso_id: str, *, con_notas: bool) -> list[
     return list(await db.scalars(consulta.order_by(ServiceIncidentEntry.created_at, ServiceIncidentEntry.id)))
 
 
-async def expediente(db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: str) -> Expediente:
-    """El caso de una reserva PROPIA, sin las notas internas. Lo ajeno, 404."""
+async def expediente(
+    db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: str, caso_id: str | None = None
+) -> Expediente:
+    """El caso de una reserva PROPIA, sin las notas internas. Lo ajeno, 404.
+
+    `caso_id`: ESE caso de la reserva y no «el de la reserva» (la respuesta
+    de abrir o de retirar es la del caso sobre el que se actuó, aunque
+    después de uno retirado haya otro). Sobre uno que ya no es el de la
+    reserva no hay nada que hacer."""
     reserva, prestador = await atencion.reserva_de(db, usuario_id=usuario_id, reserva_id=reserva_id, rol=rol)
     caso = await _caso_de(db, reserva.id)
     if caso is None:
         raise CasoNoEncontrado()
+    if caso_id is not None and caso_id != caso.id:
+        otro = await db.get(ServiceIncident, caso_id)
+        if otro is None or otro.booking_id != reserva.id:
+            raise CasoNoEncontrado()
+        return Expediente(otro, reserva, await _entradas(db, otro.id, con_notas=False), rol, [])
     cuidado = await atencion.cuidado(db, reserva, rol=rol, usuario_id=usuario_id, prestador=prestador)
     return Expediente(caso, reserva, await _entradas(db, caso.id, con_notas=False), rol,
                       [a for a in cuidado.acciones if "incident" in a])
@@ -602,10 +656,41 @@ async def _caso_por_id(db: AsyncSession, caso_id: str) -> tuple[ServiceIncident,
     return caso, reserva
 
 
-async def expediente_para_administrar(db: AsyncSession, caso_id: str) -> Expediente:
-    """El expediente ENTERO, con las notas internas. Solo administración."""
+def _es_parte(admin_id: str, reserva: ServiceBooking, prestador: object | None) -> bool:
+    return admin_id == reserva.client_id or (prestador is not None and prestador.profile_id == admin_id)
+
+
+def efectos_permitidos(actual: ServiceAttendance | None) -> tuple[str, ...]:
+    """Los efectos que una resolución puede tener sobre la atención. UNA
+    ATENCIÓN CERRADA NO SE DESMIENTE: cerrada es final (0094), también para
+    la resolución de una apelación."""
+    if actual is not None and actual.status == CERRADA:
+        return (SIN_EFECTO, "completed")
+    return EFECTOS_EN_LA_ATENCION
+
+
+async def expediente_para_administrar(db: AsyncSession, caso_id: str, *, admin_id: str) -> Expediente:
+    """El expediente ENTERO, con las notas internas y las evidencias. Solo
+    administración, y NUNCA quien es parte de esa reserva: su caso lo ve
+    por su ruta, como cualquiera, sin las notas internas.
+
+    Dice lo que ESA persona puede hacer ahora y con qué efectos en la
+    atención: la pantalla no ofrece nada que el servidor vaya a rechazar."""
+    from app.modules.services.models import ServiceProvider
+
     caso, reserva = await _caso_por_id(db, caso_id)
-    return Expediente(caso, reserva, await _entradas(db, caso.id, con_notas=True), ADMINISTRACION)
+    if _es_parte(admin_id, reserva, await db.get(ServiceProvider, reserva.provider_id)):
+        raise ResolutorEnConflicto(details={"reason": "party"})
+    vivo = caso.status in CASOS_VIVOS
+    resuelve = vivo and not (caso.status == CASO_APELADO and caso.resolved_by == admin_id)
+    acciones = [ANOTAR_EN_INTERNO]
+    if vivo:
+        acciones.append(atencion.ESCRIBIR_EN_EL_CASO)
+    if resuelve:
+        acciones.append(RESOLVER)
+    efectos = list(efectos_permitidos(await db.get(ServiceAttendance, reserva.id))) if resuelve else []
+    return Expediente(caso, reserva, await _entradas(db, caso.id, con_notas=True), ADMINISTRACION, acciones,
+                      efectos)
 
 
 async def _abrir_de_administracion(
@@ -617,9 +702,10 @@ async def _abrir_de_administracion(
     caso, reserva = await _caso_por_id(db, caso_id)
     c = await atencion.abrir(db, usuario_id=admin_id, reserva_id=reserva.id, rol=ADMINISTRACION, clave=clave,
                              accion=accion, huella=huella, ahora=ahora)
-    if admin_id == c.reserva.client_id or (c.prestador is not None and c.prestador.profile_id == admin_id):
+    if _es_parte(admin_id, c.reserva, c.prestador):
         raise ResolutorEnConflicto(details={"reason": "party"})
-    caso = await _caso_de(db, c.reserva.id)
+    # ESE caso (no «el de la reserva»: uno retirado puede tener otro detrás).
+    caso = await db.get(ServiceIncident, caso.id, populate_existing=True)
     if caso is None:  # pragma: no cover - un caso no se borra suelto
         raise CasoNoEncontrado()
     return c, caso
@@ -661,10 +747,10 @@ async def _aplicar_a_la_atencion(db: AsyncSession, c: atencion.Contexto, efecto:
     if efecto == "none":
         return False
     actual = await db.get(ServiceAttendance, c.reserva.id, populate_existing=True)
-    if actual is not None and actual.status == CERRADA:
-        if efecto == "completed":
-            return False
+    if efecto not in efectos_permitidos(actual):
         raise EfectoNoPermitido(details={"attention": CERRADA})
+    if actual is not None and actual.status == CERRADA:
+        return False
     nueva = actual is None
     if nueva:
         actual = ServiceAttendance(booking_id=c.reserva.id, checkin_attempts=0, started_with_code=False,
@@ -858,7 +944,7 @@ async def moderar(
     huella = reserva_dominio._huella({"review_id": resena.id, "action": accion, "reason": motivo})
     c = await atencion.abrir(db, usuario_id=admin_id, reserva_id=resena.booking_id, rol=ADMINISTRACION, clave=clave,
                              accion=RESENA_MODERADA, huella=huella, ahora=ahora)
-    if admin_id == c.reserva.client_id or (c.prestador is not None and c.prestador.profile_id == admin_id):
+    if _es_parte(admin_id, c.reserva, c.prestador):
         raise ResolutorEnConflicto(details={"reason": "party"})
     resena = await _resena_de(db, c.reserva.id)
     if resena is None:  # pragma: no cover - una reseña no se borra suelta
@@ -990,6 +1076,7 @@ async def resenas_para_moderar(db: AsyncSession, *, estado: str | None, cursor: 
 
 
 __all__ = [
+    "ANOTAR_EN_INTERNO",
     "AlmacenNoConfigurado",
     "ApelacionNoPermitida",
     "CasoInvalido",
@@ -1006,6 +1093,7 @@ __all__ = [
     "MOTIVOS_DE_MODERACION",
     "ModeracionNoPermitida",
     "PUBLICAR",
+    "RESOLVER",
     "PaginaDeCasos",
     "PaginaDeResenas",
     "PlazoDelCasoVencido",
@@ -1019,6 +1107,7 @@ __all__ = [
     "Subida",
     "abrir_caso",
     "anotar_desde_administracion",
+    "efectos_permitidos",
     "apelar",
     "borrar_archivo",
     "casos",
@@ -1028,6 +1117,7 @@ __all__ = [
     "expediente",
     "expediente_para_administrar",
     "moderar",
+    "motivos_para_abrir",
     "resenar",
     "resenas_para_moderar",
     "resenas_visibles",

@@ -8,6 +8,7 @@ mentira: cada estado, cada papel y cada límite de tiempo.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -22,7 +23,7 @@ FIN = INICIO + timedelta(minutes=60)
 CLIENTE, PERFIL = "c" * 8, "p" * 8
 POLITICA = limites.PoliticaDeAtencion(
     llegada_minutos=15, tolerancia_minutos=15, confirmacion_horas=24, reprogramaciones=1,
-    reprogramar_horas_antes=24, recordatorio_horas=24, caso_horas=48, apelacion_dias=5, resena_dias=30,
+    reprogramar_horas_antes=24, recordatorio_horas=24, caso_horas=48, apelacion_dias=5, apelaciones=1, resena_dias=30,
     resena_con_moderacion_previa=True,
 )
 
@@ -40,16 +41,21 @@ def _caso(estado: str = "open", *, abierto_por: str = CLIENTE, resoluciones: int
     return SimpleNamespace(status=estado, opened_by=abierto_por, resolutions=resoluciones, resolved_at=resuelto)
 
 
+def _casos(acciones: set[str]) -> set[str]:
+    return {a for a in acciones if "incident" in a}
+
+
 def _resena(estado: str = "published", respuesta: str | None = None):
     return SimpleNamespace(status=estado, reply=respuesta)
 
 
 def _acciones(rol: str, *, ahora: datetime, reserva=None, atendiendo=None, caso=None, resena=None,
-              reprogramaciones: int = 0, version: str | None = "v1", activo: bool = True) -> set[str]:
+              reprogramaciones: int = 0, version: str | None = "v1", activo: bool = True,
+              politica=POLITICA, **extra) -> set[str]:
     return set(atencion.acciones_disponibles(
         rol=rol, usuario_id=CLIENTE if rol == "client" else PERFIL, reserva=reserva or _reserva(),
-        atencion=atendiendo, caso=caso, resena=resena, ahora=ahora, politica=POLITICA,
-        reprogramaciones=reprogramaciones, version_vigente=version, prestador_activo=activo,
+        atencion=atendiendo, caso=caso, resena=resena, ahora=ahora, politica=politica,
+        reprogramaciones=reprogramaciones, version_vigente=version, prestador_activo=activo, **extra,
     ))
 
 
@@ -165,14 +171,36 @@ def test_se_apela_una_vez_dentro_de_su_plazo() -> None:
     # Resuelto, ya no se escribe ni se retira; y la atención se puede confirmar otra vez.
     acciones = _acciones("client", ahora=resuelto_el, atendiendo=atendiendo, caso=resuelto)
     assert acciones == {"appeal_incident", "confirm"}
-    # Apelado: se escribe, no se apela otra vez. Cerrado o retirado: nada del caso.
+    # SIN OTRA PERSONA QUE PUEDA RESOLVERLA, o con las apelaciones a cero, no se ofrece.
+    sin_apelaciones = replace(POLITICA, apelaciones=0)
+    for rol in ("client", "provider"):
+        assert "appeal_incident" not in _acciones(rol, ahora=resuelto_el, atendiendo=atendiendo, caso=resuelto,
+                                                  hay_otro_decisor=False)
+        assert "appeal_incident" not in _acciones(rol, ahora=resuelto_el, atendiendo=atendiendo, caso=resuelto,
+                                                  politica=sin_apelaciones)
+    # Apelado: se escribe, no se apela otra vez. Cerrado: nada del caso.
     apelado = _caso("appealed", resoluciones=1, resuelto=resuelto_el)
     assert _acciones("provider", ahora=resuelto_el, atendiendo=atendiendo, caso=apelado) == {"add_incident_entry"}
-    for final, resoluciones in (("closed", 2), ("withdrawn", 0)):
-        fin = _caso(final, resoluciones=resoluciones, resuelto=resuelto_el if resoluciones else None)
-        for rol in ("client", "provider"):
-            assert not [a for a in _acciones(rol, ahora=resuelto_el, atendiendo=atendiendo, caso=fin)
-                        if "incident" in a], (final, rol)
+    cerrado = _caso("closed", resoluciones=2, resuelto=resuelto_el)
+    for rol in ("client", "provider"):
+        assert not [a for a in _acciones(rol, ahora=resuelto_el, atendiendo=atendiendo, caso=cerrado)
+                    if "incident" in a], rol
+
+
+def test_un_caso_retirado_no_le_quita_el_suyo_a_la_otra_parte() -> None:
+    ahora = INICIO + timedelta(hours=2)
+    atendiendo = _atencion("completed", completed_at=FIN)
+    retirado = _caso("withdrawn", abierto_por=PERFIL)
+    # La otra parte abre el suyo; quien retiró el suyo, no (ni escribe, ni lo retira otra vez).
+    assert _casos(_acciones("client", ahora=ahora, atendiendo=atendiendo, caso=retirado)) == {"open_incident"}
+    assert _casos(_acciones("provider", ahora=ahora, atendiendo=atendiendo, caso=retirado,
+                            retiro_el_suyo=True)) == set()
+    # Con el de la otra parte ya abierto, quien retiró el suyo escribe en ese como cualquiera.
+    vivo = _caso("open", abierto_por=CLIENTE)
+    assert _casos(_acciones("provider", ahora=ahora, atendiendo=atendiendo, caso=vivo,
+                            retiro_el_suyo=True)) == {"add_incident_entry"}
+    # Un caso retirado no frena la confirmación (no está vivo).
+    assert "confirm" in _acciones("client", ahora=ahora, atendiendo=atendiendo, caso=retirado)
 
 
 def test_los_estados_de_un_caso_estan_todos_cubiertos() -> None:

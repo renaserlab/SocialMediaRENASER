@@ -277,6 +277,8 @@ class Settings(BaseSettings):
     #: Horas para abrir un caso tras la atención, y días para apelar.
     services_incident_window_hours: int = 48
     services_incident_appeal_days: int = 5
+    #: Cuántas veces se apela un caso: 0 (ninguna) o 1. La base no admite más.
+    services_incident_appeals_max: int = 1
     #: Días para reseñar, y si una reseña espera a moderación antes de verse.
     services_review_window_days: int = 30
     services_reviews_premoderation: bool = True

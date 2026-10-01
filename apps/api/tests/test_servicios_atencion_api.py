@@ -44,6 +44,7 @@ from tests.test_servicios_reserva_api import (  # noqa: F401 - montajes comparti
     DEL_PRESTADOR,
     MIS_RESERVAS,
     RETENCIONES,
+    _aceptando,
     _clave,
     _condiciones,
     _confirmar,
@@ -51,6 +52,7 @@ from tests.test_servicios_reserva_api import (  # noqa: F401 - montajes comparti
     _horarios,
     _reservado,
     _retener,
+    _servicio,
     _siempre,
     reservas,
 )
@@ -647,8 +649,9 @@ async def test_los_recordatorios_salen_una_vez(atencion) -> None:
     recordatorios = [(a[0], a[1], a[3]) for a in await _avisos(motor, reserva) if "reminder" in a[1]]
     assert recordatorios == sorted([(h["cliente"], "service_booking_reminder_client", "{}"),
                                     (h["perfil"], "service_booking_reminder_provider", "{}")])
-    # A las partes no se les enseña en su historial; una cancelada no se recuerda.
-    assert "booking_reminded" in await _sucesos(motor, reserva)
+    # Queda en el historial de la reserva (las partes lo ven: «te lo recordamos»).
+    assert "booking_reminded" in [e["action"] for e in (await _ver(app, "client", h))["history"]]
+    # Una cancelada no se recuerda.
     otra = await _reservado(app, motor)
     assert (await _hacer(app, "client", otra, "cancel", {})).status_code == 200
     await _llevar(motor, otra["reserva"]["id"], minutos=120)
@@ -811,14 +814,24 @@ async def test_un_caso_con_su_expediente_privado(atencion) -> None:
 async def test_el_plazo_para_abrir_un_caso_y_la_excepcion_de_seguridad(atencion) -> None:
     app, motor, _ = atencion
     h = await _atendida(app, motor)
+    # Dentro del plazo, cada parte puede alegar SUS motivos (y el servidor se los dice a la app).
+    await _llevar(motor, h["reserva"]["id"], minutos=-90)
+    assert (await _ver(app, "client", h))["care"]["incident_reasons"] == list(posventa.MOTIVOS_DE["client"])
+    assert (await _ver(app, "provider", h))["care"]["incident_reasons"] == list(posventa.MOTIVOS_DE["provider"])
     # Tres días después de terminar (el plazo, provisional, es de 48 horas).
     await _llevar(motor, h["reserva"]["id"], minutos=-3 * 24 * 60)
     await _retrasar(motor, "service_attendances", "completed_at", "booking_id", h["reserva"]["id"], horas=71)
     assert "open_incident" in await _acciones(app, "client", h)  # se ofrece: el de seguridad sigue abierto
+    # ...y SOLO ese: la app no ofrece un motivo que el servidor va a rechazar.
+    for rol in ("client", "provider"):
+        assert (await _ver(app, rol, h))["care"]["incident_reasons"] == ["safety"]
     r = await _hacer(app, "client", h, "incident", {"reason": "quality", "description": DESCRIPCION})
     assert r.status_code == 409 and _codigo(r) == "service_incident_window_closed", r.text
     r = await _hacer(app, "client", h, "incident", {"reason": "safety", "description": DESCRIPCION})
     assert r.status_code == 201, r.text
+    # Con el caso abierto ya no hay nada que alegar: no se abre otro.
+    for rol in ("client", "provider"):
+        assert (await _ver(app, rol, h))["care"]["incident_reasons"] == []
 
 
 async def test_resolver_no_es_devolver_dinero(atencion) -> None:
@@ -1131,7 +1144,13 @@ ALTERACIONES_DE_LA_0094 = (
      f"alter table {_I} add constraint service_incidents_estado_del_efecto check (financial_effect_status is null "
      "or financial_effect_status in ('not_applicable', 'pending', 'blocked', 'executed'))"),
     (f"alter table {_I} drop constraint service_incidents_sin_efecto",),
-    (f"alter table {_I} drop constraint service_incidents_una_por_reserva",),
+    # Un caso por reserva sin contar los retirados: sin el índice, sin que sea único o sin que sea parcial.
+    ("drop index public.service_incidents_una_por_reserva",),
+    ("drop index public.service_incidents_una_por_reserva",
+     f"create index service_incidents_una_por_reserva on {_I} (booking_id) where status <> 'withdrawn'"),
+    ("drop index public.service_incidents_una_por_reserva",
+     f"create unique index service_incidents_una_por_reserva on {_I} (booking_id)"),
+    ("drop index public.service_incidents_de_la_reserva",),
     (f"alter table {_R} drop constraint service_reviews_una_por_reserva",),
     (f"alter table {_A} drop constraint service_attendances_cierre",
      f"alter table {_A} add constraint service_attendances_cierre check (true) not valid"),
@@ -1327,7 +1346,9 @@ async def test_la_baja_de_quien_contrato_se_lleva_sus_evidencias_y_deja_la_resen
     assert await _uno(motor, "select count(*) from public.service_incidents where booking_id = cast(:b as uuid)",
                       b=reserva) == 1
     publicas = (await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/reviews", None)).json()
-    assert [x["author_id"] for x in publicas["items"]] == [None]
+    assert [x["rating"] for x in publicas["items"]] == [RESENA["rating"]]
+    de_moderacion = (await _pedir(app, "GET", RESENAS, h["jefa"], status="published")).json()["items"]
+    assert [x["author_id"] for x in de_moderacion if x["booking_id"] == h["reserva"]["id"]] == [None]
     # El prestador sigue viendo su reserva y el expediente; la evidencia ya no está, y no es un 500.
     suya, perfil = _de("provider", h)
     visto = await _pedir(app, "GET", f"{suya}/incident", perfil)
@@ -1537,3 +1558,290 @@ async def test_la_misma_clave_a_la_vez_es_una_sola_accion(atencion) -> None:
     otra["cliente"] = h["cliente"]
     r = await _hacer(app, "client", h, "check-in-code", clave=clave)
     assert r.status_code == 409 and _codigo(r) == "idempotency_key_reused", r.text
+
+
+# =========================================================================== #
+# 13. Lo que encontró la revisión independiente del 01/10
+# =========================================================================== #
+async def test_el_barrido_no_se_atasca_con_lo_que_no_puede_cerrar(atencion) -> None:
+    """Las que no se cierran solas (sin la señal fuerte, o con un caso vivo)
+    NO ocupan el lote: detrás de ellas, la que sí se puede cerrar se cierra."""
+    app, motor, _ = atencion
+    sin_codigo = await _atendida(app, motor, con_codigo=False, hasta="completed")
+    jefa, extra = sin_codigo["jefa"], {"jefa": sin_codigo["jefa"], "moderador": sin_codigo["moderador"]}
+    con_caso = await _atendida(app, motor, hasta="completed", **extra)
+    await _llevar(motor, con_caso["reserva"]["id"], minutos=-90)
+    r = await _hacer(app, "client", con_caso, "incident", {"reason": "incomplete", "description": DESCRIPCION})
+    assert r.status_code == 201, r.text
+    buena = await _atendida(app, motor, hasta="completed", **extra)
+    ya = (await _pedir(app, "POST", TAREAS, jefa)).json()["unverified"]  # lo que dejaron otras pruebas
+    # Las dos que no se pueden cerrar son MÁS ANTIGUAS que la que sí.
+    for h, horas in ((sin_codigo, 60), (con_caso, 50), (buena, 30)):
+        await _retrasar(motor, "service_attendances", "completed_at", "booking_id", h["reserva"]["id"], horas=horas)
+    r = await _pedir(app, "POST", TAREAS, jefa, batch=1)
+    assert r.status_code == 200, r.text
+    assert (r.json()["closed"], r.json()["unverified"]) == (1, ya + 1), r.text
+    assert (await _ver(app, "client", buena))["care"]["attendance"]["status"] == "closed"
+    for h in (sin_codigo, con_caso):
+        assert (await _ver(app, "client", h))["care"]["attendance"]["status"] == "completed"
+    # Y la cuenta de las que esperan no depende del lote.
+    r = await _pedir(app, "POST", TAREAS, jefa, batch=1)
+    assert (r.json()["closed"], r.json()["unverified"]) == (0, ya + 1), r.text
+    assert (await _hacer(app, "client", sin_codigo, "confirm")).status_code == 200
+
+
+async def test_el_barrido_confirma_cada_fila_y_no_retiene_el_lote(atencion, monkeypatch) -> None:
+    """Cada atención cerrada se CONFIRMA antes de pasar a la siguiente: el
+    barrido no deja un lote entero de reservas bloqueadas hasta el final."""
+    from app.modules.services import atencion as dominio
+
+    app, motor, _ = atencion
+    primera = await _atendida(app, motor, hasta="completed")
+    jefa = primera["jefa"]
+    segunda = await _atendida(app, motor, hasta="completed", jefa=jefa, moderador=primera["moderador"])
+    await _pedir(app, "POST", TAREAS, jefa)
+    await _retrasar(motor, "service_attendances", "completed_at", "booking_id", primera["reserva"]["id"], horas=40)
+    await _retrasar(motor, "service_attendances", "completed_at", "booking_id", segunda["reserva"]["id"], horas=30)
+    vistas: list[int] = []
+    original = dominio._cerrar_sola
+
+    async def mirando(db, reserva_id, **kw):
+        # Desde OTRA conexión: ¿cuántas de las dos ya están cerradas de verdad?
+        vistas.append(await _uno(
+            motor, "select count(*) from public.service_attendances where status = 'closed' "
+                   "and booking_id in (cast(:a as uuid), cast(:b as uuid))",
+            a=primera["reserva"]["id"], b=segunda["reserva"]["id"]))
+        return await original(db, reserva_id, **kw)
+
+    monkeypatch.setattr(dominio, "_cerrar_sola", mirando)
+    r = await _pedir(app, "POST", TAREAS, jefa)
+    assert r.status_code == 200 and r.json()["closed"] == 2, r.text
+    assert vistas == [0, 1]
+
+
+async def test_retirar_un_caso_no_le_quita_el_suyo_a_la_otra_parte(atencion) -> None:
+    app, motor, _ = atencion
+    h = await _atendida(app, motor, hasta="completed")
+    reserva = h["reserva"]["id"]
+    await _llevar(motor, reserva, minutos=-90)
+    # El prestador abre un caso cualquiera y lo retira en el acto.
+    r = await _hacer(app, "provider", h, "incident", {"reason": "other", "description": DESCRIPCION})
+    assert r.status_code == 201, r.text
+    del_prestador = r.json()["id"]
+    clave = _clave()
+    assert (await _hacer(app, "provider", h, "incident/withdraw", clave=clave)).status_code == 200
+    # QUIEN CONTRATÓ CONSERVA EL SUYO; quien retiró el suyo ya no abre otro.
+    assert "open_incident" in await _acciones(app, "client", h)
+    assert "open_incident" not in await _acciones(app, "provider", h)
+    r = await _hacer(app, "provider", h, "incident", {"reason": "safety", "description": DESCRIPCION})
+    assert r.status_code == 409 and _codigo(r) == "service_incident_exists", r.text
+    r = await _hacer(app, "client", h, "incident", {"reason": "safety", "description": DESCRIPCION})
+    assert r.status_code == 201, r.text
+    del_cliente = r.json()["id"]
+    assert del_cliente != del_prestador and r.json()["status"] == "open"
+    # El caso de la reserva es, para las dos partes, EL VIVO; y vuelve a frenar el cierre.
+    for rol in ("client", "provider"):
+        base, quien = _de(rol, h)
+        visto = (await _pedir(app, "GET", f"{base}/incident", quien)).json()
+        assert (visto["id"], visto["status"], visto["reason"]) == (del_cliente, "open", "safety")
+        assert (await _ver(app, rol, h))["care"]["incident"]["id"] == del_cliente
+    assert "confirm" not in await _acciones(app, "client", h)
+    # Repetir la retirada con su clave devuelve EL RETIRADO, no el nuevo.
+    r = await _hacer(app, "provider", h, "incident/withdraw", clave=clave)
+    assert r.status_code == 200 and (r.json()["id"], r.json()["status"]) == (del_prestador, "withdrawn"), r.text
+    # Administración ve los dos; el retirado no se resuelve, el vivo sí.
+    for caso, estado in ((del_prestador, "withdrawn"), (del_cliente, "open")):
+        r = await _pedir(app, "GET", f"{CASOS}/{caso}", h["jefa"])
+        assert r.status_code == 200 and r.json()["status"] == estado, r.text
+    assert (await _resolver(app, h["jefa"], del_prestador)).status_code == 409
+    # Si también lo retira quien contrató, ya nadie abre otro: como mucho, dos por reserva.
+    assert (await _hacer(app, "client", h, "incident/withdraw")).status_code == 200
+    for rol in ("client", "provider"):
+        assert "open_incident" not in await _acciones(app, rol, h)
+        r = await _hacer(app, rol, h, "incident", {"reason": "safety", "description": DESCRIPCION})
+        assert r.status_code == 409 and _codigo(r) == "service_incident_exists", r.text
+    assert await _uno(motor, "select count(*) from public.service_incidents where booking_id = cast(:b as uuid)",
+                      b=reserva) == 2
+
+
+async def test_el_tope_de_evidencias_es_de_cada_parte(atencion, monkeypatch) -> None:
+    from app.modules.services import reserva_politica
+
+    app, motor, almacen = atencion
+    monkeypatch.setattr(reserva_politica, "EVIDENCIAS_POR_PARTE", 1)
+    h = await _con_caso(app, motor)
+
+    async def subir(rol: str, nombre: str, datos: bytes, tipo: str):
+        base, quien = _de(rol, h)
+        async with _cliente(app, quien) as http:
+            return await http.post(f"{base}/incident/evidence", files={"file": (nombre, datos, tipo)},
+                                   headers={"Idempotency-Key": _clave()})
+
+    assert (await subir("client", "a.png", PNG, "image/png")).status_code == 201
+    r = await subir("client", "b.pdf", PDF, "application/pdf")
+    assert r.status_code == 409 and _codigo(r) == "service_incident_evidence_limit", r.text
+    # Que una parte llene su cupo NO deja a la otra sin poder aportar la suya.
+    r = await subir("provider", "c.pdf", PDF, "application/pdf")
+    assert r.status_code == 201, r.text
+    assert len(almacen.de(posventa.DEPOSITO, h["cliente"])) == 1
+    assert len(almacen.de(posventa.DEPOSITO, h["perfil"])) == 1
+
+
+async def test_un_administrador_que_es_parte_no_lee_el_expediente_de_administracion(atencion) -> None:
+    app, motor, _ = atencion
+    h = await _con_caso(app, motor)
+    caso, jefa = h["caso"], h["jefa"]
+    base, cliente = _de("client", h)
+    async with _cliente(app, cliente) as http:
+        r = await http.post(f"{base}/incident/evidence", files={"file": ("a.png", PNG, "image/png")},
+                            headers={"Idempotency-Key": _clave()})
+        assert r.status_code == 201, r.text
+        evidencia = [e for e in r.json()["entries"] if e["kind"] == "evidence"][0]["id"]
+    r = await _pedir(app, "POST", f"{CASOS}/{caso}/entries", jefa,
+                     {"body": "Nota solo para el equipo", "internal": True}, _clave())
+    assert r.status_code == 201, r.text
+    for parte in (h["cliente"], h["perfil"]):
+        await _sembrar(motor, "update public.profiles set role = 'admin' where id = cast(:u as uuid)", u=parte)
+        try:
+            for ruta in (f"{CASOS}/{caso}", f"{CASOS}/{caso}/entries/{evidencia}/file"):
+                r = await _pedir(app, "GET", ruta, parte)
+                assert r.status_code == 409 and _codigo(r) == "service_incident_resolver_conflict", (ruta, r.text)
+                assert "Nota solo para el equipo" not in r.text
+        finally:
+            await _sembrar(motor, "update public.profiles set role = 'user' where id = cast(:u as uuid)", u=parte)
+    # Su caso lo sigue viendo por SU ruta, sin las notas internas.
+    visto = (await _pedir(app, "GET", f"{base}/incident", cliente)).json()
+    assert "Nota solo para el equipo" not in json.dumps(visto, ensure_ascii=False)
+    assert (await _pedir(app, "GET", f"{CASOS}/{caso}", jefa)).status_code == 200
+
+
+async def test_subir_una_evidencia_con_la_reserva_ocupada_es_409_y_no_deja_el_archivo(atencion, monkeypatch) -> None:
+    from app.modules.services import reserva_politica
+
+    app, motor, almacen = atencion
+    h = await _con_caso(app, motor)
+    monkeypatch.setattr(reserva_politica, "ESPERA_DEL_CERROJO_MS", 300)
+    base, cliente = _de("client", h)
+    async with motor.connect() as otra:
+        await otra.execute(text("select 1 from public.service_bookings where id = cast(:b as uuid) for update"),
+                           {"b": h["reserva"]["id"]})
+        async with _cliente(app, cliente) as http:
+            r = await http.post(f"{base}/incident/evidence", files={"file": ("a.png", PNG, "image/png")},
+                                headers={"Idempotency-Key": _clave()})
+        await otra.rollback()
+    assert r.status_code == 409 and _codigo(r) == "service_booking_busy", r.text
+    assert almacen.de(posventa.DEPOSITO, cliente) == []
+
+
+async def test_administracion_solo_ve_lo_que_el_servidor_le_va_a_aceptar(atencion) -> None:
+    app, motor, _ = atencion
+    h = await _con_caso(app, motor)
+    caso, jefa = h["caso"], h["jefa"]
+    otra_jefa = await _persona(motor, "admin")
+    visto = (await _pedir(app, "GET", f"{CASOS}/{caso}", jefa)).json()
+    assert sorted(visto["available_actions"]) == ["add_incident_entry", "add_internal_note", "resolve_incident"]
+    assert visto["attention_effects"] == ["none", "completed", "provider_no_show", "client_no_show"]
+    # Resuelto con «se realizó»: la atención queda CERRADA, y eso es definitivo.
+    assert (await _resolver(app, jefa, caso, attention_effect="completed")).status_code == 200
+    visto = (await _pedir(app, "GET", f"{CASOS}/{caso}", jefa)).json()
+    assert (visto["available_actions"], visto["attention_effects"]) == (["add_internal_note"], [])
+    r = await _hacer(app, "client", h, "incident/appeal", {"body": "No estoy de acuerdo: la sesión no se dio."})
+    assert r.status_code == 200, r.text
+    # Apelado: quien resolvió no resuelve; la otra persona sí, y SOLO con lo que el servidor admite.
+    mio = (await _pedir(app, "GET", f"{CASOS}/{caso}", jefa)).json()
+    assert sorted(mio["available_actions"]) == ["add_incident_entry", "add_internal_note"]
+    assert mio["attention_effects"] == []
+    suyo = (await _pedir(app, "GET", f"{CASOS}/{caso}", otra_jefa)).json()
+    assert sorted(suyo["available_actions"]) == ["add_incident_entry", "add_internal_note", "resolve_incident"]
+    assert suyo["attention_effects"] == ["none", "completed"]
+    for efecto in ("provider_no_show", "client_no_show"):
+        r = await _resolver(app, otra_jefa, caso, attention_effect=efecto)
+        assert r.status_code == 409 and _codigo(r) == "service_incident_effect_not_allowed", r.text
+    for efecto in suyo["attention_effects"][:1]:
+        assert (await _resolver(app, otra_jefa, caso, attention_effect=efecto)).status_code == 200
+
+
+async def test_sin_otra_persona_que_decida_no_se_ofrece_apelar(atencion) -> None:
+    """Con UNA sola persona en administración, una apelación no la podría
+    resolver nadie (quien resolvió no resuelve su apelación): no se ofrece."""
+    app, motor, _ = atencion
+    h = await _con_caso(app, motor)
+    caso, jefa = h["caso"], h["jefa"]
+    assert (await _resolver(app, jefa, caso)).status_code == 200
+    cuerpo = {"body": "No estoy de acuerdo con la decisión tomada."}
+    base, quien = _de("client", h)
+    otras = [f[0] for f in await _filas(
+        motor, "select id::text from public.profiles where role = 'admin' and id <> cast(:j as uuid)", j=jefa)]
+    await _sembrar(motor, "update public.profiles set role = 'moderator' where role = 'admin' and id <> cast(:j as uuid)",
+                   j=jefa)
+    try:
+        assert (await _pedir(app, "GET", f"{base}/incident", quien)).json()["available_actions"] == []
+        assert "appeal_incident" not in await _acciones(app, "provider", h)
+        r = await _hacer(app, "client", h, "incident/appeal", cuerpo)
+        assert r.status_code == 409 and _codigo(r) == "service_incident_appeal_not_allowed", r.text
+        # Otra persona de administración que ES PARTE tampoco cuenta.
+        await _sembrar(motor, "update public.profiles set role = 'admin' where id = cast(:u as uuid)", u=h["perfil"])
+        assert (await _pedir(app, "GET", f"{base}/incident", quien)).json()["available_actions"] == []
+    finally:
+        await _sembrar(motor, "update public.profiles set role = 'user' where id = cast(:u as uuid)", u=h["perfil"])
+        for otra in otras:
+            await _sembrar(motor, "update public.profiles set role = 'admin' where id = cast(:u as uuid)", u=otra)
+    # En cuanto hay otra persona, se ofrece y se puede.
+    await _persona(motor, "admin")
+    assert (await _pedir(app, "GET", f"{base}/incident", quien)).json()["available_actions"] == ["appeal_incident"]
+    assert (await _hacer(app, "client", h, "incident/appeal", cuerpo)).status_code == 200
+
+
+async def test_las_apelaciones_son_configurables_y_pueden_ser_ninguna(atencion, monkeypatch) -> None:
+    app, motor, _ = atencion
+    h = await _con_caso(app, motor)
+    await _persona(motor, "admin")
+    assert (await _resolver(app, h["jefa"], h["caso"])).status_code == 200
+    assert "appeal_incident" in await _acciones(app, "client", h)
+    monkeypatch.setattr(get_settings(), "services_incident_appeals_max", 0)
+    assert "appeal_incident" not in await _acciones(app, "client", h)
+    r = await _hacer(app, "client", h, "incident/appeal", {"body": "No estoy de acuerdo con la decisión tomada."})
+    assert r.status_code == 409 and _codigo(r) == "service_incident_appeal_not_allowed", r.text
+    # Y nunca más de una: es lo que admite la base.
+    monkeypatch.setattr(get_settings(), "services_incident_appeals_max", 7)
+    assert (await _hacer(app, "client", h, "incident/appeal",
+                         {"body": "No estoy de acuerdo con la decisión tomada."})).status_code == 200
+    assert "appeal_incident" not in await _acciones(app, "provider", h)
+
+
+async def test_cancelada_el_prestador_ya_no_ve_lo_que_le_conto_quien_contrato(atencion) -> None:
+    app, motor, _ = atencion
+    perfil, servicio, jefa, _moderador = await _servicio(app, motor)
+    await _condiciones(app, jefa)
+    cliente = await _persona(motor)
+    inicio = (await _horarios(app, servicio, _dia(7)))[0]["starts_at"]
+    retencion = (await _retener(app, cliente, servicio, inicio)).json()["id"]
+    resumen = (await _pedir(app, "GET", f"{RETENCIONES}/{retencion}/checkout", cliente)).json()
+    r = await _confirmar(app, cliente, retencion, _aceptando(resumen, note="Traigo mis facturas"))
+    assert r.status_code == 201, r.text
+    h = {"reserva": r.json(), "cliente": cliente, "perfil": perfil}
+    # Confirmada: el prestador la necesita para atender.
+    assert (await _ver(app, "provider", h))["intake"]["note"] == "Traigo mis facturas"
+    assert (await _hacer(app, "client", h, "cancel", {})).status_code == 200
+    # CANCELADA: ya no va a atender a nadie, y deja de verla. Quien la escribió, sí.
+    del_prestador = await _ver(app, "provider", h)
+    assert del_prestador["status"] == "cancelled" and del_prestador["intake"] is None
+    assert "Traigo mis facturas" not in json.dumps(del_prestador, ensure_ascii=False)
+    assert (await _ver(app, "client", h))["intake"]["note"] == "Traigo mis facturas"
+
+
+async def test_la_resena_publica_no_dice_quien_la_escribio(atencion) -> None:
+    app, motor, _ = atencion
+    h = await _atendida(app, motor)
+    r = await _hacer(app, "client", h, "review", RESENA)
+    assert r.status_code == 201, r.text
+    publicas = await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/reviews", None)
+    assert publicas.status_code == 200 and len(publicas.json()["items"]) == 1, publicas.text
+    assert "author_id" not in publicas.json()["items"][0] and h["cliente"] not in publicas.text
+    # Tampoco en el detalle de la reserva, ni para el prestador.
+    for rol in ("client", "provider"):
+        visto = (await _ver(app, rol, h))["care"]["review"]
+        assert visto is not None and "author_id" not in visto
+    # Moderación sí sabe de quién es.
+    moderando = (await _pedir(app, "GET", RESENAS, h["jefa"], status="published")).json()["items"]
+    assert [x["author_id"] for x in moderando if x["booking_id"] == h["reserva"]["id"]] == [h["cliente"]]

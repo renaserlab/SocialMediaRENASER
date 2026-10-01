@@ -1094,10 +1094,12 @@ TABLAS_DE_LA_ATENCION = (
 #:    NINGUNA MÁS;
 #:  * las cuatro claves primarias, las seis ajenas con su acción al borrar
 #:    (la de la reseña al servicio, sin acción y DIFERIDA: la reseña se va por
-#:    un solo camino) y las dos únicas (un caso y una reseña por reserva);
+#:    un solo camino) y la única (una reseña por reserva);
 #:  * los treinta y siete CHECK, validados y por su definición: entre ellos,
 #:    que el efecto económico de un caso NO admite un estado «ejecutado»;
-#:  * los índices con su definición, y todos válidos, listos y vivos;
+#:  * los índices con su definición, y todos válidos, listos y vivos: entre
+#:    ellos el ÚNICO PARCIAL que deja un caso por reserva sin contar los
+#:    retirados (el código abre un caso nuevo tras uno retirado);
 #:  * los ocho disparadores activos con su función, su forma y sus
 #:    argumentos, y las tres funciones sin SECURITY DEFINER, con su
 #:    `search_path` y su cuerpo (los saltos de la atención y del caso, y la
@@ -1185,7 +1187,6 @@ _LO_QUE_NECESITA_LA_ATENCION = text(
       ('service_reviews', 'author_id', 'profiles', 'id', 'n', false)
     ),
     unicas(tabla, nombre, definicion) as (values
-      ('service_incidents', 'service_incidents_una_por_reserva', 'UNIQUE (booking_id)'),
       ('service_reviews', 'service_reviews_una_por_reserva', 'UNIQUE (booking_id)')
     ),
     disparadores(tabla, nombre, funcion, tipo, argumentos) as (values
@@ -1239,7 +1240,9 @@ _LO_QUE_NECESITA_LA_ATENCION = text(
       and (select count(*) from unicas e
              join pg_catalog.pg_constraint c
                on c.conrelid = to_regclass('public.' || e.tabla) and c.conname = e.nombre
-            where c.contype = 'u' and pg_catalog.pg_get_constraintdef(c.oid) = e.definicion) = 2
+            where c.contype = 'u' and pg_catalog.pg_get_constraintdef(c.oid) = e.definicion) = 1
+      and (select count(*) from pg_catalog.pg_constraint c
+            where c.contype = 'u' and c.conrelid in (select t from tablas)) = 1
       -- Los CHECK, validados y POR SU DEFINICIÓN (la huella de los 37).
       and (select count(*) from pg_catalog.pg_constraint c
             where c.contype = 'c' and c.convalidated and c.conrelid in (select t from tablas)) = 37
@@ -1258,12 +1261,16 @@ _LO_QUE_NECESITA_LA_ATENCION = text(
                 'USING btree (incident_id, created_at, id)',
                 'CREATE INDEX service_incidents_por_estado ON public.service_incidents '
                 'USING btree (status, created_at DESC, id DESC)',
+                'CREATE INDEX service_incidents_de_la_reserva ON public.service_incidents '
+                'USING btree (booking_id, created_at DESC, id DESC)',
+                'CREATE UNIQUE INDEX service_incidents_una_por_reserva ON public.service_incidents '
+                'USING btree (booking_id) WHERE (status <> ''withdrawn''::text)',
                 'CREATE INDEX service_reviews_del_servicio ON public.service_reviews '
                 'USING btree (service_id, status, created_at DESC, id DESC)',
                 'CREATE UNIQUE INDEX service_incident_entries_un_archivo ON public.service_incident_entries '
                 'USING btree (incident_id, sha256) WHERE (sha256 IS NOT NULL)'
-              )) = 5
-      and (select count(*) from pg_catalog.pg_index i where i.indrelid in (select t from tablas)) = 11
+              )) = 7
+      and (select count(*) from pg_catalog.pg_index i where i.indrelid in (select t from tablas)) = 12
       and not exists (select 1 from pg_catalog.pg_index i
                        where i.indrelid in (select t from tablas)
                          and not (i.indisvalid and i.indisready and i.indislive))

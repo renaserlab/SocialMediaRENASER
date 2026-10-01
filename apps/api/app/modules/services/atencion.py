@@ -35,7 +35,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ValidationAppError
@@ -50,6 +50,7 @@ from app.modules.services.atencion_models import (
     CASOS_VIVOS,
     CASO_EN_CURSO,
     CASO_RESUELTO,
+    CASO_RETIRADO,
     CERRADA,
     CON_CODIGO,
     EFECTO_BLOQUEADO,
@@ -237,9 +238,17 @@ def acciones_disponibles(
     reprogramaciones: int,
     version_vigente: str | None,
     prestador_activo: bool,
+    retiro_el_suyo: bool = False,
+    hay_otro_decisor: bool = True,
 ) -> list[str]:
     """LO QUE ESA PERSONA PUEDE HACER AHORA con esa reserva. Las transiciones
-    comprueban exactamente esto: lo que no está aquí, el servidor lo rechaza."""
+    comprueban exactamente esto: lo que no está aquí, el servidor lo rechaza.
+
+    `caso` es EL de la reserva (`caso_de`): el vivo o el decidido y, si no
+    hay, el último retirado. Un caso retirado no impide abrir otro, salvo a
+    quien retiró el suyo (`retiro_el_suyo`). Y apelar solo se ofrece si en
+    administración hay OTRA persona que pueda resolverlo (`hay_otro_decisor`):
+    quien resolvió no resuelve su apelación."""
     inicio, fin = _utc(reserva.starts_at), _utc(reserva.ends_at)
     p = plazos(reserva, atencion, caso, politica)
     confirmada = reserva.status == RESERVA_CONFIRMADA
@@ -252,7 +261,8 @@ def acciones_disponibles(
         acciones.append(CANCELAR)
     if confirmada and sin_empezar and ahora >= p.ausencia_desde and ahora <= p.caso_hasta:
         acciones.append(REPORTAR_AUSENCIA)
-    if confirmada and caso is None and ahora >= inicio:
+    sin_caso = caso is None or caso.status == CASO_RETIRADO
+    if confirmada and sin_caso and not retiro_el_suyo and ahora >= inicio:
         acciones.append(ABRIR_CASO)
     if caso_vivo:
         acciones.append(ESCRIBIR_EN_EL_CASO)
@@ -260,6 +270,7 @@ def acciones_disponibles(
         acciones.append(RETIRAR_EL_CASO)
     if (
         caso is not None and caso.status == CASO_RESUELTO and caso.resolutions == 1
+        and politica.apelaciones >= 1 and hay_otro_decisor
         and p.apelar_hasta is not None and ahora <= p.apelar_hasta
     ):
         acciones.append(APELAR)
@@ -307,6 +318,50 @@ class Cuidado:
     cancelacion: ServiceBookingEvent | None
     cambios: list[ServiceBookingEvent] = field(default_factory=list)
     efecto: str = EFECTO_NO_APLICA
+    #: El plazo ordinario para abrir un caso ya pasó (solo queda el de seguridad).
+    caso_fuera_de_plazo: bool = False
+
+
+async def caso_de(db: AsyncSession, reserva_id: str) -> ServiceIncident | None:
+    """EL caso de una reserva: el vivo o el decidido (la base no admite más
+    de uno) y, si no hay ninguno, el último retirado."""
+    return await db.scalar(
+        select(ServiceIncident).where(ServiceIncident.booking_id == reserva_id)
+        .order_by(ServiceIncident.status == CASO_RETIRADO, ServiceIncident.created_at.desc(),
+                  ServiceIncident.id.desc())
+        .limit(1).execution_options(populate_existing=True)
+    )
+
+
+async def retiro_el_suyo(db: AsyncSession, reserva_id: str, usuario_id: str) -> bool:
+    """¿Esa persona ya abrió y retiró un caso de esta reserva? Entonces no
+    abre otro (como mucho hay dos casos por reserva, uno retirado por cada
+    parte). A LA OTRA PARTE no le afecta: conserva el suyo."""
+    return bool(
+        await db.scalar(
+            select(func.count()).select_from(ServiceIncident)
+            .where(ServiceIncident.booking_id == reserva_id, ServiceIncident.status == CASO_RETIRADO,
+                   ServiceIncident.opened_by == usuario_id)
+        )
+    )
+
+
+async def hay_otro_decisor(
+    db: AsyncSession, reserva: ServiceBooking, prestador: ServiceProvider | None, caso: ServiceIncident
+) -> bool:
+    """¿Hay en administración alguien que pueda resolver una apelación de
+    este caso? Ni quien lo resolvió ni quien es parte. Si no hay nadie, la
+    apelación no se ofrece: sería un caso vivo que nadie puede cerrar."""
+    from app.modules.profiles.models import Profile
+    from app.modules.services.permissions import ROLES_QUE_DECIDEN
+
+    fuera = [x for x in (caso.resolved_by, reserva.client_id, prestador.profile_id if prestador else None) if x]
+    return bool(
+        await db.scalar(
+            select(func.count()).select_from(Profile)
+            .where(Profile.role.in_(tuple(ROLES_QUE_DECIDEN)), Profile.id.not_in(fuera))
+        )
+    )
 
 
 async def _version_vigente(db: AsyncSession, reserva: ServiceBooking) -> str | None:
@@ -342,7 +397,7 @@ async def cuidado(
     ahora = ahora or _ahora()
     politica = limites.PoliticaDeAtencion.de()
     atencion = await db.get(ServiceAttendance, reserva.id)
-    caso = await db.scalar(select(ServiceIncident).where(ServiceIncident.booking_id == reserva.id))
+    caso = await caso_de(db, reserva.id)
     resena = await db.scalar(select(ServiceReview).where(ServiceReview.booking_id == reserva.id))
     cambios = await _sucesos(db, reserva.id, RESERVA_REPROGRAMADA)
     cancelaciones = await _sucesos(db, reserva.id, RESERVA_CANCELADA_EVENTO)
@@ -350,14 +405,21 @@ async def cuidado(
         prestador = await db.get(ServiceProvider, reserva.provider_id)
     vigente = await _version_vigente(db, reserva) if rol == CLIENTE and reserva.status == RESERVA_CONFIRMADA else None
     pedido = await db.get(ServiceOrder, reserva.order_id)
+    # Solo se pregunta lo que puede cambiar la respuesta.
+    retirado = caso is not None and caso.status == CASO_RETIRADO and await retiro_el_suyo(db, reserva.id, usuario_id)
+    apelable = caso is not None and caso.status == CASO_RESUELTO and int(caso.resolutions) == 1
+    otro = await hay_otro_decisor(db, reserva, prestador, caso) if apelable else False
+    los_plazos = plazos(reserva, atencion, caso, politica)
     return Cuidado(
         rol=rol,
         acciones=acciones_disponibles(
             rol=rol, usuario_id=usuario_id, reserva=reserva, atencion=atencion, caso=caso, resena=resena,
             ahora=ahora, politica=politica, reprogramaciones=len(cambios), version_vigente=vigente,
             prestador_activo=prestador is not None and prestador.status == PRESTADOR_ACTIVO,
+            retiro_el_suyo=retirado, hay_otro_decisor=otro,
         ),
-        atencion=atencion, caso=caso, resena=resena, plazos=plazos(reserva, atencion, caso, politica),
+        atencion=atencion, caso=caso, resena=resena, plazos=los_plazos,
+        caso_fuera_de_plazo=ahora > los_plazos.caso_hasta,
         politica=politica, reprogramaciones=len(cambios),
         cancelacion=cancelaciones[-1] if cancelaciones else None, cambios=cambios,
         efecto=estado_del_efecto(pedido, SIN_EFECTO),
@@ -908,9 +970,12 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
         con la señal fuerte y sin un caso vivo. Sin la señal fuerte NO se
         cierran: se cuentan, y esperan a quien contrata o a un caso.
 
-    Cada fila va en su propio punto de guardado: una que falle no tumba el
-    lote. Lo que otra petición tiene bloqueado se salta. NADIE LLAMA A ESTO
-    TODAVÍA: el planificador es una decisión de la empresa. No mueve dinero."""
+    CADA FILA SE CONFIRMA ANTES DE PASAR A LA SIGUIENTE: una que falle no
+    tumba el lote, y el barrido no deja un lote entero de reservas
+    bloqueadas hasta el final. Lo que otra petición tiene bloqueado se
+    salta. LO QUE NO SE PUEDE CERRAR NO OCUPA EL LOTE (no deja atrás a las
+    que sí). NADIE LLAMA A ESTO TODAVÍA: el planificador es una decisión de
+    la empresa. No mueve dinero."""
     ahora = ahora or _ahora()
     lote = max(1, min(int(lote or limites.LOTE_DE_TAREAS), limites.LOTE_MAXIMO_DE_TAREAS))
     politica = limites.PoliticaDeAtencion.de()
@@ -927,31 +992,45 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
         )
     )
     limite = ahora - timedelta(hours=politica.confirmacion_horas)
-    vencidas = (
-        await db.execute(
-            select(ServiceAttendance.booking_id, ServiceAttendance.started_with_code)
-            .where(ServiceAttendance.status == TERMINADA, ServiceAttendance.completed_at <= limite)
+    vencida = and_(ServiceAttendance.status == TERMINADA, ServiceAttendance.completed_at <= limite)
+    con_caso_vivo = (
+        select(ServiceIncident.id)
+        .where(ServiceIncident.booking_id == ServiceAttendance.booking_id, ServiceIncident.status.in_(CASOS_VIVOS))
+        .exists()
+    )
+    # SOLO LAS QUE SE PUEDEN CERRAR: las que no tienen la señal fuerte o
+    # tienen un caso vivo se quedarían para siempre a la cabeza del lote.
+    vencidas = list(
+        await db.scalars(
+            select(ServiceAttendance.booking_id)
+            .where(vencida, ServiceAttendance.started_with_code.is_(True), ~con_caso_vivo)
             .order_by(ServiceAttendance.completed_at, ServiceAttendance.booking_id).limit(lote)
         )
-    ).all()
+    )
+    hecho.sin_verificar = int(
+        await db.scalar(
+            select(func.count()).select_from(ServiceAttendance)
+            .where(vencida, ServiceAttendance.started_with_code.is_(False))
+        ) or 0
+    )
+    await db.commit()
 
     for reserva_id in por_recordar:
         try:
-            async with db.begin_nested():
-                if await _recordar(db, reserva_id, ahora=ahora, hasta=hasta):
-                    hecho.recordadas += 1
+            recordada = await _recordar(db, reserva_id, ahora=ahora, hasta=hasta)
+            await db.commit()
+            hecho.recordadas += int(recordada)
         except Exception:  # noqa: BLE001 - una fila no tumba el lote
+            await db.rollback()
             avisos.logger.exception("[servicios] no se pudo recordar la reserva %s", reserva_id)
             hecho.saltadas += 1
-    for reserva_id, con_codigo in vencidas:
-        if not con_codigo:
-            hecho.sin_verificar += 1
-            continue
+    for reserva_id in vencidas:
         try:
-            async with db.begin_nested():
-                if await _cerrar_sola(db, reserva_id, ahora=ahora, limite=limite):
-                    hecho.cerradas += 1
+            cerrada = await _cerrar_sola(db, reserva_id, ahora=ahora, limite=limite)
+            await db.commit()
+            hecho.cerradas += int(cerrada)
         except Exception:  # noqa: BLE001
+            await db.rollback()
             avisos.logger.exception("[servicios] no se pudo cerrar la atención %s", reserva_id)
             hecho.saltadas += 1
     return hecho
@@ -991,6 +1070,7 @@ __all__ = [
     "acciones_disponibles",
     "anotar",
     "avisar",
+    "caso_de",
     "cancelar",
     "cerrar",
     "confirmar",

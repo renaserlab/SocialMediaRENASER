@@ -573,6 +573,19 @@ def test_un_caso_por_reserva_y_solo_sus_saltos(pg) -> None:  # noqa: F811
     _hacer(pg, "update public.service_incidents set status = 'withdrawn' where id = %s", otro)
     assert "Salto de caso no permitido: withdrawn → resolved" in _falla(
         pg, RESOLVER, "resolved", "none", "not_applicable", m["admin"], otro)
+    # UN RETIRADO NO CUENTA: quien lo retira no le quita el suyo a la otra parte. De los
+    # que cuentan (vivos o decididos) sigue habiendo uno, y el retirado no vuelve.
+    de_dos = _reservada(pg, m, inicio="2031-03-09 15:00+00", cliente=_persona(pg))["reserva"]
+    retirado = _caso(pg, de_dos, m["perfil"], motivo="client_absent")
+    _hacer(pg, "update public.service_incidents set status = 'withdrawn' where id = %s", retirado)
+    vivo = _caso(pg, de_dos, m["cliente"])
+    assert "service_incidents_una_por_reserva" in _falla(
+        pg, "insert into public.service_incidents (booking_id, opened_by, reason, description) values (%s, %s, "
+            "'quality', %s)", de_dos, m["cliente"], DESCRIPCION)
+    assert "Salto de caso no permitido: withdrawn → open" in _falla(
+        pg, "update public.service_incidents set status = 'open' where id = %s", retirado)
+    _hacer(pg, "update public.service_incidents set status = 'withdrawn' where id = %s", vivo)
+    assert _uno(pg, "select count(*) from public.service_incidents where booking_id = %s", de_dos) == 2
 
 
 @SIN_POSTGRES

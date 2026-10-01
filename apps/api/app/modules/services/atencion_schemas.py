@@ -198,10 +198,13 @@ class CasoDeLaReservaRead(BaseModel):
 
 class ResenaRead(BaseModel):
     """Una reseña. `verified` es siempre cierto: la base no guarda una reseña
-    sin su atención cerrada. `status` solo viaja en la propia y en moderación."""
+    sin su atención cerrada. `status` solo viaja en la propia y en moderación.
+
+    NO DICE QUIÉN LA ESCRIBIÓ: la identidad pública de quien reseña es una
+    decisión de la empresa todavía pendiente, y la lista es pública (también
+    para quien no tiene sesión). Solo moderación lo sabe (`ResenaAdminRead`)."""
 
     id: str
-    author_id: str | None
     rating: int
     fulfillment: int | None
     quality: int | None
@@ -220,7 +223,7 @@ class ResenaRead(BaseModel):
         if r is None:
             return None
         return cls(
-            id=r.id, author_id=r.author_id, rating=r.rating,
+            id=r.id, rating=r.rating,
             **{eje: getattr(r, eje) for eje in EJES_DE_RESENA},
             recommends=bool(r.recommends), comment=r.comment, reply=r.reply, replied_at=_momento(r.replied_at),
             created_at=_utc(r.created_at), status=r.status if con_estado else None,
@@ -232,6 +235,9 @@ class CuidadoRead(BaseModel):
     son las del servidor: la app no ofrece ninguna que no esté aquí."""
 
     available_actions: list[str]
+    #: Los motivos con los que esa parte puede abrir un caso AHORA (vacío si no
+    #: puede abrirlo). Pasado el plazo ordinario, solo el de seguridad.
+    incident_reasons: list[str]
     attendance: AtencionRead | None
     cancellation: CancelacionRead | None
     reschedules: list[CambioDeHorarioRead]
@@ -244,6 +250,8 @@ class CuidadoRead(BaseModel):
         p = c.plazos
         return cls(
             available_actions=c.acciones,
+            incident_reasons=list(posventa.motivos_para_abrir(c.rol, fuera_de_plazo=c.caso_fuera_de_plazo))
+            if dominio.ABRIR_CASO in c.acciones else [],
             attendance=AtencionRead.desde(c.atencion, rol=c.rol),
             cancellation=CancelacionRead.desde(c.cancelacion),
             reschedules=[CambioDeHorarioRead.desde(e) for e in c.cambios],
@@ -374,6 +382,9 @@ class ExpedienteAdminRead(ExpedienteRead):
     starts_at: datetime
     booking_status: str
     resolutions: int
+    #: Los efectos en la atención que el servidor aceptaría AHORA a quien
+    #: mira. Vacío si no puede resolver. Una atención cerrada no se desmiente.
+    attention_effects: list[str]
 
     @classmethod
     def del_expediente(cls, x: posventa.Expediente, *, usuario_id: str) -> "ExpedienteAdminRead":
@@ -381,17 +392,19 @@ class ExpedienteAdminRead(ExpedienteRead):
         r = x.reserva
         return cls(**base.model_dump(), booking_code=r.booking_code, title=r.title_snapshot,
                    provider_name=r.provider_name_snapshot, starts_at=_utc(r.starts_at), booking_status=r.status,
-                   resolutions=int(x.caso.resolutions))
+                   resolutions=int(x.caso.resolutions), attention_effects=x.efectos)
 
 
 class ResenaAdminRead(ResenaRead):
     booking_id: str
     service_id: str
+    #: Solo aquí: quién la escribió (`null` si su cuenta ya no existe).
+    author_id: str | None
 
     @classmethod
     def de_moderacion(cls, r: ServiceReview) -> "ResenaAdminRead":
         base = ResenaRead.desde(r, con_estado=True)
-        return cls(**base.model_dump(), booking_id=r.booking_id, service_id=r.service_id)
+        return cls(**base.model_dump(), booking_id=r.booking_id, service_id=r.service_id, author_id=r.author_id)
 
 
 class PaginaDeResenasAdminRead(BaseModel):

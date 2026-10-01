@@ -229,7 +229,6 @@ class ServiceIncident(Base):
         ),
         CheckConstraint(_entre("resolutions", 0, 2), name="service_incidents_resoluciones"),
         CheckConstraint(_en("appealed_by", PARTES, nulo=True), name="service_incidents_apela"),
-        UniqueConstraint("booking_id", name="service_incidents_una_por_reserva"),
         CheckConstraint(
             "(resolutions = 0) = (outcome is null)"
             " and (outcome is null) = (resolved_at is null)"
@@ -255,6 +254,14 @@ class ServiceIncident(Base):
             name="service_incidents_sin_efecto",
         ),
         Index("service_incidents_por_estado", "status", text("created_at desc"), text("id desc")),
+        # UNO POR RESERVA, SIN CONTAR LOS RETIRADOS: quien retira el suyo no
+        # le quita el suyo a la otra parte.
+        Index(
+            "service_incidents_una_por_reserva", "booking_id", unique=True,
+            postgresql_where=text(f"status <> '{CASO_RETIRADO}'"),
+            sqlite_where=text(f"status <> '{CASO_RETIRADO}'"),
+        ),
+        Index("service_incidents_de_la_reserva", "booking_id", text("created_at desc"), text("id desc")),
     )
 
 

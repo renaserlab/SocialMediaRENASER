@@ -81,7 +81,8 @@ INTENTOS_DEL_CODIGO = 5
 DESCRIPCION_DEL_CASO = (20, 2000)
 ENTRADA_MAXIMA = 2000
 MOTIVO_MAXIMO = 500
-EVIDENCIAS_POR_CASO = 10
+#: Por PARTE, no por caso: que una llene su cupo no deja a la otra sin el suyo.
+EVIDENCIAS_POR_PARTE = 10
 COMENTARIO_DE_RESENA = (20, 2000)
 RESPUESTA_MAXIMA = 1000
 #: Los barridos de la atención: cuántas filas en una llamada.
@@ -100,6 +101,8 @@ _COTAS_DE_LA_ATENCION = {
     "services_booking_reminder_hours": (1, 168),
     "services_incident_window_hours": (1, 720),
     "services_incident_appeal_days": (1, 60),
+    # Dos resoluciones como mucho por caso (0094): una apelación, o ninguna.
+    "services_incident_appeals_max": (0, 1),
     "services_review_window_days": (1, 365),
 }
 
@@ -121,6 +124,7 @@ class PoliticaDeAtencion:
     #: Cuánto hay para abrir un caso, y para apelar su resolución.
     caso_horas: int
     apelacion_dias: int
+    apelaciones: int
     #: Cuánto hay para reseñar, y si una reseña espera a moderación.
     resena_dias: int
     resena_con_moderacion_previa: bool
@@ -142,6 +146,7 @@ class PoliticaDeAtencion:
             recordatorio_horas=acotado("services_booking_reminder_hours"),
             caso_horas=acotado("services_incident_window_hours"),
             apelacion_dias=acotado("services_incident_appeal_days"),
+            apelaciones=acotado("services_incident_appeals_max"),
             resena_dias=acotado("services_review_window_days"),
             resena_con_moderacion_previa=bool(a.services_reviews_premoderation),
         )
@@ -172,7 +177,7 @@ __all__ = [
     "COMENTARIO_DE_RESENA",
     "DESCRIPCION_DEL_CASO",
     "ENTRADA_MAXIMA",
-    "EVIDENCIAS_POR_CASO",
+    "EVIDENCIAS_POR_PARTE",
     "INTENTOS_DEL_CODIGO",
     "LOTE_DE_TAREAS",
     "LOTE_MAXIMO_DE_TAREAS",

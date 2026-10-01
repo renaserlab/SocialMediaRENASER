@@ -1152,12 +1152,18 @@ async def mi_reserva(db: AsyncSession, *, cliente_id: str, reserva_id: str) -> D
 
 async def reserva_del_prestador(db: AsyncSession, *, usuario_id: str, reserva_id: str) -> Detalle:
     """La reserva de un servicio PROPIO, con lo que la atención necesita. Lo
-    ajeno es un 404."""
+    ajeno es un 404.
+
+    LO QUE CONTÓ QUIEN CONTRATA (su nota, su dirección) es para atenderle:
+    de una reserva que ya no está confirmada (cancelada), el prestador no lo
+    ve. Quien lo escribió lo sigue viendo en la suya."""
     prestador = await _prestador_de(db, usuario_id)
     reserva = await db.get(ServiceBooking, reserva_id) if agenda_de_servicio._es_uuid(reserva_id) else None
     if prestador is None or reserva is None or reserva.provider_id != prestador.id:
         raise ReservaNoEncontrada()
     detalle = await _detalle(db, reserva)
+    if reserva.status != RESERVA_CONFIRMADA:
+        detalle.atencion = None
     if reserva.client_id is not None:
         from app.modules.profiles.models import Profile
 

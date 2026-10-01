@@ -111,9 +111,12 @@ async def _detalle(db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: s
     return ReservaDelPrestadorRead.del_detalle_del_prestador(await con_cuidado(db, d, rol=rol, usuario_id=usuario_id))
 
 
-async def _expediente(db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: str) -> ExpedienteRead:
+async def _expediente(
+    db: AsyncSession, *, usuario_id: str, reserva_id: str, rol: str, caso_id: str | None = None
+) -> ExpedienteRead:
     return ExpedienteRead.desde(
-        await posventa.expediente(db, usuario_id=usuario_id, reserva_id=reserva_id, rol=rol), usuario_id=usuario_id
+        await posventa.expediente(db, usuario_id=usuario_id, reserva_id=reserva_id, rol=rol, caso_id=caso_id),
+        usuario_id=usuario_id,
     )
 
 
@@ -163,10 +166,10 @@ def _rutas_de(rol: str, prefijo: str) -> None:
         _disponible: None = Depends(atencion_disponible),
         db: AsyncSession = Depends(get_db),
     ) -> ExpedienteRead:
-        await posventa.abrir_caso(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol,
-                                  motivo=cuerpo.reason, descripcion=cuerpo.description, clave=clave)
+        caso = await posventa.abrir_caso(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol,
+                                         motivo=cuerpo.reason, descripcion=cuerpo.description, clave=clave)
         await db.commit()
-        return await _expediente(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol)
+        return await _expediente(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol, caso_id=caso.id)
 
     async def ver_caso(
         booking_id: str,
@@ -237,9 +240,9 @@ def _rutas_de(rol: str, prefijo: str) -> None:
         _disponible: None = Depends(atencion_disponible),
         db: AsyncSession = Depends(get_db),
     ) -> ExpedienteRead:
-        await posventa.retirar(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol, clave=clave)
+        caso = await posventa.retirar(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol, clave=clave)
         await db.commit()
-        return await _expediente(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol)
+        return await _expediente(db, usuario_id=current_user.id, reserva_id=booking_id, rol=rol, caso_id=caso.id)
 
     async def apelar(
         booking_id: str,
@@ -454,8 +457,11 @@ async def caso(
     _disponible: None = Depends(atencion_disponible),
     db: AsyncSession = Depends(get_db),
 ) -> ExpedienteAdminRead:
+    """El expediente entero, con lo que quien mira puede hacer ahora. Quien
+    es parte de esa reserva no lo abre por aquí (409)."""
     return ExpedienteAdminRead.del_expediente(
-        await posventa.expediente_para_administrar(db, incident_id), usuario_id=current_user.id
+        await posventa.expediente_para_administrar(db, incident_id, admin_id=current_user.id),
+        usuario_id=current_user.id,
     )
 
 
@@ -475,7 +481,8 @@ async def anotar(
                                                texto=cuerpo.body, interna=cuerpo.internal, clave=clave)
     await db.commit()
     return ExpedienteAdminRead.del_expediente(
-        await posventa.expediente_para_administrar(db, incident_id), usuario_id=current_user.id
+        await posventa.expediente_para_administrar(db, incident_id, admin_id=current_user.id),
+        usuario_id=current_user.id,
     )
 
 
@@ -483,11 +490,12 @@ async def anotar(
 async def enlace_para_administrar(
     incident_id: str,
     entry_id: str,
+    current_user: AuthUser = Depends(get_current_user),
     _funcion: str = Depends(funcion_de_decision),
     _disponible: None = Depends(atencion_disponible),
     db: AsyncSession = Depends(get_db),
 ) -> EnlaceRead:
-    x = await posventa.expediente_para_administrar(db, incident_id)
+    x = await posventa.expediente_para_administrar(db, incident_id, admin_id=current_user.id)
     entrada = next((e for e in x.entradas if e.id == entry_id), None)
     if entrada is None:
         raise posventa.CasoNoEncontrado()
@@ -514,7 +522,8 @@ async def resolver(
     )
     await db.commit()
     return ExpedienteAdminRead.del_expediente(
-        await posventa.expediente_para_administrar(db, incident_id), usuario_id=current_user.id
+        await posventa.expediente_para_administrar(db, incident_id, admin_id=current_user.id),
+        usuario_id=current_user.id,
     )
 
 
