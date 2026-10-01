@@ -141,6 +141,20 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Servicios, Incremento 6: «Casos», «Caso», «Caso retirado», «Reserva
+    // confirmada», «Cancelada», «Publicada», «Publicar», «Nota interna» y
+    // «Marcar como realizada» se escriben EXACTAMENTE igual en portugués;
+    // «{n} de 5» es formato puro.
+    'servicios.admin.casos',
+    'servicios.atencion.admin.caso',
+    'servicios.atencion.admin.notaInterna',
+    'servicios.atencion.caso.estado.withdrawn',
+    'servicios.atencion.moderar.publicar',
+    'servicios.atencion.resena.deCinco',
+    'servicios.atencion.resena.estado.published',
+    'servicios.atencion.reserva.cancelled',
+    'servicios.atencion.reserva.confirmed',
+    'servicios.atencion.terminar',
     // Servicios, Incremento 5: «Reservas» se escribe igual en portugués.
     'servicios.reserva.admin.vista.bookings',
     // Servicios, Incremento 4: «Configurar agenda», «Cancelar», «Motivo»,

@@ -70,11 +70,13 @@ ESTADOS_DE_RETENCION = (RETENCION_ACTIVA, RETENCION_CONSUMIDA, RETENCION_LIBERAD
 #: Las que OCUPAN su horario.
 OCUPAN = (RETENCION_ACTIVA, RETENCION_CONSUMIDA)
 
-#: La reserva y el pedido. UN SOLO ESTADO en este incremento: una reserva
-#: existe cuando está confirmada. `pending_payment` llegará con el cobro, y
-#: la cancelación con el Incremento 6.
+#: La reserva y el pedido. Una reserva existe cuando está confirmada;
+#: `pending_payment` llegará con el cobro. La cancelación llegó con el
+#: Incremento 6 (0094): el estado de la ATENCIÓN vive aparte, en
+#: `service_attendances`.
 RESERVA_CONFIRMADA = "confirmed"
-ESTADOS_DE_RESERVA = (RESERVA_CONFIRMADA,)
+RESERVA_CANCELADA = "cancelled"
+ESTADOS_DE_RESERVA = (RESERVA_CONFIRMADA, RESERVA_CANCELADA)
 PEDIDO_CONFIRMADO = "confirmed"
 ESTADOS_DE_PEDIDO = (PEDIDO_CONFIRMADO,)
 #: El pago, separado del estado (arquitectura §5).
@@ -96,10 +98,39 @@ RETENCION_CREADA = "hold_created"
 RETENCION_SOLTADA = "hold_released"
 RETENCION_VENCIO = "hold_expired"
 RESERVA_CONFIRMADA_EVENTO = "booking_confirmed"
-ACCIONES = (RETENCION_CREADA, RETENCION_SOLTADA, RETENCION_VENCIO, RESERVA_CONFIRMADA_EVENTO)
+#: Lo que añade el Incremento 6 (0094): todo lo que le pasa a una reserva
+#: después de confirmarse queda en el MISMO historial.
+RESERVA_CANCELADA_EVENTO = "booking_cancelled"
+RESERVA_REPROGRAMADA = "booking_rescheduled"
+RESERVA_RECORDADA = "booking_reminded"
+CODIGO_EMITIDO = "attendance_code_issued"
+ATENCION_INICIADA = "attendance_started"
+ATENCION_TERMINADA_EVENTO = "attendance_completed"
+ATENCION_CONFIRMADA = "attendance_confirmed"
+ATENCION_CERRADA_EVENTO = "attendance_closed"
+AUSENCIA_REPORTADA = "no_show_reported"
+CASO_ABIERTO = "incident_opened"
+CASO_CON_ENTRADA = "incident_entry_added"
+CASO_RETIRADO = "incident_withdrawn"
+CASO_RESUELTO = "incident_resolved"
+CASO_APELADO = "incident_appealed"
+RESENA_CREADA = "review_created"
+RESENA_RESPONDIDA = "review_replied"
+RESENA_MODERADA = "review_moderated"
+ACCIONES = (
+    RETENCION_CREADA, RETENCION_SOLTADA, RETENCION_VENCIO, RESERVA_CONFIRMADA_EVENTO,
+    RESERVA_CANCELADA_EVENTO, RESERVA_REPROGRAMADA, RESERVA_RECORDADA,
+    CODIGO_EMITIDO, ATENCION_INICIADA, ATENCION_TERMINADA_EVENTO,
+    ATENCION_CONFIRMADA, ATENCION_CERRADA_EVENTO, AUSENCIA_REPORTADA,
+    CASO_ABIERTO, CASO_CON_ENTRADA, CASO_RETIRADO,
+    CASO_RESUELTO, CASO_APELADO,
+    RESENA_CREADA, RESENA_RESPONDIDA, RESENA_MODERADA,
+)
 CLIENTE = "client"
 SISTEMA = "system"
-ROLES = (CLIENTE, SISTEMA)
+PRESTADOR = "provider"
+ADMINISTRACION = "admin"
+ROLES = (CLIENTE, SISTEMA, PRESTADOR, ADMINISTRACION)
 
 _HEXADECIMAL = "0123456789abcdef"
 
@@ -437,6 +468,28 @@ class ServiceBookingEvent(Base):
 
 __all__ = [
     "ACCIONES",
+    "ADMINISTRACION",
+    "ATENCION_CERRADA_EVENTO",
+    "ATENCION_CONFIRMADA",
+    "ATENCION_INICIADA",
+    "ATENCION_TERMINADA_EVENTO",
+    "AUSENCIA_REPORTADA",
+    "CASO_ABIERTO",
+    "CASO_APELADO",
+    "CASO_CON_ENTRADA",
+    "CASO_RESUELTO",
+    "CASO_RETIRADO",
+    "CODIGO_EMITIDO",
+    "ESTADOS_DE_RESERVA",
+    "PRESTADOR",
+    "RESENA_CREADA",
+    "RESENA_MODERADA",
+    "RESENA_RESPONDIDA",
+    "RESERVA_CANCELADA",
+    "RESERVA_CANCELADA_EVENTO",
+    "RESERVA_RECORDADA",
+    "RESERVA_REPROGRAMADA",
+    "ROLES",
     "ACEPTA_CONDICIONES_DEL_SERVICIO",
     "ACEPTA_CONDICIONES_DE_Z",
     "CLIENTE",

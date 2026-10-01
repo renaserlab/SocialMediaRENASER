@@ -261,6 +261,26 @@ class Settings(BaseSettings):
     #: `service_booking_provider_confirmation_required`). Lista separada por comas.
     services_booking_instant_modalities: str = "virtual,in_person"
 
+    #: LA ATENCIÓN Y LA POSVENTA DE SERVICIOS (Incremento 6). TODOS
+    #: PROVISIONALES: son los de la «política operativa v1» del alcance, no
+    #: decisiones tomadas aquí (`docs/Z_REQUISITOS_Y_DECISIONES.md`, G1–G12).
+    #: Se leen y se acotan en `services/reserva_politica.py`.
+    #: Minutos antes de la hora en que se abre la llegada, y la tolerancia.
+    services_attention_checkin_minutes: int = 15
+    services_attention_tolerance_minutes: int = 15
+    #: Horas que tiene quien contrata para confirmar que la atención se hizo.
+    services_attention_confirmation_hours: int = 24
+    #: Cuántas veces reprograma quien contrata, y con cuántas horas de antelación.
+    services_booking_reschedule_max: int = 1
+    services_booking_reschedule_min_hours: int = 24
+    services_booking_reminder_hours: int = 24
+    #: Horas para abrir un caso tras la atención, y días para apelar.
+    services_incident_window_hours: int = 48
+    services_incident_appeal_days: int = 5
+    #: Días para reseñar, y si una reseña espera a moderación antes de verse.
+    services_review_window_days: int = 30
+    services_reviews_premoderation: bool = True
+
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:
     #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay

@@ -36,7 +36,30 @@ export const BLOQUEOS = [
   'terms_unavailable',
 ] as const;
 
-export const SUCESOS_DE_LA_RESERVA = ['hold_created', 'hold_released', 'hold_expired', 'booking_confirmed'] as const;
+/** Los del servidor, en su orden (`ACCIONES`). Del Incremento 6: cancelar, reprogramar, la atención, el caso y la reseña. */
+export const SUCESOS_DE_LA_RESERVA = [
+  'hold_created',
+  'hold_released',
+  'hold_expired',
+  'booking_confirmed',
+  'booking_cancelled',
+  'booking_rescheduled',
+  'booking_reminded',
+  'attendance_code_issued',
+  'attendance_started',
+  'attendance_completed',
+  'attendance_confirmed',
+  'attendance_closed',
+  'no_show_reported',
+  'incident_opened',
+  'incident_entry_added',
+  'incident_withdrawn',
+  'incident_resolved',
+  'incident_appealed',
+  'review_created',
+  'review_replied',
+  'review_moderated',
+] as const;
 export const AMBITOS_DE_RESERVAS = ['upcoming', 'past'] as const;
 export type AmbitoDeReservas = (typeof AMBITOS_DE_RESERVAS)[number];
 

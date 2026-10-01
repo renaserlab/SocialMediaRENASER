@@ -1,4 +1,5 @@
-"""LOS LÍMITES DE LA RESERVA DE SERVICIOS (Incremento 5), EN UN SOLO SITIO.
+"""LOS LÍMITES DE LA RESERVA Y DE LA ATENCIÓN DE SERVICIOS (Incrementos 5 y
+6), EN UN SOLO SITIO.
 
 Dos clases de número, y no se mezclan:
 
@@ -71,6 +72,81 @@ class Politica:
         )
 
 
+# --------------------------------------------------------------------------- #
+# La atención y la posventa (Incremento 6)
+# --------------------------------------------------------------------------- #
+#: TÉCNICOS (los mismos que impone la 0094 donde la base los conoce).
+CODIGO_DE_ASISTENCIA_CIFRAS = 6
+INTENTOS_DEL_CODIGO = 5
+DESCRIPCION_DEL_CASO = (20, 2000)
+ENTRADA_MAXIMA = 2000
+MOTIVO_MAXIMO = 500
+EVIDENCIAS_POR_CASO = 10
+COMENTARIO_DE_RESENA = (20, 2000)
+RESPUESTA_MAXIMA = 1000
+#: Los barridos de la atención: cuántas filas en una llamada.
+LOTE_DE_TAREAS = 200
+LOTE_MAXIMO_DE_TAREAS = 1000
+
+#: Cotas de los PROVISIONALES de la atención (política operativa v1 del
+#: alcance; ninguno es una decisión tomada aquí). Un entorno mal configurado
+#: no deja una atención sin poder empezar ni un caso sin plazo.
+_COTAS_DE_LA_ATENCION = {
+    "services_attention_checkin_minutes": (0, 240),
+    "services_attention_tolerance_minutes": (0, 240),
+    "services_attention_confirmation_hours": (1, 720),
+    "services_booking_reschedule_max": (0, 10),
+    "services_booking_reschedule_min_hours": (0, 720),
+    "services_booking_reminder_hours": (1, 168),
+    "services_incident_window_hours": (1, 720),
+    "services_incident_appeal_days": (1, 60),
+    "services_review_window_days": (1, 365),
+}
+
+
+@dataclass(frozen=True)
+class PoliticaDeAtencion:
+    """Lo configurable de la atención, ya leído y acotado. TODO PROVISIONAL."""
+
+    #: Cuántos minutos antes de la hora se abre la llegada (código, iniciar).
+    llegada_minutos: int
+    #: La tolerancia: pasada la hora, cuándo se puede reportar una ausencia.
+    tolerancia_minutos: int
+    #: Cuánto tiene quien contrata para confirmar que se realizó.
+    confirmacion_horas: int
+    #: Cuántas veces reprograma quien contrata, y con cuánta antelación.
+    reprogramaciones: int
+    reprogramar_horas_antes: int
+    recordatorio_horas: int
+    #: Cuánto hay para abrir un caso, y para apelar su resolución.
+    caso_horas: int
+    apelacion_dias: int
+    #: Cuánto hay para reseñar, y si una reseña espera a moderación.
+    resena_dias: int
+    resena_con_moderacion_previa: bool
+
+    @classmethod
+    def de(cls, ajustes: Settings | None = None) -> "PoliticaDeAtencion":
+        a = ajustes or get_settings()
+
+        def acotado(nombre: str) -> int:
+            minimo, maximo = _COTAS_DE_LA_ATENCION[nombre]
+            return min(max(int(getattr(a, nombre)), minimo), maximo)
+
+        return cls(
+            llegada_minutos=acotado("services_attention_checkin_minutes"),
+            tolerancia_minutos=acotado("services_attention_tolerance_minutes"),
+            confirmacion_horas=acotado("services_attention_confirmation_hours"),
+            reprogramaciones=acotado("services_booking_reschedule_max"),
+            reprogramar_horas_antes=acotado("services_booking_reschedule_min_hours"),
+            recordatorio_horas=acotado("services_booking_reminder_hours"),
+            caso_horas=acotado("services_incident_window_hours"),
+            apelacion_dias=acotado("services_incident_appeal_days"),
+            resena_dias=acotado("services_review_window_days"),
+            resena_con_moderacion_previa=bool(a.services_reviews_premoderation),
+        )
+
+
 #: Los adaptadores de cobro de Servicios. NINGUNO: no existe ninguno.
 ADAPTADORES_DE_COBRO: dict[str, object] = {}
 
@@ -92,6 +168,17 @@ def cobro_disponible(ajustes: Settings | None = None) -> bool:
 __all__ = [
     "ADAPTADORES_DE_COBRO",
     "ALFABETO_DEL_CODIGO",
+    "CODIGO_DE_ASISTENCIA_CIFRAS",
+    "COMENTARIO_DE_RESENA",
+    "DESCRIPCION_DEL_CASO",
+    "ENTRADA_MAXIMA",
+    "EVIDENCIAS_POR_CASO",
+    "INTENTOS_DEL_CODIGO",
+    "LOTE_DE_TAREAS",
+    "LOTE_MAXIMO_DE_TAREAS",
+    "MOTIVO_MAXIMO",
+    "PoliticaDeAtencion",
+    "RESPUESTA_MAXIMA",
     "DIRECCION_MAXIMA",
     "DISTRITO_MAXIMO",
     "ESPERA_DEL_CERROJO_MS",

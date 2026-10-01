@@ -408,7 +408,7 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
     )}
     # Las seis de la 0086 y la de los envíos congelados (0088).
     # 0088: los envíos; 0090: el catálogo (`services` no casa con `service_%`);
-    # 0092: la agenda; 0093: la reserva.
+    # 0092: la agenda; 0093: la reserva; 0094: la atención y la posventa.
     assert tablas == set(MODELOS) | {
         "service_provider_application_submissions",
         "service_categories",
@@ -426,6 +426,10 @@ def test_aplica_desde_cero_con_todas_las_anteriores_y_se_reejecuta(pg) -> None:
         "service_booking_intakes",
         "service_booking_acceptances",
         "service_booking_events",
+        "service_attendances",
+        "service_incidents",
+        "service_incident_entries",
+        "service_reviews",
     }
     # Reejecutar la 0086 sobre una base que ya tiene la 0087 le devuelve su
     # función de saltos de ocho estados: por eso la 0087 dice que, si pasa,
@@ -542,6 +546,16 @@ def test_claves_ajenas_y_su_comportamiento_al_borrar(pg) -> None:
         ("service_booking_events", "services", "c"),
         ("service_booking_events", "service_holds", "c"),
         ("service_booking_events", "service_bookings", "c"),
+        # 0094: la atención, el caso y la reseña cuelgan de la reserva y caen
+        # en cascada con ella; el expediente, de su caso. La reseña apunta al
+        # servicio sin borrar nada (un solo camino, como al prestador) y
+        # pierde a su autor con la baja.
+        ("service_attendances", "service_bookings", "c"),
+        ("service_incidents", "service_bookings", "c"),
+        ("service_incident_entries", "service_incidents", "c"),
+        ("service_reviews", "service_bookings", "c"),
+        ("service_reviews", "services", "a"),
+        ("service_reviews", "profiles", "n"),
     }
     assert ajenas == esperadas
     # Quién actuó NO tiene clave ajena: un `set null` sería reescribir historia.

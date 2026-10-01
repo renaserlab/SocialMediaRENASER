@@ -1,6 +1,9 @@
 """La migración 0093: la reserva y la contratación protegida (Incremento 5).
 
-1. ESTÁTICA: es la última y sigue a la 0092; una sola transacción que
+SE MONTA HASTA LA 0093: lo que la 0094 amplía de sus tablas (tres CHECK, dos
+funciones y un disparador) se prueba en `test_servicios_migracion_0094.py`.
+
+1. ESTÁTICA: sigue a la 0092 (y la sigue la 0094); una sola transacción que
    comprueba lo anterior antes de crear nada; no concede permisos; de lo ya
    aplicado solo amplía el tipo de `service_policies`; no trae pasarela ni
    dinero; sus límites son los de `reserva_politica`.
@@ -71,10 +74,11 @@ FUTURO = "2031-03-03 15:00+00"
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0092() -> None:
+def test_sigue_a_la_0092_y_la_sigue_la_0094() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0092_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0092_")
+    assert nombres[posicion + 1].startswith("0094_")
 
 
 def test_es_una_unica_transaccion_que_comprueba_antes_de_crear() -> None:
@@ -218,7 +222,7 @@ def _hueco(pg, sql: str, *args) -> str:
 
 @SIN_POSTGRES
 def test_desde_cero_queda_cerrada(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     for tabla in TABLAS:
         assert _uno(pg, "select relrowsecurity from pg_class where oid = %s::regclass", f"public.{tabla}"), tabla
         assert _uno(pg, "select count(*) from pg_policies where schemaname = 'public' and tablename = %s", tabla) == 0
@@ -246,6 +250,7 @@ def test_es_igual_al_modelo_por_definicion(pg) -> None:  # noqa: F811
 
     from app.modules.services import reserva_models
 
+    # ENTERA: el modelo declara ya los tres CHECK que amplía la 0094.
     _montar(pg)
     _hacer(pg, "drop schema if exists orm_0093 cascade")
     _hacer(pg, "create schema orm_0093")
@@ -300,7 +305,7 @@ def test_es_igual_al_modelo_por_definicion(pg) -> None:  # noqa: F811
 # --- La doble reserva ------------------------------------------------------- #
 @SIN_POSTGRES
 def test_dos_sesiones_que_se_pisan_no_caben_ni_con_la_separacion(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     s, v = m["servicio"], m["version"]
     otra = _persona(pg)
@@ -330,7 +335,7 @@ def _insertar_retencion_sql(servicio: str, version: str, cliente: str, inicio: s
 
 @SIN_POSTGRES
 def test_una_sesion_tiene_sus_plazas_y_ni_una_mas(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     s, v = m["servicio"], m["version"]
     a, b, c = _persona(pg), _persona(pg), _persona(pg)
@@ -346,7 +351,7 @@ def test_una_sesion_tiene_sus_plazas_y_ni_una_mas(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_una_retencion_activa_por_servicio_y_lo_soltado_ya_no_ocupa(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     s, v, cliente = m["servicio"], m["version"], m["cliente"]
     primera = _retencion(pg, s, v, cliente)
@@ -369,7 +374,7 @@ def test_dos_conexiones_a_la_vez_no_dejan_dos_sesiones_que_se_pisan(pg) -> None:
     (exclusión, o interbloqueo si las dos llegan a comprobar a la vez)."""
     import psycopg
 
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     s, v = m["servicio"], m["version"]
     personas = [_persona(pg), _persona(pg)]
@@ -402,7 +407,7 @@ def test_dos_conexiones_a_la_vez_no_dejan_dos_sesiones_que_se_pisan(pg) -> None:
 # --- Los saltos y los estados a medias -------------------------------------- #
 @SIN_POSTGRES
 def test_los_saltos_de_una_retencion(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     s, v, cliente = m["servicio"], m["version"], m["cliente"]
     h = _retencion(pg, s, v, cliente)
@@ -424,7 +429,7 @@ def test_los_saltos_de_una_retencion(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_ningun_estado_a_medias_al_confirmar(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     s, v, p, cliente = m["servicio"], m["version"], m["prestador"], m["cliente"]
     h = _retencion(pg, s, v, cliente)
@@ -486,7 +491,7 @@ def _contratar_sin_condiciones(pg, m: dict, retencion: str) -> None:
 
 @SIN_POSTGRES
 def test_un_pedido_no_tiene_dinero_ni_pasarela(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     base = ("insert into public.service_orders (service_id, version_id, provider_id, client_id, environment, "
             "price_model, price_minor, currency, total_minor, payment_status, payment_provider, status, "
@@ -504,7 +509,7 @@ def test_un_pedido_no_tiene_dinero_ni_pasarela(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_lo_contratado_no_se_reescribe_ni_se_borra_suelto(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     h = _retencion(pg, m["servicio"], m["version"], m["cliente"])
     pedido, reserva = _contratar(pg, m["servicio"], m["version"], m["prestador"], m["cliente"], m["politica"], h)
@@ -529,7 +534,7 @@ def test_lo_contratado_no_se_reescribe_ni_se_borra_suelto(pg) -> None:  # noqa: 
 # --- La baja de una cuenta --------------------------------------------------- #
 @SIN_POSTGRES
 def test_la_baja_espera_mientras_haya_una_reserva_por_venir(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     h = _retencion(pg, m["servicio"], m["version"], m["cliente"])
     _contratar(pg, m["servicio"], m["version"], m["prestador"], m["cliente"], m["politica"], h)
@@ -542,7 +547,7 @@ def test_la_baja_espera_mientras_haya_una_reserva_por_venir(pg) -> None:  # noqa
 
 @SIN_POSTGRES
 def test_la_baja_con_reservas_pasadas_anonimiza_y_se_lleva_lo_privado(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     h = _retencion(pg, m["servicio"], m["version"], m["cliente"], inicio="2021-03-03 15:00+00")
     pedido, reserva = _contratar(pg, m["servicio"], m["version"], m["prestador"], m["cliente"], m["politica"], h,
@@ -571,7 +576,7 @@ def test_la_baja_de_quien_presta_no_depende_del_orden_de_los_disparadores(pg) ->
     con su servicio vivo y `solo_en_cascada` lo impedía. Aquí se fuerza ese
     orden recreando la clave del servicio (su disparador pasa a ser el
     último)."""
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     h = _retencion(pg, m["servicio"], m["version"], m["cliente"], inicio="2021-03-03 15:00+00")
     pedido, reserva = _contratar(pg, m["servicio"], m["version"], m["prestador"], m["cliente"], m["politica"], h)
@@ -605,7 +610,7 @@ def test_las_claves_al_prestador_no_borran_y_se_comprueban_al_confirmar(pg) -> N
     la clave se comprueba, aunque sea al confirmar la transacción."""
     import psycopg
 
-    _montar(pg)
+    _montar(pg, hasta="0093")
     m = _mundo(pg)
     h = _retencion(pg, m["servicio"], m["version"], m["cliente"])
     with pytest.raises(psycopg.Error) as error:
@@ -617,7 +622,7 @@ def test_las_claves_al_prestador_no_borran_y_se_comprueban_al_confirmar(pg) -> N
 
 @SIN_POSTGRES
 def test_las_politicas_admiten_las_condiciones_de_contratacion_y_nada_mas(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     admin = _persona(pg, "admin")
     assert _politica(pg, admin)
     assert "service_policies_tipo" in _falla(
@@ -656,7 +661,7 @@ def test_sobre_la_0092_con_datos_no_toca_nada(pg) -> None:  # noqa: F811
 
 @SIN_POSTGRES
 def test_reejecutarla_deja_exactamente_lo_mismo(pg) -> None:  # noqa: F811
-    _montar(pg)
+    _montar(pg, hasta="0093")
     antes = _foto(pg)
     _hacer(pg, TEXTO)
     assert _foto(pg) == antes
@@ -722,7 +727,7 @@ def test_el_rollback_de_la_cabecera_funciona_con_condiciones_publicadas(pg) -> N
         assert _uno(pg, "select to_regclass(%s)", f"public.{tabla}") is not None, tabla
 
     # SIN condiciones de contratación, el tipo vuelve a ser el de la 0086.
-    _montar(pg)
+    _montar(pg, hasta="0093")
     _hacer(pg, deshacer)
     assert _uno(pg, "select pg_get_constraintdef(oid) from pg_catalog.pg_constraint "
                     "where conname = 'service_policies_tipo'") == tipo_de_la_0086
