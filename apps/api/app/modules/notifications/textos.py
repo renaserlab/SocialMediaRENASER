@@ -365,6 +365,103 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("You have a new booking", "Open it to see the details."),
         "pt": ("Você tem uma nova reserva", "Abra-a para ver os detalhes."),
     },
+    # Z Servicios, Incremento 6: la atención y la posventa. Sin fecha, hora,
+    # motivo, dirección ni evidencia: el detalle se lee en la reserva.
+    "service_booking_cancelled_provider": {
+        "es": ("Se canceló una reserva", "Quien la contrató la canceló. Ábrela para ver el detalle."),
+        "en": ("A booking was cancelled", "The client cancelled it. Open it to see the details."),
+        "pt": ("Uma reserva foi cancelada", "Quem contratou a cancelou. Abra-a para ver os detalhes."),
+    },
+    "service_booking_cancelled_client": {
+        "es": ("Tu reserva se canceló", "El prestador la canceló. Ábrela para ver el detalle."),
+        "en": ("Your booking was cancelled", "The provider cancelled it. Open it to see the details."),
+        "pt": ("Sua reserva foi cancelada", "O prestador a cancelou. Abra-a para ver os detalhes."),
+    },
+    "service_booking_rescheduled_provider": {
+        "es": ("Una reserva cambió de horario", "Ábrela para ver el horario nuevo."),
+        "en": ("A booking was rescheduled", "Open it to see the new time."),
+        "pt": ("Uma reserva mudou de horário", "Abra-a para ver o novo horário."),
+    },
+    "service_booking_reminder_client": {
+        "es": ("Tienes una reserva pronto", "Ábrela para ver el detalle."),
+        "en": ("You have a booking coming up", "Open it to see the details."),
+        "pt": ("Você tem uma reserva em breve", "Abra-a para ver os detalhes."),
+    },
+    "service_booking_reminder_provider": {
+        "es": ("Tienes una atención pronto", "Ábrela para ver el detalle."),
+        "en": ("You have an appointment coming up", "Open it to see the details."),
+        "pt": ("Você tem um atendimento em breve", "Abra-o para ver os detalhes."),
+    },
+    "service_attention_completed_client": {
+        "es": ("¿Se realizó tu atención?", "Confírmalo o cuéntanos si hubo un problema."),
+        "en": ("Did your appointment take place?", "Confirm it or tell us if something went wrong."),
+        "pt": ("Seu atendimento foi realizado?", "Confirme ou conte se houve um problema."),
+    },
+    "service_attention_absent_client": {
+        "es": ("Se registró que no asististe", "Si no fue así, ábrela y cuéntanos lo que pasó."),
+        "en": ("You were reported as absent", "If that is not right, open it and tell us what happened."),
+        "pt": ("Registraram que você não compareceu", "Se não foi assim, abra-a e conte o que aconteceu."),
+    },
+    "service_attention_absent_provider": {
+        "es": ("Se registró que no atendiste", "Si no fue así, ábrela y cuéntanos lo que pasó."),
+        "en": ("You were reported as absent", "If that is not right, open it and tell us what happened."),
+        "pt": ("Registraram que você não atendeu", "Se não foi assim, abra-a e conte o que aconteceu."),
+    },
+    "service_incident_opened_client": {
+        "es": ("Se abrió un caso sobre tu reserva", "Ábrelo para responder."),
+        "en": ("A case was opened about your booking", "Open it to respond."),
+        "pt": ("Foi aberto um caso sobre sua reserva", "Abra-o para responder."),
+    },
+    "service_incident_opened_provider": {
+        "es": ("Se abrió un caso sobre una atención", "Ábrelo para responder."),
+        "en": ("A case was opened about an appointment", "Open it to respond."),
+        "pt": ("Foi aberto um caso sobre um atendimento", "Abra-o para responder."),
+    },
+    "service_incident_opened_team": {
+        "es": ("Hay un caso nuevo de Servicios", "Ábrelo para revisarlo."),
+        "en": ("There is a new Services case", "Open it to review it."),
+        "pt": ("Há um novo caso de Serviços", "Abra-o para revisá-lo."),
+    },
+    "service_incident_updated_client": {
+        "es": ("Hay novedades en tu caso", "Ábrelo para verlas."),
+        "en": ("There is news on your case", "Open it to see it."),
+        "pt": ("Há novidades no seu caso", "Abra-o para vê-las."),
+    },
+    "service_incident_updated_provider": {
+        "es": ("Hay novedades en un caso", "Ábrelo para verlas."),
+        "en": ("There is news on a case", "Open it to see it."),
+        "pt": ("Há novidades em um caso", "Abra-o para vê-las."),
+    },
+    "service_incident_resolved_client": {
+        "es": ("Tu caso tiene una resolución", "Ábrelo para leerla."),
+        "en": ("Your case has a decision", "Open it to read it."),
+        "pt": ("Seu caso tem uma resolução", "Abra-o para lê-la."),
+    },
+    "service_incident_resolved_provider": {
+        "es": ("Un caso tiene una resolución", "Ábrelo para leerla."),
+        "en": ("A case has a decision", "Open it to read it."),
+        "pt": ("Um caso tem uma resolução", "Abra-o para lê-la."),
+    },
+    "service_incident_appealed_team": {
+        "es": ("Se apeló un caso de Servicios", "Ábrelo para revisarlo."),
+        "en": ("A Services case was appealed", "Open it to review it."),
+        "pt": ("Um caso de Serviços foi apelado", "Abra-o para revisá-lo."),
+    },
+    "service_review_available_client": {
+        "es": ("Ya puedes reseñar tu atención", "Cuenta cómo te fue."),
+        "en": ("You can now review your appointment", "Tell others how it went."),
+        "pt": ("Você já pode avaliar seu atendimento", "Conte como foi."),
+    },
+    "service_review_received_provider": {
+        "es": ("Recibiste una reseña", "Ábrela para leerla y responder."),
+        "en": ("You received a review", "Open it to read it and reply."),
+        "pt": ("Você recebeu uma avaliação", "Abra-a para ler e responder."),
+    },
+    "service_review_replied_client": {
+        "es": ("Respondieron a tu reseña", "Ábrela para leer la respuesta."),
+        "en": ("Your review got a reply", "Open it to read the reply."),
+        "pt": ("Responderam à sua avaliação", "Abra-a para ler a resposta."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

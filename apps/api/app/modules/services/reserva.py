@@ -802,6 +802,30 @@ def _codigo() -> str:
     return f"{letras[:4]}-{letras[4:]}"
 
 
+async def horario_vigente(db: AsyncSession, fila: ServiceHold, vigente: ServiceVersion, *, ahora: datetime) -> None:
+    """EL HORARIO de una retención, OTRA VEZ, con la agenda de AHORA y sin
+    contarse a sí misma. La antelación y el horizonte se miden desde que se
+    retuvo: un horario que se apartó a tiempo no caduca por los minutos que
+    se tarda en leer. Lo usan confirmar y reprogramar."""
+    agenda = await agenda_de_servicio.agenda_de(db, fila.service_id)
+    servicio_calc = agenda_de_servicio._servicio_de(vigente)
+    if agenda is None or agenda.status != AGENDA_ACTIVA or calc.zona(agenda.timezone) is None or servicio_calc is None:
+        raise HorarioNoDisponible()
+    politica_agenda = limites_de_la_agenda.Politica.de()
+    datos_agenda = await agenda_de_servicio._datos(
+        db, agenda, servicio_calc, ahora=ahora, politica=politica_agenda, excepto=fila.id
+    )
+    desde, hasta = calc.ventana(_utc(fila.created_at), politica_agenda)
+    horario = _slot(datos_agenda, _utc(fila.starts_at), desde=desde, hasta=hasta)
+    if (
+        horario is None
+        or horario.fin != _utc(fila.ends_at)
+        or servicio_calc.modalidad != fila.modality
+        or horario.ocupadas >= horario.capacidad
+    ):
+        raise HorarioNoDisponible()
+
+
 @sin_esperas_largas
 async def confirmar(
     db: AsyncSession,
@@ -888,26 +912,7 @@ async def confirmar(
     if huella_del_servicio is not None and datos.get("service_conditions_sha256") != huella_del_servicio:
         raise CondicionesCambiadas(details={"kind": ACEPTA_CONDICIONES_DEL_SERVICIO})
 
-    # EL HORARIO, OTRA VEZ, con la agenda de AHORA y sin contarse a sí misma.
-    # La antelación y el horizonte se miden desde que se retuvo: un horario
-    # que se apartó a tiempo no caduca por los minutos que se tarda en leer.
-    agenda = await agenda_de_servicio.agenda_de(db, fila.service_id)
-    servicio_calc = agenda_de_servicio._servicio_de(vigente)
-    if agenda is None or agenda.status != AGENDA_ACTIVA or calc.zona(agenda.timezone) is None or servicio_calc is None:
-        raise HorarioNoDisponible()
-    politica_agenda = limites_de_la_agenda.Politica.de()
-    datos_agenda = await agenda_de_servicio._datos(
-        db, agenda, servicio_calc, ahora=ahora, politica=politica_agenda, excepto=fila.id
-    )
-    desde, hasta = calc.ventana(_utc(fila.created_at), politica_agenda)
-    horario = _slot(datos_agenda, _utc(fila.starts_at), desde=desde, hasta=hasta)
-    if (
-        horario is None
-        or horario.fin != _utc(fila.ends_at)
-        or servicio_calc.modalidad != fila.modality
-        or horario.ocupadas >= horario.capacidad
-    ):
-        raise HorarioNoDisponible()
+    await horario_vigente(db, fila, vigente, ahora=ahora)
 
     nombre = (prestador.display_name or "").strip() or "—"
     titulo = (vigente.title or "").strip() or "—"
@@ -1054,8 +1059,10 @@ async def _pagina(
     limite = max(1, min(int(limite), limites.RESERVAS_MAXIMAS_POR_PAGINA))
     consulta = select(ServiceBooking).where(filtro)
     punto = _leer_cursor(cursor)
+    # POR VENIR es lo confirmado que todavía no terminó; lo cancelado (0094)
+    # y lo terminado son PASADAS.
     if ambito == POR_VENIR:
-        consulta = consulta.where(ServiceBooking.ends_at > ahora)
+        consulta = consulta.where(ServiceBooking.ends_at > ahora, ServiceBooking.status == RESERVA_CONFIRMADA)
         if punto:
             consulta = consulta.where(
                 or_(ServiceBooking.starts_at > punto[0],
@@ -1063,7 +1070,9 @@ async def _pagina(
             )
         consulta = consulta.order_by(ServiceBooking.starts_at, ServiceBooking.id)
     else:
-        consulta = consulta.where(ServiceBooking.ends_at <= ahora)
+        consulta = consulta.where(
+            or_(ServiceBooking.ends_at <= ahora, ServiceBooking.status != RESERVA_CONFIRMADA)
+        )
         if punto:
             consulta = consulta.where(
                 or_(ServiceBooking.starts_at < punto[0],

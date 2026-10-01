@@ -74,6 +74,55 @@ RESERVA_CONFIRMADA = "service_booking_confirmed"
 RESERVA_RECIBIDA = "service_booking_received"
 TIPOS_DE_LA_RESERVA = frozenset({RESERVA_CONFIRMADA, RESERVA_RECIBIDA})
 
+# LA ATENCIÓN Y LA POSVENTA (Incremento 6). Como los de la reserva: sin fecha,
+# dirección, nota, motivo ni evidencia. EL TIPO DICE A QUIÉN VA (`_client` a
+# quien contrata, `_provider` al prestador, `_team` al equipo de Z): con él
+# decide el teléfono a qué pantalla lleva, porque el `payload` va vacío.
+CANCELADA_POR_QUIEN_CONTRATA = "service_booking_cancelled_provider"
+CANCELADA_POR_EL_PRESTADOR = "service_booking_cancelled_client"
+REPROGRAMADA = "service_booking_rescheduled_provider"
+RECORDATORIO_A_QUIEN_CONTRATA = "service_booking_reminder_client"
+RECORDATORIO_AL_PRESTADOR = "service_booking_reminder_provider"
+ATENCION_POR_CONFIRMAR = "service_attention_completed_client"
+AUSENCIA_DE_QUIEN_CONTRATA = "service_attention_absent_client"
+AUSENCIA_DEL_PRESTADOR = "service_attention_absent_provider"
+CASO_ABIERTO_A_QUIEN_CONTRATA = "service_incident_opened_client"
+CASO_ABIERTO_AL_PRESTADOR = "service_incident_opened_provider"
+CASO_ABIERTO_AL_EQUIPO = "service_incident_opened_team"
+CASO_NOVEDAD_A_QUIEN_CONTRATA = "service_incident_updated_client"
+CASO_NOVEDAD_AL_PRESTADOR = "service_incident_updated_provider"
+CASO_RESUELTO_A_QUIEN_CONTRATA = "service_incident_resolved_client"
+CASO_RESUELTO_AL_PRESTADOR = "service_incident_resolved_provider"
+CASO_APELADO_AL_EQUIPO = "service_incident_appealed_team"
+RESENA_DISPONIBLE = "service_review_available_client"
+RESENA_RECIBIDA = "service_review_received_provider"
+RESENA_RESPONDIDA = "service_review_replied_client"
+#: El aviso de un caso al EQUIPO apunta al CASO; los demás, a la reserva.
+ENTIDAD_CASO = "service_incident"
+TIPOS_DE_LA_ATENCION = frozenset(
+    {
+        CANCELADA_POR_QUIEN_CONTRATA,
+        CANCELADA_POR_EL_PRESTADOR,
+        REPROGRAMADA,
+        RECORDATORIO_A_QUIEN_CONTRATA,
+        RECORDATORIO_AL_PRESTADOR,
+        ATENCION_POR_CONFIRMAR,
+        AUSENCIA_DE_QUIEN_CONTRATA,
+        AUSENCIA_DEL_PRESTADOR,
+        CASO_ABIERTO_A_QUIEN_CONTRATA,
+        CASO_ABIERTO_AL_PRESTADOR,
+        CASO_ABIERTO_AL_EQUIPO,
+        CASO_NOVEDAD_A_QUIEN_CONTRATA,
+        CASO_NOVEDAD_AL_PRESTADOR,
+        CASO_RESUELTO_A_QUIEN_CONTRATA,
+        CASO_RESUELTO_AL_PRESTADOR,
+        CASO_APELADO_AL_EQUIPO,
+        RESENA_DISPONIBLE,
+        RESENA_RECIBIDA,
+        RESENA_RESPONDIDA,
+    }
+)
+
 TIPOS_DEL_CATALOGO = frozenset(
     {
         SERVICIO_EN_REVISION,
@@ -107,6 +156,7 @@ TIPOS = frozenset(
     }
     | TIPOS_DEL_CATALOGO
     | TIPOS_DE_LA_RESERVA
+    | TIPOS_DE_LA_ATENCION
 )
 
 #: Tope de destinatarios del equipo. Hoy hay uno; esto evita que un error de

@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 #: `seller-documents` (0085) sigue la misma regla: `<perfil>/<postulación>/...`,
 #: y `service-provider-documents` (0088, Servicios) también. Las imágenes del
 #: catálogo de Servicios (`service-media`, 0090) van bajo
-#: `<perfil>/<servicio>/<versión>/`: el perfil del prestador, primero.
+#: `<perfil>/<servicio>/<versión>/`: el perfil del prestador, primero. Las
+#: evidencias de un caso (`service-incident-evidence`, 0094) van bajo
+#: `<quien la sube>/<caso>/`.
 USER_BUCKETS = (
     "post-media",
     "avatars",
@@ -44,6 +46,7 @@ USER_BUCKETS = (
     "seller-documents",
     "service-provider-documents",
     "service-media",
+    "service-incident-evidence",
 )
 
 _TIMEOUT = httpx.Timeout(15.0)
