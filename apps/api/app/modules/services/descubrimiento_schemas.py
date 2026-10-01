@@ -115,8 +115,8 @@ class ConfianzaRead(BaseModel):
 
 
 class ResenasRead(BaseModel):
-    """Las reseñas VERIFICADAS del servicio. Todavía no existen (Incremento 6):
-    `count` es 0 y `average` es `null`, nunca un 0 que parezca una nota."""
+    """Las reseñas VERIFICADAS y publicadas (Incremento 6). Sin ninguna —o sin
+    la 0094—, `count` es 0 y `average` es `null`, nunca un 0 que parezca una nota."""
 
     count: int = 0
     average: float | None = None

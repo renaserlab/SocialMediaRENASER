@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.services import agenda_calculo as calc
 from app.modules.services import reserva as dominio
 from app.modules.services import reserva_politica as limites
+from app.modules.services.atencion_schemas import CuidadoRead
 from app.modules.services.catalogo_models import ServiceVersion
 from app.modules.services.reserva_models import (
     ServiceBooking,
@@ -307,8 +308,14 @@ class AceptacionRead(BaseModel):
         return cls(kind=a.kind, version=a.policy_version, sha256=a.sha256, accepted_at=dominio._utc(a.accepted_at))
 
 
+#: Lo que no es historia de la reserva para sus partes: cada mensaje o
+#: evidencia de un caso (se leen en el expediente) y la moderación de una
+#: reseña (es de administración).
+ACCIONES_QUE_NO_SE_ENSENAN = ("incident_entry_added", "review_moderated", "attendance_code_issued")
+
+
 class SucesoRead(BaseModel):
-    #: `hold_created`, `hold_released`, `hold_expired`, `booking_confirmed`.
+    #: Una de `reserva_models.ACCIONES`.
     action: str
     status: str
     at: datetime
@@ -323,6 +330,10 @@ class ReservaDetalleRead(ReservaRead):
     intake: AtencionRead | None
     acceptances: list[AceptacionRead]
     history: list[SucesoRead]
+    #: La atención y la posventa (Incremento 6): lo que se puede hacer, la
+    #: llegada, el caso, la reseña. `null` mientras la base no tenga la 0094:
+    #: entonces la app no ofrece ninguna de esas acciones.
+    care: CuidadoRead | None = None
 
     @classmethod
     def del_detalle(cls, d: dominio.Detalle) -> "ReservaDetalleRead":
@@ -335,7 +346,10 @@ class ReservaDetalleRead(ReservaRead):
             ),
             intake=AtencionRead.desde(d.atencion),
             acceptances=[AceptacionRead.desde(a) for a in d.aceptaciones],
-            history=[SucesoRead.desde(e) for e in d.historial],
+            # El historial que ven las partes: lo que le pasó a la reserva. Las
+            # entradas del expediente y la moderación no son suyas.
+            history=[SucesoRead.desde(e) for e in d.historial if e.action not in ACCIONES_QUE_NO_SE_ENSENAN],
+            care=d.extra.get("care"),
         )
 
 

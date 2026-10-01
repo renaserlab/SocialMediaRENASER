@@ -42,6 +42,8 @@ from app.modules.events.router import router as events_router
 from app.modules.products.router import admin_router as products_admin_router
 from app.modules.products.router import router as products_router
 from app.modules.services.agenda_router import router as services_schedule_router
+from app.modules.services.atencion_router import admin_router as services_attention_admin_router
+from app.modules.services.atencion_router import router as services_attention_router
 from app.modules.services.catalogo_router import admin_router as services_catalog_admin_router
 from app.modules.services.catalogo_router import router as services_catalog_router
 from app.modules.services.descubrimiento_router import router as services_discovery_router
@@ -233,6 +235,12 @@ def create_app() -> FastAPI:
     # `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` (apagada).
     app.include_router(services_booking_router, prefix=prefix)
     app.include_router(services_booking_admin_router, prefix=prefix)
+    # La atención y la posventa (Incremento 6): lo que cuelga de una reserva
+    # (`/services/{me,provider}/bookings/{b}/…`), `/services/catalog/{id}/reviews`
+    # y `/admin/services/{incidents,reviews,tasks}`. Tampoco choca. Además de
+    # las puertas de la reserva exige la 0094.
+    app.include_router(services_attention_router, prefix=prefix)
+    app.include_router(services_attention_admin_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

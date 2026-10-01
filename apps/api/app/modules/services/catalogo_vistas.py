@@ -410,7 +410,7 @@ async def bandeja(
 async def publica(db: AsyncSession, servicio_id: str, *, mira: str | None = None):
     """La ficha pública (Incremento 3): lo que decide `descubrimiento` y nada
     más. Lo que no es público es el mismo 404 que no existe."""
-    from app.modules.services import descubrimiento
+    from app.modules.services import descubrimiento, posventa
     from app.modules.services.descubrimiento_schemas import (
         ConfianzaRead,
         FichaPublicaRead,
@@ -426,6 +426,7 @@ async def publica(db: AsyncSession, servicio_id: str, *, mira: str | None = None
     imgs = await catalogo.imagenes_de(db, f.version.id)
     firmadas = await imagenes.firmar(sorted({i.storage_path for i in imgs}))
     comun = ServicioPublicoRead.desde(f.servicio, f.version, f.prestador, f.categoria, imgs, firmadas)
+    cuantas, promedio = await posventa.resenas_visibles(db, servicio_id=f.servicio.id)
     return FichaPublicaRead(
         **comun.model_dump(exclude={"provider"}),
         provider=PrestadorDeLaFichaRead(
@@ -436,7 +437,7 @@ async def publica(db: AsyncSession, servicio_id: str, *, mira: str | None = None
         ),
         category_parent_id=f.categoria.parent_id,
         approved_by_z=True,
-        reviews=ResenasRead(),
+        reviews=ResenasRead(count=cuantas, average=promedio),
         saved=f.guardado,
         more_from_provider=[TarjetaDeServicioRead.desde(t) for t in f.del_prestador],
         related=[TarjetaDeServicioRead.desde(t) for t in f.relacionados],

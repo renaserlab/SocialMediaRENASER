@@ -23,7 +23,7 @@ from app.core.exceptions import NotFoundError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.services import catalogo as dominio
 from app.modules.services import descubrimiento as d
-from app.modules.services import esquema
+from app.modules.services import esquema, posventa
 from app.modules.services.catalogo_router import catalogo_disponible
 from app.modules.services.descubrimiento_schemas import (
     CategoriaDelCatalogoRead,
@@ -146,6 +146,7 @@ async def perfil_de_prestador(
         p = await d.perfil(db, provider_id, mira=_mira(current_user))
     except d.PrestadorNoPublico:
         raise PrestadorNoEncontrado() from None
+    cuantas, promedio = await posventa.resenas_visibles(db, prestador_id=p.prestador.id)
     return PerfilDePrestadorRead(
         id=p.prestador.id,
         display_name=p.prestador.display_name,
@@ -154,7 +155,7 @@ async def perfil_de_prestador(
         categories=[CategoriaDelCatalogoRead.desde(c) for c in p.categorias],
         modalities=p.modalidades,
         areas=p.zonas,
-        reviews=ResenasRead(),
+        reviews=ResenasRead(count=cuantas, average=promedio),
     )
 
 

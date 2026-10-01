@@ -36,10 +36,12 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import AuthUser, get_current_user
-from app.modules.services import esquema
+from app.modules.services import atencion, esquema
 from app.modules.services import reserva as dominio
 from app.modules.services import reserva_politica as limites
+from app.modules.services.atencion_schemas import CuidadoRead
 from app.modules.services.catalogo_router import _id
+from app.modules.services.reserva_models import CLIENTE, PRESTADOR
 from app.modules.services.reserva_schemas import (
     BarridoRead,
     PaginaDeReservasAdminRead,
@@ -65,6 +67,16 @@ admin_router = APIRouter(prefix="/admin/services", tags=["services-booking-admin
 async def reservas_disponibles(db: AsyncSession = Depends(get_db)) -> None:
     """Banderas, admisión, catálogo, agenda y la 0093 completas, o 503."""
     await esquema.exigir_reservas(db)
+
+
+async def con_cuidado(db: AsyncSession, detalle: dominio.Detalle, *, rol: str, usuario_id: str) -> dominio.Detalle:
+    """Añade al detalle LA ATENCIÓN (Incremento 6) y lo que esa persona puede
+    hacer ahora (`care.available_actions`). Sin la 0094 no añade nada: la
+    reserva se sigue viendo y la app no ofrece ninguna acción."""
+    if await esquema.hay_atencion(db):
+        cuidado = await atencion.cuidado(db, detalle.reserva, rol=rol, usuario_id=usuario_id)
+        detalle.extra["care"] = CuidadoRead.desde(cuidado, detalle.reserva, usuario_id=usuario_id)
+    return detalle
 
 
 async def _retencion_fresca(db: AsyncSession, retencion, *, ahora=None) -> RetencionRead:  # noqa: ANN001
@@ -155,9 +167,8 @@ async def confirmar(
     await db.commit()
     if not hecho.creada:
         response.status_code = status.HTTP_200_OK
-    return ReservaDetalleRead.del_detalle(
-        await dominio.mi_reserva(db, cliente_id=current_user.id, reserva_id=hecho.reserva.id)
-    )
+    detalle = await dominio.mi_reserva(db, cliente_id=current_user.id, reserva_id=hecho.reserva.id)
+    return ReservaDetalleRead.del_detalle(await con_cuidado(db, detalle, rol=CLIENTE, usuario_id=current_user.id))
 
 
 @router.get("/me/bookings", response_model=PaginaDeReservasRead)
@@ -181,9 +192,8 @@ async def mi_reserva(
     _disponible: None = Depends(reservas_disponibles),
     db: AsyncSession = Depends(get_db),
 ) -> ReservaDetalleRead:
-    return ReservaDetalleRead.del_detalle(
-        await dominio.mi_reserva(db, cliente_id=current_user.id, reserva_id=booking_id)
-    )
+    detalle = await dominio.mi_reserva(db, cliente_id=current_user.id, reserva_id=booking_id)
+    return ReservaDetalleRead.del_detalle(await con_cuidado(db, detalle, rol=CLIENTE, usuario_id=current_user.id))
 
 
 # =========================================================================== #
@@ -212,8 +222,9 @@ async def reserva_del_prestador(
     _disponible: None = Depends(reservas_disponibles),
     db: AsyncSession = Depends(get_db),
 ) -> ReservaDelPrestadorRead:
+    detalle = await dominio.reserva_del_prestador(db, usuario_id=current_user.id, reserva_id=booking_id)
     return ReservaDelPrestadorRead.del_detalle_del_prestador(
-        await dominio.reserva_del_prestador(db, usuario_id=current_user.id, reserva_id=booking_id)
+        await con_cuidado(db, detalle, rol=PRESTADOR, usuario_id=current_user.id)
     )
 
 
@@ -268,4 +279,4 @@ async def barrer(
     return BarridoRead(expired=vencidas)
 
 
-__all__ = ["admin_router", "router"]
+__all__ = ["admin_router", "con_cuidado", "router"]
