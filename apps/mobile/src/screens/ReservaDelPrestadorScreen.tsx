@@ -4,11 +4,13 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { AtencionDeLaReserva } from '@/components/AtencionDeLaReserva';
 import { DetalleDeReserva } from '@/components/DetalleDeReserva';
 import { EstadoDeServicios } from '@/components/EstadoDeServicios';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import type { FalloDeCarga } from '@/lib/serviciosAdmision';
+import type { ConCuidado } from '@/lib/serviciosAtencion';
 import type { ReservaDelPrestador } from '@/lib/serviciosReserva';
 import { useParametroDeRuta } from '@/hooks/useCatalogoDeServicios';
 import { leerFallo, useTextosDeServicios } from '@/hooks/useServicios';
@@ -21,13 +23,17 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * público; ni correo ni teléfono), cuándo, cómo y lo que escribió al
  * contratar. La dirección solo existe si es a domicilio. Una reserva ajena o
  * inexistente es el mismo 404.
+ *
+ * Y SU ATENCIÓN (Incremento 6): empezar (con el código de quien contrata),
+ * marcarla como realizada, cancelar, reportar una inasistencia, el caso y la
+ * respuesta a la reseña. Lo decide el servidor (`care.available_actions`).
  */
 export function ReservaDelPrestadorScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const id = useParametroDeRuta('bookingId');
   const { f } = useTextosDeServicios('reserva');
-  const [reserva, setReserva] = useState<ReservaDelPrestador | null>(null);
+  const [reserva, setReserva] = useState<ConCuidado<ReservaDelPrestador> | null>(null);
   const [fallo, setFallo] = useState<FalloDeCarga | null>(null);
 
   const cargar = useCallback(async () => {
@@ -66,6 +72,12 @@ export function ReservaDelPrestadorScreen() {
                     .join(' · ') || f('servicios.reserva.sinNombrePublico')}
             </Text>
           </View>
+          <AtencionDeLaReserva
+            rol="provider"
+            reserva={reserva}
+            alCambiar={(fresca) => setReserva(fresca as ConCuidado<ReservaDelPrestador>)}
+            recargar={cargar}
+          />
           <DetalleDeReserva reserva={reserva} />
         </>
       )}

@@ -4,11 +4,13 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { AtencionDeLaReserva } from '@/components/AtencionDeLaReserva';
 import { DetalleDeReserva } from '@/components/DetalleDeReserva';
 import { EstadoDeServicios } from '@/components/EstadoDeServicios';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import type { FalloDeCarga } from '@/lib/serviciosAdmision';
+import type { ConCuidado } from '@/lib/serviciosAtencion';
 import type { ReservaDetalle } from '@/lib/serviciosReserva';
 import { useParametroDeRuta } from '@/hooks/useCatalogoDeServicios';
 import { leerFallo, useTextosDeServicios } from '@/hooks/useServicios';
@@ -19,6 +21,10 @@ import { useAppTheme } from '@/theme/useAppTheme';
 /**
  * UNA RESERVA PROPIA, con lo aceptado y su historial. Recién confirmada
  * (`?confirmada=1`), lo dice arriba: ahora SÍ está reservado.
+ *
+ * Y SU ATENCIÓN (Incremento 6): en qué está y lo que se puede hacer ahora
+ * (cancelar, cambiar el horario, el código de asistencia, confirmar, reportar
+ * un problema, reseñar). Lo decide el servidor (`care.available_actions`).
  */
 export function ReservaScreen() {
   const { colors } = useAppTheme();
@@ -26,7 +32,7 @@ export function ReservaScreen() {
   const id = useParametroDeRuta('bookingId');
   const { confirmada } = useLocalSearchParams<{ confirmada?: string }>();
   const { f } = useTextosDeServicios('reserva');
-  const [reserva, setReserva] = useState<ReservaDetalle | null>(null);
+  const [reserva, setReserva] = useState<ConCuidado<ReservaDetalle> | null>(null);
   const [fallo, setFallo] = useState<FalloDeCarga | null>(null);
 
   const cargar = useCallback(async () => {
@@ -65,6 +71,7 @@ export function ReservaScreen() {
               <Text variant="secondary">{f('servicios.reserva.confirmadaCuerpo')}</Text>
             </View>
           ) : null}
+          <AtencionDeLaReserva rol="client" reserva={reserva} alCambiar={setReserva} recargar={cargar} />
           <DetalleDeReserva reserva={reserva} />
         </>
       )}

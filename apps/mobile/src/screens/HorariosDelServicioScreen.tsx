@@ -17,6 +17,7 @@ import {
   type Calendario,
   type Horario,
 } from '@/lib/serviciosAgenda';
+import { rutaDeReprogramar } from '@/lib/serviciosAtencion';
 import { hayQueVolverAElegir, rutaDeLaContratacion } from '@/lib/serviciosReserva';
 import { useParametroDeRuta } from '@/hooks/useCatalogoDeServicios';
 import { useCerrojo, useTextosDeServicios } from '@/hooks/useServicios';
@@ -38,6 +39,10 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * puede contratar aquí (`booking_available`), APARTA el horario unos minutos:
  * el servidor lo vuelve a calcular y, si otra persona lo tomó, contesta 409 y
  * se vuelve a elegir. Con la misma clave, un doble toque aparta una vez.
+ *
+ * PARA CAMBIAR EL HORARIO DE UNA RESERVA (`?reprogramar=<reserva>`, Incremento
+ * 6) es lo mismo: se aparta el horario nuevo y se sigue a confirmar el cambio.
+ * La reserva no se toca hasta entonces.
  */
 export function HorariosDelServicioScreen() {
   const { colors } = useAppTheme();
@@ -46,6 +51,8 @@ export function HorariosDelServicioScreen() {
   const parametros = useLocalSearchParams();
   const { f } = useTextosDeServicios('reserva');
   const elegido = horarioElegidoDesdeRuta({ ...parametros, serviceId: id });
+  // La reserva cuyo horario se está cambiando, o vacío si se contrata de nuevo.
+  const reprogramar = typeof parametros.reprogramar === 'string' ? parametros.reprogramar : '';
   const [sePuedeContinuar, setSePuedeContinuar] = useState(false);
   // Volver a pedir los horarios (tras un 409: alguien tomó el elegido).
   const [vuelta, setVuelta] = useState(0);
@@ -83,12 +90,14 @@ export function HorariosDelServicioScreen() {
         // Hecho: la próxima vez es OTRA petición (si esta venció, se aparta de
         // nuevo; si sigue activa, el servidor dice cuál es y se sigue con ella).
         clave.current = nuevaClave();
-        router.push(rutaDeLaContratacion(retencion.id) as never);
+        if (reprogramar) router.push(rutaDeReprogramar(reprogramar, retencion.id) as never);
+        else router.push(rutaDeLaContratacion(retencion.id) as never);
       } catch (error) {
         // Ese mismo horario ya estaba apartado para ti: se sigue con él.
         const detalles = error instanceof ApiError ? (error.details as { hold_id?: string } | null) : null;
         if (error instanceof ApiError && error.code === 'service_hold_already_active' && detalles?.hold_id) {
-          router.push(rutaDeLaContratacion(detalles.hold_id) as never);
+          if (reprogramar) router.push(rutaDeReprogramar(reprogramar, detalles.hold_id) as never);
+          else router.push(rutaDeLaContratacion(detalles.hold_id) as never);
           return;
         }
         if (error instanceof ApiError && hayQueVolverAElegir(error.code)) {
@@ -102,7 +111,8 @@ export function HorariosDelServicioScreen() {
 
   return (
     <AppScreen contentStyle={styles.contenido}>
-      <AppHeader title={f('servicios.agenda.horarios')} onBack={volver} />
+      <AppHeader title={f(reprogramar ? 'servicios.atencion.reprogramar.elegir' : 'servicios.agenda.horarios')} onBack={volver} />
+      {reprogramar ? <Text variant="secondary">{f('servicios.atencion.reprogramar.elegirCuerpo')}</Text> : null}
       <SelectorDeHorarios
         key={vuelta}
         cargarCalendario={cargarCalendario}
@@ -126,7 +136,7 @@ export function HorariosDelServicioScreen() {
           </Text>
           {sePuedeContinuar ? (
             <Button
-              label={f('servicios.reserva.continuar')}
+              label={f(reprogramar ? 'servicios.atencion.reprogramar.apartar' : 'servicios.reserva.continuar')}
               icon="arrow-right"
               loading={ocupado}
               disabled={ocupado}

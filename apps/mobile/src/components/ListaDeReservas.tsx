@@ -14,8 +14,9 @@ import { useTextosDeServicios } from '@/hooks/useServicios';
 import { spacing } from '@/theme/tokens';
 
 /**
- * Una lista de reservas CONFIRMADAS (por venir o pasadas), con su código, la
- * hora local de la agenda y la modalidad. La usan «Mis reservas» y la
+ * Una lista de reservas (por venir o pasadas; entre las pasadas, las
+ * canceladas, que se dicen), con su código, la hora local de la agenda y la
+ * modalidad. La usan «Mis reservas» y la
  * bandeja del prestador; cada una decide adónde lleva tocar una fila.
  */
 export function ListaDeReservas({
@@ -66,9 +67,9 @@ export function ListaDeReservas({
             <ListRow
               key={b.id}
               title={b.title}
-              subtitle={`${f(claveDelDia(diaDeLaSemana(b.date)))} ${fechaVisible(b.date)} · ${b.time} · ${f(
-                claveDeLaModalidad(b.modality),
-              )} · ${b.code}`}
+              subtitle={`${b.status === 'cancelled' ? `${f('servicios.atencion.reserva.cancelled')} · ` : ''}${f(
+                claveDelDia(diaDeLaSemana(b.date)),
+              )} ${fechaVisible(b.date)} · ${b.time} · ${f(claveDeLaModalidad(b.modality))} · ${b.code}`}
               rightIcon="chevron-right"
               onPress={() => alAbrir(b)}
             />

@@ -139,6 +139,18 @@ export function AdminServiciosScreen() {
           icon="calendar"
           onPress={() => router.push('/admin/servicios/reservas' as never)}
         />
+        <Button
+          label={f('servicios.admin.casos')}
+          variant="ghost"
+          icon="alert-triangle"
+          onPress={() => router.push('/admin/servicios/casos' as never)}
+        />
+        <Button
+          label={f('servicios.admin.resenas')}
+          variant="ghost"
+          icon="star"
+          onPress={() => router.push('/admin/servicios/resenas' as never)}
+        />
       </View>
 
       {fallo !== null ? (

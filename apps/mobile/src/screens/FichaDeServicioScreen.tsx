@@ -10,6 +10,7 @@ import { ContenidoDelServicio } from '@/components/ContenidoDelServicio';
 import { DisponibilidadEnLaFicha } from '@/components/DisponibilidadEnLaFicha';
 import { ResenasDelServicio, SenalesDeConfianza } from '@/components/ConfianzaEnServicios';
 import { EstadoDelCatalogo } from '@/components/EstadoDelCatalogo';
+import { ListaDeResenasDelServicio } from '@/components/ListaDeResenasDelServicio';
 import { StateView } from '@/components/StateView';
 import { TarjetaDeServicio } from '@/components/TarjetaDeServicio';
 import { Text } from '@/components/Text';
@@ -145,6 +146,7 @@ export function FichaDeServicioScreen() {
           </Text>
 
           <ResenasDelServicio resenas={ficha.reviews} />
+          <ListaDeResenasDelServicio servicio={ficha.id} />
 
           {ficha.more_from_provider.length > 0 ? (
             <View style={styles.bloque}>
