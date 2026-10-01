@@ -55,6 +55,13 @@ APLICADAS = {
     # entonces tampoco se edita. Su cabecera dice «SIN APLICAR» a propósito,
     # como la de la 0090 y la 0091: cambiarla sería editar lo aplicado.
     "0092_servicios_disponibilidad_y_agenda.sql": "eba1a48199c91b53f7e42f1623bb845211fe27c7",
+    # Ejecutada a mano en Supabase (PostgreSQL 17.6) y verificada en solo
+    # lectura, sin divergencias, el 01/10/2026 a las 02:13 UTC (30/09, 21:13
+    # en Lima; Z_SERVICIOS_ARQUITECTURA.md §80): desde entonces tampoco se
+    # edita. Es la versión FINAL, con las dos claves al prestador diferidas.
+    # Su cabecera dice «SIN APLICAR» a propósito, como las anteriores:
+    # cambiarla sería editar lo aplicado.
+    "0093_servicios_reserva_y_contratacion.sql": "1d878ace7a1de9001e37b95efabbf106307ff143",
 }
 
 
