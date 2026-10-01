@@ -11,8 +11,8 @@ aplicada y verificada (§61); y la **Parte V** (§62 en adelante), también el
 30/09/2026, con el Incremento 5 implementado y probado y, tras ejecutarse la
 0093 a mano y verificarse el 01/10/2026 (02:13 UTC), **técnicamente cerrado**
 (§80); y la **Parte VI** (§82 en adelante), el 01/10/2026, con el Incremento 6
-**implementado y probado en local**: su migración, la **0094, no está
-aplicada**.
+implementado y probado y, tras ejecutarse la 0094 a mano y verificarse ese
+mismo día (14:28 UTC), **técnicamente cerrado** (§102).
 
 ## Estado
 
@@ -30,8 +30,8 @@ aplicada**.
 | **Migración 0092** | **APLICADA** a mano en Supabase y verificada el 30/09/2026 en solo lectura: **sin divergencias** (§61). La puerta de esquema, con el rol real de la API, la reconoce. Ya es histórica: no se edita. Al desplegar `Edson`, reiniciar la API |
 | **Incremento 5 (reserva y contratación)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§80). Retener, resumen, condiciones versionadas, confirmar lo gratuito, mis reservas, la bandeja del prestador y la supervisión |
 | **Migración 0093** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (02:13 UTC) en solo lectura: **sin divergencias** (§80). Las cinco puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita. El código que la usa está en `Edson`, **sin desplegar**: producción todavía no la conoce |
-| **Incremento 6 (atención, posventa y cierre)** | **implementado y probado; pendiente de aplicar y verificar la migración 0094 y de realizar el QA físico** (§82–§101). Cancelar, reprogramar, el código de asistencia, empezar, terminar y confirmar, la inasistencia, el caso con su expediente y sus evidencias privadas, la resolución y la apelación, la reseña verificada con su moderación, 19 avisos y los barridos. Con YAGNI estricto: lo no necesario para una atención gratuita no se construyó (§100) |
-| **Migración 0094** | **SIN APLICAR.** Escrita y probada solo contra PostgreSQL local. Sin ella, la contratación sigue y la atención contesta 503 `services_not_ready` (§82). Cómo aplicarla, en §96: **antes de desplegar**, y reiniciando la API después |
+| **Incremento 6 (atención, posventa y cierre)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§102). Cancelar, reprogramar, el código de asistencia, empezar, terminar y confirmar, la inasistencia, el caso con su expediente y sus evidencias privadas, la resolución y la apelación, la reseña verificada con su moderación, 19 avisos y los barridos. Con YAGNI estricto: lo no necesario para una atención gratuita no se construyó (§100) |
+| **Migración 0094** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (14:28 UTC) en solo lectura: **sin divergencias** (§102). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y **no se deshace**: se corrige hacia delante (§104) |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
@@ -2768,7 +2768,9 @@ otra base):
    sin `btree_gist`, que la 0092 ya instaló).
 2. Pegar el fichero **entero** en el editor SQL de Supabase y ejecutarlo: es
    una sola transacción, comprueba lo anterior antes de crear nada y verifica
-   lo que dejó; si algo falla, no queda nada. Es reejecutable.
+   lo que dejó; si algo falla, no queda nada. Es reejecutable **mientras no
+   esté la 0094 encima**: con ella, se niega sin cambiar nada (§102), y así
+   debe ser. La 0093 ya no se vuelve a ejecutar.
 3. **Reiniciar la API** (o desplegar `Edson`, que la reinicia): la puerta
    recuerda el «no».
 4. Verificar (§75) en una sesión de solo lectura, también con el rol real de
@@ -3179,9 +3181,12 @@ Nada de esto se resolvió en el cierre, a propósito:
 # Parte VI · Incremento 6: atención, cancelación, reprogramación, posventa y cierre
 
 Escrito el 01/10/2026 en la rama `Edson`, con el Incremento 6 **implementado y
-probado en local**. **La migración 0094 NO está aplicada**: ni en Supabase ni
-en ningún otro sitio que no sea el PostgreSQL desechable de las pruebas. El
-código está **sin desplegar** (sin push, PR ni merge) y **no mueve dinero**.
+probado**. Después la 0094 se ejecutó a mano en Supabase y se verificó ese
+mismo día (14:28 UTC) sin divergencias: el incremento quedó **técnicamente
+cerrado** (§102). El código sigue **sin desplegar** (sin push, PR ni merge),
+Servicios **sin activar** y **nada mueve dinero**. Solo queda el QA físico. De
+§82 a §101 se describe el incremento tal como se escribió; donde decía «sin
+aplicar», manda §102.
 
 Se hizo con **YAGNI estricto**, a petición expresa: solo lo necesario para
 recorrer de principio a fin una atención **gratuita**, segura y verificable.
@@ -3193,7 +3198,7 @@ está listado en §100.
 | | |
 |---|---|
 | **Qué hace** | Sobre una reserva confirmada (Incremento 5): **cancelarla** o **cambiarle el horario** antes de que empiece; el **código de asistencia** de quien contrata; el prestador **empieza** y **termina**; quien contrata **confirma** (o un barrido la cierra, solo con la señal fuerte); declarar una **inasistencia**; abrir un **caso** con su expediente y sus **evidencias privadas**; administración **resuelve**, una parte **apela** una vez y resuelve otra persona; la **reseña verificada**, la respuesta del prestador y su **moderación**; recordatorios; y 19 avisos |
-| **Migración 0094** | **SIN APLICAR.** Escrita y probada solo en local. Cómo se aplica, en §96; qué se consulta después, en §97 |
+| **Migración 0094** | **APLICADA** a mano en Supabase y verificada en solo lectura el 01/10/2026, **sin divergencias** (§102). Cómo se aplica, en §96; qué se consulta, en §97 |
 | **Sin la 0094** | La contratación del Incremento 5 **sigue funcionando**: el detalle de una reserva trae `care: null` y la app no ofrece ninguna acción nueva. Las 33 rutas privadas de la atención contestan **503 `services_not_ready`** sin escribir nada; las reseñas públicas contestan 200 con `available: false`; la ficha dice 0 reseñas y promedio `null`. Nunca un 500 |
 | **Banderas** | Las mismas: `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` **apagadas**, `FEATURE_SERVICE_PAYMENTS` **apagada**, `SERVICE_PAYMENTS_PROVIDER=none`. **No hay bandera nueva**: la atención va con la contratación. Apagadas: 503 `services_disabled` / `service_booking_disabled`, antes de mirar la base |
 | **Dinero** | **Ninguno.** Nada se cobra, se devuelve, se retiene ni se transfiere. El «efecto económico» de un caso es una **solicitud** con su estado, y ese estado **no puede decir «ejecutado»** (§90) |
@@ -3593,7 +3598,10 @@ clave. Un cerrojo que no llega (55P03) o un interbloqueo (40P01) son **409
 
 ## 96. Cómo aplicar la 0094
 
-**No está aplicada.** Cuando la empresa lo decida, en este orden:
+**Aplicada** a mano en Supabase y verificada el 01/10/2026 (§102): los pasos 1
+a 4 y el 6 están hechos; el 5 corresponde al despliegue de `Edson`, que no se
+ha hecho; el 7 sigue siendo de la empresa. Así se aplicó (y así se aplicaría
+en otra base):
 
 1. Comprobar que la base tiene la **0086–0093** (la 0094 se niega sin ellas).
 2. **Antes de desplegar el código.** El código nuevo funciona sin la 0094
@@ -3618,15 +3626,11 @@ clave. Un cerrojo que no llega (55P03) o un interbloqueo (40P01) son **409
    administración si se quieren apelaciones (G8/G15), y decidir quién llama a
    los barridos (G12).
 
-**Rollback**: el de la cabecera del fichero, **solo si no hay datos reales**
-(el bloque se niega si alguna tabla tiene filas, si hay una reserva cancelada
-o si el historial ya tiene acciones de este incremento). Después hay que
-**reejecutar la 0093 entera** (devuelve a sus dos funciones el cuerpo de la
-0093) y reiniciar la API. Probado en local. El bloque borra la fila del
-depósito con un `delete from storage.buckets`: las versiones recientes de
-Supabase pueden rechazarlo; en ese caso se quita esa línea y el depósito,
-vacío, se borra desde el panel (**no probado contra Supabase**). Con datos, lo
-que se hace es apagar `FEATURE_SERVICE_BOOKING`, no borrar.
+**No hay rollback en producción.** El bloque de la cabecera del fichero solo
+vale para una **base local desechable**, que es donde se probó: borra tablas
+y la fila del depósito, y nunca se ejecutó contra Supabase. Una migración
+aplicada **no se deshace**: se apagan las banderas y se corrige **hacia
+delante**, con una migración nueva (§104).
 
 ## 97. Verificar la 0094 (solo lectura)
 
@@ -3774,6 +3778,11 @@ administración que decidía por el estado. Los demás, en §99.
 
 ## 99. Riesgos y limitaciones conocidas
 
+> *Al cierre (§102):* la 0094 ya está aplicada y verificada (los dos primeros
+> puntos de esta lista dejaron de ser riesgos), el recordatorio tras
+> reprogramar se corrigió y el rollback se sustituye por la recuperación
+> hacia delante (§104). Lo demás sigue igual.
+
 - **La 0094 no está aplicada ni verificada en Supabase.** Todo lo de esta
   parte se probó en local. La puerta fija huellas de los CHECK y de las
   funciones: es estricta a propósito y **frágil ante cualquier retoque** del
@@ -3841,12 +3850,409 @@ Y sigue pendiente, sin resolver aquí:
 
 ## 101. Estado y punto exacto de continuación
 
-- **Incremento 6 de Z Servicios implementado y probado; pendiente de aplicar
-  y verificar la migración 0094 y de realizar el QA físico.**
+- **Incremento 6 de Z Servicios técnicamente cerrado; únicamente queda
+  pendiente el QA físico** (§102). Al escribirse esta parte, el 01/10/2026,
+  el estado era «implementado y probado; pendiente de aplicar y verificar la
+  0094»: la 0094 se aplicó y se verificó ese mismo día.
 - `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`
   **apagadas**; `SERVICE_PAYMENTS_PROVIDER=none`; **no hubo despliegue**, ni
   push, ni PR, ni merge.
-- **No se movió dinero**, no se escribió en Supabase y no se aplicó la 0094.
-- Siguiente paso, cuando la empresa lo decida: aplicar la 0094 (§96),
-  verificarla (§97) con el verificador de las anteriores adaptado, reiniciar
-  la API y repetir el recorrido.
+- **No se movió dinero** y no se escribió ningún dato en Supabase. La 0094 la
+  aplicó Edson a mano; la verificación fue de solo lectura.
+- Decisiones **G1–G18** de la empresa (`Z_REQUISITOS_Y_DECISIONES.md`); la
+  **F21**, resaltada en §105.
+- Siguiente paso: el **QA físico**. Con él termina Servicios; activarlo y
+  desplegarlo son decisiones de la empresa.
+
+## 102. Cierre técnico del Incremento 6 (01/10/2026)
+
+**La 0094 se ejecutó a mano en Supabase** después del informe del 01/10 y se
+**verificó ese mismo día a las 14:28 UTC** (09:28 en Lima) **sin
+divergencias**. No se volvió a ejecutar, no se tocó el fichero y **no se
+escribió ningún dato en Supabase**. De §82 a §101 se describe el incremento
+tal como se escribió; donde decía «sin aplicar», manda esta sección.
+
+Cuatro cosas distintas, que no hay que confundir:
+
+| | Estado |
+|---|---|
+| **El esquema en Supabase** | La 0086–0094 están **aplicadas y verificadas** (PostgreSQL 17.6) |
+| **La verificación local** | Referencia 0001–0094 en PostgreSQL 17.11 desechable, puertas, recorrido y pruebas: todo correcto |
+| **El código en `Edson`** | Completo y probado; **sin push, sin PR, sin merge y sin desplegar** |
+| **Producción** | Sigue con el código anterior, que **no conoce** estas tablas. Servicios **no está activado**: las tres banderas, apagadas |
+
+### La verificación, en solo lectura
+
+El verificador de la 0093, adaptado a la 0094, abre dos sesiones:
+
+- **catálogos** (psycopg): `BEGIN READ ONLY`; `transaction_read_only = on` y
+  una sonda de escritura (`create temp table`) **rechazada con 25006** antes
+  de consultar nada; al terminar sigue en solo lectura, **sin id de
+  transacción de escritura**, y `ROLLBACK`;
+- **la de la API**: la misma `DATABASE_URL`, con asyncpg y SQLAlchemy como
+  `app/shared/database.py`; `SET TRANSACTION READ ONLY` como primera
+  sentencia, la misma sonda rechazada (25006) y `ROLLBACK`.
+
+La URL sale del fichero de secretos autorizado: ni ella, ni el host, ni el
+usuario se imprimen ni se guardan. Referencia: prólogo + 0001–0094 sobre
+PostgreSQL 17.11 local desechable.
+
+| Comprobación | Resultado |
+|---|---|
+| Esquema público entero frente a la referencia (1778 columnas, 1344 restricciones, 552 índices, 103 disparadores, 62 funciones, 169/169 tablas con RLS, 149 políticas; de Servicios, 28 tablas y 390 columnas) | **igual**: la 0001–0093 siguen como la 0094 las deja, y nada más cambió |
+| Las cuatro tablas | normales y permanentes, RLS activa, **0 políticas**, del propietario esperado (también sus índices y sus funciones) |
+| Columnas | las **57**, con su orden, tipo, nulabilidad, valor predeterminado, identidad o generación e intercalación |
+| Claves primarias y únicas | **4** primarias y **1** única (una reseña por reserva), validadas |
+| Claves ajenas | **6**, validadas, con su destino, `ON UPDATE` y `ON DELETE`: 4 en cascada, 1 `SET NULL` (quien reseña) y **1 sin acción y diferida** (la reseña a su servicio) |
+| CHECK | los **37**, con su nombre y su definición, validados. El del estado del efecto económico admite `not_applicable`, `pending` y `blocked`, y **ningún valor que diga «ejecutado»** |
+| Índices | los **12** (4 primarios, 1 de la única y 7 propios, **2 únicos y parciales**): definición, método, columnas, orden, clases de operadores y condición; **válidos, listos y vivos**. `service_incidents_una_por_reserva` es `UNIQUE … (booking_id) WHERE (status <> 'withdrawn')`: es la **versión final** del fichero (la de la revisión, commit `0f7d510`), no la primera |
+| Disparadores | los **8** de las cuatro tablas, habilitados y por fila, con su función, momento, evento y argumentos; y el **diferido** nuevo de la reserva (`service_bookings_coherentes_al_cambiar`) |
+| Funciones | las **4** nuevas y las **2** de la 0093 que la 0094 reescribe: plpgsql, devuelven `trigger`, **SECURITY INVOKER**, `search_path=public, pg_temp`, cuerpo idéntico por su huella, sin EXECUTE para PUBLIC, `anon` ni `authenticated`. Las 2 que reutiliza (0086, 0090), idénticas a la referencia |
+| Lo que cambia de la 0093 | los tres CHECK ampliados (`cancelled`; las acciones y los roles `provider` y `admin`), validados; ninguna columna nueva en sus tablas |
+| Permisos de PUBLIC, `anon` y `authenticated` | **ninguno**: ni declarados (tabla o columna), ni en la ACL, ni efectivos. Con permisos, solo el propietario y `service_role` |
+| Lo que escribió su transacción | **una sola** transacción; en el catálogo, sus 83 objetos y lo mismo que en la referencia; **una sola fila de datos** en las 215 tablas de los esquemas que no son del sistema: la del depósito en `storage.buckets` |
+| Integridad de `public` | 366 claves ajenas: 0 filas huérfanas, 0 sin validar |
+| §97, ejecutado tal cual | los resultados esperados |
+
+**El depósito de las evidencias** (`service-incident-evidence`): existe, es
+**privado**, admite 10 MB y los cuatro formatos (PDF, JPEG, PNG, WebP);
+**ninguna política** de `storage.objects` lo nombra ni vale para cualquier
+depósito; **0 archivos**. Sin credenciales, su ruta pública contesta que el
+depósito no existe y una firma inventada se rechaza: no sirve nada. Lo que
+**no** se pudo comprobar contra Supabase es un enlace firmado de verdad: hace
+falta un archivo real, y eso es del QA físico (en local, el enlace caduca a
+los 120 segundos y solo lo piden las dos partes y administración).
+
+**Los datos: las cuatro tablas están VACÍAS** (0 atenciones, casos, entradas
+y reseñas), y también las de la 0093 (0 reservas, pedidos y retenciones); no
+hay ninguna condición de contratación publicada. Los 21 recuentos de
+incoherencias (atenciones o casos sin reserva, entradas sin caso, reseñas sin
+atención cerrada o duplicadas, resoluciones imposibles, efectos económicos
+«ejecutados», evidencias sin archivo y archivos sin evidencia, reservas
+canceladas que siguen ocupando, pedidos con dinero…) dan 0, pero **solo
+porque no hay filas**: no prueban nada más que eso. Lo que impide esas
+incoherencias es el esquema, que sí se comprobó, y las pruebas locales.
+
+El verificador se ensayó antes contra la referencia local (sin divergencias)
+y contra la referencia **estropeada a propósito, una alteración cada vez**:
+una columna de otro tipo, otra nulabilidad, un predeterminado quitado, un
+CHECK ausente, un CHECK que admite «ejecutado», una clave ajena con otra
+acción, un índice inválido, el índice único vuelto normal, un disparador
+deshabilitado, otro ausente, una función con otro cuerpo, otra `SECURITY
+DEFINER`, RLS apagada, una política, un permiso de tabla, de columna y de
+función a los de fuera, el depósito ausente, público o con una política que
+lo abre, un CHECK de la 0093 sin ampliar y datos incoherentes. **Detectó las
+22.**
+
+### Las puertas, con la conexión y el rol de la API
+
+En un proceso nuevo la memoria de la puerta empieza **vacía**. Con la misma
+conexión que usa la API (su rol: no superusuario, con BYPASSRLS, propietario
+de las tablas), el código real dice **sí** a las seis: `hay_admision`,
+`hay_catalogo`, `hay_guardados`, `hay_agenda`, `hay_reservas` y
+`hay_atencion`, y lo recuerda. Por separado: la consulta de la 0093 **pura**
+dice que no (como debe, la 0094 la enmendó), la de «la 0093 como la deja la
+0094» dice que sí, y la de lo nuevo también. Con las banderas como están
+(apagadas), `exigir_reservas`, `exigir_atencion` y la puerta de las
+condiciones contestan `services_disabled` **sin mirar la base**; con las dos
+encendidas solo en ese proceso, las tres pasan.
+
+La puerta de la atención se cierra, en local y dentro de transacciones que se
+deshacen, ante **47 alteraciones** (`test_servicios_atencion_api.py`): una
+tabla ausente, una columna ausente, de más o de otro tipo, otra nulabilidad,
+otro predeterminado, un CHECK distinto o sin validar, una clave ajena con otra
+acción o sin diferir, un índice crítico ausente, no único, no parcial o
+inválido, un disparador ausente o deshabilitado, una función distinta o
+`SECURITY DEFINER`, RLS apagada, una política, un permiso de fuera (de tabla,
+de columna o de función) y el depósito ausente o público. Un error al mirar es
+**503 `services_not_ready`**, nunca 500, y **no se recuerda**.
+
+**Lo único que la puerta no mira del depósito: sus políticas.** Una política
+de `storage.objects` que abriera ese depósito no cierra la puerta (el
+verificador de solo lectura sí la detecta). En Supabase no hay ninguna. Queda
+anotado como deuda baja: las políticas de Storage solo las crea una migración
+o una persona desde el panel.
+
+### La 0093 no se reejecuta encima de la 0094
+
+Comprobado en la referencia: reejecutar la 0093 sobre una base con la 0094
+**se niega** con `P0001` («La 0093 no dejó sus disparadores»): su
+verificación final cuenta los disparadores de sus tablas, ve uno más (el
+diferido que añade la 0094) y aborta; la transacción entera se deshace y las
+dos funciones que la 0094 reescribió **quedan como estaban**. Es deliberado:
+si no se negara, devolvería a esas dos funciones el cuerpo de la 0093 y
+cancelar y reprogramar dejarían de funcionar.
+
+- La cadena limpia **0001–0094 funciona** (es como se construye cada
+  referencia y cada base de pruebas).
+- **Ningún procedimiento vigente invita a reejecutar la 0093**: §74 la da por
+  aplicada, y lo que decía «después, reejecutar la 0093» era el rollback de la
+  0094, que ya no aplica (§104).
+- **Ninguna herramienta la ejecuta sola**: las migraciones se aplican a mano
+  en Supabase; la integración continua solo las aplica, en orden y una vez,
+  a su PostgreSQL desechable; el despliegue no las toca.
+
+### El reinicio y el recorrido integral (local, API real)
+
+PostgreSQL 17 desechable; la API real en su propio proceso (uvicorn), con
+`FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` encendidas **solo en ese
+proceso**, pagos apagados, sesiones HS256 reales con un secreto de usar y
+tirar y el almacén de pruebas; ningún servicio externo. **116 de 116
+comprobaciones, 692 peticiones, cinco procesos, ningún 500.**
+
+- **La memoria de la puerta**: con 0001–0093 se contrata como en el
+  Incremento 5 y las 33 rutas privadas de la atención contestan 503
+  `services_not_ready`; se aplica la 0094 en local (dos veces) y **el mismo
+  proceso sigue en 503**; se **reinicia** y las reconoce.
+- **Reserva gratuita**: el pedido y lo aceptado se conservan en todo el
+  recorrido; las acciones son las que manda el servidor.
+- **Cancelación**: de quien contrata (cinco a la vez con la misma clave: una);
+  del prestador, que sin explicar por qué recibe un 422; el horario vuelve; el
+  pedido y lo aceptado siguen; repetirla con otra clave, 409; empezada, 409.
+- **Reprogramación**: misma reserva, código, pedido, versión, precio y
+  condiciones; el horario anterior se libera **solo** al confirmarse el
+  cambio; si el horario nuevo falla (su retención venció), 409 y la reserva
+  conserva el suyo; dos a la vez, una; la segunda, 409 por el límite; y con la
+  política de fábrica una reserva ya recordada **no se reprograma** (409: la
+  antelación y la ventana del recordatorio son las mismas 24 h).
+- **Recordada y después reprogramada** (con una antelación de 1 h, solo en
+  ese proceso): el recordatorio era del horario viejo; el nuevo **se recuerda
+  cuando se acerca, una sola vez**. Era la limitación anotada en §99, y se
+  corrigió en el cierre (ver «Correcciones»).
+- **Atención**: el código, un intento fallido, empezar con código y sin él,
+  terminar, confirmar; el barrido cierra la que tiene la señal fuerte y deja
+  la que no la tiene y la que tiene un caso vivo.
+- **Inasistencia**: del prestador y de quien contrata, solo pasada la
+  tolerancia; la otra parte lo discute con un caso y administración decide;
+  **sin consecuencia económica** (`not_applicable`).
+- **Incidencias**: abrir, evidencia válida, archivo inválido rechazado,
+  respuesta de la otra parte, nota interna que las partes no ven, resolver con
+  una devolución **solicitada y no ejecutada**, apelar, que resuelva otra
+  persona, una sola apelación, cerrado, y retirar sin quitarle el suyo a la
+  otra parte.
+- **Reseñas**: antes del cierre, 409; verificada, una; promedio y cantidad;
+  una respuesta; publicar y esconder **sin borrar**; el historial lo guarda; y
+  sin el nombre de quien la escribió.
+- **Dinero**: ninguna tabla de dinero cambió; todos los pedidos siguen
+  gratuitos; ningún efecto dice otra cosa que «no aplica»; las tablas de la
+  atención no tienen ni una columna de importe; el proceso no tenía ninguna
+  clave de pasarela.
+- **Privacidad**: lo ajeno es 404; la evidencia, por enlace firmado; a
+  domicilio (encendido solo en ese proceso), la dirección la ve su prestador y,
+  **cancelada, ya no**; no está en administración, en el historial ni en
+  ningún aviso; una persona de administración que es parte **no lee ni decide**
+  su caso.
+- **Banderas**: con la contratación apagada, 503 `service_booking_disabled`;
+  con Servicios apagado, 503 `services_disabled`.
+
+### Concurrencia (sobre la 0094 tal como está aplicada)
+
+La referencia local es idéntica a Supabase, así que estas pruebas valen para
+la 0094 aplicada: cancelar y reprogramar a la vez; reprogramar dos veces;
+reprogramar mientras el prestador bloquea ese día; empezar y cancelar;
+terminar, confirmar y abrir un caso; dos resoluciones; dos reseñas y dos
+respuestas; barridos a la vez y mientras se confirma; la misma clave cinco
+veces; y subir una evidencia con la reserva ocupada. Siempre un resultado
+coherente y un 409; nunca un 500, dos casos vivos, dos reseñas ni un horario
+ocupado dos veces.
+
+### Correcciones del cierre
+
+Una, de código funcional, y nada más:
+
+- **El recordatorio es de un horario, no de la reserva** (commit `8154118`).
+  Una reserva recordada que después cambiaba de horario no se volvía a
+  recordar. Con la política de fábrica no se alcanza; con una antelación menor
+  (la del ejemplo del blueprint: 12 h), sí. Ahora consta como recordada solo
+  si su último recordatorio es posterior a su último cambio de horario. Prueba
+  en rojo antes del arreglo; cinco mutaciones dirigidas, las cinco muertas.
+
+Y una prueba para algo que ya funcionaba y nadie comprobaba: una fila que
+falla en el barrido se deshace ella sola, las demás siguen, la respuesta la
+cuenta como saltada y la siguiente pasada la reintenta.
+
+### Pruebas ejecutadas en el cierre
+
+Cambió código funcional compartido (el barrido), así que se repitió todo:
+
+| Qué | Resultado |
+|---|---|
+| Backend completo con PostgreSQL | **4279 aprobadas, 0 fallidas, 0 omitidas** |
+| Backend completo sin PostgreSQL | **3074 aprobadas, 0 fallidas (1205 omitidas por necesitar PostgreSQL)** |
+| Móvil completo (135 baterías) | **3646/3646** |
+| `tsc --noEmit` · Expo Doctor · exportación web (`EXPO_NO_DOTENV=1`) | limpio · 18/18 · correcta |
+| Rutas de la API | 564 operaciones, **0 duplicadas** (134 de Servicios) |
+| `git diff --check` · secretos en el cambio | limpio · ninguno |
+| Recorrido integral | **116/116** |
+| Mutaciones dirigidas a lo cambiado | **5/5 muertas** |
+
+**No se repitieron** las 54 mutaciones del incremento: su código no cambió.
+
+### La huella
+
+`0094_servicios_atencion_y_cierre.sql` consta en `APLICADAS`
+(`test_servicios_migracion_0090.py`) con su huella git `1ed10ac8…`: desde
+ahora una edición del fichero pone roja `test_las_aplicadas_no_han_cambiado`
+(comprobado añadiéndole una línea). Su cabecera sigue diciendo «SIN APLICAR»
+y describe un rollback **que solo vale para una base local desechable**: no
+se corrige ahí porque cambiarla sería editar lo aplicado (§104).
+
+### Veredicto
+
+**Incremento 6 de Z Servicios técnicamente cerrado; únicamente queda
+pendiente el QA físico.**
+
+## 103. Lo que no se implementó: clasificación y evidencia
+
+Cruzado con el blueprint (`Servicios de Excelencia Z`, v1.0), sus capturas, la
+arquitectura y el código. Ninguna de estas funciones era necesaria para que el
+recorrido gratuito fuera coherente; ninguna se implementó en el cierre.
+
+| # | Función | Clasificación | Evidencia |
+|---|---|---|---|
+| 1 | **Aceptación manual del prestador** | Decisión empresarial pendiente (F3, G14) | Blueprint §2: una cita se confirma «automática al pagar **o** por aceptación del prestador», y la regla MVP deja el tipo «Solicitud» para «si el negocio lo necesita». Las modalidades que se contratan hoy se confirman solas; a domicilio no se contrata. La app lo dice tal cual («el prestador tiene que aceptar la reserva, y eso todavía no está disponible»), ninguna pantalla promete una aprobación y **no existe un estado de espera**: una reserva es `confirmed` o `cancelled` |
+| 2 | **Reprogramación pedida por el prestador** | Decisión empresarial pendiente (G2) | Blueprint §15.2 y §22: reprogramar es de **quien contrata**; el prestador no tiene esa acción en sus permisos ni en sus capturas («Enviar mensaje» e «Iniciar atención»). El único texto que lo roza es un caso límite (§26): si el prestador cambia su horario, «no alterar reservas existentes; solicitar reprogramación individual». Lo primero se cumple (cambiar la agenda no toca las reservas). Lo segundo hoy se hace por fuera: el prestador avisa o **cancela explicando por qué**, y quien contrató vuelve a reservar |
+| 3 | **Cancelación por administración** | Decisión empresarial pendiente (G1) | El blueprint **no la define**: sus estados son `CANCELLED_BY_CLIENT` y `CANCELLED_BY_PROVIDER` (§12), y de administración solo dice «consultar / reasignar excepcionalmente, sin editar historia» (A04). Ver §103.1 |
+| 4 | **Señales de la sala (100ms)** | Integración externa pendiente (y decisión G17) | Blueprint §13: «ingreso a sala Z de ambas partes» es **una** de las señales fuertes, no la única; basta una, y el código de seis cifras lo es. La integración de 100ms no tiene cuenta conectada ni se probó en teléfonos (`FEATURE_LIVE` apagada). **Z no ofrece hoy una sala**: en un servicio virtual las partes se conectan por fuera |
+| 5 | **QR** | Mejora futura | Blueprint §13.1: «Cliente escanea QR **o** entrega PIN». El PIN está: de un solo uso, solo dentro de su ventana y registrado en el historial (criterio 14) |
+| 6 | **Geolocalización** | Fuera de alcance | Blueprint §13: «complementaria; nunca obligatoria general». Excluida expresamente del incremento |
+| 7 | **Pagos** | Integración externa y decisión pendientes (F14–F18, G13) | Blueprint §14.1 y decisión D03: «procesador y payouts a Perú: no confirmado; pagos reales bloqueados»; criterio 28. Banderas apagadas, `SERVICE_PAYMENTS_PROVIDER=none`, ningún adaptador, y la base no admite un pedido con precio |
+| 8 | **Conciliación** | Integración externa pendiente | Depende de los pagos: sin movimientos no hay nada que conciliar. No se inventó ninguna |
+| 9 | **Planificador** | Decisión operativa pendiente (F13, G12) | Blueprint §13.1 y §23 piden el cierre automático y el recordatorio de 24 h; las **tareas existen** y son idempotentes. Quién las llama (cron, Lambda, EventBridge) es infraestructura que no se construyó a propósito. Ver §103.4 |
+| 10 | **Push con destino** | Mejora de plataforma pendiente | Blueprint §23: cada aviso lleva `deepLink`. La bandeja interna sí lleva a la reserva o al caso; el push abre la aplicación desde el Incremento 1, en toda la plataforma |
+| 11 | **Pantalla de configuración** | Decisión empresarial pendiente (G1–G12) | Blueprint A09: «políticas por país/categoría, versionado y fecha efectiva». Los textos legales ya se versionan y se publican desde administración; los **plazos** son variables de entorno porque ninguno está decidido |
+| 12 | **Fotos en la reseña** | Mejora futura | Blueprint §17: «Multimedia: opcional» |
+| 13 | **Índice de desempeño** | Mejora futura (y, en parte, pagos) | Blueprint §18.2 (índice de permanencia con umbrales) y P10 «Rendimiento», cuya captura incluye ingresos y saldo. No hay volumen ni decisión sobre los umbrales; la nota ajustada (§17.1) usa un `m = 10` «recomendado». Hoy se enseña el promedio **con su número de reseñas**, nunca solo |
+
+**Encontrado en el cruce, y no estaba en la lista** (se registra, no se
+resuelve):
+
+- **La política operativa no se copia en la reserva.** El blueprint (§15.1,
+  criterio 20) pide que la política aplicable se copie, inmutable, a cada
+  reserva. Hoy se copia lo **aceptado** (las condiciones de Z y las del
+  servicio, por versión y huella), pero los **plazos** (cuántas veces se
+  reprograma, con cuánta antelación, la tolerancia, el plazo de confirmación)
+  se leen de la configuración vigente en el momento de cada acción. Mientras
+  todo sea gratuito no tiene consecuencia económica, y el propio blueprint
+  deja la política de cancelación sin definir (D07). **Antes de que cancelar
+  cueste dinero hay que congelarla en la reserva** (decisión G18).
+- **Cómo se encuentran las partes en un servicio virtual.** Sin sala de Z ni
+  enlace en la reserva, se ponen de acuerdo por fuera (decisión G17).
+
+### 103.1 Cancelación por administración
+
+**¿Puede una resolución administrativa exigir cancelar una reserva y liberar
+su horario?** No, y no hace falta que pueda:
+
+- un caso solo se abre **desde la hora de inicio**, y una reserva solo se
+  cancela **antes** de ella. Cuando administración resuelve, el horario ya
+  pasó: no hay nada que liberar, y la consecuencia se expresa con el **efecto
+  en la atención** (`provider_no_show`, `client_no_show`, `completed`) y el
+  efecto económico solicitado;
+- para una reserva **por venir**, cancelan quien contrata o el prestador (que
+  explica por qué). Administración no tiene esa acción.
+
+El hueco es operativo, no del blueprint: si administración **suspende** a un
+prestador con reservas por venir, estas siguen confirmadas; el prestador ya
+no puede empezarlas (y sí cancelarlas), quien contrató puede cancelar y,
+llegada la hora, declarar la ausencia y abrir un caso. Nadie avisa de oficio a
+quien contrató. Si la empresa quiere que administración cancele directamente,
+es la decisión G1; el camino mínimo sería la misma transición de cancelar, con
+el rol `admin` (que el historial ya admite), un motivo obligatorio y la regla
+de no decidir lo propio. **No se construyó.**
+
+### 103.2 Reprogramación del prestador
+
+No está exigida como acción formal (fila 2). No se construyó la solicitud ni
+la aceptación. Lo que el prestador puede hacer hoy sin salir de Z: cancelar
+explicando por qué; quien contrató recibe el aviso y reserva otro horario.
+
+### 103.3 Aceptación del prestador
+
+No se implementó (fila 1). Comprobado: ninguna pantalla promete una
+aprobación manual; ninguna reserva queda esperando (no existe ese estado); el
+servidor no anuncia acciones de aceptar o rechazar; y «a domicilio» **no se
+contrata** salvo que alguien cambie `SERVICES_BOOKING_INSTANT_MODALITIES`, que
+la haría confirmarse sola, sin aprobación. No tocar esa variable sin la
+decisión F3/G14.
+
+### 103.4 Los barridos
+
+`POST /admin/services/tasks/run` (y `…/holds/expire`, del Incremento 5):
+idempotentes (repetirlos no hace nada); por lotes (200, hasta 1000); cada fila
+en su propia transacción, con la reserva bloqueada y saltando lo que otra
+petición tiene (`SKIP LOCKED`); una fila que falla se deshace sola y se
+reintenta en la pasada siguiente; no duplican avisos; no mueven dinero; y
+dicen cuántas recordaron, cerraron, quedan sin verificar y saltaron.
+
+**Sin un planificador externo no hay recordatorios automáticos ni cierre
+automático oportuno**: solo ocurren cuando alguien lanza el barrido desde
+administración. Quién lo ejecutará, y cada cuánto, es una decisión operativa
+pendiente (F13, G12). No se construyó cron, Lambda ni EventBridge.
+
+## 104. Recuperación: hacia delante, nunca borrando
+
+**Una migración aplicada no se deshace en producción.** El bloque de
+«rollback» de la cabecera de la 0094 (y lo que §96 decía de él) **solo vale
+para una base local desechable**, que es donde se probó:
+
+- borra las cuatro tablas, y con ellas cualquier atención, caso, expediente y
+  reseña;
+- borra la fila del depósito con un `delete from storage.buckets`, que las
+  versiones recientes de Supabase **rechazan** (protegen esas tablas) y que
+  abortaría el bloque entero; nunca se probó contra Supabase;
+- exige después reejecutar la 0093, que sobre una base de producción con datos
+  no es una operación que deba improvisarse.
+
+**No hay ninguna instrucción operativa vigente que borre evidencias, tablas o
+depósitos en producción.** Si aparece un defecto:
+
+1. **Apagar** `FEATURE_SERVICE_BOOKING` (y `FEATURE_SERVICES` si hace falta):
+   todas las rutas contestan 503 sin mirar la base, y nada se pierde.
+2. **Corregir hacia delante**: una migración nueva (`0095_…`), aditiva, en
+   una transacción, con su prueba y su verificación en solo lectura, como
+   todas las anteriores.
+3. **No editar** la 0094 ni ninguna aplicada, y **no borrar** el depósito ni
+   sus archivos: las evidencias son de personas reales.
+
+## 105. Lo que sigue pendiente y NO se implementó
+
+> **F21 · La baja de quien presta se lleva su historia. Sin resolver, y es
+> lo más importante que queda antes de encender la contratación.** Hoy, si
+> un prestador borra su cuenta:
+>
+> | Se borra | Cómo |
+> |---|---|
+> | sus servicios y sus versiones | en cascada desde su perfil (0090) |
+> | sus **reservas pasadas** y las canceladas | con el servicio |
+> | sus **pedidos** y **lo que aceptó quien contrató** | con el servicio |
+> | las **atenciones**, los **casos**, **su expediente** (mensajes, resoluciones, apelación, notas internas) y las **reseñas** | con la reserva (0094) |
+> | el **historial** de esas reservas | con el servicio |
+> | **sus** evidencias en el depósito | por el barrido de archivos de su cuenta |
+>
+> Y **no** se borran las evidencias que subió **quien contrató**: su fila
+> desaparece con el caso, pero el archivo se queda en el depósito privado, sin
+> nada que lo nombre, hasta que esa persona borre su propia cuenta. Lo único
+> que frena la baja es una reserva **confirmada y por venir**.
+>
+> **Recomendación técnica (no es una decisión):** conservar la historia
+> contractual (reservas, pedidos, lo aceptado), las resoluciones y, cuando
+> existan, los movimientos económicos; **anonimizar** la identidad del
+> prestador como ya se hace con quien contrata; definir un **plazo legal** de
+> conservación; e impedir que una baja destruya evidencia necesaria para un
+> caso vivo o reciente. Exige cambiar la clave de la 0090 con una migración
+> nueva: no se tocó la 0090 ni se creó una 0095.
+
+- **G1–G18** (`Z_REQUISITOS_Y_DECISIONES.md`), además de C1–C15, D1–D15,
+  E1–E12 y F1–F21: **ninguna se dio por resuelta**. G17 y G18 son nuevas, del
+  cruce con el blueprint (§103).
+- **Publicar las condiciones de contratación** (F9): no hay ninguna, y sin
+  ellas no se confirma nada.
+- **El planificador** (F13, G12) y una **segunda persona en administración**
+  si se quieren apelaciones (G15).
+- **Pagos, Stripe, comisiones, comprobantes, devoluciones y conciliación**: no
+  existen para Servicios.
+- **El QA físico** de los Incrementos 1–6 (`Z_QA_FISICO_PENDIENTE.md`).
+- **Desplegar `Edson`**: no hubo push ni despliegue. Al hacerlo, la API
+  arranca de nuevo y la puerta mira la base entonces.
+- **Servicios sigue sin activar**: las tres banderas, apagadas.

@@ -2796,16 +2796,18 @@ reseñas de lo contratado ni posventa. **El Incremento 6 no se empezó.**
 ## Z Servicios, Incremento 6 — atención, cancelación, reprogramación, posventa y cierre (01/10/2026)
 
 El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
-Parte VI (§82 en adelante). **Implementado y probado en local** el 01/10/2026
-en `Edson`. **La migración 0094 NO está aplicada** y el QA físico está
-pendiente. El código sigue **sin desplegar**; `FEATURE_SERVICES`,
+Parte VI (§82 en adelante). Implementado y probado el 01/10/2026 en `Edson`;
+la 0094 se ejecutó después a mano en Supabase y se verificó en solo lectura
+ese mismo día (14:28 UTC) **sin divergencias** (§102). **Técnicamente
+cerrado; únicamente queda pendiente el QA físico.** El código sigue **sin
+desplegar** y Servicios **sin activar**; `FEATURE_SERVICES`,
 `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la
 pasarela, `none`. **No se movió dinero** y no se activó ningún pago.
 
 Se hizo con **YAGNI estricto** (instrucción expresa): lo necesario para
 recorrer de principio a fin una atención **gratuita**, segura y verificable.
 Lo demás está listado abajo como **no implementado**. Nada de lo que sigue es
-política definitiva: **G1–G16 son de la empresa**, y todas las anteriores
+política definitiva: **G1–G18 son de la empresa**, y todas las anteriores
 (C1–C15, D1–D15, E1–E12, F1–F21) **siguen pendientes tal como estaban**.
 
 ### Requisitos cumplidos
@@ -2883,6 +2885,8 @@ política definitiva: **G1–G16 son de la empresa**, y todas las anteriores
 | G14 | **La aceptación del prestador** (a domicilio; amplía F3) | Sigue sin existir: a domicilio no se contrata |
 | G15 | **Quién decide en administración y cuántas personas hacen falta** | Solo `admin`. Con una sola persona **no hay apelaciones**: hacen falta dos antes de encender la contratación si se quieren |
 | G16 | **La baja de una cuenta con un caso vivo o con evidencias** (junto a F20 y F21) | La de quien contrata se lleva sus evidencias (el expediente conserva la fila, sin su archivo) y deja el caso y la reseña sin su nombre |
+| G17 | **Cómo se encuentran las partes en un servicio virtual** (una sala de Z con 100ms, un enlace del prestador, mensajes) | Z no ofrece sala ni guarda un enlace: se ponen de acuerdo por fuera. La integración de 100ms no tiene cuenta conectada. Surgida del cruce con el blueprint en el cierre |
+| G18 | **Qué política operativa queda congelada en cada reserva** (el blueprint pide copiarla, inmutable, al confirmar) | Se copia lo **aceptado** (condiciones de Z y del servicio, por versión y huella); los **plazos** (reprogramar, tolerancia, confirmación) son los vigentes al actuar. Sin consecuencia mientras todo sea gratuito; **hay que congelarla antes de que cancelar cueste dinero**. Surgida del cruce con el blueprint en el cierre |
 
 > **F21 sigue pendiente, y ahora pesa más.** La baja de quien presta se sigue
 > llevando sus servicios y, con ellos, sus reservas pasadas, sus pedidos, lo
@@ -2923,12 +2927,50 @@ verificable:
 
 ### Límites del Incremento 6
 
-- **La 0094 no está aplicada.** Sin ella, la contratación sigue y la atención
-  contesta 503.
+- **La 0094 está aplicada y verificada** (§102); el código, sin desplegar.
 - **No hay QA físico.**
 - **Nada mueve dinero** y ningún estado dice que se movió.
-- Lo conocido y no corregido (bajo, ver `Z_SERVICIOS_ARQUITECTURA.md` §99):
-  una reserva ya recordada y después reprogramada no se vuelve a recordar; una
+- Lo conocido y no corregido (bajo, ver `Z_SERVICIOS_ARQUITECTURA.md` §99): una
   atención terminada sin código que nadie confirma se queda `completed`; un
   caso decidido impide abrir otro, también por seguridad; el prestador ve en
   el historial que hay una reseña antes de que se publique (no su contenido).
+
+### Cierre técnico (01/10/2026, Incremento 6)
+
+**Incremento 6 de Z Servicios técnicamente cerrado; únicamente queda pendiente
+el QA físico.** El detalle, en `Z_SERVICIOS_ARQUITECTURA.md` §102–§105.
+
+- **La 0094 está en Supabase y coincide** con la referencia 0001–0094:
+  verificada en solo lectura el 01/10/2026 a las 14:28 UTC, sin divergencias,
+  y con las seis puertas de esquema diciendo «sí» con la conexión y el rol
+  reales de la API. Las cuatro tablas están vacías y el depósito de evidencias
+  es privado. Su huella consta en `APLICADAS`.
+- **Una corrección de código**: el recordatorio es de un horario, no de la
+  reserva (una reserva recordada y después reprogramada se vuelve a recordar).
+- **Lo omitido, clasificado** contra el blueprint y sus capturas (§103):
+  ninguna de las trece funciones era necesaria para el recorrido gratuito.
+  La aceptación del prestador, la reprogramación pedida por el prestador, la
+  cancelación por administración y la pantalla de configuración son
+  **decisiones de la empresa**; los pagos, la conciliación y la sala de 100ms,
+  **integraciones externas** sin confirmar; el planificador, una **decisión
+  operativa**; el QR, las fotos en la reseña y el índice de desempeño,
+  **mejoras futuras**; la geolocalización, **fuera de alcance**; y el push con
+  destino, una tarea de plataforma pendiente desde el Incremento 1.
+- **Dos decisiones nuevas**, del cruce con el blueprint: **G17** (cómo se
+  encuentran las partes en un servicio virtual) y **G18** (congelar la política
+  operativa en la reserva antes de que cancelar cueste dinero).
+- **Una migración aplicada no se deshace**: se apagan las banderas y se
+  corrige hacia delante (§104).
+
+> **F21 sigue pendiente y es lo más importante antes de encender la
+> contratación.** La baja de quien presta se lleva sus reservas pasadas, sus
+> pedidos, lo que aceptó quien contrató, las atenciones, los casos con su
+> expediente y sus resoluciones, las reseñas y el historial. Las evidencias
+> que subió quien contrató se quedan en el depósito, sin nada que las nombre.
+> **Recomendación técnica (no es una decisión):** conservar la historia
+> contractual, las resoluciones y los movimientos económicos; anonimizar la
+> identidad; definir un plazo legal; e impedir que una baja destruya evidencia
+> necesaria. No se modificó la 0090 ni se creó una 0095.
+
+Siguen pendientes, **todas**: C1–C15, D1–D15, E1–E12, F1–F21 y G1–G18. Ninguna
+se dio por resuelta.

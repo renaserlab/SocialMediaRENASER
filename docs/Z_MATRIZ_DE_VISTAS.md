@@ -829,13 +829,14 @@ finanzas del prestador. El push abre la aplicación, no la reserva.
 
 > *Al 01/10/2026:* cancelar, reprogramar, los recordatorios, la asistencia y
 > las reseñas de lo contratado llegaron con el Incremento 6 (sección
-> siguiente), con la 0094 **sin aplicar**.
+> siguiente).
 
 ## Servicios · Incremento 6: atención, posventa y cierre (01/10/2026)
 
 Backend real detrás de `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` (las dos
-apagadas). Usa la **0094, SIN APLICAR** (`Z_SERVICIOS_ARQUITECTURA.md` §96):
-sin ella, el detalle de una reserva trae `care: null`, ninguna de estas vistas
+apagadas). Usa la **0094, APLICADA** en Supabase y verificada el 01/10/2026
+(`Z_SERVICIOS_ARQUITECTURA.md` §102: técnicamente cerrado). Sin ella (en otra
+base), el detalle de una reserva trae `care: null`, ninguna de estas vistas
 ofrece nada y sus rutas contestan 503. El código está sin desplegar y ninguna
 vista se probó en un teléfono (QA físico pendiente). Ninguna se alcanza solo
 escribiendo la URL, y ninguna decide por el estado ni por la hora del

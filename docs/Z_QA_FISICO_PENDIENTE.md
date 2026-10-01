@@ -1760,19 +1760,21 @@ Antes de empezar:
 
 ## Z Servicios · Incremento 6 — atención, posventa y cierre (01/10/2026)
 
-**Nada de esta sección está comprobado en un teléfono: el QA físico está
-pendiente.** Y, a diferencia de los incrementos anteriores, **la 0094 NO está
-aplicada** en Supabase: sin ella nada de esto se puede probar fuera de una
-base local. Las pruebas automáticas cubren la migración, el dominio, las
-carreras contra PostgreSQL, la API, el recorrido con la API real reiniciada
-(89 de 89 comprobaciones) y el código de las pantallas
-(`Z_SERVICIOS_ARQUITECTURA.md` §98).
+**Nada de esta sección está comprobado en un teléfono: el QA físico sigue
+pendiente.** La 0094 **sí está aplicada** en Supabase y verificada en solo
+lectura el 01/10/2026, sin divergencias; el incremento está técnicamente
+cerrado (`Z_SERVICIOS_ARQUITECTURA.md` §102). El código sigue sin desplegar y
+las banderas, apagadas. Las pruebas automáticas cubren la migración, el
+dominio, las carreras contra PostgreSQL, la API, el recorrido integral con la
+API real reiniciada (116 de 116 comprobaciones en el cierre) y el código de
+las pantallas (§98 y §102).
 
 Antes de empezar:
 
-- Aplicar la **0094** en la base del QA y verificarla
-  (`Z_SERVICIOS_ARQUITECTURA.md` §96–§97), **antes** de arrancar el código
-  nuevo, y **reiniciar la API** después: la puerta recuerda el «no».
+- La **0094** ya está en Supabase (§102). Si el QA usa **otra** base,
+  aplicarla y verificarla allí (`Z_SERVICIOS_ARQUITECTURA.md` §96–§97),
+  **antes** de arrancar el código nuevo, y **reiniciar la API** después: la
+  puerta recuerda el «no».
 - La API de ese entorno corre el código de `Edson` con `FEATURE_SERVICES=true`
   y `FEATURE_SERVICE_BOOKING=true` **solo allí**. `FEATURE_SERVICE_PAYMENTS`
   apagada y `SERVICE_PAYMENTS_PROVIDER=none`, como en todas partes.
@@ -1886,7 +1888,12 @@ Antes de empezar:
       caso quedan sin su nombre; su evidencia ya no se puede abrir y la app lo
       dice sin cerrarse.
 - [ ] En el panel de Supabase, el depósito `service-incident-evidence` es
-      **privado** y sus archivos no tienen URL pública.
+      **privado** y sus archivos no tienen URL pública. (Sin archivos está
+      comprobado; **con un archivo real**, no: es lo único del depósito que
+      el cierre no pudo probar.)
+- [ ] Un servicio **virtual**: no hay sala de Z ni enlace en la reserva. Las
+      partes se ponen de acuerdo por fuera y quien contrató **dicta** su
+      código al prestador. Anotar si eso basta (decisión G17).
 
 ### Accesibilidad e idiomas
 
