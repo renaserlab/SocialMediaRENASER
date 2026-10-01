@@ -62,6 +62,15 @@ APLICADAS = {
     # Su cabecera dice «SIN APLICAR» a propósito, como las anteriores:
     # cambiarla sería editar lo aplicado.
     "0093_servicios_reserva_y_contratacion.sql": "1d878ace7a1de9001e37b95efabbf106307ff143",
+    # Ejecutada a mano en Supabase (PostgreSQL 17.6) y verificada en solo
+    # lectura, sin divergencias, el 01/10/2026 a las 14:28 UTC (09:28 en
+    # Lima; Z_SERVICIOS_ARQUITECTURA.md §102): desde entonces tampoco se
+    # edita. Es la versión FINAL, con el índice único PARCIAL del caso (uno
+    # por reserva sin contar los retirados). Su cabecera dice «SIN APLICAR» y
+    # describe un rollback que es SOLO para una base local desechable: no se
+    # corrige ahí porque cambiarla sería editar lo aplicado. En producción una
+    # migración aplicada no se deshace: se corrige hacia delante, con otra.
+    "0094_servicios_atencion_y_cierre.sql": "1ed10ac846a363a99f458c0055239c75f8661dfc",
 }
 
 
