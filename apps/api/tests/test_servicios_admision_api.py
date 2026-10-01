@@ -400,12 +400,52 @@ RUTAS_DE_LA_RESERVA = {
 }
 
 
-def test_estan_exactamente_las_rutas_de_los_incrementos_1_a_5() -> None:
+#: La atención y la posventa (Incremento 6, 0094): cancelar, reprogramar, la
+#: asistencia, el caso con su expediente, la reseña y su administración.
+RUTAS_DE_LA_ATENCION = {
+    ("GET", "/services/catalog/{service_id}/reviews"),
+    ("POST", "/services/me/bookings/{booking_id}/cancel"),
+    ("POST", "/services/me/bookings/{booking_id}/check-in-code"),
+    ("POST", "/services/me/bookings/{booking_id}/confirm"),
+    ("GET", "/services/me/bookings/{booking_id}/incident"),
+    ("POST", "/services/me/bookings/{booking_id}/incident"),
+    ("POST", "/services/me/bookings/{booking_id}/incident/appeal"),
+    ("POST", "/services/me/bookings/{booking_id}/incident/entries"),
+    ("GET", "/services/me/bookings/{booking_id}/incident/entries/{entry_id}/file"),
+    ("POST", "/services/me/bookings/{booking_id}/incident/evidence"),
+    ("POST", "/services/me/bookings/{booking_id}/incident/withdraw"),
+    ("POST", "/services/me/bookings/{booking_id}/no-show"),
+    ("POST", "/services/me/bookings/{booking_id}/reschedule"),
+    ("POST", "/services/me/bookings/{booking_id}/review"),
+    ("POST", "/services/provider/bookings/{booking_id}/cancel"),
+    ("POST", "/services/provider/bookings/{booking_id}/complete"),
+    ("GET", "/services/provider/bookings/{booking_id}/incident"),
+    ("POST", "/services/provider/bookings/{booking_id}/incident"),
+    ("POST", "/services/provider/bookings/{booking_id}/incident/appeal"),
+    ("POST", "/services/provider/bookings/{booking_id}/incident/entries"),
+    ("GET", "/services/provider/bookings/{booking_id}/incident/entries/{entry_id}/file"),
+    ("POST", "/services/provider/bookings/{booking_id}/incident/evidence"),
+    ("POST", "/services/provider/bookings/{booking_id}/incident/withdraw"),
+    ("POST", "/services/provider/bookings/{booking_id}/no-show"),
+    ("POST", "/services/provider/bookings/{booking_id}/review/reply"),
+    ("POST", "/services/provider/bookings/{booking_id}/start"),
+    ("GET", "/admin/services/incidents"),
+    ("GET", "/admin/services/incidents/{incident_id}"),
+    ("POST", "/admin/services/incidents/{incident_id}/entries"),
+    ("GET", "/admin/services/incidents/{incident_id}/entries/{entry_id}/file"),
+    ("POST", "/admin/services/incidents/{incident_id}/resolve"),
+    ("GET", "/admin/services/reviews"),
+    ("POST", "/admin/services/reviews/{review_id}/moderate"),
+    ("POST", "/admin/services/tasks/run"),
+}
+
+
+def test_estan_exactamente_las_rutas_de_los_incrementos_1_a_6() -> None:
     rutas = {(m, p[len(API):]) for m, p in _rutas(create_app()) if "/services" in p}
-    assert len(RUTAS_DE_LA_AGENDA) == 14 and len(RUTAS_DE_LA_RESERVA) == 13
+    assert len(RUTAS_DE_LA_AGENDA) == 14 and len(RUTAS_DE_LA_RESERVA) == 13 and len(RUTAS_DE_LA_ATENCION) == 34
     assert rutas == (
         RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO | RUTAS_DE_LA_AGENDA
-        | RUTAS_DE_LA_RESERVA
+        | RUTAS_DE_LA_RESERVA | RUTAS_DE_LA_ATENCION
     )
 
 

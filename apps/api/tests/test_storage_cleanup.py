@@ -144,7 +144,9 @@ def test_los_buckets_declarados_son_los_que_usa_el_movil():
     `service-provider-documents` (0088), los de las postulaciones de Servicios.
     Y `service-media` (0090), las imágenes del catálogo de Servicios: las sube
     la API, no el móvil, pero bajo `<perfil>/<servicio>/...`, así que también
-    se van con la cuenta.
+    se van con la cuenta. Y `service-incident-evidence` (0094), las evidencias
+    de un caso de Servicios, bajo `<perfil>/<caso>/...`: las de quien se va se
+    van con su cuenta (la fila del expediente queda, sin su archivo).
     """
     assert set(storage.USER_BUCKETS) == {
         "post-media",
@@ -153,6 +155,7 @@ def test_los_buckets_declarados_son_los_que_usa_el_movil():
         "seller-documents",
         "service-provider-documents",
         "service-media",
+        "service-incident-evidence",
     }
 
 
