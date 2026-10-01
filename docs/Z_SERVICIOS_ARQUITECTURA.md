@@ -12,7 +12,10 @@ aplicada y verificada (§61); y la **Parte V** (§62 en adelante), también el
 0093 a mano y verificarse el 01/10/2026 (02:13 UTC), **técnicamente cerrado**
 (§80); y la **Parte VI** (§82 en adelante), el 01/10/2026, con el Incremento 6
 implementado y probado y, tras ejecutarse la 0094 a mano y verificarse ese
-mismo día (14:28 UTC), **técnicamente cerrado** (§102).
+mismo día (14:28 UTC), **técnicamente cerrado** (§102). La **Parte VII** (§106 en
+adelante), ese mismo día: la política operativa de cada reserva, congelada al
+confirmarla (G18), **implementada y probada**, con la migración 0095 escrita y
+**sin aplicar**.
 
 ## Estado
 
@@ -32,6 +35,8 @@ mismo día (14:28 UTC), **técnicamente cerrado** (§102).
 | **Migración 0093** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (02:13 UTC) en solo lectura: **sin divergencias** (§80). Las cinco puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita. El código que la usa está en `Edson`, **sin desplegar**: producción todavía no la conoce |
 | **Incremento 6 (atención, posventa y cierre)** | **técnicamente cerrado; únicamente queda pendiente el QA físico** (§102). Cancelar, reprogramar, el código de asistencia, empezar, terminar y confirmar, la inasistencia, el caso con su expediente y sus evidencias privadas, la resolución y la apelación, la reseña verificada con su moderación, 19 avisos y los barridos. Con YAGNI estricto: lo no necesario para una atención gratuita no se construyó (§100) |
 | **Migración 0094** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (14:28 UTC) en solo lectura: **sin divergencias** (§102). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y **no se deshace**: se corrige hacia delante (§104) |
+| **Política operativa congelada (G18)** | **implementada y probada; pendiente de aplicar y verificar la 0095 y del QA físico** (§106). Cada reserva guarda al confirmarse los nueve plazos y topes con los que después se decide, y solo se decide con esos: cambiar la configuración ya no cambia una reserva hecha |
+| **Migración 0095** | **ESCRITA, SIN APLICAR**. Probada contra PostgreSQL 17 local (§110). Sin ella, y con las banderas encendidas, toda la reserva contestaría 503 (§114). **Primero la migración, después el código** (§115) |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
 | **Código** | En la rama `Edson`, **sin desplegar**: sin push, PR ni merge. La API de producción sigue con el backend anterior |
@@ -3199,7 +3204,7 @@ está listado en §100.
 |---|---|
 | **Qué hace** | Sobre una reserva confirmada (Incremento 5): **cancelarla** o **cambiarle el horario** antes de que empiece; el **código de asistencia** de quien contrata; el prestador **empieza** y **termina**; quien contrata **confirma** (o un barrido la cierra, solo con la señal fuerte); declarar una **inasistencia**; abrir un **caso** con su expediente y sus **evidencias privadas**; administración **resuelve**, una parte **apela** una vez y resuelve otra persona; la **reseña verificada**, la respuesta del prestador y su **moderación**; recordatorios; y 19 avisos |
 | **Migración 0094** | **APLICADA** a mano en Supabase y verificada en solo lectura el 01/10/2026, **sin divergencias** (§102). Cómo se aplica, en §96; qué se consulta, en §97 |
-| **Sin la 0094** | La contratación del Incremento 5 **sigue funcionando**: el detalle de una reserva trae `care: null` y la app no ofrece ninguna acción nueva. Las 33 rutas privadas de la atención contestan **503 `services_not_ready`** sin escribir nada; las reseñas públicas contestan 200 con `available: false`; la ficha dice 0 reseñas y promedio `null`. Nunca un 500 |
+| **Sin la 0094** | La contratación del Incremento 5 **sigue funcionando**: el detalle de una reserva trae `care: null` y la app no ofrece ninguna acción nueva. Las 33 rutas privadas de la atención contestan **503 `services_not_ready`** sin escribir nada; las reseñas públicas contestan 200 con `available: false`; la ficha dice 0 reseñas y promedio `null`. Nunca un 500. *Era así hasta la corrección G18: desde ella la reserva exige además la 0095 y, sin ella, contesta 503 entera (§114)* |
 | **Banderas** | Las mismas: `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` **apagadas**, `FEATURE_SERVICE_PAYMENTS` **apagada**, `SERVICE_PAYMENTS_PROVIDER=none`. **No hay bandera nueva**: la atención va con la contratación. Apagadas: 503 `services_disabled` / `service_booking_disabled`, antes de mirar la base |
 | **Dinero** | **Ninguno.** Nada se cobra, se devuelve, se retiene ni se transfiere. El «efecto económico» de un caso es una **solicitud** con su estado, y ese estado **no puede decir «ejecutado»** (§90) |
 | **Código** | En `Edson`, **sin desplegar**: sin push, PR ni merge |
@@ -3521,7 +3526,8 @@ la 0094 la deja. Ante la duda, no. El «sí» y el «no» se recuerdan hasta
 reiniciar; un error al mirar es un 503 y no se recuerda. **Si se retoca la
 0094 hay que recalcular esas huellas.** `hay_reservas` (Incremento 5) acepta
 la 0093 pura **y** la 0093 enmendada por la 0094, así que el código nuevo
-funciona antes y después de aplicarla.
+funciona antes y después de aplicarla. *Desde la corrección G18 solo acepta
+la 0093 tal como la dejan la 0094 y la 0095 (§114).*
 
 **Los barridos** (`POST /admin/services/tasks/run`, por lotes de 200, hasta
 1000): recuerdan las reservas que empiezan en las próximas 24 h (una vez cada
@@ -3639,8 +3645,9 @@ rechaza (25006), y terminando con `ROLLBACK`:
 
 ```sql
 -- 1. La puerta, con el rol de la API: tiene que decir true
---    (las dos consultas de esquema.hay_atencion: _LA_RESERVA_CON_LA_0094 y
---    _LO_QUE_NECESITA_LA_ATENCION).
+--    (las dos consultas de esquema.hay_atencion: _LO_QUE_NECESITA_LA_RESERVA y
+--    _LO_QUE_NECESITA_LA_ATENCION. Desde la corrección G18 la primera exige,
+--    además, la 0095: §114).
 -- 2. Las cuatro tablas, con RLS y sin políticas.
 select c.relname, c.relrowsecurity,
        (select count(*) from pg_policy p where p.polrelid = c.oid) as politicas
@@ -4136,6 +4143,8 @@ resuelve):
   todo sea gratuito no tiene consecuencia económica, y el propio blueprint
   deja la política de cancelación sin definir (D07). **Antes de que cancelar
   cueste dinero hay que congelarla en la reserva** (decisión G18).
+  *Corregido en lo técnico ese mismo día: Parte VII (§106). La 0095 está sin
+  aplicar y los valores siguen siendo provisionales.*
 - **Cómo se encuentran las partes en un servicio virtual.** Sin sala de Z ni
   enlace en la reserva, se ponen de acuerdo por fuera (decisión G17).
 
@@ -4209,7 +4218,7 @@ depósitos en producción.** Si aparece un defecto:
 
 1. **Apagar** `FEATURE_SERVICE_BOOKING` (y `FEATURE_SERVICES` si hace falta):
    todas las rutas contestan 503 sin mirar la base, y nada se pierde.
-2. **Corregir hacia delante**: una migración nueva (`0095_…`), aditiva, en
+2. **Corregir hacia delante**: una migración nueva (la siguiente), aditiva, en
    una transacción, con su prueba y su verificación en solo lectura, como
    todas las anteriores.
 3. **No editar** la 0094 ni ninguna aplicada, y **no borrar** el depósito ni
@@ -4241,11 +4250,13 @@ depósitos en producción.** Si aparece un defecto:
 > prestador como ya se hace con quien contrata; definir un **plazo legal** de
 > conservación; e impedir que una baja destruya evidencia necesaria para un
 > caso vivo o reciente. Exige cambiar la clave de la 0090 con una migración
-> nueva: no se tocó la 0090 ni se creó una 0095.
+> nueva: no se tocó la 0090. (La 0095 que existe desde la Parte VII es la de
+> la política congelada, y no cambia nada de esto.)
 
 - **G1–G18** (`Z_REQUISITOS_Y_DECISIONES.md`), además de C1–C15, D1–D15,
   E1–E12 y F1–F21: **ninguna se dio por resuelta**. G17 y G18 son nuevas, del
-  cruce con el blueprint (§103).
+  cruce con el blueprint (§103). *G18 quedó después resuelta en lo técnico
+  (§106); sus valores, no.*
 - **Publicar las condiciones de contratación** (F9): no hay ninguna, y sin
   ellas no se confirma nada.
 - **El planificador** (F13, G12) y una **segunda persona en administración**
@@ -4256,3 +4267,308 @@ depósitos en producción.** Si aparece un defecto:
 - **Desplegar `Edson`**: no hubo push ni despliegue. Al hacerlo, la API
   arranca de nuevo y la puerta mira la base entonces.
 - **Servicios sigue sin activar**: las tres banderas, apagadas.
+
+# Parte VII · La política operativa congelada (G18, 01/10/2026)
+
+## 106. Estado
+
+**Corrección G18 implementada y probada; pendiente de aplicar y verificar la
+migración 0095 y de realizar el QA físico.** No es un incremento nuevo: cierra
+el único hueco contractual que el cierre del Incremento 6 dejó registrado
+(§103).
+
+| | |
+|---|---|
+| **Código** | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
+| **Migración 0095** | **ESCRITA Y SIN APLICAR**. Probada solo contra PostgreSQL 17 local. No consta en `APLICADAS`: hasta que se aplique y se verifique, se puede corregir |
+| **Banderas** | `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none` |
+| **Valores** | **provisionales**: congelarlos no los decide (G1–G12 siguen siendo de la empresa) |
+| **API y móvil** | sin rutas, pantallas ni campos nuevos: el contrato que consume la app no cambió |
+
+## 107. La causa
+
+Al confirmar, una reserva ya copiaba el servicio, su versión, el prestador, el
+horario, la modalidad, el precio y lo aceptado (las condiciones, por versión y
+huella). **Los plazos** con los que después se decide qué se puede hacer con
+ella no: `PoliticaDeAtencion.de()` leía la configuración del proceso en cuatro
+sitios (al abrir cualquier transición, al enseñar las acciones, en el barrido
+y al calcular el plazo de apelación del expediente). Cambiar una variable de
+entorno cambiaba, hacia atrás, todas las reservas ya confirmadas.
+
+Dos pruebas del Incremento 6 **afirmaban** ese efecto («con otra política, sí
+se reprograma»; «las apelaciones se quitan después»): son la evidencia del
+defecto, y se reescribieron con el comportamiento correcto.
+
+## 108. Qué se congela y qué no
+
+Cada valor que el dominio lee, clasificado. **A**: decide qué puede hacer
+alguien con una reserva ya hecha, o hasta cuándo; se congela. **B**: técnico u
+operativo, no cambia ningún derecho; se lee al actuar. **C**: todos los de A
+son, además, provisionales: se congela el valor que el código usa hoy, sin
+darlo por decidido.
+
+| Ajuste | En la fotografía | Qué decide | Clase |
+|---|---|---|---|
+| `services_attention_checkin_minutes` (15) | `attention_checkin_minutes` | desde cuándo se pide el código y se puede empezar | A · C (G3) |
+| `services_attention_tolerance_minutes` (15) | `attention_tolerance_minutes` | desde cuándo se declara una ausencia | A · C (G3) |
+| `services_attention_confirmation_hours` (24) | `attention_confirmation_hours` | el plazo para confirmar y el cierre automático | A · C (G4) |
+| `services_booking_reschedule_max` (1) | `booking_reschedule_max` | cuántas veces se reprograma | A · C (G2) |
+| `services_booking_reschedule_min_hours` (24) | `booking_reschedule_min_hours` | con cuánta antelación | A · C (G2) |
+| `services_incident_window_hours` (48) | `incident_window_hours` | el plazo ordinario para abrir un caso | A · C (G7) |
+| `services_incident_appeal_days` (5) | `incident_appeal_days` | el plazo para apelar | A · C (G8) |
+| `services_incident_appeals_max` (1) | `incident_appeals_max` | si se puede apelar | A · C (G8) |
+| `services_review_window_days` (30) | `review_window_days` | hasta cuándo se reseña | A · C (G11) |
+| `services_booking_reminder_hours` (24) | — | cuándo sale el recordatorio | B: es un aviso, no un plazo de nadie |
+| `services_reviews_premoderation` | — | si una reseña NUEVA espera a moderación | B: es de la moderación de Z; si se enciende tiene que valer para toda reseña que se escribe |
+| `services_booking_hold_minutes`, `…max_active_holds`, `…instant_modalities` | — | la retención y qué se confirma solo | B: valen ANTES de que haya reserva |
+| `services_agenda_notice_minutes`, `…horizon_days` | — | qué horarios se ofrecen (también al reprogramar) | B: es la disponibilidad del horario NUEVO, de la agenda de hoy |
+| intentos y cifras del código, largos de texto, evidencias por parte, lotes, espera del cerrojo, minutos de un enlace firmado | — | límites técnicos | B: constantes del código, varias impuestas también por la 0094 |
+| banderas y pasarela (`cobro_disponible`) | — | si hay cobro | B: estado del sistema, no un plazo |
+
+**Cancelar no tiene ningún plazo configurable**, y por eso no hay nada suyo
+en la fotografía: se cancela hasta la hora de inicio y sin coste (no hay
+dinero). No se inventó un valor para completar la lista. Cuando la empresa
+decida plazos o costes de cancelación (G1), entrarán como claves nuevas, con
+otra versión de la estructura y su migración.
+
+## 109. La fotografía: forma, versión y huella
+
+Tres columnas de `service_bookings`, escritas en el mismo `INSERT` que la
+reserva (la fecha de captura es `confirmed_at`):
+
+| Columna | Qué es |
+|---|---|
+| `operating_policy` (jsonb) | los nueve valores, por su clave. Solo enteros. Ni textos, ni la configuración del sistema |
+| `operating_policy_version` (integer) | la versión de su estructura: **1**. Otra estructura es otra versión, con su migración: la base solo admite las que conoce |
+| `operating_policy_sha256` (text) | el SHA-256 de su **forma canónica** |
+
+La forma canónica es `{"schema_version":1,"values":{…}}` con las claves en
+orden alfabético y sin espacios. La calcula la API
+(`reserva_politica.huella_de_la_fotografia`) **y la vuelve a calcular la
+base** en un CHECK: una huella que no es la de su fotografía no se guarda. La
+de la política de fábrica es `dc91b8ba…`, fija en una prueba.
+
+**No se duplica lo aceptado.** Las condiciones de contratación siguen en
+`service_booking_acceptances` (su identificador, versión y huella); la
+fotografía no copia su texto ni las referencia. Son dos cosas: lo que la
+persona **aceptó** y los valores con los que el sistema **decide**.
+
+**Por qué columnas y no una tabla aparte.** La reserva ya es la fotografía (el
+título, el prestador, la zona) y ya está protegida: `servicios_reserva_inmutable()`
+compara la fila entera. Así salen gratis, por construcción, «una por reserva»,
+«se crea con la reserva o no se crea», «no se edita» y «una reserva anterior
+no la gana después». Una tabla uno a uno habría necesitado tres disparadores
+más, RLS, permisos y otra consulta en cada acción.
+
+## 110. La 0095
+
+`0095_servicios_politica_operativa_congelada.sql`. Aditiva, una transacción,
+reejecutable. Añade a `service_bookings`:
+
+- las tres columnas, **anulables y sin valor predeterminado**;
+- cuatro CHECK: entera o ninguna (`…_politica_completa`); de una versión
+  conocida (`…_version`); exactamente sus nueve claves, cada una un entero
+  dentro de sus cotas (`…_forma`); y la huella que le corresponde
+  (`…_huella`);
+- `servicios_reserva_con_politica()` y su disparador `BEFORE INSERT`: **una
+  reserva nueva nace con su fotografía, o no nace**.
+
+Antes de tocar nada comprueba la 0086–0094 y se detiene diciendo qué falta;
+entre otras cosas exige el disparador `service_bookings_inmutables` activo y
+`servicios_reserva_inmutable()` **con el cuerpo exacto de la 0094**, porque de
+él depende que la fotografía no se edite. Al final verifica lo que dejó (las
+columnas sin predeterminado, los cuatro CHECK validados, el disparador, que la
+función no se ejecuta desde fuera, RLS, cero políticas y cero permisos) y dice
+cuántas reservas quedan sin fotografía. No crea tablas, no concede nada, no
+borra y no toca ninguna fila.
+
+## 111. Inmutabilidad
+
+- **En la base.** El disparador de la 0093 (con el cuerpo de la 0094) rechaza
+  cualquier `UPDATE` de una reserva que no sea cancelarla o reprogramarla, y
+  en los dos exige que el resto de la fila sea idéntico. Probado: sustituir la
+  fotografía por otra válida, vaciarla, tocar una sola de las tres columnas,
+  hacerlo de paso al cancelar o al reprogramar, y hacerlo sobre una reserva
+  cancelada: todo se rechaza. Cancelar y reprogramar siguen funcionando y la
+  conservan.
+- **En el dominio.** No hay ninguna función que la escriba salvo `confirmar`.
+  El cuerpo de la petición no la admite (422). Un reintento con la misma clave
+  devuelve la reserva ya hecha, sin volver a leer la configuración.
+- **La baja de una cuenta no cambia** (F21 sigue pendiente): la fotografía se
+  queda con la reserva cuando se va quien contrató, y se va con ella cuando se
+  va quien presta.
+
+## 112. Las reservas anteriores
+
+Las que existan al aplicar la 0095 se quedan **sin fotografía** (las tres
+columnas en `NULL`). No se les inventa una: nadie guardó con qué política se
+confirmaron, y la migración no conoce la configuración del proceso. **Tampoco
+pueden ganarla después** (una reserva no se reescribe), así que nunca se
+presentará una política reconstruida como si fuera la original. La API las
+trata como lo que son: `PoliticaDeAtencion.de_la_reserva` les aplica la
+política **vigente**, como hasta ahora, y lo dice (`congelada` es falso).
+
+**Limitación, dicha tal cual:** una reserva anterior sigue expuesta al cambio
+de configuración. En Supabase no hay ninguna (verificado el 01/10/2026:
+§102); la migración lo dirá al aplicarse.
+
+## 113. Quién lee la fotografía
+
+Un solo lector: `PoliticaDeAtencion.de_la_reserva` (estructura, claves, tipos,
+cotas y huella), y un solo punto de entrada en el dominio,
+`atencion.politica_de(reserva)`. Lo usan:
+
+| Dónde | Qué decide con ella |
+|---|---|
+| `atencion.abrir` (toda transición), con la fila ya bloqueada | reprogramar (antelación y tope), el código y empezar (la llegada), la ausencia (la tolerancia), abrir un caso, apelar, reseñar |
+| `atencion.cuidado` | las acciones disponibles y los plazos que enseña el detalle |
+| `atencion._cerrar_sola` y el filtro del barrido | el cierre automático, y cuántas quedan sin verificar |
+| `ExpedienteRead` | hasta cuándo se apela |
+
+`PoliticaDeAtencion.vigente()` (la de ahora) solo la llama quien **confirma**
+una reserva, para congelarla, y el lector para una reserva anterior a la 0095.
+Si la fotografía guardada no es de fiar (no puede pasar en una base con la
+0095), **no se sustituye por la vigente**: con esa reserva no se hace nada
+(409 `service_booking_action_not_available`) y el barrido la salta.
+
+El barrido necesita saber, en SQL, qué atenciones vencieron «con el plazo de
+su reserva». No hace aritmética de fechas con JSON (no es portable): lee los
+plazos distintos que hay entre las terminadas (uno por cada cambio de
+configuración) y compara cada atención con el suyo. Quien cierra vuelve a
+comprobarlo con la fotografía verificada.
+
+## 114. La puerta
+
+`hay_reservas` exige ahora la 0093 **tal como la dejan la 0094 y la 0095**:
+las tres columnas con su tipo, anulables y sin predeterminado; los 46 CHECK
+por su definición; los 17 disparadores (entre ellos el que exige la fotografía
+y el que impide reescribir la reserva) y sus funciones por su cuerpo; RLS,
+cero políticas y nadie de fuera. `hay_atencion` exige lo mismo y, además, la
+0094.
+
+**Sin la 0095, toda la reserva contesta 503 `services_not_ready`**, no solo
+lo nuevo: los modelos ya leen esas columnas, y sin ellas cualquier consulta de
+una reserva sería un 500. El catálogo sigue, y la agenda privada del prestador
+también. **Los horarios públicos no se ofrecen** mientras la contratación esté
+encendida: sin poder leer lo ocupado se enseñaría como libre el horario de
+otra persona, así que contestan 503 (`agenda._exigir_lo_ocupado`); con la
+contratación apagada nadie aparta nada y son los de la agenda. Es el estado de
+producción hasta que se aplique (con las banderas apagadas no se llega a
+mirar). Un error al inspeccionar es un 503 y **no se recuerda**; el «sí» y el
+«no», sí: **al aplicar la 0095 hay que reiniciar la API**.
+
+## 115. Cómo aplicar y verificar la 0095
+
+**Primero la migración, después el código.** Un servidor con este código y
+sin la 0095 contesta 503 en toda la reserva. Un servidor anterior que
+confirmara reservas con la 0095 ya puesta chocaría con su disparador (no trae
+la fotografía): hoy no existe ninguno, porque el código de Servicios no está
+desplegado y sus banderas están apagadas.
+
+1. Confirmar que nadie está contratando (las banderas están apagadas).
+2. Pegar el fichero entero en el editor SQL de Supabase y ejecutarlo. Es una
+   sola transacción: o queda todo o no queda nada. Tiene que terminar con el
+   aviso «La 0095: N reserva(s) anteriores, sin fotografía»; hoy, N = 0.
+3. **Reiniciar la API** que vaya a usarla (la puerta recuerda el «no»).
+4. Verificar en solo lectura, como las anteriores: comparación con una
+   referencia local 0001–0095, las tres columnas, los cuatro CHECK, el
+   disparador y su función, RLS, políticas y permisos, y las puertas con la
+   conexión y el rol reales de la API.
+5. Registrar su huella en `APLICADAS` y actualizar esta sección.
+
+**No se deshace en producción** (§104): si algo falla después, se apaga
+`FEATURE_SERVICE_BOOKING` y se corrige con otra migración.
+
+## 116. Pruebas, mutaciones y revisión (01/10/2026)
+
+| Qué | Resultado |
+|---|---|
+| La 0095 (`test_servicios_migracion_0095.py`) | **20**: 7 estáticas y 13 contra PostgreSQL 17. Desde cero (0001–0095); sobre la 0094 vacía y con reservas (no toca ninguna, y dice cuántas quedan sin fotografía); reejecutada dos veces, y la 0094 encima; con un fallo a mitad (tres cortes: no queda nada); incompleta (diez formas: se niega); sin cada dependencia (seis: se niega diciendo cuál); la huella de la API es la que exige la base; fotografías corruptas, sin huella o de otra versión; que no se edita, ni se vacía, ni se sustituye; una reserva anterior; y la baja de una cuenta |
+| El modelo, igual a la base **por definición** | la batería de la 0093 con la cadena entera: incluye las tres columnas y los cuatro CHECK (dos solo existen en PostgreSQL) |
+| Las migraciones anteriores, intactas | `test_las_aplicadas_no_han_cambiado` (0086–0094, por su huella); las baterías de la 0093 y la 0094 siguen en verde, fijadas a su migración |
+| La fotografía y su lector, sin base | **24** (en `test_servicios_atencion_reglas.py`): lo contractual y nada más, la huella canónica, veinte fotografías que no son de fiar, y la reserva anterior |
+| Por la API real, con PostgreSQL (`test_servicios_politica_congelada.py`) | **21**: 15 funcionales (política A al reservar y B después: reprogramar, la llegada y la tolerancia, el cierre automático, el caso, la apelación, la reseña; el reintento; el fallo sin reserva a medias; la fotografía manipulada; la reserva anterior), 4 carreras y 2 de la puerta (26 alteraciones) |
+| Backend completo con PostgreSQL | **4346 aprobadas, 0 fallidas, 0 omitidas** (23 min) |
+| Backend completo sin PostgreSQL | **3107 aprobadas, 1239 omitidas** (las que necesitan PostgreSQL), 0 fallidas |
+| Móvil | **no cambió** (ningún fichero): `tsc --noEmit` limpio y paridad i18n (34/34). No se repitieron la batería completa, Expo Doctor ni la exportación web |
+| Rutas | 556 operaciones, 134 de Servicios: ninguna nueva ni duplicada |
+| `git diff --check` · secretos | limpio · ninguno |
+
+**Dos pruebas del Incremento 6 afirmaban el defecto** y se reescribieron:
+«con otra política, sí se reprograma» y «las apelaciones se quitan después».
+Una tercera describía una base solo con la 0093 (la reserva seguía); ahora
+describe una base sin la 0095 (la reserva espera).
+
+### El recorrido (local, API real)
+
+Seis procesos de la API contra una base local, con la configuración cambiada
+**de verdad** (cada política es un proceso arrancado con otras variables de
+entorno): **59 de 59 comprobaciones, 587 peticiones, ningún 500**.
+
+1. Con la 0001–0094 y sin la 0095: la reserva y las 33 rutas de la atención
+   contestan 503, los horarios no se ofrecen y no se escribe nada. Aplicada la
+   0095 (dos veces), el mismo proceso sigue en 503.
+2. Reiniciada, con la política A: contratar (la reserva nace con la fotografía
+   de A), el recorrido gratuito entero, cancelar y reprogramar.
+3. **Reiniciada con la política B**: lo hecho con A sigue con A al reprogramar
+   (409 con sus 24 h), en la llegada, la tolerancia, el cierre automático, el
+   caso, la apelación y la reseña; lo nuevo recibe B, con otra huella.
+4. **Reiniciada con A otra vez**: lo hecho con B sigue con B.
+5. Las banderas apagadas, los registros sin trazas ni secretos, y el dinero
+   intacto.
+
+### Concurrencia (PostgreSQL)
+
+Confirmar a la vez y con la misma `Idempotency-Key` (una reserva, una
+fotografía, y las repeticiones devuelven los mismos plazos); seis personas
+confirmando mientras la configuración salta entre A y B (cada reserva queda
+con una política **entera**, nunca una mezcla); reprogramar mientras cambia
+(la de A no se mueve en ningún instante; la de B, una vez); y cuatro barridos
+a la vez mientras cambia (se cierra solo la que toca, una vez). No se repitió
+la campaña de concurrencia del Incremento 6: ese código no cambió.
+
+### Mutaciones dirigidas
+
+**27 de 27 muertas**, en un árbol de trabajo desechable: volver a leer la
+configuración (en el lector, al actuar, al enseñar, en el barrido, en el
+expediente, en la apelación); no guardar la fotografía; no comprobar la
+huella (en el lector y en la base); no validar los valores ni la versión;
+sustituir por la vigente una que no es de fiar; recalcular en un reintento;
+aceptar la que envía quien contrata; permitir una reserva sin ella; que la
+0095 no exija el cuerpo que impide reescribir la reserva; claves de más; una
+reserva anterior presentada como congelada; la puerta sin mirar el valor
+predeterminado o sin exigir la 0095; congelar de más (la moderación, el
+recordatorio); un plazo global en la cancelación; y ofrecer horarios sin
+poder leer lo ocupado. No se repitieron las 54 del Incremento 6.
+
+### Revisión independiente
+
+Sin hallazgos bloqueantes ni altos.
+
+- **Medio, corregido** (prueba en rojo, corrección, prueba en verde): con la
+  puerta de la reserva cerrada y la contratación encendida, el calendario
+  público ofrecía los horarios sin descontar lo ocupado. Ahora contestan 503;
+  con la contratación apagada son los de la agenda (§114). De la misma
+  revisión sale el orden de aplicación: **primero la 0095, después el código**
+  (§115).
+- **Bajos, no cambiados, y por qué.** Que una reserva anterior se rija por la
+  vigente no deja rastro en ninguna respuesta: se identifica en la base
+  (`operating_policy is null`) y no se añadió un campo para ello. Una
+  fotografía no fiable bloquea también ver y cancelar: a propósito, pero
+  obliga a que **una versión 2 de la estructura se despliegue en el lector
+  antes de escribirse**. El barrido lee una clave del JSON en SQL: es solo el
+  filtro; quien cierra la relee comprobada. La huella es redundante en
+  PostgreSQL (la base la recalcula): se mantiene porque identifica la política
+  y protege la lectura donde no hay CHECK. La migración no fija `lock_timeout`
+  (como las anteriores), y una restauración solo de datos con los disparadores
+  activos rechazaría las reservas sin fotografía.
+
+## 117. Lo que sigue pendiente
+
+- **Aplicar y verificar la 0095** (§115) y, después, registrar su huella.
+- **Los valores**: los nueve siguen siendo los provisionales del alcance.
+  Congelarlos no resuelve G2, G3, G4, G7, G8 ni G11.
+- **La cancelación con plazos o con coste** (G1): no existe; cuando se decida
+  entrará en la fotografía con otra versión.
+- **F21** (la baja de quien presta se lleva su historia): sin tocar.
+- **El QA físico** de los seis incrementos, y lo de §105.

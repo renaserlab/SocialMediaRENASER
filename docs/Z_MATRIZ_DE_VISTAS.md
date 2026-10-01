@@ -842,6 +842,14 @@ vista se probó en un teléfono (QA físico pendiente). Ninguna se alcanza solo
 escribiendo la URL, y ninguna decide por el estado ni por la hora del
 teléfono: lo vigila `serviciosAtencionVistas.test.mts`.
 
+> *Corrección G18 (01/10/2026):* **ninguna vista, ruta ni campo nuevo.** Los
+> plazos que enseña el panel de la atención (`care.deadlines`) y las acciones
+> que ofrece son los de **cada reserva**, congelados al confirmarla, y no los
+> de la configuración del momento. Necesita la **0095, escrita y sin
+> aplicar**: sin ella, con las banderas encendidas, las vistas de reservas
+> contestan 503 y los horarios no se ofrecen
+> (`Z_SERVICIOS_ARQUITECTURA.md` §106–§117).
+
 Servicios › «Mis reservas» › la reserva › cancelar / cambiar el horario /
 mostrar mi código / confirmar / reportar un problema / reseña. Área del
 prestador › «Reservas de mis servicios» › la reserva › empezar / terminar /

@@ -265,6 +265,10 @@ class Settings(BaseSettings):
     #: PROVISIONALES: son los de la «política operativa v1» del alcance, no
     #: decisiones tomadas aquí (`docs/Z_REQUISITOS_Y_DECISIONES.md`, G1–G18).
     #: Se leen y se acotan en `services/reserva_politica.py`.
+    #: LOS QUE DECIDEN SOBRE UNA RESERVA YA HECHA SE CONGELAN CON ELLA al
+    #: confirmarla (0095, G18): cambiarlos aquí solo vale para las que se
+    #: confirmen después. No se congelan el aviso previo (`reminder`) ni la
+    #: moderación previa de una reseña (`premoderation`).
     #: Minutos antes de la hora en que se abre la llegada, y la tolerancia.
     services_attention_checkin_minutes: int = 15
     services_attention_tolerance_minutes: int = 15

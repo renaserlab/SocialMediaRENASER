@@ -1903,3 +1903,25 @@ Antes de empezar:
 - [ ] En inglés y portugués no queda ningún texto en español ni códigos
       (`service_…`, `incident_…`), ni un «0,0» donde no hay reseñas, ni
       «devuelto» o «reembolsado» en ningún estado.
+
+### La política congelada (corrección G18; después de aplicar la 0095)
+
+Hace falta un entorno de pruebas donde se puedan cambiar las variables de la
+API y reiniciarla. Nada de esto se probó en un teléfono.
+
+- [ ] **Antes de aplicar la 0095**, con las banderas encendidas: «Mis
+      reservas», la bandeja del prestador y los horarios de un servicio dicen
+      que todavía no está disponible. La app no se cierra ni enseña un error
+      técnico.
+- [ ] Aplicada la 0095 y **reiniciada la API**: se contrata con normalidad, y
+      el detalle de la reserva enseña hasta cuándo se puede cambiar el horario
+      y cuántos cambios quedan.
+- [ ] Cambiar `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS` (por ejemplo, de 24 a 2)
+      y reiniciar: la reserva **ya hecha** enseña el mismo límite que antes; una
+      **nueva** enseña el nuevo.
+- [ ] Lo mismo con `SERVICES_ATTENTION_TOLERANCE_MINUTES`: en la reserva ya
+      hecha, «no vino» se ofrece con la tolerancia de cuando se confirmó.
+- [ ] Lo mismo con `SERVICES_REVIEW_WINDOW_DAYS`: la reseña de una atención ya
+      contratada se ofrece durante el plazo de cuando se confirmó.
+- [ ] En ninguna pantalla aparece un texto técnico de la política (una huella,
+      `operating_policy`, un nombre de variable).

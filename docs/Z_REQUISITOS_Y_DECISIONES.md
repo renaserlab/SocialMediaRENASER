@@ -2886,7 +2886,7 @@ política definitiva: **G1–G18 son de la empresa**, y todas las anteriores
 | G15 | **Quién decide en administración y cuántas personas hacen falta** | Solo `admin`. Con una sola persona **no hay apelaciones**: hacen falta dos antes de encender la contratación si se quieren |
 | G16 | **La baja de una cuenta con un caso vivo o con evidencias** (junto a F20 y F21) | La de quien contrata se lleva sus evidencias (el expediente conserva la fila, sin su archivo) y deja el caso y la reseña sin su nombre |
 | G17 | **Cómo se encuentran las partes en un servicio virtual** (una sala de Z con 100ms, un enlace del prestador, mensajes) | Z no ofrece sala ni guarda un enlace: se ponen de acuerdo por fuera. La integración de 100ms no tiene cuenta conectada. Surgida del cruce con el blueprint en el cierre |
-| G18 | **Qué política operativa queda congelada en cada reserva** (el blueprint pide copiarla, inmutable, al confirmar) | Se copia lo **aceptado** (condiciones de Z y del servicio, por versión y huella); los **plazos** (reprogramar, tolerancia, confirmación) son los vigentes al actuar. Sin consecuencia mientras todo sea gratuito; **hay que congelarla antes de que cancelar cueste dinero**. Surgida del cruce con el blueprint en el cierre |
+| G18 | **Qué política operativa queda congelada en cada reserva** (el blueprint pide copiarla, inmutable, al confirmar) | **Resuelto en lo técnico el 01/10/2026** (falta aplicar la 0095; `Z_SERVICIOS_ARQUITECTURA.md` §106). Al confirmar se guardan con la reserva, inmutables y con su huella, los nueve plazos y topes con los que después se decide: reprogramar (cuántas veces y con cuánta antelación), la llegada, la tolerancia, la confirmación y el cierre automático, el caso, la apelación (plazo y si la hay) y la reseña. **Sus valores siguen siendo los provisionales**: decidirlos es G2, G3, G4, G7, G8 y G11, y un cambio valdrá para las reservas que se confirmen después. **No se congelan** el aviso previo (G12) ni la moderación previa de una reseña (G11). **Cancelar no tiene ningún plazo configurable** (G1): cuando se decida uno, entrará en la fotografía |
 
 > **F21 sigue pendiente, y ahora pesa más.** La baja de quien presta se sigue
 > llevando sus servicios y, con ellos, sus reservas pasadas, sus pedidos, lo
@@ -2974,3 +2974,32 @@ el QA físico.** El detalle, en `Z_SERVICIOS_ARQUITECTURA.md` §102–§105.
 
 Siguen pendientes, **todas**: C1–C15, D1–D15, E1–E12, F1–F21 y G1–G18. Ninguna
 se dio por resuelta.
+
+### Corrección G18: la política operativa, congelada en cada reserva (01/10/2026)
+
+**Corrección G18 de Z Servicios implementada y probada; pendiente de aplicar y
+verificar la migración 0095 y de realizar el QA físico.** El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md` §106–§117.
+
+- **Qué se corrigió.** Los plazos con los que se decide qué se puede hacer
+  con una reserva se leían de la configuración del momento: cambiarla cambiaba
+  hacia atrás las reservas ya hechas. Ahora cada reserva guarda los suyos al
+  confirmarse (la migración **0095, escrita y sin aplicar**) y solo se decide
+  con esos.
+- **Qué NO se decidió.** Ningún valor. Los nueve son los provisionales del
+  alcance («política operativa v1»): G2, G3, G4, G7, G8 y G11 siguen siendo de
+  la empresa. Congelar un valor provisional no lo convierte en política.
+- **Qué no se congela, y por qué**: el aviso previo (es un aviso, no un plazo
+  de nadie) y la moderación previa de una reseña (es de la moderación de Z: si
+  se enciende tiene que valer para toda reseña que se escribe).
+- **Cancelar**: sigue sin plazo ni coste, hasta la hora de inicio (G1). No se
+  inventó un plazo. Cuando la empresa lo decida entrará en la fotografía, con
+  otra versión de su estructura.
+- **Las reservas anteriores a la 0095** no tienen fotografía ni pueden
+  ganarla: se rigen por la política vigente, como hasta ahora. En Supabase no
+  hay ninguna.
+- **Sin rutas, pantallas ni campos nuevos.** No se movió dinero, no se activó
+  ninguna bandera, no se publicó ninguna política y no se escribió en Supabase.
+
+Siguen pendientes, **todas las demás**: C1–C15, D1–D15, E1–E12, F1–F21 (F21,
+la primera) y G1–G17.
