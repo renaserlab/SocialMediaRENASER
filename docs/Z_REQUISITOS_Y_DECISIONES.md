@@ -2886,7 +2886,7 @@ política definitiva: **G1–G18 son de la empresa**, y todas las anteriores
 | G15 | **Quién decide en administración y cuántas personas hacen falta** | Solo `admin`. Con una sola persona **no hay apelaciones**: hacen falta dos antes de encender la contratación si se quieren |
 | G16 | **La baja de una cuenta con un caso vivo o con evidencias** (junto a F20 y F21) | La de quien contrata se lleva sus evidencias (el expediente conserva la fila, sin su archivo) y deja el caso y la reseña sin su nombre |
 | G17 | **Cómo se encuentran las partes en un servicio virtual** (una sala de Z con 100ms, un enlace del prestador, mensajes) | Z no ofrece sala ni guarda un enlace: se ponen de acuerdo por fuera. La integración de 100ms no tiene cuenta conectada. Surgida del cruce con el blueprint en el cierre |
-| G18 | **Qué política operativa queda congelada en cada reserva** (el blueprint pide copiarla, inmutable, al confirmar) | **Resuelto en lo técnico el 01/10/2026** (falta aplicar la 0095; `Z_SERVICIOS_ARQUITECTURA.md` §106). Al confirmar se guardan con la reserva, inmutables y con su huella, los nueve plazos y topes con los que después se decide: reprogramar (cuántas veces y con cuánta antelación), la llegada, la tolerancia, la confirmación y el cierre automático, el caso, la apelación (plazo y si la hay) y la reseña. **Sus valores siguen siendo los provisionales**: decidirlos es G2, G3, G4, G7, G8 y G11, y un cambio valdrá para las reservas que se confirmen después. **No se congelan** el aviso previo (G12) ni la moderación previa de una reseña (G11). **Cancelar no tiene ningún plazo configurable** (G1): cuando se decida uno, entrará en la fotografía |
+| G18 | **Qué política operativa queda congelada en cada reserva** (el blueprint pide copiarla, inmutable, al confirmar) | **Resuelto en lo técnico el 01/10/2026** (la 0095, aplicada y verificada sin divergencias ese día: `Z_SERVICIOS_ARQUITECTURA.md` §106 y §118). Al confirmar se guardan con la reserva, inmutables y con su huella, los nueve plazos y topes con los que después se decide: reprogramar (cuántas veces y con cuánta antelación), la llegada, la tolerancia, la confirmación y el cierre automático, el caso, la apelación (plazo y si la hay) y la reseña. **Sus valores siguen siendo los provisionales**: decidirlos es G2, G3, G4, G7, G8 y G11, y un cambio valdrá para las reservas que se confirmen después. **No se congelan** el aviso previo (G12) ni la moderación previa de una reseña (G11). **Cancelar no tiene ningún plazo configurable** (G1): cuando se decida uno, entrará en la fotografía |
 
 > **F21 sigue pendiente, y ahora pesa más.** La baja de quien presta se sigue
 > llevando sus servicios y, con ellos, sus reservas pasadas, sus pedidos, lo
@@ -3003,3 +3003,39 @@ verificar la migración 0095 y de realizar el QA físico.** El detalle, en
 
 Siguen pendientes, **todas las demás**: C1–C15, D1–D15, E1–E12, F1–F21 (F21,
 la primera) y G1–G17.
+
+### Cierre técnico de G18 y cierre consolidado de los seis incrementos (01/10/2026)
+
+**Los Incrementos 1–6 de Z Servicios están técnicamente cerrados; únicamente
+quedan pendientes el QA físico, las decisiones empresariales y las
+integraciones externas documentadas.** El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md` §118–§120.
+
+- **La 0095 está en Supabase y coincide** con la referencia 0001–0095:
+  verificada en solo lectura el 01/10/2026 a las 18:05 UTC, sin divergencias,
+  con las seis puertas de esquema diciendo «sí» con la conexión y el rol
+  reales de la API. Una sola transacción dejó sus tres columnas, sus cuatro
+  CHECK, su función y su disparador, y ninguna fila. Su huella consta en
+  `APLICADAS`.
+- **No hay ninguna reserva anterior** a la 0095 (ni ninguna otra): las tablas
+  de la reserva y de la atención están vacías, y no hay condiciones de
+  contratación publicadas.
+- **G18 queda resuelta en lo técnico.** Sus nueve valores **siguen siendo
+  provisionales**: son los del alcance, no una decisión.
+- **No se corrigió código** en el cierre: no hubo divergencias ni defectos.
+
+**Lo que sigue pendiente, y de quién es:**
+
+| | |
+|---|---|
+| **De la empresa** | S1–S14 (S7, decidida), C1–C16, D1–D15, E1–E12, F1–F21 y G1–G17: **ninguna se dio por resuelta**. Entre ellas: **F21** (qué se conserva cuando quien presta borra su cuenta: la primera antes de encender la contratación), publicar las condiciones de contratación (F9), los valores definitivos de la política operativa (G2–G4, G7, G8, G11), quién ejecuta los barridos (F13, G12), cómo se encuentran las partes en un servicio virtual (G17) y el proveedor de pagos |
+| **QA físico** | los seis incrementos, en teléfonos, con archivos reales, notificaciones y personas distintas (`Z_QA_FISICO_PENDIENTE.md`) |
+| **Integración y operación** | el push con destino, la conexión de 100ms, la de la pasarela de pago, la programación de los barridos, el despliegue de `Edson`, el CI remoto, la revisión del PR y la integración a `main` |
+
+Los resúmenes anteriores decían «C1–C15»: la tabla del Incremento 2 tiene
+**C16** (las monedas del formulario), y el Incremento 1 tiene su propia serie
+**S**. Se corrige aquí; ninguna cambió de estado.
+
+`FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`
+siguen **apagadas**, la pasarela es `none`, **no se movió dinero** y el código
+sigue **sin desplegar**.

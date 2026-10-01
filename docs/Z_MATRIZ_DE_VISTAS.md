@@ -845,10 +845,11 @@ teléfono: lo vigila `serviciosAtencionVistas.test.mts`.
 > *Corrección G18 (01/10/2026):* **ninguna vista, ruta ni campo nuevo.** Los
 > plazos que enseña el panel de la atención (`care.deadlines`) y las acciones
 > que ofrece son los de **cada reserva**, congelados al confirmarla, y no los
-> de la configuración del momento. Necesita la **0095, escrita y sin
-> aplicar**: sin ella, con las banderas encendidas, las vistas de reservas
-> contestan 503 y los horarios no se ofrecen
-> (`Z_SERVICIOS_ARQUITECTURA.md` §106–§117).
+> de la configuración del momento. Necesita la **0095, APLICADA** en Supabase
+> y verificada el 01/10/2026 (`Z_SERVICIOS_ARQUITECTURA.md` §118): en una base
+> sin ella, con las banderas encendidas, las vistas de reservas contestan 503
+> y los horarios no se ofrecen. Con ella quedan técnicamente cerrados los seis
+> incrementos (§119); **ninguna vista se probó en un teléfono**.
 
 Servicios › «Mis reservas» › la reserva › cancelar / cambiar el horario /
 mostrar mi código / confirmar / reportar un problema / reseña. Área del

@@ -93,10 +93,13 @@ Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
 antes de usarla, y sigue funcionando cuando no lo está. Al 01/10/2026 la
-última **escrita** es la **0095** (la política operativa de cada reserva de
-Servicios, congelada al confirmarla): **sin aplicar**; ver
-[`Z_SERVICIOS_ARQUITECTURA.md` §106](Z_SERVICIOS_ARQUITECTURA.md). La última
-**aplicada** es la **0094** (atención, posventa y cierre,
+última **escrita y aplicada** es la **0095** (la política operativa de cada
+reserva de Servicios, congelada al confirmarla): ejecutada a mano en Supabase
+y verificada en solo lectura el 01/10/2026 (18:05 UTC) **sin divergencias**,
+también con las seis puertas de esquema y la conexión y el rol reales de la
+API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §118](Z_SERVICIOS_ARQUITECTURA.md).
+Con ella quedan técnicamente cerrados los seis incrementos de Servicios
+(§119). La anterior es la **0094** (atención, posventa y cierre,
 Incremento 6 de Servicios): ejecutada a mano en Supabase y verificada en solo
 lectura el 01/10/2026 (14:28 UTC) **sin divergencias**, también con las seis
 puertas de esquema y la conexión y el rol reales de la API; ver
@@ -176,7 +179,7 @@ Todas nacen apagadas y se encienden por entorno.
 | `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
 | `feature_services` | Z Servicios: la admisión de prestadores, el catálogo, el descubrimiento, la agenda y la reserva (Incrementos 1–5). **Apagada por defecto** (`False`). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni la contratación**: esta necesita además `feature_service_booking`. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
-| `feature_service_booking` | Contratar Servicios: apartar un horario, confirmar lo **gratuito** y consultar reservas (Incremento 5), y **atenderlas**: cancelar, reprogramar, asistencia, casos y reseñas (Incremento 6, con la **0094**, ya aplicada). **Apagada por defecto.** Necesita `feature_services` y la 0093 tal como la dejan la 0094 y la **0095** (la política congelada, **sin aplicar**: sin ella, 503 `services_not_ready` en toda la reserva, y los horarios no se ofrecen); apagada, sus rutas contestan 503 `service_booking_disabled` sin mirar la base y los horarios no ofrecen «Continuar». **No cobra nada.** |
+| `feature_service_booking` | Contratar Servicios: apartar un horario, confirmar lo **gratuito** y consultar reservas (Incremento 5), y **atenderlas**: cancelar, reprogramar, asistencia, casos y reseñas (Incremento 6, con la **0094**, ya aplicada). **Apagada por defecto.** Necesita `feature_services` y la 0093 tal como la dejan la 0094 y la **0095** (la política congelada, **ya aplicada**; en una base sin ella, 503 `services_not_ready` en toda la reserva, y los horarios no se ofrecen); apagada, sus rutas contestan 503 `service_booking_disabled` sin mirar la base y los horarios no ofrecen «Continuar». **No cobra nada.** |
 | `feature_service_payments` | Cobrar un servicio. **Apagada.** Encenderla no basta: no hay adaptador (`ADAPTADORES_DE_COBRO` vacío) y la 0093 solo admite pedidos gratuitos. Lo que tiene precio contesta 503 `service_booking_payments_not_configured`. |
 | `service_payments_provider` | La pasarela de Servicios. **`none`**. |
 | `services_booking_hold_minutes` | Cuánto dura un horario apartado. **10** (provisional; decisión F1). |

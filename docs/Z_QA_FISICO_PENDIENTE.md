@@ -1904,16 +1904,17 @@ Antes de empezar:
       (`service_…`, `incident_…`), ni un «0,0» donde no hay reseñas, ni
       «devuelto» o «reembolsado» en ningún estado.
 
-### La política congelada (corrección G18; después de aplicar la 0095)
+### La política congelada (corrección G18; la 0095, ya aplicada)
 
-Hace falta un entorno de pruebas donde se puedan cambiar las variables de la
-API y reiniciarla. Nada de esto se probó en un teléfono.
+La 0095 está aplicada en Supabase y verificada (01/10/2026). Hace falta un
+entorno de pruebas donde se puedan cambiar las variables de la API y
+reiniciarla. Nada de esto se probó en un teléfono.
 
-- [ ] **Antes de aplicar la 0095**, con las banderas encendidas: «Mis
-      reservas», la bandeja del prestador y los horarios de un servicio dicen
-      que todavía no está disponible. La app no se cierra ni enseña un error
-      técnico.
-- [ ] Aplicada la 0095 y **reiniciada la API**: se contrata con normalidad, y
+- [ ] *(Solo en una base de pruebas sin la 0095; en Supabase ya no se puede
+      reproducir.)* Con las banderas encendidas, «Mis reservas», la bandeja
+      del prestador y los horarios de un servicio dicen que todavía no está
+      disponible. La app no se cierra ni enseña un error técnico.
+- [ ] Con la API **reiniciada** tras la 0095: se contrata con normalidad, y
       el detalle de la reserva enseña hasta cuándo se puede cambiar el horario
       y cuántos cambios quedan.
 - [ ] Cambiar `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS` (por ejemplo, de 24 a 2)
