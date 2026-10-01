@@ -785,9 +785,10 @@ externos. La ficha sigue sin botón de contratar.
 ## Servicios · Incremento 5: reserva y contratación (30/09/2026)
 
 Backend real detrás de `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` (las dos
-apagadas). Usa la **0093, SIN APLICAR** (`Z_SERVICIOS_ARQUITECTURA.md` §74);
-el código sigue sin desplegar y ninguna de estas vistas se probó todavía en un
-teléfono (QA físico pendiente). Sin la 0093 o con la contratación apagada, los
+apagadas). Usa la **0093, APLICADA** en Supabase y verificada el 01/10/2026
+(`Z_SERVICIOS_ARQUITECTURA.md` §80: técnicamente cerrado); el código sigue sin
+desplegar y ninguna de estas vistas se probó todavía en un teléfono (QA físico
+pendiente). Sin la 0093 o con la contratación apagada, los
 horarios no ofrecen «Continuar» (`booking_available` es falso) y las rutas
 contestan 503. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
 `serviciosReservaVistas.test.mts`.

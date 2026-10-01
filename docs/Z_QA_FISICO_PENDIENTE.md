@@ -1651,17 +1651,20 @@ Antes de empezar:
 
 ## Z Servicios · Incremento 5 — reserva y contratación (30/09/2026)
 
-**Nada de esta sección está comprobado en un teléfono, y la 0093 NO está
-aplicada en Supabase.** Las pruebas automáticas cubren la migración, el
+**Nada de esta sección está comprobado en un teléfono: el QA físico sigue
+pendiente.** La 0093 **sí está aplicada** en Supabase y verificada en solo
+lectura el 01/10/2026, sin divergencias; el incremento está técnicamente
+cerrado (`Z_SERVICIOS_ARQUITECTURA.md` §80). El código sigue sin desplegar y
+las banderas, apagadas. Las pruebas automáticas cubren la migración, el
 dominio, las carreras contra PostgreSQL, la API, el recorrido integral con la
-API real reiniciada (63 de 63 comprobaciones) y el código de las pantallas
-(`Z_SERVICIOS_ARQUITECTURA.md` §76).
+API real reiniciada (100 de 100 comprobaciones en el cierre) y el código de
+las pantallas (§76 y §80).
 
 Antes de empezar:
 
-- **Aplicar la 0093** en la base del QA y verificarla
-  (`Z_SERVICIOS_ARQUITECTURA.md` §74–§75), y **reiniciar la API** después:
-  la puerta recuerda el «no».
+- La **0093** ya está en Supabase (§80). Si el QA usa **otra** base,
+  aplicarla y verificarla allí (`Z_SERVICIOS_ARQUITECTURA.md` §74–§75) y
+  **reiniciar la API** después: la puerta recuerda el «no».
 - La API de ese entorno corre el código de `Edson` con `FEATURE_SERVICES=true`
   y `FEATURE_SERVICE_BOOKING=true` **solo allí**. `FEATURE_SERVICE_PAYMENTS`
   apagada y `SERVICE_PAYMENTS_PROVIDER=none`, como en todas partes.

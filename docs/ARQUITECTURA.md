@@ -92,14 +92,16 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. Al 30/09/2026 la
-última **escrita** es la **0093** (reserva y contratación, Incremento 5 de
-Servicios), **SIN APLICAR**: probada solo contra PostgreSQL local; los pasos
-para aplicarla y verificarla están en [`Z_SERVICIOS_ARQUITECTURA.md` §74–§75](Z_SERVICIOS_ARQUITECTURA.md),
-y al aplicarla hay que **reiniciar la API**. La última **escrita y aplicada** es la **0092** (disponibilidad y agenda,
-Incremento 4 de Servicios), ejecutada a mano y verificada ese día en solo
-lectura **sin divergencias**, también con la puerta de esquema y el rol real
-de la API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §61](Z_SERVICIOS_ARQUITECTURA.md).
+antes de usarla, y sigue funcionando cuando no lo está. Al 01/10/2026 la
+última **escrita y aplicada** es la **0093** (reserva y contratación,
+Incremento 5 de Servicios): ejecutada a mano en Supabase y verificada en solo
+lectura **sin divergencias**, también con las puertas de esquema y la conexión
+y el rol reales de la API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §80](Z_SERVICIOS_ARQUITECTURA.md).
+El código que la usa está en `Edson`, **sin desplegar**: producción todavía no
+la conoce, y al desplegarlo la API arranca de nuevo (la puerta recuerda lo que
+vio al mirar). La anterior, la **0092** (disponibilidad y agenda, Incremento 4
+de Servicios), se aplicó y verificó igual el 30/09/2026; ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §61](Z_SERVICIOS_ARQUITECTURA.md).
 La API de producción todavía corre el backend anterior, que no la usa:
 **cuando se despliegue `Edson`, reiniciarla** (el despliegue lo hace), porque
 la puerta recuerda el «no». La **0091** (servicios guardados, Incremento 3 de

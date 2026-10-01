@@ -2693,13 +2693,15 @@ aplicación (tarea abierta).
 ## Z Servicios, Incremento 5 — reserva y contratación protegida (30/09/2026)
 
 El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
-Parte V (§62 en adelante). **Implementado y probado el 30/09/2026 en `Edson`;
-pendiente de aplicar y verificar la migración 0093 y de realizar el QA
-físico.** La 0093 **no se aplicó** en Supabase. El código sigue **sin
-desplegar**; `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y
-`FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la pasarela, `none`. Nada de lo
-que sigue se presenta como política definitiva si la empresa no lo confirmó:
-F1–F21 son suyas.
+Parte V (§62 en adelante). Implementado y probado el 30/09/2026 en `Edson`;
+la 0093 se ejecutó después a mano en Supabase y se verificó en solo lectura
+el 01/10/2026 (02:13 UTC) **sin divergencias** (§80). **Técnicamente cerrado;
+únicamente queda pendiente el QA físico.** El código sigue **sin desplegar**
+(producción todavía no conoce la 0093); `FEATURE_SERVICES`,
+`FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la
+pasarela, `none`. No hay ninguna condición de contratación publicada. Nada de
+lo que sigue se presenta como política definitiva si la empresa no lo
+confirmó: F1–F21 son suyas.
 
 ### Requisitos cumplidos
 
@@ -2769,8 +2771,16 @@ F1–F21 son suyas.
 | F20 | **Conservación de la evidencia** (lo aceptado, el pedido, el historial) | Se guarda sin plazo; con la baja, la persona queda en `NULL` y su nota y su dirección se borran. Plazo legal por decidir |
 | F21 | **La baja de QUIEN PRESTA con reservas pasadas** | Hoy se lleva sus servicios y con ellos sus reservas pasadas, pedidos, historial y lo que aceptó quien contrató (el camino de borrado de la 0090, por un solo camino desde la revisión del 30/09). Conservarlo (dejar al prestador en `NULL`, como a quien contrata) exige alterar la clave de la 0090 y una decisión legal |
 
+> **F21, antes de encender la contratación.** Hoy, borrar la cuenta de un
+> prestador se lleva sus servicios y, con ellos, sus reservas **pasadas**, sus
+> pedidos, su historial y **lo que aceptó quien contrató**. La empresa tiene
+> que decidir qué se conserva, cuánto tiempo y con qué base legal. En el
+> cierre del incremento no se modificó la 0090 ni se diseñó una solución: es
+> una decisión, no un arreglo técnico.
+
 Siguen siendo de la empresa, además: **E1–E12** (agenda), **C15** antes de
-encender Servicios (D6) y el **destino del push** de un aviso.
+encender Servicios (D6), el **destino del push** de un aviso, **publicar las
+condiciones de contratación** (F9) y el **planificador del barrido** (F13).
 
 ### Límites del Incremento 5 y lo que queda para el 6
 
