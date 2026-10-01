@@ -278,8 +278,9 @@ async def ocupaciones(
     """LO YA OCUPADO (Incremento 5): cada retención VIVA y cada reserva, por
     venir. Una retención `active` cuyo vencimiento ya pasó NO ocupa aunque el
     barrido no haya pasado: el vencimiento lo decide la hora, no la limpieza.
-    Sin la 0093 no hay nada que ocupe. `excepto` es la retención propia
-    (al confirmar, la que se revalida no se cuenta contra sí misma)."""
+    Sin la reserva completa no se lee nada (ver `_exigir_lo_ocupado`).
+    `excepto` es la retención propia (al confirmar, la que se revalida no se
+    cuenta contra sí misma)."""
     if not await esquema.hay_reservas(db):
         return ()
     from app.modules.services.reserva_models import OCUPAN, RETENCION_CONSUMIDA, ServiceHold
@@ -294,6 +295,16 @@ async def ocupaciones(
         consulta = consulta.where(ServiceHold.id != excepto)
     filas = (await db.execute(consulta.order_by(ServiceHold.starts_at, ServiceHold.id))).all()
     return tuple(calc.Ocupacion(_utc(s), _utc(d), _utc(h)) for s, d, h in filas)
+
+
+async def _exigir_lo_ocupado(db: AsyncSession) -> None:
+    """ANTES DE OFRECER HORARIOS AL PÚBLICO. Con la contratación ENCENDIDA y
+    la reserva sin poder leerse (le falta una migración: hoy, la 0095) no se
+    sabe qué está ocupado: no se ofrece ningún horario (503) antes que ofrecer
+    el de otra persona. Con la contratación apagada nadie aparta nada, y los
+    horarios son los de la agenda."""
+    if esquema.reserva_encendida() and not await esquema.hay_reservas(db):
+        raise esquema.ServiciosSinMigracion()
 
 
 async def _datos(
@@ -1051,6 +1062,7 @@ async def _calendario(
     inicio, fin = _rango(desde, hasta, hoy, ultima)
     if estado != ACTIVA:
         return Calendario(agenda.timezone, estado, servicio.modalidad, servicio.duracion, hoy, ultima, inicio, fin, [], None)
+    await _exigir_lo_ocupado(db)
     datos = await _datos(db, agenda, servicio, ahora=ahora, politica=politica)
     por_dia = calc.dias(
         datos, modalidad=servicio.modalidad, desde_fecha=inicio, hasta_fecha=fin, ahora=ahora, politica=politica
@@ -1097,6 +1109,7 @@ async def _horarios(
             raise CursorInvalido() from None
         if despues.tzinfo is None:
             raise CursorInvalido()
+    await _exigir_lo_ocupado(db)
     datos = await _datos(db, agenda, servicio, ahora=ahora, politica=politica)
     primero, ultimo = calc.ventana(ahora, politica)
     todos = calc.horarios_del_dia(dia, datos, modalidad=servicio.modalidad, desde=primero, hasta=ultimo)

@@ -1296,14 +1296,15 @@ SIN_LA_0095 = (
 )
 
 
-async def test_sobre_una_base_sin_la_0095_la_reserva_y_la_atencion_esperan(atencion) -> None:
+async def test_sobre_una_base_sin_la_0095_la_reserva_y_la_atencion_esperan(atencion, monkeypatch) -> None:
     """LA SITUACIÓN DE PRODUCCIÓN HOY: la 0086–0094 aplicadas y la 0095 no.
     Los modelos ya leen la fotografía de la política: sin sus columnas, TODO
     lo de la reserva y lo de la atención contesta 503 `services_not_ready`,
-    nunca 500, y no se escribe nada. El catálogo y la agenda siguen, y la
-    agenda ofrece sus horarios (sin contar retenciones, como antes de la
-    0093). Se llega ahí quitando lo que añade la 0095, dentro de una
-    transacción que no se confirma."""
+    nunca 500, y no se escribe nada. El catálogo sigue. LOS HORARIOS PÚBLICOS
+    NO SE OFRECEN mientras la contratación esté encendida (no se sabe qué
+    está ocupado); con ella apagada, son los de la agenda. Se llega ahí
+    quitando lo que añade la 0095, dentro de una transacción que no se
+    confirma."""
     app, motor, _ = atencion
     h = await _reservado(app, motor)
     libre = (await _horarios(app, h["servicio"], _dia(9)))[0]["starts_at"]
@@ -1340,13 +1341,25 @@ async def test_sobre_una_base_sin_la_0095_la_reserva_y_la_atencion_esperan(atenc
                 for metodo, ruta, quien in _todas_las_rutas(h):
                     r = await _llamar(app, metodo, ruta, quien)
                     assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), (ruta, r.text)
-                # EL CATÁLOGO Y LA AGENDA SIGUEN.
+                # EL CATÁLOGO SIGUE. LOS HORARIOS, NO: sin poder leer lo ocupado,
+                # ofrecerlos sería ofrecer el de otra persona (el de `h` está tomado).
                 assert (await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}", None)).status_code == 200
-                assert libre in [x["starts_at"] for x in await _horarios(app, h["servicio"], _dia(9))]
+                for fecha in (h["fecha"], _dia(9)):
+                    r = await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/availability/{fecha}", None)
+                    assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), (fecha, r.text)
+                r = await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/availability", None)
+                assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), r.text
                 r = await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/reviews", None)
                 assert r.status_code == 200 and r.json()["available"] is False
                 # NADA SE ESCRIBIÓ.
                 assert (await conexion.execute(text(cuentas))).one() == antes
+                # CON LA CONTRATACIÓN APAGADA nadie aparta nada: los horarios son los de la agenda.
+                monkeypatch.setattr(get_settings(), "feature_service_booking", False)
+                esquema.olvidar()
+                assert libre in [x["starts_at"] for x in await _horarios(app, h["servicio"], _dia(9))]
+                r = await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/availability", None)
+                assert r.status_code == 200 and r.json()["booking_available"] is False, r.text
+                monkeypatch.setattr(get_settings(), "feature_service_booking", True)
             finally:
                 app.dependency_overrides[get_db] = normal
                 await sesion.close()
