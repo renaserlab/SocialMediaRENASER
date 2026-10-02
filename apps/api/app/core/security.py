@@ -117,6 +117,10 @@ def _decode_token(token: str, settings: Settings) -> dict[str, Any]:
         raise UnauthorizedError("Token invalido.", code="invalid_token") from exc
 
     alg = header.get("alg", "")
+    # PyJWT no comprueba el tipo de `alg` en la cabecera: un token fabricado
+    # con `"alg": 123` (o `null`) llegaba hasta `alg.startswith` y era un 500.
+    if not isinstance(alg, str):
+        raise UnauthorizedError("Token invalido.", code="invalid_token")
     key = _resolve_key(token, alg, settings)
 
     # Tolerancia de reloj. Sin ella (PyJWT usa 0 por defecto) un token recien

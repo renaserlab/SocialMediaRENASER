@@ -81,6 +81,10 @@ describe('las vistas existen y se llega a ellas', () => {
   it('desde el panel de administración, SOLO con la bandera encendida', () => {
     const panel = fuente('screens/PanelDeAdministracionScreen.tsx');
     assert.match(panel, /serviciosEncendido\s*\?\s*\[\.\.\.SECCIONES_DE_ADMINISTRACION, SECCION_DE_SERVICIOS\]\s*:\s*SECCIONES_DE_ADMINISTRACION/);
+    // Y la bandera del panel es la de ADMINISTRACIÓN (el rol), no la del
+    // piloto: quien revisa no tiene por qué ser participante.
+    assert.match(panel, /const serviciosEncendido = useServiciosDeAdministracion\(\);/);
+    assert.ok(!/useServiciosEncendido\(\)/.test(panel));
     const seccion = panel.slice(panel.indexOf('export const SECCION_DE_SERVICIOS'));
     for (const ruta of ['/admin/servicios', '/admin/servicios/condiciones']) {
       assert.ok(seccion.includes(`ruta: '${ruta}'`), ruta);
@@ -123,7 +127,11 @@ describe('la bandera funcional', () => {
 
   it('Servicios solo está encendido si el servidor dice exactamente `true`', () => {
     assert.match(plataforma, /serviciosEncendido: dto\?\.feature_services === true/);
-    assert.match(plataforma, /const APAGADA: Configuracion = \{ publicacionFlexible: false, serviciosEncendido: false \}/);
+    assert.match(plataforma, /serviciosDeAdministracion: dto\?\.feature_services_admin === true/);
+    assert.match(
+      plataforma,
+      /const APAGADA: Configuracion = \{\s*publicacionFlexible: false,\s*serviciosEncendido: false,\s*serviciosDeAdministracion: false,\s*\}/,
+    );
   });
 
   it('el modo flexible sigue igual: una sola lectura compartida, que se olvida si falla', () => {

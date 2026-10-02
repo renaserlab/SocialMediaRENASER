@@ -12,7 +12,7 @@ import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
-import { useServiciosEncendido } from '@/hooks/useServiciosEncendido';
+import { useServiciosDeAdministracion } from '@/hooks/useServiciosEncendido';
 
 type Entrada = { titulo: TranslationKey; icono: keyof typeof Feather.glyphMap; ruta: string };
 
@@ -62,7 +62,8 @@ export const SECCIONES_DE_ADMINISTRACION: { titulo: TranslationKey; entradas: En
 
 /**
  * Z SERVICIOS, aparte: solo se enseña con `FEATURE_SERVICES` encendida en el
- * servidor. Apagada, el panel queda exactamente como estaba.
+ * servidor. Apagada, el panel queda exactamente como estaba. Durante el piloto
+ * se enseña a quien administra por su rol, esté o no entre los participantes.
  */
 export const SECCION_DE_SERVICIOS: { titulo: TranslationKey; entradas: Entrada[] } = {
   titulo: 'panelAdmin.seccionServicios',
@@ -79,7 +80,7 @@ export function PanelDeAdministracionScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
-  const serviciosEncendido = useServiciosEncendido();
+  const serviciosEncendido = useServiciosDeAdministracion();
   const secciones = serviciosEncendido
     ? [...SECCIONES_DE_ADMINISTRACION, SECCION_DE_SERVICIOS]
     : SECCIONES_DE_ADMINISTRACION;

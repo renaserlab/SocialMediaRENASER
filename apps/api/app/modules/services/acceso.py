@@ -23,11 +23,14 @@ todavía para todo Internet.
 
 LAS RUTAS DE ADMINISTRACIÓN NO PASAN POR AQUÍ. Quien revisa una postulación o
 resuelve un caso entra por su rol (`permissions.py`), esté o no en la lista; y
-estar en la lista no da ningún rol. El piloto no eleva privilegios.
+estar en la lista no da ningún rol. El piloto no eleva privilegios. Por eso la
+app pregunta DOS cosas y no una: si esta persona usa Servicios
+(`abierto_para`) y si le toca administrarlo (`administra`).
 
 UNA SOLA COMPROBACIÓN. `exigir_participante` cuelga de los seis routers de
-`/services` en `main.py`, y `/platform/config` usa `abierto_para` para decirle
-a la app si enseña las entradas. Ninguna ruta repite la condición.
+`/services` en `main.py`, y `/platform/config` usa `abierto_para` y
+`administra` para decirle a la app qué entradas enseña. Ninguna ruta repite la
+condición.
 """
 
 from __future__ import annotations
@@ -37,10 +40,12 @@ import uuid
 from functools import lru_cache
 
 from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import AuthUser, get_user_if_token
-from app.modules.services import esquema
+from app.modules.services import esquema, permissions
 
 logger = logging.getLogger("renaser.services")
 
@@ -95,17 +100,53 @@ def abierto_para(perfil_id: str | None) -> bool:
         return False
 
 
-async def exigir_participante(usuario: AuthUser | None = Depends(get_user_if_token)) -> None:
-    """La puerta de quién, antes que cualquier otra y sin consultar la base.
+async def administra(db: AsyncSession, perfil_id: str | None) -> bool:
+    """¿Enseña la app la sección de administración de Servicios a esta persona?
+
+    Administración entra por su rol, esté o no en la lista del piloto. Con
+    `abierto_para` sola, a una administradora de fuera del piloto la app le
+    escondía la bandeja, y nadie podía revisar la primera postulación.
+
+    Con Servicios apagado o sin sesión no mira la base. Y si no puede mirarla,
+    es que no: `/platform/config` la lee toda la app y no se rompe por esto.
+    """
+    if not get_settings().feature_services or not perfil_id:
+        return False
+    try:
+        return await permissions.funcion_de(db, perfil_id) is not None
+    except Exception:  # noqa: BLE001 - ante la duda, la sección no se enseña
+        logger.warning("Servicios: no se pudo mirar si quien pregunta administra.", exc_info=True)
+        return False
+
+
+_portador = HTTPBearer(auto_error=False)
+
+
+async def quien_pregunta(
+    credenciales: HTTPAuthorizationCredentials | None = Depends(_portador),
+) -> AuthUser | None:
+    """Quién pide, para la puerta; `None` si es una visita sin sesión.
 
     UN TOKEN QUE VIENE Y NO VALE ES UN 401, no un «no participas»
     (`get_user_if_token`): a un participante con la sesión caducada hay que
     decirle que la renueve, no que Servicios no existe. Pasa igual con
-    Servicios apagado o encendido, así que no delata nada. Sin token, es una
-    visita sin sesión: durante el piloto, fuera.
+    Servicios apagado que en el piloto, así que no delata nada.
+
+    CON LA APERTURA GENERAL NO SE MIRA EL TOKEN. La puerta ya no necesita
+    saber quién pregunta, y cada ruta decide como siempre: las privadas exigen
+    su sesión y las públicas tratan un token caducado como una visita.
     """
+    ajustes = get_settings()
+    if ajustes.feature_services and ajustes.services_public_access:
+        return None
+    return await get_user_if_token(credenciales, ajustes)
+
+
+async def exigir_participante(usuario: AuthUser | None = Depends(quien_pregunta)) -> None:
+    """La puerta de quién, antes que cualquier otra y sin consultar la base.
+    Sin token es una visita sin sesión: durante el piloto, fuera."""
     if not abierto_para(usuario.id if usuario is not None else None):
         raise esquema.ServiciosApagados()
 
 
-__all__ = ["abierto_para", "exigir_participante"]
+__all__ = ["abierto_para", "administra", "exigir_participante", "quien_pregunta"]

@@ -603,6 +603,7 @@ async def test_la_configuracion_publica_dice_si_servicios_esta_encendido(entorno
     assert (await http.get(f"{API}/platform/config")).json() == {
         "publicacion_flexible": get_settings().publicacion_flexible,
         "feature_services": False,
+        "feature_services_admin": False,
     }
     assert (await http.get("/health")).json()["status"] == "ok"
 

@@ -8,14 +8,16 @@
  *  - se pregunta una vez por persona, y OTRA persona vuelve a preguntar: lo
  *    que valía para la cuenta anterior no se hereda;
  *  - ante la duda, `false`: un fallo no enseña Servicios, y no se guarda;
- *  - una respuesta que llega tarde, de la cuenta anterior, no pisa la actual.
+ *  - una respuesta que llega tarde, de la cuenta anterior, no pisa la actual;
+ *  - administración es OTRA respuesta, por el rol: no depende del piloto;
+ *  - con sesión y sin perfil cargado no se pregunta como «nadie».
  */
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { describe, it } from 'node:test';
 
 type Peticion = { ruta: string; opciones: { auth?: boolean } | undefined };
-type Respuesta = { publicacion_flexible?: unknown; feature_services?: unknown };
+type Respuesta = { publicacion_flexible?: unknown; feature_services?: unknown; feature_services_admin?: unknown };
 
 const peticiones: Peticion[] = [];
 let responder: (peticion: Peticion) => Promise<Respuesta> = async () => ({});
@@ -123,5 +125,55 @@ describe('si esta persona puede usar Z Servicios', () => {
     assert.equal(await P.serviciosEncendido('gema'), true);
     assert.equal(await P.publicacionFlexible(), true);
     assert.equal(peticiones.length, 1);
+  });
+});
+
+describe('si a esta persona le toca administrar Z Servicios', () => {
+  it('es otra respuesta: una administradora de fuera del piloto ve su sección', async () => {
+    peticiones.length = 0;
+    responder = async () => ({ feature_services: false, feature_services_admin: true });
+    assert.equal(await P.serviciosDeAdministracion('jefa'), true);
+    assert.equal(await P.serviciosEncendido('jefa'), false);
+    // Y una participante sin rol, al revés. Las dos salen de UNA petición por persona.
+    responder = async () => ({ feature_services: true, feature_services_admin: false });
+    assert.equal(await P.serviciosEncendido('pili'), true);
+    assert.equal(await P.serviciosDeAdministracion('pili'), false);
+    assert.equal(peticiones.length, 2);
+  });
+
+  it('solo `true` literal, y un fallo es que no', async () => {
+    for (const [quien, dto] of [
+      ['a1', {}],
+      ['a2', { feature_services: true }],
+      ['a3', { feature_services_admin: 'admin' }],
+      ['a4', { feature_services_admin: 1 }],
+    ] as [string, Respuesta][]) {
+      responder = async () => dto;
+      assert.equal(await P.serviciosDeAdministracion(quien), false, quien);
+    }
+    responder = async () => {
+      throw new Error('sin cobertura');
+    };
+    assert.equal(await P.serviciosDeAdministracion('a5'), false);
+  });
+});
+
+describe('para quién se pregunta', () => {
+  it('el perfil; sin él, si hay sesión; y si no, nadie', () => {
+    assert.equal(P.quienPregunta('ana', true), 'ana');
+    assert.equal(P.quienPregunta('ana', false), 'ana');
+    assert.equal(P.quienPregunta(null, false), null);
+    assert.notEqual(P.quienPregunta(null, true), null);
+  });
+
+  it('una sesión sin perfil cargado no deja su respuesta a quien no tiene sesión', async () => {
+    peticiones.length = 0;
+    // El perfil no cargó, pero el token es de una participante: el servidor dice que sí.
+    responder = si;
+    assert.equal(await P.serviciosEncendido(P.quienPregunta(null, true)), true);
+    // Sale. Sigue sin perfil, pero ya sin sesión: se pregunta otra vez.
+    responder = no;
+    assert.equal(await P.serviciosEncendido(P.quienPregunta(null, false)), false);
+    assert.equal(peticiones.length, 2);
   });
 });

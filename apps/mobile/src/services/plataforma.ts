@@ -14,6 +14,9 @@ import { apiRequest, API_V1 } from '@/services/api';
  *    durante el piloto el servidor contesta `true` solo a los perfiles
  *    autorizados, y `false` a los demás y a quien no tiene sesión. Por eso la
  *    pregunta va CON la sesión, y se repite cuando cambia quien la usa.
+ *    ADMINISTRACIÓN ES OTRA RESPUESTA (`feature_services_admin`): va por el
+ *    rol, no por la lista. Quien revisa no tiene por qué ser del piloto, y con
+ *    una sola respuesta se quedaba sin su bandeja.
  *
  * Lo decide el servidor: la app solo adapta lo que enseña, y el servidor
  * vuelve a comprobarlo todo (a quien no entra, sus rutas le contestan 503
@@ -26,12 +29,33 @@ import { apiRequest, API_V1 } from '@/services/api';
  * el modo estricto, y Servicios escondido. Un servidor viejo que no manda
  * `feature_services` es un servidor sin Servicios.
  */
-type Configuracion = { publicacionFlexible: boolean; serviciosEncendido: boolean };
+type Configuracion = {
+  publicacionFlexible: boolean;
+  serviciosEncendido: boolean;
+  serviciosDeAdministracion: boolean;
+};
 
-const APAGADA: Configuracion = { publicacionFlexible: false, serviciosEncendido: false };
+const APAGADA: Configuracion = {
+  publicacionFlexible: false,
+  serviciosEncendido: false,
+  serviciosDeAdministracion: false,
+};
 
-/** Para quién se preguntó: el id de su perfil, o `null` sin sesión. */
+/** Para quién se preguntó: ver `quienPregunta`. `null` es sin sesión. */
 type Quien = string | null;
+
+const SESION_SIN_PERFIL = 'sesion-sin-perfil';
+
+/**
+ * Para quién se pregunta: el id del perfil o, sin él, si hay sesión.
+ *
+ * El perfil puede no haber cargado todavía (o haber fallado) con la sesión ya
+ * iniciada: la pregunta viaja con ESE token, y su respuesta no puede quedarse
+ * guardada como la de «nadie». Al salir se vuelve a preguntar.
+ */
+export function quienPregunta(perfil: string | null, conSesion: boolean): Quien {
+  return perfil ?? (conSesion ? SESION_SIN_PERFIL : null);
+}
 
 let enCurso: Promise<Configuracion> | null = null;
 let deQuien: Quien = null;
@@ -42,10 +66,12 @@ function configuracion(quien: Quien): Promise<Configuracion> {
     const pedida: Promise<Configuracion> = apiRequest<{
       publicacion_flexible?: unknown;
       feature_services?: unknown;
+      feature_services_admin?: unknown;
     }>(`${API_V1}/platform/config`)
       .then((dto) => ({
         publicacionFlexible: dto?.publicacion_flexible === true,
         serviciosEncendido: dto?.feature_services === true,
+        serviciosDeAdministracion: dto?.feature_services_admin === true,
       }))
       .catch(() => {
         // Solo se olvida si nadie preguntó por otra persona entretanto.
@@ -65,10 +91,17 @@ export function publicacionFlexible(): Promise<boolean> {
 /**
  * Si ESTA persona puede usar Z Servicios. `false` ante la duda.
  *
- * `quien` es el id de su perfil (`null` sin sesión). Al cambiar —entrar, salir
- * u otra cuenta— se vuelve a preguntar: lo que valía para la anterior no vale
- * para esta.
+ * `quien` sale de `quienPregunta`. Al cambiar —entrar, salir u otra cuenta—
+ * se vuelve a preguntar: lo que valía para la anterior no vale para esta.
  */
 export function serviciosEncendido(quien: Quien): Promise<boolean> {
   return configuracion(quien).then((c) => c.serviciosEncendido);
+}
+
+/**
+ * Si a ESTA persona le toca administrar Z Servicios: la sección del panel de
+ * administración. Por su rol, esté o no en el piloto. `false` ante la duda.
+ */
+export function serviciosDeAdministracion(quien: Quien): Promise<boolean> {
+  return configuracion(quien).then((c) => c.serviciosDeAdministracion);
 }

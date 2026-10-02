@@ -149,9 +149,13 @@ async def _servicios(db: AsyncSession, usuario_id: str) -> list[str]:
     perfil, y con ellos el único sitio donde consta qué carpetas de
     `service-media` eran suyas.
 
-    SI NO SE PUEDE MIRAR, NINGUNO: una base anterior al catálogo de Servicios
-    no tiene esas tablas ni esas imágenes, y la baja no puede romperse por
-    eso. El punto de guardado deja la transacción como estaba.
+    SI LAS TABLAS NO EXISTEN, NINGUNO: una base anterior al catálogo de
+    Servicios no tiene esas tablas ni esas imágenes, y la baja no puede
+    romperse por eso. El punto de guardado deja la transacción como estaba.
+
+    CUALQUIER OTRO FALLO SÍ LA ROMPE (500, y se reintenta). Seguir sin la
+    lista borraría los servicios en cascada y dejaría sus imágenes en el
+    depósito para siempre, sin nada que diga de quién eran.
     """
     try:
         async with db.begin_nested():
@@ -163,8 +167,11 @@ async def _servicios(db: AsyncSession, usuario_id: str) -> list[str]:
                 {"perfil": usuario_id},
             )
             return sorted({str(f[0]) for f in filas})
-    except DBAPIError:
-        return []
+    except DBAPIError as error:
+        # 42P01: «no existe la relación». SQLite (pruebas) no da código: lo dice.
+        if _origen(error)[0] == "42P01" or "no such table" in str(error).lower():
+            return []
+        raise
 
 
 #: Lo que la baja necesita de la base, mirado en el catálogo pieza a pieza: no

@@ -22,9 +22,11 @@ import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.modules.identity import baja
 from app.modules.services import esquema
 from tests import test_baja_de_cuenta_postgres as baja_pg
 from tests.test_baja_de_cuenta_postgres import (
@@ -1441,6 +1443,29 @@ async def test_la_baja_barre_tambien_lo_que_se_subio_y_se_quedo_sin_fila(entorno
     assert almacen.de("service-media", ident) == []
     assert len(almacen.de("service-media", ajeno)) == 1
     assert (await _ficha(app, ajeno)).status_code == 200
+
+
+async def test_si_no_se_puede_leer_que_servicios_ofrecia_la_baja_no_sigue(entorno) -> None:
+    """«No hay tablas de Servicios» es que no ofrecía ninguno. Cualquier otro
+    fallo al leerlos NO: seguir borraría los servicios en cascada y dejaría sus
+    imágenes en el depósito sin nada que diga de quién eran."""
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _publicado(app, perfil, jefa, moderador))["id"]
+    async with AsyncSession(motor) as db:
+        assert await baja._servicios(db, perfil) == [ident]
+        # Un fallo que no es «no existe la tabla»: se propaga.
+        await db.execute(text("alter table public.services rename column provider_id to provider_id_x"))
+        with pytest.raises(DBAPIError):
+            await baja._servicios(db, perfil)
+        await db.rollback()
+        # Una base anterior al catálogo: ninguno, y la transacción sigue viva.
+        await db.execute(text("alter table public.services rename to services_de_antes"))
+        assert await baja._servicios(db, perfil) == []
+        assert await db.scalar(text("select 1")) == 1
+        await db.rollback()
+        assert await baja._servicios(db, perfil) == [ident]
 
 
 async def test_a_domicilio_no_entra_aunque_se_escriba_a_mano(entorno) -> None:

@@ -13,15 +13,19 @@
    ella, también en el catálogo público, y SIN MIRAR LA BASE.
 4. ADMINISTRACIÓN ENTRA POR SU ROL, esté o no en la lista; y estar en la lista
    no da ningún rol.
-5. LA APP SOLO RECIBE UN SÍ O UN NO para esa persona, nunca la lista.
-6. CON TOKENS DE VERDAD: uno que viene y no vale (caducado, mal firmado) es un
-   401, no un «no participas»; y contesta igual con Servicios apagado.
+5. LA APP SOLO RECIBE UN SÍ O UN NO para esa persona, nunca la lista. Y otro
+   sí o no, aparte, para la sección de administración: va por el rol.
+6. CON TOKENS DE VERDAD: uno que viene y no vale (caducado, mal firmado,
+   fabricado) es un 401, no un «no participas» ni un 500; contesta igual con
+   Servicios apagado, y con la apertura general la puerta ya no lo mira.
 
 No necesita PostgreSQL: la puerta de quién entra no consulta la base.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
 import uuid
@@ -35,7 +39,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import UnauthorizedError
-from app.core.security import AuthUser, get_current_user, get_optional_user, get_user_if_token
+from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.main import create_app
 from app.modules.profiles.models import Profile
 from app.modules.services import acceso, esquema
@@ -121,7 +125,7 @@ async def entorno(cerrado):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _obligatorio
     app.dependency_overrides[get_optional_user] = _opcional
-    app.dependency_overrides[get_user_if_token] = _opcional
+    app.dependency_overrides[acceso.quien_pregunta] = _opcional
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         yield http, quien
     app.dependency_overrides.clear()
@@ -331,7 +335,7 @@ async def test_la_app_recibe_un_si_o_un_no_para_esa_persona_y_nunca_la_lista(ent
     for nombre, persona in (("piloto", PILOTO), ("fuera", FUERA), ("anonima", None), ("jefa", JEFA)):
         r = await _pedir(http, quien, persona, "GET", configuracion)
         assert r.status_code == 200
-        assert set(r.json()) == {"publicacion_flexible", "feature_services"}
+        assert set(r.json()) == {"publicacion_flexible", "feature_services", "feature_services_admin"}
         for perfil in (PILOTO, MODERADOR):
             assert perfil not in r.text
         vistos[nombre] = r.json()["feature_services"]
@@ -342,6 +346,62 @@ async def test_la_app_recibe_un_si_o_un_no_para_esa_persona_y_nunca_la_lista(ent
     # Y con la apertura general, cualquiera.
     _poner(monkeypatch, feature_services=True, services_public_access=True)
     assert (await _pedir(http, quien, None, "GET", configuracion)).json()["feature_services"] is True
+
+
+@pytest.mark.asyncio
+async def test_la_app_ensena_la_seccion_de_administracion_por_el_rol_y_no_por_la_lista(entorno, monkeypatch) -> None:
+    """Una administradora que NO está en el piloto tiene que ver su bandeja: si
+    no, nadie puede revisar la primera postulación. Y un participante sin rol
+    no ve nada de administración."""
+    http, quien = entorno
+    configuracion = f"{API}/platform/config"
+
+    async def _ve(persona: str | None) -> tuple[bool, bool]:
+        cuerpo = (await _pedir(http, quien, persona, "GET", configuracion)).json()
+        return cuerpo["feature_services"], cuerpo["feature_services_admin"]
+
+    _poner(monkeypatch, feature_services=True, services_pilot_profile_ids=PILOTO)
+    assert await _ve(JEFA) == (False, True)
+    assert await _ve(MODERADOR) == (False, True)
+    assert await _ve(PILOTO) == (True, False)
+    assert await _ve(FUERA) == (False, False)
+    assert await _ve(None) == (False, False)
+    # Con la apertura general sigue yendo por el rol.
+    _poner(monkeypatch, services_public_access=True)
+    assert await _ve(JEFA) == (True, True)
+    assert await _ve(FUERA) == (True, False)
+    # Y con Servicios apagado, ni administración.
+    _poner(monkeypatch, feature_services=False)
+    assert await _ve(JEFA) == (False, False)
+
+
+@pytest.mark.asyncio
+async def test_la_configuracion_solo_mira_la_base_con_servicios_encendido_y_con_sesion(entorno, monkeypatch) -> None:
+    http, quien = entorno
+    configuracion = f"{API}/platform/config"
+    miradas: list[str] = []
+
+    async def _funcion_de(db, perfil):  # noqa: ARG001
+        miradas.append(perfil)
+        return None
+
+    monkeypatch.setattr(acceso.permissions, "funcion_de", _funcion_de)
+    _poner(monkeypatch, feature_services=False, services_pilot_profile_ids=JEFA)
+    assert (await _pedir(http, quien, JEFA, "GET", configuracion)).status_code == 200
+    _poner(monkeypatch, feature_services=True)
+    assert (await _pedir(http, quien, None, "GET", configuracion)).status_code == 200
+    assert miradas == []
+    assert (await _pedir(http, quien, JEFA, "GET", configuracion)).status_code == 200
+    assert miradas == [JEFA]
+
+    # Y si la base falla al mirar, la app sigue recibiendo su configuración.
+    async def _rota(db, perfil):  # noqa: ARG001
+        raise RuntimeError("la base no contesta")
+
+    monkeypatch.setattr(acceso.permissions, "funcion_de", _rota)
+    r = await _pedir(http, quien, JEFA, "GET", configuracion)
+    assert r.status_code == 200 and r.json()["feature_services_admin"] is False
+    assert r.json()["feature_services"] is True
 
 
 # =========================================================================== #
@@ -418,7 +478,7 @@ async def test_un_token_que_no_vale_contesta_igual_con_servicios_apagado(con_tok
     for estado, valores in (
         ("apagado", {"feature_services": False}),
         ("piloto", {"feature_services": True, "services_pilot_profile_ids": PILOTO}),
-        ("abierto", {"feature_services": True, "services_public_access": True}),
+        ("piloto sin nadie", {"feature_services": True}),
     ):
         _poner(monkeypatch, **{"services_public_access": False, "services_pilot_profile_ids": "", **valores})
         vistos[estado] = await _con(http, caducado, catalogo)
@@ -440,3 +500,41 @@ async def test_la_configuracion_de_la_app_no_falla_con_un_token_caducado(con_tok
     assert r.status_code == 200 and r.json()["feature_services"] is False
     r = await http.get(configuracion, headers={"Authorization": f"Bearer {_token(PILOTO)}"})
     assert r.status_code == 200 and r.json()["feature_services"] is True
+
+
+@pytest.mark.asyncio
+async def test_con_la_apertura_general_la_puerta_no_mira_el_token(con_tokens, monkeypatch) -> None:
+    """Abierto a todos, la puerta no necesita saber quién pregunta. El catálogo
+    público trata un token caducado como una visita sin sesión —como antes del
+    piloto—, y una ruta privada sigue exigiendo su sesión."""
+    http = con_tokens
+    _poner(monkeypatch, feature_services=True, services_public_access=True)
+    caducado = _token(PILOTO, expira_en=-3600)
+    assert (await _con(http, caducado, f"{API}/services/catalog"))[0] == 200
+    assert (await _con(http, "esto-no-es-un-token", f"{API}/services/catalog"))[0] == 200
+    assert await _con(http, caducado, f"{API}/services/provider/application") == (401, "token_expired")
+    assert (await _con(http, None, f"{API}/services/provider/application"))[0] == 401
+
+
+def _fabricado(cabecera: dict) -> str:
+    def _b64(dato: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(dato).encode()).rstrip(b"=").decode()
+
+    return f"{_b64(cabecera)}.{_b64({'sub': PILOTO})}.firma"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("alg", [123, None, ["HS256"], {"a": 1}])
+async def test_un_token_fabricado_con_un_algoritmo_que_no_es_texto_es_un_401_y_no_un_500(
+    con_tokens, monkeypatch, alg,
+) -> None:
+    """PyJWT no comprueba el tipo de `alg`: llegaba a `alg.startswith` y
+    rompía. En el piloto, apagado, y en una ruta que cualquiera puede leer."""
+    http = con_tokens
+    token = _fabricado({"alg": alg, "typ": "JWT"})
+    for valores in ({"feature_services": False}, {"feature_services": True, "services_pilot_profile_ids": PILOTO}):
+        _poner(monkeypatch, **{"services_public_access": False, "services_pilot_profile_ids": "", **valores})
+        assert await _con(http, token, f"{API}/services/catalog") == (401, "invalid_token"), valores
+        assert await _con(http, token, f"{API}/services/provider/application") == (401, "invalid_token"), valores
+    r = await http.get(f"{API}/platform/config", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200 and r.json()["feature_services"] is False
