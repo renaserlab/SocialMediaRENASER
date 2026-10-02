@@ -520,7 +520,9 @@ def _fabricado(cabecera: dict) -> str:
     def _b64(dato: dict) -> str:
         return base64.urlsafe_b64encode(json.dumps(dato).encode()).rstrip(b"=").decode()
 
-    return f"{_b64(cabecera)}.{_b64({'sub': PILOTO})}.firma"
+    # La firma tiene que ser base64 bien formado: si no, PyJWT rechaza el
+    # token antes de mirar la cabecera y esta prueba no probaría nada.
+    return f"{_b64(cabecera)}.{_b64({'sub': PILOTO})}.c2lnbg"
 
 
 @pytest.mark.asyncio
