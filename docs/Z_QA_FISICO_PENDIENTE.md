@@ -1926,3 +1926,20 @@ reiniciarla. Nada de esto se probó en un teléfono.
       contratada se ofrece durante el plazo de cuando se confirmó.
 - [ ] En ninguna pantalla aparece un texto técnico de la política (una huella,
       `operating_policy`, un nombre de variable).
+
+### Las políticas de la primera versión (02/10/2026): qué comprobar antes de encender
+
+Las políticas están en `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo. Estas
+cuatro dependen de una configuración o de un trabajo que todavía no se hizo.
+Nada de esto se probó en un teléfono.
+
+- [ ] El entorno tiene `SERVICES_CATALOG_MODALITIES=virtual,in_person`. Un
+      prestador que intenta enviar un servicio **a domicilio** recibe el aviso
+      de que esa modalidad no está permitida, y no lo puede enviar.
+- [ ] En el formulario de un servicio, elegir **USD o EUR** y guardar: aparece
+      «Z no admite esa moneda por ahora» y no se puede enviar (C16).
+- [ ] **No encender Servicios con imágenes subidas** antes de implementar la
+      ruta opaca (C15): hoy la dirección firmada de una imagen lleva el
+      identificador del perfil del prestador.
+- [ ] Solo hay condiciones publicadas para **Perú**. Un prestador de otro país
+      no puede enviar su postulación.

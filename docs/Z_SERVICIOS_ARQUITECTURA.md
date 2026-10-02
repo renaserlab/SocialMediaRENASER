@@ -18,6 +18,10 @@ confirmarla (G18), implementada y probada y, tras ejecutarse la 0095 a mano y
 verificarse (18:05 UTC), **técnicamente cerrada** (§118). Con ella quedan
 cerrados **los seis incrementos** (§119).
 
+El 02/10/2026 se consolidaron las **políticas de la primera versión** y se
+depuró el registro de decisiones (§121): solo documentación, sin código ni
+migraciones.
+
 ## Estado
 
 | | |
@@ -38,6 +42,7 @@ cerrados **los seis incrementos** (§119).
 | **Migración 0094** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (14:28 UTC) en solo lectura: **sin divergencias** (§102). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y **no se deshace**: se corrige hacia delante (§104) |
 | **Política operativa congelada (G18)** | **técnicamente cerrada; únicamente queda pendiente el QA físico** (§118). Cada reserva guarda al confirmarse los nueve plazos y topes con los que después se decide, y solo se decide con esos: cambiar la configuración ya no cambia una reserva hecha |
 | **Migración 0095** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (18:05 UTC) en solo lectura: **sin divergencias** (§118). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y no se deshace |
+| **Políticas de la primera versión** | **consolidadas el 02/10/2026** (§121): 105 políticas iniciales, 42 decisiones decididas para la primera versión, 14 valores provisionales y 25 que siguen necesitando a la empresa. La ruta opaca de los archivos (C15) está decidida y **sin implementar** |
 | **Los seis incrementos** | **técnicamente cerrados** (§119): quedan el QA físico, las decisiones de la empresa y las integraciones externas (§120) |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
@@ -4828,6 +4833,9 @@ accesibilidad y los idiomas.
 - **El proveedor de pagos** y lo que cuelga de él (comisión, comprobantes,
   devoluciones).
 
+> *Al 02/10/2026:* esta lista se depuró (§121). Lo que sigue siendo de la empresa
+> está en `Z_REQUISITOS_Y_DECISIONES.md`, apartado IV.
+
 **D. Integración y operación.** No se hizo nada de esto:
 
 - el push que lleve a la reserva o al caso (hoy abre la aplicación);
@@ -4837,3 +4845,73 @@ accesibilidad y los idiomas.
 - **desplegar `Edson`**: sin push, sin PR y sin merge; al desplegar, la API
   arranca y la puerta mira la base entonces;
 - el CI remoto de esa rama, la revisión del PR y la integración a `main`.
+
+## 121. Las políticas de la primera versión y el registro depurado (02/10/2026)
+
+Solo documentación: **no se cambió código, no se creó ninguna migración** y
+las 0086–0095 siguen como estaban. El detalle, para leer sin ser técnico, está
+al comienzo de `Z_REQUISITOS_Y_DECISIONES.md`.
+
+**Qué se hizo.** Se adoptaron 105 políticas iniciales («Políticas iniciales
+v1», P1–P105) y se clasificó cada una de las 96 decisiones anotadas en los
+seis incrementos (S1–S14, C1–C16, D1–D15, E1–E12, F1–F21 y G1–G18):
+
+| Estado | Cuántas | Identificadores |
+|---|---|---|
+| `DECIDIDA_PRIMERA_VERSION` | 42 | S7, C2, C4, C5, C9, C10, C11, C13, C15, D1, D3, D4, D6, D7, D8, D9, D10, D11, D13, D14, D15, E3, E4, E5, E6, E7, E11, E12, F3, F4, F5, F6, F8, F10, F11, F15, F19, G1, G5, G9, G10, G18 |
+| `PROVISIONAL_CONFIGURABLE` | 14 | C6, C7, C8, E1, E2, F1, F2, F7, G2, G3, G4, G7, G8, G11 |
+| `REQUIERE_EMPRESA` | 25 | S1, S2, S3, S6, S8, S9, S10, S11, S13, C1, C3, C12, C14, D5, D12, F9, F16, F17, F18, F20, F21, G6, G13, G15, G16 |
+| `INTEGRACION_EXTERNA` | 3 | F13, G12, G17 |
+| `MEJORA_FUTURA` | 6 | S4, S5, C16, D2, E8, F12 |
+| `NO_APLICA_PRIMERA_VERSION` | 6 | S12, S14, E9, E10, F14, G14 |
+
+**Qué manda.** Las partes I–VII de este documento son un registro
+cronológico: cada cierre dice lo que era verdad ese día, y muchas frases
+(«C15 sigue pendiente», «E1–E12 siguen siendo de la empresa», «ninguna se dio
+por resuelta») son anteriores a esta consolidación. Donde haya diferencia,
+**manda el consolidado del 02/10/2026**.
+
+**«Decidida para la primera versión» no es «aprobada por la empresa».** Son
+reglas iniciales técnicas, adoptadas por indicación de Edson. No son textos
+legales ni se publican como condiciones.
+
+### Lo decidido que el código o la base todavía no imponen
+
+| Política | Qué pasa hoy | Qué falta | Cuándo |
+|---|---|---|---|
+| P5 · A domicilio | El catálogo admite de fábrica las tres modalidades: un servicio a domicilio se podría publicar, aunque no contratar | Fijar `SERVICES_CATALOG_MODALITIES=virtual,in_person` en el entorno. Es configuración, no código | Antes de encender |
+| P29 · Ruta opaca | La ruta de una imagen empieza por el identificador del perfil y la 0090, ya aplicada, exige ese comienzo | Un bloque aparte: la ruta en `catalogo_imagenes.py`, una migración nueva que relaje el disparador y el barrido de la baja de cuenta. Hoy hay 0 archivos: no hay nada que mover | Antes de encender |
+| P2 · PEN | El formulario de la app ofrece también USD y EUR; el servidor los rechaza al guardar (C16) | Ajuste menor de la app | Antes de encender |
+| P1 · Perú | El código no bloquea países: una categoría puede limitarse a un país, y las condiciones son por país | Publicar condiciones solo para Perú. Es operación, no código | Al publicar las condiciones |
+| P7 y P8 · Reguladas y prohibidas | No hay bloqueo automático de categorías ni de actividades | Se cumple en la creación de categorías y en la aprobación manual de cada servicio; la lista debe ir en las condiciones | Al redactar las condiciones |
+| P15 · Credencial vencida | La señal pública ya se retira. No existe la relación entre credenciales y categorías que impediría publicar en una regulada | Se construye al abrir la primera categoría regulada | Antes de abrir una regulada |
+| P42 · Otra zona horaria | Se avisa de que el teléfono está en otra zona; no se calcula la equivalencia | Mejora opcional de la app | Al ampliar países |
+| P51 · Capacidad | La app no la enseña, pero la API pública devuelve la capacidad teórica | Quitarla de la respuesta pública: ajuste menor de código | Antes de abrir al público |
+| P101 · Piloto por etapas | Las banderas son globales: encender Servicios lo abre a todas las cuentas | Un entorno de piloto, o un mecanismo de acceso por lista que hoy no existe | Antes del piloto |
+
+**La ruta opaca (P29, C15 y D6) contradice a la 0090 ya aplicada.** El
+disparador de la 0090 rechaza una imagen cuya ruta no empiece por
+`<perfil>/<servicio>/`, y `catalogo_imagenes.py` la arma así. Cumplir la
+política exige, en un bloque aparte: cambiar cómo se arma la ruta, una
+**migración nueva** que sustituya esa comprobación (la 0090 no se edita) y
+revisar el barrido de la baja de cuenta, que hoy encuentra las imágenes por
+ese prefijo. Hay **0 archivos** en el depósito, así que no hay contenido que
+mover. Mientras no se haga, **no conviene encender Servicios**: cada tarjeta
+del catálogo lleva esa ruta en su URL firmada, también sin sesión.
+
+**A domicilio (P5).** `services_catalog_modalities` conserva de fábrica las
+tres modalidades, que son los límites de la 0090. La política se cumple
+fijando `SERVICES_CATALOG_MODALITIES=virtual,in_person` en el entorno; el
+valor de fábrica no se cambió, porque es código. Contratar a domicilio ya era
+imposible (`services_booking_instant_modalities`).
+
+### Lo que sigue pendiente
+
+- **De la empresa**: 48 asuntos en cinco grupos, y seis integraciones
+  externas (`Z_REQUISITOS_Y_DECISIONES.md`, apartados IV y V). **F21 sigue
+  siendo la primera** y no se resolvió con código.
+- **Los nueve valores de la política operativa** siguen siendo provisionales.
+- **QA físico**: los seis incrementos, y cuatro comprobaciones nuevas de estas
+  políticas (`Z_QA_FISICO_PENDIENTE.md`).
+- Las banderas siguen **apagadas**, la pasarela es `none` y el código, **sin
+  desplegar**.

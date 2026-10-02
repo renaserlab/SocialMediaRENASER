@@ -194,6 +194,9 @@ Todas nacen apagadas y se encienden por entorno.
 | *Los nueve anteriores de la atención, salvo el aviso y la moderación* | **Se congelan en cada reserva al confirmarla** (0095, G18): cambiarlos solo vale para las reservas que se confirmen después. `services_booking_reminder_hours` y `services_reviews_premoderation` no se congelan. |
 | `services_agenda_notice_minutes` | Antelación mínima de un horario de Servicios. **120** (provisional del documento de reglas; decisión E1). |
 | `services_agenda_horizon_days` | Hasta cuántos días por delante se ofrecen horarios. **60** (provisional; decisión E2). |
+| `services_catalog_modalities` | Modalidades que un prestador puede publicar. De fábrica, las tres que admite la 0090 (`virtual,in_person,at_home`). **Política de la primera versión (02/10/2026): `virtual,in_person`**; a domicilio queda desactivada y **hay que fijar la variable al desplegar** (decisión C4). |
+| `services_catalog_currencies` | Monedas en las que se admite un precio. **`PEN`** (política de la primera versión; decisión C5). |
+| *Cuáles de los anteriores son política decidida, cuáles provisionales y cuáles esperan a la empresa* | `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo (apartados II, III y IV). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
 | `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |
 
