@@ -14,6 +14,8 @@
 4. ADMINISTRACIÓN ENTRA POR SU ROL, esté o no en la lista; y estar en la lista
    no da ningún rol.
 5. LA APP SOLO RECIBE UN SÍ O UN NO para esa persona, nunca la lista.
+6. CON TOKENS DE VERDAD: uno que viene y no vale (caducado, mal firmado) es un
+   401, no un «no participas»; y contesta igual con Servicios apagado.
 
 No necesita PostgreSQL: la puerta de quién entra no consulta la base.
 """
@@ -23,7 +25,9 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import jwt
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -31,7 +35,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import UnauthorizedError
-from app.core.security import AuthUser, get_current_user, get_optional_user
+from app.core.security import AuthUser, get_current_user, get_optional_user, get_user_if_token
 from app.main import create_app
 from app.modules.profiles.models import Profile
 from app.modules.services import acceso, esquema
@@ -117,6 +121,7 @@ async def entorno(cerrado):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _obligatorio
     app.dependency_overrides[get_optional_user] = _opcional
+    app.dependency_overrides[get_user_if_token] = _opcional
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         yield http, quien
     app.dependency_overrides.clear()
@@ -337,3 +342,101 @@ async def test_la_app_recibe_un_si_o_un_no_para_esa_persona_y_nunca_la_lista(ent
     # Y con la apertura general, cualquiera.
     _poner(monkeypatch, feature_services=True, services_public_access=True)
     assert (await _pedir(http, quien, None, "GET", configuracion)).json()["feature_services"] is True
+
+
+# =========================================================================== #
+# 6. Con tokens de verdad
+# =========================================================================== #
+SECRETO = "secreto-de-prueba-del-piloto-de-servicios-0123456789"
+
+
+def _token(sub: str, *, expira_en: int = 3600, secreto: str = SECRETO) -> str:
+    ahora = datetime.now(timezone.utc)
+    return jwt.encode(
+        {"sub": sub, "aud": "authenticated", "role": "authenticated", "email": "quien@ejemplo.com",
+         "iat": ahora - timedelta(hours=3), "exp": ahora + timedelta(seconds=expira_en)},
+        secreto, algorithm="HS256",
+    )
+
+
+@pytest_asyncio.fixture()
+async def con_tokens(cerrado, monkeypatch):
+    """La aplicación SIN sustituir quién pide: la identidad sale del token."""
+    _poner(monkeypatch, supabase_jwt_secret=SECRETO, supabase_url="", supabase_jwt_issuer="")
+    app = create_app()
+    motor = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with motor.begin() as conexion:
+        await conexion.run_sync(Base.metadata.create_all)
+    sesiones = async_sessionmaker(motor, expire_on_commit=False)
+
+    async def _db():
+        async with sesiones() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = _db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        yield http
+    app.dependency_overrides.clear()
+    await motor.dispose()
+
+
+async def _con(http, token: str | None, ruta: str):
+    cabeceras = {"Authorization": f"Bearer {token}"} if token is not None else {}
+    return _resultado(await http.get(ruta, headers=cabeceras))
+
+
+@pytest.mark.asyncio
+async def test_un_token_que_viene_y_no_vale_es_un_401_y_no_un_no_participas(con_tokens, monkeypatch) -> None:
+    """A un participante con la sesión caducada hay que decirle que la
+    renueve. Si se le contestara «Servicios no está disponible», se quedaría
+    fuera sin saber por qué hasta que la app refrescase el token."""
+    http = con_tokens
+    catalogo, privada = f"{API}/services/catalog", f"{API}/services/provider/application"
+    _poner(monkeypatch, feature_services=True, services_pilot_profile_ids=PILOTO)
+    malos = {
+        "caducado": (_token(PILOTO, expira_en=-3600), "token_expired"),
+        "de otra firma": (_token(PILOTO, secreto="otro-secreto-que-no-es-el-del-servidor-0123456789"), "invalid_token"),
+        "basura": ("esto-no-es-un-token", "invalid_token"),
+    }
+    for nombre, (token, codigo) in malos.items():
+        for ruta in (catalogo, privada):
+            assert await _con(http, token, ruta) == (401, codigo), (nombre, ruta)
+    # El que vale: el participante entra, y quien no participa recibe el 503.
+    assert (await _con(http, _token(PILOTO), catalogo))[0] == 200
+    assert await _con(http, _token(FUERA), catalogo) == APAGADO
+    # Sin token es una visita sin sesión: durante el piloto, fuera.
+    assert await _con(http, None, catalogo) == APAGADO
+
+
+@pytest.mark.asyncio
+async def test_un_token_que_no_vale_contesta_igual_con_servicios_apagado(con_tokens, monkeypatch) -> None:
+    """Por eso no delata nada: mandar un token roto no dice si hay un piloto."""
+    http = con_tokens
+    catalogo = f"{API}/services/catalog"
+    caducado = _token(PILOTO, expira_en=-3600)
+    vistos = {}
+    for estado, valores in (
+        ("apagado", {"feature_services": False}),
+        ("piloto", {"feature_services": True, "services_pilot_profile_ids": PILOTO}),
+        ("abierto", {"feature_services": True, "services_public_access": True}),
+    ):
+        _poner(monkeypatch, **{"services_public_access": False, "services_pilot_profile_ids": "", **valores})
+        vistos[estado] = await _con(http, caducado, catalogo)
+    assert set(vistos.values()) == {(401, "token_expired")}, vistos
+    # Y un token que VALE, con Servicios apagado, es el 503 de siempre.
+    _poner(monkeypatch, feature_services=False, services_public_access=False, services_pilot_profile_ids=PILOTO)
+    assert await _con(http, _token(PILOTO), catalogo) == APAGADO
+    assert not esquema._cache
+
+
+@pytest.mark.asyncio
+async def test_la_configuracion_de_la_app_no_falla_con_un_token_caducado(con_tokens, monkeypatch) -> None:
+    """`/platform/config` la lee cualquiera: con un token que no vale contesta
+    como a una visita sin sesión (no entra), no con un error."""
+    http = con_tokens
+    _poner(monkeypatch, feature_services=True, services_pilot_profile_ids=PILOTO)
+    configuracion = f"{API}/platform/config"
+    r = await http.get(configuracion, headers={"Authorization": f"Bearer {_token(PILOTO, expira_en=-3600)}"})
+    assert r.status_code == 200 and r.json()["feature_services"] is False
+    r = await http.get(configuracion, headers={"Authorization": f"Bearer {_token(PILOTO)}"})
+    assert r.status_code == 200 and r.json()["feature_services"] is True

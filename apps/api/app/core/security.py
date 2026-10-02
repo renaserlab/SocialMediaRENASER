@@ -187,3 +187,21 @@ async def get_optional_user(
     except UnauthorizedError:
         return None
     return _user_from_claims(claims)
+
+
+async def get_user_if_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    settings: Settings = Depends(get_settings),
+) -> AuthUser | None:
+    """Identidad si viene un token; None si NO viene ninguno. Un token que
+    viene y no vale es un 401, como en `get_current_user`.
+
+    La diferencia con `get_optional_user` es esa: aqui un token caducado no se
+    trata como una visita anonima. Es para las puertas que deciden por QUIEN
+    pregunta (el piloto de Servicios): quien manda un token cree tener sesion,
+    y contestarle «esto no es para ti» en vez de «renueva tu sesion» le
+    dejaria fuera sin saber por que hasta que la app refrescase el token.
+    """
+    if credentials is None or not credentials.credentials:
+        return None
+    return _user_from_claims(_decode_token(credentials.credentials, settings))

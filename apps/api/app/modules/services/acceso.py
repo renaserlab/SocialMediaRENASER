@@ -39,7 +39,7 @@ from functools import lru_cache
 from fastapi import Depends
 
 from app.core.config import get_settings
-from app.core.security import AuthUser, get_optional_user
+from app.core.security import AuthUser, get_user_if_token
 from app.modules.services import esquema
 
 logger = logging.getLogger("renaser.services")
@@ -95,8 +95,15 @@ def abierto_para(perfil_id: str | None) -> bool:
         return False
 
 
-async def exigir_participante(usuario: AuthUser | None = Depends(get_optional_user)) -> None:
-    """La puerta de quién, antes que cualquier otra y sin consultar la base."""
+async def exigir_participante(usuario: AuthUser | None = Depends(get_user_if_token)) -> None:
+    """La puerta de quién, antes que cualquier otra y sin consultar la base.
+
+    UN TOKEN QUE VIENE Y NO VALE ES UN 401, no un «no participas»
+    (`get_user_if_token`): a un participante con la sesión caducada hay que
+    decirle que la renueve, no que Servicios no existe. Pasa igual con
+    Servicios apagado o encendido, así que no delata nada. Sin token, es una
+    visita sin sesión: durante el piloto, fuera.
+    """
     if not abierto_para(usuario.id if usuario is not None else None):
         raise esquema.ServiciosApagados()
 
