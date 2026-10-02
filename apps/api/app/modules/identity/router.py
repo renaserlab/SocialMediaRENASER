@@ -45,10 +45,14 @@ async def delete_my_account(
     - 204: borrada (tambien si ya lo estaba: repetir es seguro).
     - 409 `account_deletion_blocked`: tiene ventas, saldos, pedidos o
       reclamos que la plataforma conserva; no se ha tocado nada.
+    - 409 `service_history_requires_support`: es parte de una reserva de
+      Servicios, pasada o por venir (F21); no se ha tocado nada y la cuenta
+      la cierra soporte. Repetir la petición no cambia la respuesta.
     - 503 `account_deletion_storage_failed`: sus archivos no se pudieron
       borrar; la cuenta sigue activa y se puede reintentar.
-    - 503 `account_deletion_unavailable`: la base no tiene la 0089 completa
-      (o no se pudo comprobar); no se ha tocado nada y la cuenta sigue activa.
+    - 503 `account_deletion_unavailable`: la base no tiene la 0089 completa,
+      o no se pudo comprobar, o no se pudo mirar su historia de Servicios; no
+      se ha tocado nada y la cuenta sigue activa.
 
     La identidad sale del token ya validado, nunca de un id recibido: solo se
     puede borrar la cuenta propia.

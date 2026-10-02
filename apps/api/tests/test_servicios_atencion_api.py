@@ -1388,7 +1388,12 @@ async def test_un_error_al_mirar_la_0094_es_503_y_no_se_recuerda(atencion, monke
 # =========================================================================== #
 # 9. La baja de una cuenta
 # =========================================================================== #
-async def test_la_baja_de_quien_contrato_se_lleva_sus_evidencias_y_deja_la_resena_sin_nombre(atencion) -> None:
+async def test_la_baja_de_quien_contrato_no_toca_su_caso_ni_sus_evidencias_ni_su_resena(atencion) -> None:
+    """Hasta F21 (02/10/2026) esta baja se hacía: se llevaba las evidencias de
+    quien contrató y dejaba el caso y la reseña sin su nombre. Ahora la
+    historia contractual la frena y NO SE TOCA NADA; lo que la base haría si
+    se borrara el perfil (anonimizar) sigue probado en
+    `test_servicios_migracion_0094.py`."""
     app, motor, almacen = atencion
     h = await _con_caso(app, motor)
     cliente, reserva, caso = h["cliente"], h["reserva"]["id"], h["caso"]
@@ -1400,21 +1405,23 @@ async def test_la_baja_de_quien_contrato_se_lleva_sus_evidencias_y_deja_la_resen
     assert (await _resolver(app, h["jefa"], caso, attention_effect="completed")).status_code == 200
     assert (await _hacer(app, "client", h, "review", RESENA)).status_code == 201
     assert len(almacen.de(posventa.DEPOSITO, cliente)) == 1
-    # La reserva ya pasó (el caso se abrió con la atención empezada): la cuenta se puede borrar.
+    # La reserva ya pasó (el caso se abrió con la atención empezada), y aun así la cuenta no se borra sola.
     await _llevar(motor, reserva, minutos=-3 * 60)
     r = await _borrar_cuenta(app, cliente)
-    assert r.status_code in (200, 204), r.text
-    # SUS ARCHIVOS se van del depósito; la reseña y el caso se quedan, sin su cuenta.
-    assert almacen.de(posventa.DEPOSITO, cliente) == []
-    assert await _filas(motor, "select author_id, rating, status from public.service_reviews "
-                               "where booking_id = cast(:b as uuid)", b=reserva) == [(None, 5, "published")]
+    assert r.status_code == 409 and _codigo(r) == "service_history_requires_support", r.text
+    # SUS ARCHIVOS siguen en el depósito, y la reseña y el caso, con su cuenta.
+    assert len(almacen.de(posventa.DEPOSITO, cliente)) == 1 and almacen.borrados == []
+    assert await _filas(motor, "select author_id::text, rating, status from public.service_reviews "
+                               "where booking_id = cast(:b as uuid)", b=reserva) == [(cliente, 5, "published")]
     assert await _uno(motor, "select count(*) from public.service_incidents where booking_id = cast(:b as uuid)",
                       b=reserva) == 1
     publicas = (await _pedir(app, "GET", f"{CATALOGO}/{h['servicio']}/reviews", None)).json()
     assert [x["rating"] for x in publicas["items"]] == [RESENA["rating"]]
     de_moderacion = (await _pedir(app, "GET", RESENAS, h["jefa"], status="published")).json()["items"]
-    assert [x["author_id"] for x in de_moderacion if x["booking_id"] == h["reserva"]["id"]] == [None]
-    # El prestador sigue viendo su reserva y el expediente; la evidencia ya no está, y no es un 500.
+    assert [x["author_id"] for x in de_moderacion if x["booking_id"] == h["reserva"]["id"]] == [cliente]
+    # Si el archivo de una evidencia faltara del depósito, el prestador sigue
+    # viendo su reserva y el expediente, y no es un 500.
+    almacen.objetos[posventa.DEPOSITO].clear()
     suya, perfil = _de("provider", h)
     visto = await _pedir(app, "GET", f"{suya}/incident", perfil)
     assert visto.status_code == 200, visto.text

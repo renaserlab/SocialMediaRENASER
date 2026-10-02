@@ -973,10 +973,13 @@ async def test_un_error_al_mirar_la_0093_es_503_y_no_se_recuerda(reservas, monke
 
 
 async def test_la_baja_de_quien_tiene_una_reserva_por_venir_espera(reservas) -> None:
+    """Desde F21 (02/10/2026) la frena la historia contractual, antes de llegar
+    a la base: 409 `service_history_requires_support`. El freno de la 0093
+    (`account_deletion_blocked`) sigue detrás: `test_servicios_conservacion.py`."""
     app, motor, _ = reservas
     hecho = await _reservado(app, motor)
     r = await _borrar_cuenta(app, hecho["cliente"])
-    assert r.status_code == 409 and _codigo(r) == "account_deletion_blocked", r.text
+    assert r.status_code == 409 and _codigo(r) == "service_history_requires_support", r.text
     assert await _uno(motor, "select count(*) from public.profiles where id = cast(:u as uuid)", u=hecho["cliente"]) == 1
 
 

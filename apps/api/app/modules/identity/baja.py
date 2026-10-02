@@ -11,6 +11,13 @@ EL ORDEN, Y POR QUÉ:
   0. Se comprueba que la base tiene la 0089 COMPLETA (`_hay_0089`). Si no, o
      si no se puede comprobar, 503 y no se toca nada: con la versión a medias
      de la 0089 borrar se llevaba en cascada órdenes en las que se movió dinero.
+  0b. Se mira si la persona tiene HISTORIA CONTRACTUAL en Servicios
+     (`_sin_historia_de_servicios`, F21): un pedido, una reserva o lo que
+     cuelga de ellos, como quien contrató o como quien prestó, vivo o cerrado.
+     Si la tiene, 409 `service_history_requires_support`: la cuenta la cierra
+     soporte. Si no se puede mirar, 503. En los dos casos no se ha borrado ni
+     apuntado nada, ni se ha llamado a Storage. Es una decisión PROVISIONAL:
+     ver `services/conservacion.py`.
   1. Se apuntan sus conversaciones: sus adjuntos de chat no van bajo su
      carpeta, y después de borrar ya no se podría saber cuáles eran. Y, por lo
      mismo, los servicios que ofrecía: las imágenes de su catálogo van bajo la
@@ -57,6 +64,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.profiles.models import Profile
+from app.modules.services import conservacion
 from app.shared import storage
 
 logger = logging.getLogger(__name__)
@@ -73,6 +81,18 @@ class CuentaConRegistrosQueConservar(ConflictError):
     )
 
 
+class HistoriaDeServicios(ConflictError):
+    """F21: la persona es parte de un pedido o de una reserva de Servicios (o
+    de lo que cuelga de ellos). La baja automática no la toca: la cierra
+    soporte. No dice qué tiene ni cuánto."""
+
+    code = "service_history_requires_support"
+    message = (
+        "Tu cuenta tiene reservas o atenciones de Z Servicios que debemos conservar. "
+        "Escribe a soporte y la cerramos contigo."
+    )
+
+
 class ArchivosSinBorrar(ServiceUnavailableError):
     code = "account_deletion_storage_failed"
     message = "No pudimos borrar tus archivos. Tu cuenta sigue activa: inténtalo de nuevo."
@@ -82,11 +102,17 @@ class BajaNoDisponible(ServiceUnavailableError):
     """La base no tiene la 0089 COMPLETA (o no se pudo comprobar). Sin ella,
     borrar puede chocar con un historial —y un choque no es una venta: decir
     «tienes ventas» sería mentir— o, peor, llevarse en cascada una orden en la
-    que se movió dinero. No se toca nada."""
+    que se movió dinero. No se toca nada.
+
+    También cuando no se pudo mirar la historia de Servicios (F21): una cuenta
+    que no se pudo mirar no se da por limpia."""
 
     code = "account_deletion_unavailable"
     message = "No podemos borrar tu cuenta en este momento. Sigue activa: inténtalo más tarde."
 
+
+#: Un interbloqueo que PostgreSQL deshizo y un cerrojo que no llegó a tiempo.
+_ESPERAS_FALLIDAS = ("40P01", "55P03")
 
 #: De qué área es la fila que impidió el borrado. Solo para decirlo con
 #: palabras al móvil y al registro; nunca se devuelve el nombre de una tabla.
@@ -257,11 +283,36 @@ async def _hay_0089(db: AsyncSession) -> bool:
         return False
 
 
+async def _sin_historia_de_servicios(db: AsyncSession, usuario_id: str) -> None:
+    """F21. Antes de apuntar, borrar o tocar un archivo: si la persona tiene
+    historia contractual en Servicios, 409; si no se puede mirar, 503. En los
+    dos casos la transacción se deshace (solo tenía cerrojos) y la cuenta
+    sigue como estaba. Si pasa, sus servicios y su perfil quedan en fila hasta
+    que la baja termine: no puede nacer una reserva entre mirar y borrar."""
+    try:
+        conserva = await conservacion.de_la_persona(db, usuario_id)
+    except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
+        await db.rollback()
+        logger.warning(
+            "No se pudo mirar la historia de Servicios de %s: la baja contesta 503.", usuario_id, exc_info=True
+        )
+        raise BajaNoDisponible() from None
+    if conserva:
+        await db.rollback()
+        # Qué familias, nunca cuántas filas: es lo que soporte necesita saber.
+        logger.warning(
+            "La cuenta %s tiene historia contractual de Servicios (%s): la cierra soporte.",
+            usuario_id, ", ".join(conserva),
+        )
+        raise HistoriaDeServicios()
+
+
 async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     """Borra la cuenta. Devuelve las conversaciones que se fueron enteras con
     ella, para `retirar_conversaciones` después de contestar."""
     if not await _hay_0089(db):
         raise BajaNoDisponible()
+    await _sin_historia_de_servicios(db, usuario_id)
     suyas, enteras = await _conversaciones(db, usuario_id)
     servicios = await _servicios(db, usuario_id)
     postgres = (await db.connection()).dialect.name == "postgresql"
@@ -280,6 +331,12 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     except DBAPIError as error:
         await db.rollback()
         sqlstate, tabla, restriccion = _origen(error)
+        if sqlstate in _ESPERAS_FALLIDAS:
+            # La baja y otra operación de la misma cuenta se esperaban la una
+            # a la otra y PostgreSQL deshizo esta. No se borró nada ni se tocó
+            # un archivo: 503, y repetir la petición la termina.
+            logger.warning("Baja de %s deshecha por un cerrojo (%s): se puede reintentar", usuario_id, sqlstate)
+            raise BajaNoDisponible() from None
         # 23xxx: una restricción (clave ajena `restrict`, disparador de
         # historial, CHECK). Cualquier otra cosa es un fallo de verdad: 500.
         if not (sqlstate or "").startswith("23"):

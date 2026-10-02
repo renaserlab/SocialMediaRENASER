@@ -9,6 +9,8 @@ PostgreSQL, que es la suite de siempre:
   - si Storage no contesta, no borra nada y responde 503;
   - si la base lo impide, responde 409 y NO TOCA NINGÚN ARCHIVO;
   - sin la 0089 completa, 503 antes de tocar nada;
+  - con historia contractual de Servicios (F21), 409 antes de borrar o de
+    tocar un archivo; y si no se puede mirar, 503;
   - la puerta de la 0089 se cierra ante cualquier fallo al mirar y guarda
     su respuesta hasta el próximo reinicio;
   - repetir es seguro.
@@ -29,6 +31,9 @@ from app.core.security import AuthUser, get_current_user
 from app.main import create_app
 from app.modules.identity import baja
 from app.modules.profiles.models import Profile
+from app.modules.services import conservacion
+from app.modules.services.models import ServiceProvider
+from app.modules.services.reserva_models import ServiceOrder
 from app.shared import storage
 from app.shared.database import Base, get_db
 from tests.test_baja_de_cuenta_postgres import ALMACEN, StorageDeMentira, _ClienteReal
@@ -175,6 +180,129 @@ async def test_sin_la_0089_completa_no_se_toca_nada(entorno, monkeypatch) -> Non
     }
     assert await _existe(sesiones, ANA)
     assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
+
+
+# --------------------------------------------------------------------------- #
+# F21: la historia contractual de Servicios, antes de todo lo demás
+# --------------------------------------------------------------------------- #
+async def _con_un_pedido(sesiones, *, contrata: str, presta: str) -> None:
+    """Un pedido de Servicios entre dos personas. Con sus modelos y en SQLite:
+    la consulta es la misma en los dos motores."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    async with sesiones() as db:
+        prestador = ServiceProvider(profile_id=presta, provider_type="individual", display_name="Clases")
+        db.add(prestador)
+        await db.flush()
+        db.add(ServiceOrder(
+            service_id=str(uuid4()), version_id=str(uuid4()), provider_id=prestador.id, client_id=contrata,
+            environment="sandbox", price_model="free", title_snapshot="Clase de guitarra",
+            provider_name_snapshot="Clases", confirmed_at=datetime.now(UTC),
+        ))
+        await db.commit()
+
+
+@pytest.mark.parametrize("como", ["cliente", "prestador"])
+async def test_con_historia_de_servicios_es_409_antes_de_borrar_y_de_tocar_un_archivo(entorno, como) -> None:
+    app, sesiones, almacen, estado = entorno
+    _archivos(almacen)
+    if como == "cliente":
+        await _con_un_pedido(sesiones, contrata=ANA, presta=BEA)
+    else:
+        await _con_un_pedido(sesiones, contrata=BEA, presta=ANA)
+    # Si llegara a borrar, la base «chocaría» (otro código): no llega.
+    estado["chocar"]()
+    for _ in range(2):  # y repetir no cambia la respuesta
+        r = await _borrar(app)
+        assert r.status_code == 409, r.text
+        assert r.json()["error"] == {
+            "code": "service_history_requires_support", "message": baja.HistoriaDeServicios.message, "details": None,
+        }
+        assert await _existe(sesiones, ANA)
+        assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
+    # La respuesta no dice qué tiene ni cuánto.
+    assert "service_orders" not in r.text and "1" not in r.json()["error"]["message"]
+
+
+async def test_la_historia_de_otra_persona_no_frena_la_mia(entorno) -> None:
+    app, sesiones, _, _ = entorno
+    await _con_un_pedido(sesiones, contrata=BEA, presta=BEA)
+    assert (await _borrar(app)).status_code == 204
+    assert not await _existe(sesiones, ANA) and await _existe(sesiones, BEA)
+    async with sesiones() as db:
+        assert len((await db.execute(select(ServiceOrder.id))).all()) == 1
+
+
+async def test_si_no_se_puede_mirar_la_historia_es_503_y_no_se_toca_nada(entorno, monkeypatch, caplog) -> None:
+    """Cerrada ante cualquier fallo al mirar: una cuenta que no se pudo mirar
+    no se da por limpia. Ni se borra, ni se llama a Storage, ni es un 204."""
+    import logging
+
+    app, sesiones, almacen, estado = entorno
+    _archivos(almacen)
+
+    async def _revienta(db, perfil_id):
+        raise RuntimeError("la base no contesta")
+
+    monkeypatch.setattr(conservacion, "de_la_persona", _revienta)
+    with caplog.at_level(logging.WARNING):
+        r = await _borrar(app)
+    assert r.status_code == 503, r.text
+    assert r.json()["error"] == {
+        "code": "account_deletion_unavailable", "message": baja.BajaNoDisponible.message, "details": None,
+    }
+    assert "No se pudo mirar la historia de Servicios" in caplog.text
+    assert await _existe(sesiones, ANA)
+    assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
+
+
+async def test_la_puerta_de_la_0089_va_antes_que_la_historia(entorno, monkeypatch) -> None:
+    app, sesiones, almacen, _ = entorno
+    await _con_un_pedido(sesiones, contrata=ANA, presta=BEA)
+    miradas = []
+
+    async def _sin_0089(db):
+        return False
+
+    async def _mirar(db, perfil_id):
+        miradas.append(perfil_id)
+        return ()
+
+    monkeypatch.setattr(baja, "_hay_0089", _sin_0089)
+    monkeypatch.setattr(conservacion, "de_la_persona", _mirar)
+    r = await _borrar(app)
+    assert r.status_code == 503 and r.json()["error"]["code"] == "account_deletion_unavailable", r.text
+    assert miradas == [] and almacen.borrados == []
+
+
+class _Interbloqueo(Exception):
+    sqlstate = "40P01"
+
+
+class _SesionInterbloqueada(AsyncSession):
+    """Como si PostgreSQL deshiciera la baja por un interbloqueo al borrar."""
+
+    async def execute(self, sentencia, *args, **kwargs):
+        if getattr(sentencia, "is_delete", False) and sentencia.table.name == "profiles":
+            raise DBAPIError("DELETE FROM profiles", {}, _Interbloqueo("deadlock detected"))
+        return await super().execute(sentencia, *args, **kwargs)
+
+
+async def test_un_interbloqueo_al_borrar_es_503_y_se_puede_reintentar(entorno) -> None:
+    """La última red: si la baja y otra operación de la misma cuenta se
+    esperan la una a la otra, no es un 500. No se borró nada ni se tocó un
+    archivo, y repetir la petición la termina."""
+    app, sesiones, almacen, estado = entorno
+    _archivos(almacen)
+    normales = estado["sesiones"]
+    estado["sesiones"] = async_sessionmaker(normales.kw["bind"], expire_on_commit=False, class_=_SesionInterbloqueada)
+    r = await _borrar(app)
+    assert r.status_code == 503 and r.json()["error"]["code"] == "account_deletion_unavailable", r.text
+    assert await _existe(sesiones, ANA)
+    assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
+    estado["sesiones"] = normales
+    assert (await _borrar(app)).status_code == 204
 
 
 async def test_repetir_la_baja_es_seguro(entorno) -> None:

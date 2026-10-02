@@ -11,6 +11,8 @@
  *  - 409 `account_deletion_blocked`: la cuenta tiene ventas, pedidos o
  *    reclamos que se conservan. REINTENTAR NO SIRVE, y decir «inténtalo en
  *    unos momentos» es mentir: hay que escribir a soporte.
+ *  - 409 `service_history_requires_support` (F21, 02/10/2026): la cuenta es
+ *    parte de una reserva de Servicios. Lo mismo: soporte, no reintentar.
  *  - 503 `account_deletion_storage_failed` (o cualquier otro fallo): la cuenta
  *    sigue activa y reintentar sí lo arregla.
  *
@@ -44,11 +46,20 @@ describe('Borrar la cuenta', () => {
   const manejador = bloque(AJUSTES, 'const handleDeleteAccount', '\n  };\n');
 
   it('una cuenta bloqueada NO se presenta como «inténtalo de nuevo»', () => {
-    const rama = bloque(manejador, "error.code === 'account_deletion_blocked'", 'return;');
+    const rama = bloque(manejador, 'BAJA_BLOQUEADA.includes(error.code)', 'return;');
     assert.ok(manejador.includes('error instanceof ApiError'), 'lee el código del error del servidor');
     assert.ok(rama.includes("t('settings.deleteAccountBlocked')"));
     assert.ok(rama.includes("t('settings.deleteAccountBlockedBody')"));
     assert.ok(!rama.includes('deleteAccountFailedBody'));
+  });
+
+  it('la historia de Servicios (F21) se trata como bloqueada, no como un fallo pasajero', () => {
+    const bloqueada = bloque(AJUSTES, 'const BAJA_BLOQUEADA', ';');
+    assert.ok(bloqueada.includes("'account_deletion_blocked'"));
+    assert.ok(bloqueada.includes("'service_history_requires_support'"));
+    // Va ANTES que «no se sabe» y que «inténtalo de nuevo»: un 409 no llega a ellas.
+    assert.ok(manejador.indexOf('BAJA_BLOQUEADA.includes') < manejador.indexOf('sinSaberComoTermino(error)'));
+    assert.ok(!bloque(AJUSTES, 'const BAJA_NO_HECHA', ';').includes('service_history_requires_support'));
   });
 
   it('sin respuesta de la API NO afirma que la cuenta sigue activa (la baja pudo terminar)', () => {

@@ -16,6 +16,13 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
+/**
+ * Códigos con los que la API dice que la cuenta no se cierra sola: reintentar
+ * no cambia nada, hay que escribir a soporte. El segundo (F21) llega cuando
+ * la cuenta es parte de una reserva, pasada o por venir.
+ */
+const BAJA_BLOQUEADA = ['account_deletion_blocked', 'service_history_requires_support'];
+
 /** Códigos con los que la API garantiza que la cuenta NO se borró. */
 const BAJA_NO_HECHA = ['account_deletion_storage_failed', 'account_deletion_unavailable'];
 
@@ -80,10 +87,11 @@ export function SettingsScreen() {
       await deleteAccount();
       router.replace('/');
     } catch (error) {
-      // BLOQUEADA NO ES «INTÉNTALO DE NUEVO». La cuenta tiene ventas, pedidos
-      // o reclamos que hay que conservar: repetir no cambia nada, hay que
-      // escribir a soporte. Cualquier otro fallo sí se arregla reintentando.
-      if (error instanceof ApiError && error.code === 'account_deletion_blocked') {
+      // BLOQUEADA NO ES «INTÉNTALO DE NUEVO». La cuenta tiene ventas, pedidos,
+      // reclamos o reservas que hay que conservar: repetir no cambia nada, hay
+      // que escribir a soporte. Cualquier otro fallo sí se arregla
+      // reintentando.
+      if (error instanceof ApiError && BAJA_BLOQUEADA.includes(error.code)) {
         notify(t('settings.deleteAccountBlocked'), t('settings.deleteAccountBlockedBody'));
         return;
       }
