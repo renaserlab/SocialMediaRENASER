@@ -1,0 +1,56 @@
+[BORRADOR PENDIENTE DE REVISIÓN Y APROBACIÓN EMPRESARIAL Y LEGAL: ESTA LÍNEA SE RETIRA AL APROBAR EL TEXTO Y, MIENTRAS ESTÉ, NO SE PUBLICA]
+
+CONDICIONES DEL PILOTO DE Z SERVICIOS
+
+Estas condiciones se aplican a las reservas que se hacen en Z Servicios durante su piloto. Léelas antes de confirmar una reserva: al confirmarla, las aceptas tal como están en ese momento.
+
+1. NATURALEZA DEL PILOTO
+Z Servicios está en una versión piloto. El acceso es limitado: solo participan las cuentas que Z ha autorizado. Z puede modificar, suspender o dar por terminado el piloto, en todo o en parte.
+
+2. PARTICIPANTES
+Solo pueden participar personas mayores de edad. Al usar Z Servicios declaras que lo eres y que la información que das sobre ti y sobre tus servicios es verdadera. Tu cuenta es personal: no la compartas ni dejes que otra persona reserve o atienda con ella.
+
+3. EL PAPEL DE Z
+Z facilita que quien ofrece un servicio (el prestador) y quien lo busca (quien contrata) se encuentren y acuerden una reserva. El servicio lo presta el prestador, que es el responsable de ejecutarlo como lo describe su ficha. Z revisa a los prestadores y sus fichas antes de publicarlas, modera el catálogo y puede suspender o retirar una publicación.
+
+4. ALCANCE
+El piloto se desarrolla en el Perú. Los servicios pueden ser virtuales o presenciales, en el lugar que indique el prestador. No hay atención a domicilio. No se admiten servicios de categorías reguladas ni de alto riesgo, ni servicios prohibidos.
+
+5. DINERO
+Durante el piloto no hay pagos dentro de Z. Z no cobra, no retiene ni transfiere dinero, no cobra comisión, no emite comprobantes y no gestiona devoluciones económicas. Las reservas que se confirman en Z son de servicios gratuitos. Si una ficha indica un precio a consultar, es solo información: ese servicio no se reserva ni se paga en Z. Nadie debe presentar un pago hecho fuera de Z como si Z lo hubiera procesado, ni pedirlo a nombre de Z.
+
+6. LA RESERVA
+Para reservar eliges un horario disponible. Z lo aparta a tu nombre durante unos minutos para que revises el resumen: el servicio, el prestador, la fecha, la hora, la duración, la modalidad y estas condiciones. La reserva queda hecha cuando la confirmas. Con ella se guardan la versión de estas condiciones y, si el servicio las tiene, sus condiciones propias, tal como las aceptaste.
+
+7. CANCELACIÓN
+Quien contrata y el prestador pueden cancelar una reserva hasta antes de su hora de inicio, mientras la atención no haya empezado. En el piloto cancelar no tiene penalidad económica. El prestador debe indicar el motivo.
+
+8. CAMBIO DE HORARIO
+Quien contrata puede cambiar el horario de su reserva una vez, con al menos 24 horas de anticipación, a otro horario disponible del mismo servicio.
+
+9. LA ATENCIÓN
+Desde 15 minutos antes de la hora de inicio, quien contrata puede pedir en la aplicación su código de asistencia y dárselo al prestador, que lo usa para iniciar la atención. Al terminar, el prestador la marca como terminada y quien contrata confirma que se realizó. Si no la confirma ni presenta una incidencia en las 24 horas siguientes, y la atención empezó con su código, Z puede darla por cerrada. Si pasados 15 minutos de la hora de inicio la otra parte no se ha presentado, puedes reportar su inasistencia en la aplicación.
+
+10. INCIDENCIAS
+Si algo no salió como se acordó, cualquiera de las dos partes puede presentar una incidencia desde la hora de inicio y hasta 48 horas después del término de la atención. Un problema de seguridad puede avisarse en cualquier momento. Puedes acompañarla con mensajes y evidencias. Lo que presentes debe ser verdadero. No presentes evidencia obtenida de forma ilícita, ni evidencia que muestre a otras personas o sus datos sin su autorización. El equipo de Z revisa lo aportado por las dos partes y decide.
+
+11. APELACIÓN
+La decisión sobre una incidencia puede apelarse una sola vez, dentro de los 5 días siguientes. La apelación la revisa una persona distinta de la que decidió. Si en ese momento no hay otra persona habilitada para revisarla, la aplicación no ofrecerá la apelación.
+
+12. RESEÑAS
+Solo quien contrató puede escribir una reseña, una por reserva, cuando la atención está cerrada y hasta 30 días después. Las reseñas se revisan antes de publicarse. El prestador puede responder una vez. No se publican amenazas, datos personales, discriminación ni contenido falso.
+
+13. DATOS PERSONALES
+Z usa la información de tu cuenta, de tus servicios y de tus reservas para operar el piloto: mostrar el catálogo, gestionar las reservas, atender las incidencias y moderar. Los documentos de los prestadores y las evidencias de las incidencias son privados: solo los ven quienes tienen que verlos, y se abren con enlaces temporales. Z conserva esta información el tiempo mínimo necesario para esos fines. Puedes pedir a soporte atención sobre tu cuenta y tus datos. Si tu cuenta tiene reservas, no se elimina de forma automática: escribe a soporte. Parte del historial de una reserva (lo acordado, lo aceptado, las incidencias y su resolución) puede conservarse de forma restringida o sin identificarte, por seguridad, para atender disputas o por las obligaciones que resulten aplicables.
+
+14. SERVICIOS VIRTUALES
+Z todavía no ofrece una sala propia para las atenciones virtuales. Z no graba las atenciones ni almacena grabaciones. El prestador comunicará a quien contrata el medio de atención de forma segura, siguiendo el procedimiento que el equipo del piloto indique.
+
+15. SUSPENSIÓN
+Z puede suspender a un prestador, un servicio o una cuenta por razones de seguridad, fraude, incumplimiento de estas condiciones o riesgo para las personas.
+
+16. SOPORTE
+Para cualquier consulta sobre el piloto, tu cuenta o una reserva: [CANAL DE SOPORTE PENDIENTE DE COMPLETAR ANTES DE PUBLICAR].
+
+17. VIGENCIA
+Estas condiciones rigen desde que Z las publica en la aplicación. Su versión y su huella (un código que identifica exactamente este texto) se muestran junto a ellas y se guardan con cada reserva, con la fecha en que las aceptaste. Z puede publicar una versión nueva, que valdrá para las reservas que se confirmen después. Lo que aceptaste al confirmar una reserva no cambia.
