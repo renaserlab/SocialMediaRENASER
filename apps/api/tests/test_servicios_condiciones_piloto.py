@@ -139,11 +139,20 @@ async def test_no_inventa_un_canal_de_soporte_ni_un_contacto() -> None:
 async def test_no_promete_lo_que_no_existe_ni_se_presenta_como_lo_que_no_es() -> None:
     minusculas = TEXTO.lower()
     for promesa in ("reembols", "garant", "indemniz", "seguro ", "seguros", "póliza", "entidad financiera",
-                    "banco", "pasarela", "saldo", "billetera", "legalmente", "por ley", "la ley exige", "obligación legal"):
+                    "banco", "pasarela", "saldo", "billetera", "legalmente", "por ley", "la ley exige", "obligación legal",
+                    "compensa", "reintegr", "resarc", "cobertura", "aseguramos", "nos hacemos responsables"):
         assert promesa not in minusculas, promesa
+    # «Devoluciones» solo aparece para decir que NO las hay.
+    assert minusculas.count("devoluc") == 1 and "no gestiona devoluciones económicas" in minusculas
+    # Lo que el sistema no hace no se promete (hallazgos de la revisión del 02/10/2026): conservar «el
+    # tiempo mínimo», avisar de seguridad «en cualquier momento», ni suspender una cuenta cualquiera.
+    for de_mas in ("tiempo mínimo necesario", "en cualquier momento", "suspender a un prestador, un servicio o una cuenta",
+                   "contenido falso"):
+        assert de_mas not in TEXTO, de_mas
     # No oculta que el piloto no procesa dinero: lo dice con todas las letras.
     dinero = _apartado(5)
-    for frase in ("no hay pagos dentro de Z", "no cobra", "ni transfiere dinero", "no cobra comisión",
+    # Habla de Z Servicios, no de toda la plataforma (Cursos, Eventos y Productos tienen su propio dinero).
+    for frase in ("no hay pagos en Z Servicios", "Por los servicios de este piloto", "no cobra", "ni transfiere dinero", "no cobra comisión",
                   "no emite comprobantes", "no gestiona devoluciones económicas", "servicios gratuitos",
                   "precio a consultar", "es solo información"):
         assert frase in dinero, frase
@@ -154,7 +163,11 @@ async def test_dice_el_alcance_y_las_reglas_de_la_primera_version() -> None:
     assert "personas mayores de edad" in _apartado(2) and "no la compartas" in _apartado(2)
     alcance = _apartado(4)
     for frase in ("en el Perú", "virtuales o presenciales", "No hay atención a domicilio",
-                  "categorías reguladas ni de alto riesgo", "servicios prohibidos"):
+                  "categorías reguladas ni de alto riesgo",
+                  # La lista de lo prohibido (P8) tiene que constar en las condiciones.
+                  "Están prohibidos", "actividades ilegales", "el fraude", "la falsificación", "las armas",
+                  "la explotación de personas", "el contenido sexual", "servicios financieros no autorizados",
+                  "riesgo inmediato a una persona"):
         assert frase in alcance, frase
     assert "piloto" in _apartado(1) and "acceso es limitado" in _apartado(1)
     assert "El prestador debe indicar el motivo" in _apartado(7) and "no tiene penalidad económica" in _apartado(7)
@@ -162,11 +175,22 @@ async def test_dice_el_alcance_y_las_reglas_de_la_primera_version() -> None:
     for frase in ("no ofrece una sala propia", "no graba", "ni almacena grabaciones", "de forma segura"):
         assert frase in virtuales, frase
     datos = _apartado(13)
-    for frase in ("son privados", "enlaces temporales", "tiempo mínimo necesario", "pedir a soporte",
-                  "no se elimina de forma automática", "de forma restringida o sin identificarte"):
+    for frase in ("son privados", "enlaces temporales", "conservar solo lo necesario",
+                  "se conserva mientras exista tu cuenta", "los plazos de conservación están por definir",
+                  "pedir a soporte", "no se elimina de forma automática", "de forma restringida o sin identificarte"):
         assert frase in datos, frase
     for causa in ("seguridad", "fraude", "incumplimiento", "riesgo"):
         assert causa in _apartado(15), causa
+    # Lo que Z puede hacer de verdad: suspender prestadores y servicios, y sacar una cuenta del piloto.
+    assert "suspender a un prestador o un servicio, y retirar una cuenta del piloto" in _apartado(15)
+    # Cambiar el horario y avisar de seguridad, como los deja el servidor.
+    assert "mientras el servicio siga publicado y su ficha no haya cambiado" in _apartado(8)
+    assert "en una reserva confirmada" in _apartado(10)
+    assert "Si el motivo es de seguridad, ese plazo de 48 horas no se aplica" in _apartado(10)
+    assert "no se abre otra a la vez, ni después de que Z la decida" in _apartado(10)
+    for frase in ("amenazas", "extorsión", "datos personales de otras personas", "discriminación",
+                  "afirmaciones falsas", "que no trate de la atención"):
+        assert frase in _apartado(12), frase
     assert "no cambia" in _apartado(17) and "versión nueva" in _apartado(17)
 
 

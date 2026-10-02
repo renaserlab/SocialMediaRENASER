@@ -140,6 +140,8 @@ export const es = {
   'settings.deleteAccountBlocked': 'No podemos cerrar tu cuenta todavía',
   'settings.deleteAccountBlockedBody':
     'Tiene ventas, pedidos o reclamos que debemos conservar. Escríbenos y la cerramos contigo.',
+  'settings.deleteAccountHistoryBody':
+    'Tiene reservas o atenciones que debemos conservar, y no se puede eliminar de forma automática. Escribe a soporte para atender tu solicitud.',
   'settings.deleteAccountUnknown': 'No pudimos confirmar el borrado',
   'settings.deleteAccountUnknownBody':
     'Vuelve a intentarlo cuando tengas conexión: si tu cuenta ya se eliminó, se cerrará la sesión.',

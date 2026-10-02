@@ -92,7 +92,12 @@ export function SettingsScreen() {
       // que escribir a soporte. Cualquier otro fallo sí se arregla
       // reintentando.
       if (error instanceof ApiError && BAJA_BLOQUEADA.includes(error.code)) {
-        notify(t('settings.deleteAccountBlocked'), t('settings.deleteAccountBlockedBody'));
+        // Con reservas no se promete cerrarla: se pide escribir a soporte.
+        const cuerpo =
+          error.code === 'account_deletion_blocked'
+            ? t('settings.deleteAccountBlockedBody')
+            : t('settings.deleteAccountHistoryBody');
+        notify(t('settings.deleteAccountBlocked'), cuerpo);
         return;
       }
       // SIN RESPUESTA DEL SERVIDOR NO SE SABE. La baja pudo terminar aunque

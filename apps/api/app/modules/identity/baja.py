@@ -83,13 +83,15 @@ class CuentaConRegistrosQueConservar(ConflictError):
 
 class HistoriaDeServicios(ConflictError):
     """F21: la persona es parte de un pedido o de una reserva de Servicios (o
-    de lo que cuelga de ellos). La baja automática no la toca: la cierra
-    soporte. No dice qué tiene ni cuánto."""
+    de lo que cuelga de ellos). La baja automática no la toca: la atiende
+    soporte. No dice qué tiene ni cuánto, y NO PROMETE CERRARLA: mientras no
+    exista la anonimización, nadie puede cerrar esa cuenta sin destruir su
+    historia."""
 
     code = "service_history_requires_support"
     message = (
-        "Tu cuenta tiene reservas o atenciones de Z Servicios que debemos conservar. "
-        "Escribe a soporte y la cerramos contigo."
+        "Tu cuenta tiene reservas o atenciones de Z Servicios que debemos conservar, "
+        "y no se puede eliminar de forma automática. Escribe a soporte para atender tu solicitud."
     )
 
 

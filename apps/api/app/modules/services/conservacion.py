@@ -27,6 +27,11 @@ guardado se siguen yendo con la cuenta, como hasta ahora.
 SE MIRA CON LA BANDERA APAGADA TAMBIÉN: apagar Servicios no convierte su
 historia en descartable.
 
+NO EXIGE QUE LAS MIGRACIONES ESTÉN APLICADAS. Se mira lo que la base tiene:
+una familia cuya tabla no existe no puede tener nada, y una base anterior a
+la contratación (0093) no tiene historia contractual. Lo que sí cierra la
+baja es NO PODER MIRAR: eso sube, y quien llama contesta 503.
+
 SOLO PROTEGE EL CAMINO DE LA API (`DELETE /auth/me`). Quien borre la fila del
 perfil a mano en Supabase sigue disparando las cascadas de la 0090: no hay
 ninguna otra ruta de la aplicación que borre un perfil.
@@ -34,11 +39,12 @@ ninguna otra ruta de la aplicación que borre un perfil.
 
 from __future__ import annotations
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, inspect, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from app.modules.profiles.models import Profile
+from app.modules.services import reserva_politica as limites
 from app.modules.services.agenda_models import (
     ServiceSchedule,
     ServiceScheduleBlock,
@@ -158,42 +164,74 @@ def _parte(raiz: type, enlaces: tuple, perfil_id: str):
     return or_(como_cliente, como_prestador)
 
 
-def consulta(perfil_id: str) -> Select:
+def consulta(perfil_id: str, familias: tuple = FAMILIAS) -> Select:
     """UNA sentencia, una columna por familia: `true` si la persona tiene algo
     en ella. No cuenta ni carga nada."""
     return select(
-        *(_parte(raiz, enlaces, perfil_id).label(tabla.__tablename__) for tabla, raiz, enlaces in FAMILIAS)
+        *(_parte(raiz, enlaces, perfil_id).label(tabla.__tablename__) for tabla, raiz, enlaces in familias)
     )
+
+
+def _tablas_de(familia: tuple) -> set[str]:
+    """Las tablas que nombra una familia: la suya, la raíz, las de paso y la
+    del prestador (por la que se llega a quien prestó)."""
+    tabla, raiz, enlaces = familia
+    nombres = {tabla.__tablename__, raiz.__tablename__, ServiceProvider.__tablename__}
+    for enlace in enlaces:
+        nombres |= {enlace.left.table.name, enlace.right.table.name}
+    return nombres
+
+
+async def _tablas(db: AsyncSession) -> set[str]:
+    """Las tablas que la base tiene AHORA. No se recuerda: una respuesta
+    vieja dejaría sin mirar una familia que ya existe."""
+    conexion = await db.connection()
+    return set(await conexion.run_sync(lambda sync: inspect(sync).get_table_names()))
 
 
 async def _poner_en_fila(db: AsyncSession, perfil_id: str) -> None:
     """Que no nazca una reserva entre mirar y borrar. Hasta el final de la
-    transacción de la baja:
+    transacción de la baja, y en el orden de quien confirma (el servicio, la
+    retención y la persona):
 
-      * LOS SERVICIOS en los que puede nacer: los que ofrece y aquellos en los
-        que tiene un horario apartado. Con el mismo cerrojo que toma quien
-        contrata (`reserva._poner_en_fila`, FOR NO KEY UPDATE): una
-        confirmación en curso termina antes de mirar, y una nueva espera.
-      * SU PERFIL (FOR UPDATE): escribir un pedido o una reserva a su nombre
-        comprueba la clave ajena a `profiles` y espera también.
+      1. LOS SERVICIOS QUE OFRECE, con el mismo cerrojo que toma quien
+         contrata (`reserva._poner_en_fila`, FOR NO KEY UPDATE): una
+         confirmación en curso termina antes de mirar, y una nueva espera.
+      2. SUS HORARIOS APARTADOS (FOR UPDATE): confirmar uno necesita esa fila.
+         Y NO el servicio ajeno en el que apartó: eso dejaría esperando a
+         todos los que contratan con ese prestador mientras la baja borra
+         archivos.
+      3. SU PERFIL (FOR UPDATE): escribir un pedido o una reserva a su nombre
+         comprueba la clave ajena a `profiles`, y espera también.
 
-    EN ESE ORDEN, que es el de la confirmación (el servicio y después la
-    persona): al revés, la baja y una confirmación a la vez se esperarían la
-    una a la otra (40P01). Solo PostgreSQL: SQLite (pruebas) no tiene cerrojos
-    de fila.
+    Al revés (la persona antes que la retención), la baja y una confirmación
+    suya a la vez se esperarían la una a la otra (40P01).
+
+    LOS DOS PRIMEROS NO ESPERAN MÁS QUE UNA CONTRATACIÓN
+    (`ESPERA_DEL_CERROJO_MS`): si alguien retiene esa fila más tiempo, la baja
+    no se queda colgada; sube, y es un 503 que se reintenta. El del perfil
+    espera lo que haga falta, como siempre: es el que pone en fila dos bajas
+    de la misma cuenta.
+
+    Solo PostgreSQL: SQLite (pruebas) no tiene cerrojos de fila.
     """
     if (await db.connection()).dialect.name != "postgresql":
         return
+    await db.execute(text(f"set local lock_timeout = '{int(limites.ESPERA_DEL_CERROJO_MS)}ms'"))
     los_que_ofrece = select(ServiceProvider.id).where(ServiceProvider.profile_id == perfil_id)
-    donde_aparto = select(ServiceHold.service_id).where(
-        ServiceHold.client_id == perfil_id, ServiceHold.status == RETENCION_ACTIVA
-    )
     await db.execute(
         select(Service.id)
-        .where(or_(Service.provider_id.in_(los_que_ofrece), Service.id.in_(donde_aparto)))
+        .where(Service.provider_id.in_(los_que_ofrece))
         .order_by(Service.id)
         .with_for_update(key_share=True)
     )
+    await db.execute(
+        select(ServiceHold.id)
+        .where(ServiceHold.client_id == perfil_id, ServiceHold.status == RETENCION_ACTIVA)
+        .order_by(ServiceHold.id)
+        .with_for_update()
+    )
+    await db.execute(text("set local lock_timeout to default"))
     await db.execute(select(Profile.id).where(Profile.id == perfil_id).with_for_update())
 
 
@@ -202,14 +240,23 @@ async def de_la_persona(db: AsyncSession, perfil_id: str) -> tuple[str, ...]:
     no tiene historia que conservar.
 
     DENTRO DE LA TRANSACCIÓN DE LA BAJA y antes de borrar o de tocar un
-    archivo: deja en fila sus servicios y su perfil. CUALQUIER FALLO SUBE: quien
-    llama no puede dar por buena una cuenta que no se pudo mirar.
+    archivo: deja en fila sus servicios, sus horarios apartados y su perfil.
+    CUALQUIER FALLO SUBE: quien llama no puede dar por buena una cuenta que no
+    se pudo mirar.
+
+    Se miran las familias cuyas tablas EXISTEN. Sin ninguna (una base
+    anterior a la contratación), no hay historia que conservar ni nada que
+    poner en fila.
 
     Los nombres son para el registro de soporte. A la persona no se le dice
     ni cuáles ni cuántas.
     """
+    existentes = await _tablas(db)
+    familias = tuple(familia for familia in FAMILIAS if _tablas_de(familia) <= existentes)
+    if not familias:
+        return ()
     await _poner_en_fila(db, perfil_id)
-    fila = (await db.execute(consulta(perfil_id))).one()
+    fila = (await db.execute(consulta(perfil_id, familias))).one()
     return tuple(nombre for nombre, hay in fila._mapping.items() if hay)
 
 

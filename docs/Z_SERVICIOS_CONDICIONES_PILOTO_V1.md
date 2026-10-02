@@ -22,10 +22,10 @@
 - **Título:** `Condiciones del piloto de Z Servicios`.
 - **País:** `PE`. Sin categoría: las condiciones que rigen una reserva son las
   generales del país del prestador.
-- **Tamaño del borrador:** 6183 caracteres (el límite de una política es
+- **Tamaño del borrador:** 6859 caracteres (el límite de una política es
   100 000).
 - **Huella del borrador, con sus dos marcadores:**
-  `89ee4e70ef2f1ce29ed3b5fcbb942899dddada14bbd6f393bf9d2d47d18ffbbe`.
+  `d72b7bf1abaf5db751dec64b5ba7d9b593048d8e5e55990722706d3953f11692`.
   **No será la de lo publicado:** al aprobar el texto se retiran los
   marcadores y la huella cambia. La definitiva la dice el guion (apartado 4).
 
@@ -43,7 +43,29 @@ uno, el guion se niega a preparar la publicación.
    apartado 16. **No se inventó ningún correo, teléfono ni dirección**: lo
    tiene que dar la empresa.
 
-Y tres cosas que el texto da por hechas y que decide la empresa:
+**Este texto lo acepta quien contrata, no quien presta.** Es un
+`booking_terms`: se acepta al confirmar una reserva. Varias de sus reglas
+obligan al prestador (ejecutar el servicio como dice su ficha, dar el motivo
+al cancelar, comunicar el medio de una atención virtual), y el prestador **no
+acepta este texto en ningún momento**. Lo que él acepta al postular son las
+**condiciones del prestador** (`provider_terms`, S1), que **siguen sin
+texto**: sin ellas publicadas nadie puede postular, y tienen que decir lo
+mismo. Redactarlas no era de este bloque.
+
+**Un texto con marcadores también se puede publicar.** El freno está en el
+guion, no en el servidor: quien pegue el `.txt` tal cual en el panel, o envíe
+el fichero que genera `--borrador`, publicaría unas condiciones que empiezan
+por «[BORRADOR PENDIENTE…]» y sin canal de soporte. Y publicar no tiene
+vuelta atrás por la API. Por eso el procedimiento del apartado 4 no se
+salta.
+
+Y cuatro cosas que el texto da por hechas y que decide la empresa:
+
+- **Los plazos de conservación** (apartado 13; F20, IV-19). El texto dice la
+  verdad de hoy —la información se conserva mientras exista la cuenta, y los
+  plazos están por definir—, y no promete conservar «el tiempo mínimo»: no
+  hay ningún proceso que borre nada a un plazo. Si la revisión legal exige
+  un plazo, hay que definirlo y construirlo antes de prometerlo.
 
 - **El procedimiento para comunicar el medio de una atención virtual**
   (apartado 14). El texto dice que el prestador lo comunica «de forma segura,
@@ -64,24 +86,28 @@ declaración o una regla de operación está marcado: el sistema no lo impone.
 | 1. Naturaleza del piloto | Acceso limitado a cuentas autorizadas | **Sistema**: `SERVICES_PILOT_PROFILE_IDS` (P101); con la lista vacía no entra nadie |
 | 2. Participantes | Mayores de edad, información verdadera, cuenta personal | **Declaración**. No hay verificación de edad: el piloto es una lista cerrada que elige la empresa, y el prestador presenta su documento de identidad, que revisa una persona |
 | 3. El papel de Z | Z facilita; el prestador ejecuta; Z modera | **Sistema**: nadie publica sin admisión y sin revisión de su ficha; administración suspende y retira |
-| 4. Alcance | Perú; virtual o presencial; sin domicilio; sin categorías reguladas | Modalidades: **sistema** (`SERVICES_CATALOG_MODALITIES=virtual,in_person`). Perú: **operación** (solo se publican condiciones para `PE`, y sin ellas ni se postula ni se confirma). Categorías: **operación** (solo administración las crea; no se siembra ninguna) |
-| 5. Dinero | Sin pagos; solo lo gratuito se reserva; «a consultar» es informativo | **Sistema**: solo `free` se confirma; la base no deja guardar un pedido con importe; `FEATURE_SERVICE_PAYMENTS=false`, `SERVICE_PAYMENTS_PROVIDER=none`; de fábrica solo se publican fichas gratuitas o «a consultar» |
+| 4. Alcance | Perú; virtual o presencial; sin domicilio; sin categorías reguladas; la lista de lo prohibido (P8) | Modalidades: **sistema** (`SERVICES_CATALOG_MODALITIES=virtual,in_person`). Perú: **operación** (solo se publican condiciones para `PE`, y sin ellas ni se postula ni se confirma). Categorías y actividades prohibidas: **operación** (solo administración crea categorías, no se siembra ninguna y cada servicio se aprueba a mano; no hay filtro automático) |
+| 5. Dinero | Sin pagos en Z Servicios; solo lo gratuito se reserva; «a consultar» es informativo | **Sistema**: solo `free` se confirma; la base no deja guardar un pedido con importe; `FEATURE_SERVICE_PAYMENTS=false`, `SERVICE_PAYMENTS_PROVIDER=none`; de fábrica una ficha con importe no se puede **enviar** a revisión (la regla actúa al enviar: aprobar y publicar no la repiten, y en Supabase no hay ningún servicio) |
 | 6. La reserva | Horario apartado unos minutos; se guarda lo aceptado | **Sistema**: retención de 10 minutos; aceptación con versión y huella |
 | 7. Cancelación | Hasta antes del inicio; sin penalidad; el prestador da el motivo | **Sistema** |
-| 8. Cambio de horario | Una vez, con 24 horas | **Sistema**, con los valores congelados en cada reserva (0095) |
+| 8. Cambio de horario | Una vez, con 24 horas, si el servicio sigue publicado y su ficha no cambió | **Sistema**, con los valores congelados en cada reserva (0095) |
 | 9. La atención | Código desde 15 minutos antes; cierre a las 24 horas; inasistencia a los 15 minutos | **Sistema**. El cierre automático lo ejecuta hoy una persona de administración (no hay planificador) |
-| 10. Incidencias | 48 horas; seguridad, sin plazo; evidencia verdadera y lícita | Plazos: **sistema**. La veracidad y la licitud: **declaración**, y moderación del equipo |
+| 10. Incidencias | En una reserva confirmada, desde el inicio y hasta 48 horas después; por seguridad no corre ese plazo; una incidencia a la vez y ninguna tras la decisión; evidencia verdadera y lícita | Plazos y unicidad: **sistema**. La veracidad y la licitud: **declaración**, y moderación del equipo |
 | 11. Apelación | Una, en 5 días, por otra persona; si no la hay, no se ofrece | **Sistema** |
-| 12. Reseñas | Solo quien contrató, una, hasta 30 días, con revisión previa | **Sistema** (`SERVICES_REVIEWS_PREMODERATION=true`) |
-| 13. Datos personales | Documentos y evidencias privados, enlaces temporales; la cuenta con reservas no se elimina sola | **Sistema**: depósitos privados y enlaces firmados; F21. El plazo de conservación: **pendiente** (F20) |
+| 12. Reseñas | Solo quien contrató, una, hasta 30 días, con revisión previa; lo que no se admite | **Sistema** (`SERVICES_REVIEWS_PREMODERATION=true`). Lo que no se admite lo aplica una persona al moderar (datos personales, amenazas, odio, extorsión, fuera de tema) |
+| 13. Datos personales | Documentos y evidencias privados, enlaces temporales; se conserva mientras exista la cuenta; la cuenta con reservas no se elimina sola | **Sistema**: depósitos privados y enlaces firmados; nada se borra a un plazo; F21. El plazo de conservación: **pendiente** (F20, IV-19) |
 | 14. Servicios virtuales | Sin sala propia, sin grabaciones | **Sistema**: no existe sala ni grabación (100ms, posterior). El procedimiento para comunicar el medio: **pendiente** |
-| 15. Suspensión | Por seguridad, fraude, incumplimiento o riesgo | **Sistema**: administración suspende prestadores y servicios |
+| 15. Suspensión | Suspender a un prestador o un servicio y retirar una cuenta del piloto | **Sistema**: administración suspende prestadores y servicios; una cuenta sale del piloto quitándola de la lista (P101) |
 | 16. Soporte | El canal | **Pendiente**: marcador |
 | 17. Vigencia | Versión y huella con cada reserva; una versión nueva no cambia lo aceptado | **Sistema** |
 
 Los plazos del texto son los valores de fábrica de la configuración, y una
 prueba los compara: si alguien cambia un plazo sin publicar unas condiciones
-nuevas, se pone en rojo.
+nuevas, se pone en rojo. **La prueba mira los valores de fábrica, no los de
+cada entorno:** si un servidor sobreescribe un `SERVICES_*` de la tabla III
+de `Z_REQUISITOS_Y_DECISIONES.md`, hará algo distinto de lo publicado sin
+que nada avise. Antes de publicar hay que comprobar que el entorno no los
+cambia.
 
 ## 4. Cómo se publican
 
@@ -98,6 +124,10 @@ que una inserción directa en la base no haría: **no se publican con SQL**.
   contratación (`FEATURE_SERVICE_BOOKING`): las condiciones se publican antes
   de abrirla.
 - Quien lo hace tiene el rol `admin`. Un moderador puede leer, no publicar.
+- El entorno no sobreescribe ninguno de los plazos (`SERVICES_*`) que el
+  texto dice.
+- Las condiciones del prestador (`provider_terms`) tienen su propio texto
+  aprobado, o se sabe que sin él nadie podrá postular.
 
 **Paso 1. Comprobar el texto y obtener su huella.** Desde `apps/api`:
 

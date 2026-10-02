@@ -126,6 +126,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'settings.deleteAccountBlocked': 'We can’t close your account yet',
   'settings.deleteAccountBlockedBody':
     'It has sales, orders or claims we need to keep. Write to us and we’ll close it with you.',
+  'settings.deleteAccountHistoryBody':
+    'It has bookings or sessions we need to keep, so it can’t be deleted automatically. Write to support and we’ll handle your request.',
   'settings.deleteAccountUnknown': 'We couldn’t confirm the deletion',
   'settings.deleteAccountUnknownBody':
     'Try again when you’re online: if your account was already deleted, you’ll be signed out.',

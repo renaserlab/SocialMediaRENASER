@@ -30,7 +30,9 @@ from sqlalchemy.dialects import postgresql
 from app.core.config import get_settings
 from app.modules.identity import baja
 from app.modules.services import conservacion, posventa
-from app.shared.database import Base
+from app.modules.services import reserva_politica as limites
+from app.shared import storage
+from app.shared.database import Base, get_db
 from tests.test_baja_de_cuenta_postgres import SIN_POSTGRES, _borrar_cuenta, _existe, _filas, _persona, _uno
 from tests.test_servicios_admision_api import PDF
 from tests.test_servicios_agenda_api import _codigo, _dia, _pedir
@@ -61,6 +63,7 @@ from tests.test_servicios_reserva_api import (  # noqa: F401 - montajes comparti
     _resumen,
     _retener,
     _servicio,
+    _siempre,
     reservas,
 )
 
@@ -461,7 +464,7 @@ async def test_un_error_al_mirar_es_503_y_no_se_toca_nada(atencion, monkeypatch,
     h = await _reservado(app, motor)
     limpia = await _persona(motor)
     if donde == "consulta":
-        monkeypatch.setattr(conservacion, "consulta", lambda perfil_id: text("select 1 / 0"))
+        monkeypatch.setattr(conservacion, "consulta", lambda perfil_id, familias=None: text("select 1 / 0"))
     else:
         async def _revienta(db, perfil_id):
             await db.execute(text("select 1 / 0"))
@@ -578,6 +581,194 @@ async def test_confirmar_y_borrar_a_la_vez_nunca_destruye_una_reserva(atencion, 
     # 404: la retención o el servicio ya no están. 409: la confirmación no
     # esperó más por el cerrojo (`service_booking_busy`).
     assert resultados <= {(201, 409), (404, 204), (409, 204)}, resultados
+
+
+def _con_storage_detenido(monkeypatch) -> tuple[asyncio.Event, asyncio.Event]:
+    """La baja se queda DENTRO de Storage (con la base ya borrada sin
+    confirmar y todos sus cerrojos) hasta que se le diga que siga."""
+    dentro, seguir = asyncio.Event(), asyncio.Event()
+    original = storage.delete_user_files
+
+    async def detenido(*args, **kwargs):
+        dentro.set()
+        await seguir.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(storage, "delete_user_files", detenido)
+    return dentro, seguir
+
+
+@SIN_POSTGRES
+@pytest.mark.parametrize("quien", ["prestador", "cliente"])
+async def test_si_la_baja_va_primero_la_reserva_no_nace(atencion, monkeypatch, quien) -> None:  # noqa: F811
+    """La otra mitad de la carrera, SIN DEJARLA AL AZAR (hallazgo de la
+    revisión: la prueba de arriba podía pasar ejercitando una sola rama). La
+    baja ya miró y está borrando; quien confirma ESPERA; y cuando la baja
+    termina, la reserva no nace."""
+    app, motor, _ = atencion
+    perfil, servicio, jefa, _moderador = await _servicio(app, motor)
+    await _condiciones(app, jefa)
+    cliente = await _persona(motor)
+    inicio = (await _horarios(app, servicio, _dia(7)))[0]["starts_at"]
+    r = await _retener(app, cliente, servicio, inicio)
+    assert r.status_code == 201, r.text
+    retencion = r.json()["id"]
+    cuerpo = _aceptando(await _resumen(app, cliente, retencion))
+    se_va = perfil if quien == "prestador" else cliente
+    dentro, seguir = _con_storage_detenido(monkeypatch)
+
+    baja_en_curso = asyncio.create_task(_borrar_cuenta(app, se_va))
+    await asyncio.wait_for(dentro.wait(), 20)
+    confirmando = asyncio.create_task(_confirmar(app, cliente, retencion, cuerpo))
+    assert await _esperando(motor)
+    assert not confirmando.done() and not baja_en_curso.done()
+    seguir.set()
+    borrada, confirmada = await baja_en_curso, await confirmando
+
+    assert borrada.status_code == 204, borrada.text
+    assert confirmada.status_code in (404, 409), confirmada.text
+    assert not await _existe(motor, se_va)
+    assert await _uno(motor, "select count(*) from public.service_bookings b join public.service_holds h "
+                             "on h.id = b.hold_id where h.id = cast(:h as uuid)", h=retencion) == 0
+    assert await _uno(motor, "select count(*) from public.service_orders where client_id = cast(:u as uuid)", u=cliente) == 0
+
+
+@SIN_POSTGRES
+async def test_la_baja_de_quien_aparto_un_horario_no_deja_esperando_a_los_demas(atencion, monkeypatch) -> None:  # noqa: F811
+    """Hallazgo de la revisión. Para ponerse en fila con una confirmación
+    suya, la baja de quien apartó un horario bloqueaba EL SERVICIO de otro
+    prestador hasta terminar de borrar archivos: los demás recibían
+    `service_booking_busy`. Ahora bloquea su retención, que es solo suya."""
+    app, motor, _ = atencion
+    _perfil, servicio, _jefa, _moderador = await _servicio(app, motor)
+    se_va, otra = await _persona(motor), await _persona(motor)
+    horarios = await _horarios(app, servicio, _dia(7))
+    assert (await _retener(app, se_va, servicio, horarios[0]["starts_at"])).status_code == 201
+    dentro, seguir = _con_storage_detenido(monkeypatch)
+
+    baja_en_curso = asyncio.create_task(_borrar_cuenta(app, se_va))
+    await asyncio.wait_for(dentro.wait(), 20)
+    # Con la baja a medias, otra persona aparta otro horario del mismo servicio SIN esperar.
+    r = await asyncio.wait_for(_retener(app, otra, servicio, horarios[1]["starts_at"]), 3)
+    assert r.status_code == 201, r.text
+    assert not baja_en_curso.done()
+    seguir.set()
+    assert (await baja_en_curso).status_code == 204
+
+
+@SIN_POSTGRES
+async def test_si_alguien_retiene_el_servicio_la_baja_no_se_queda_colgada(atencion, monkeypatch) -> None:  # noqa: F811
+    """Hallazgo de la revisión: la baja esperaba el cerrojo del servicio sin
+    límite. Espera lo que una contratación (`ESPERA_DEL_CERROJO_MS`) y, si no
+    llega, es un 503 que se reintenta: nada borrado, ningún archivo tocado."""
+    app, motor, almacen = atencion
+    perfil, servicio, _jefa, _moderador = await _servicio(app, motor)
+    monkeypatch.setattr(limites, "ESPERA_DEL_CERROJO_MS", 400)
+    antes = await _foto(motor)
+    async with motor.connect() as atascada:
+        await atascada.execute(text("select id from public.services where id = cast(:s as uuid) for update"),
+                               {"s": servicio})
+        r = await asyncio.wait_for(_borrar_cuenta(app, perfil), 10)
+        assert r.status_code == 503 and _codigo(r) == "account_deletion_unavailable", r.text
+        await atascada.rollback()
+    assert await _existe(motor, perfil) and await _foto(motor) == antes and almacen.borrados == []
+    assert (await _borrar_cuenta(app, perfil)).status_code == 204
+
+
+@SIN_POSTGRES
+async def test_la_baja_espera_a_su_retencion_sin_tener_todavia_su_perfil(atencion) -> None:  # noqa: F811
+    """EL ORDEN, que es lo que evita el interbloqueo con una confirmación
+    suya: la retención ANTES que el perfil. Quien confirma tiene su retención
+    y después escribe a nombre de la persona; si la baja tuviera ya el perfil
+    mientras espera la retención, se esperarían la una a la otra."""
+    app, motor, almacen = atencion
+    _perfil, servicio, _jefa, _moderador = await _servicio(app, motor)
+    cliente = await _persona(motor)
+    inicio = (await _horarios(app, servicio, _dia(7)))[0]["starts_at"]
+    r = await _retener(app, cliente, servicio, inicio)
+    assert r.status_code == 201, r.text
+    async with motor.connect() as confirmando, motor.connect() as escribiendo:
+        await confirmando.execute(text("select id from public.service_holds where id = cast(:h as uuid) for update"),
+                                  {"h": r.json()["id"]})
+        baja_en_curso = asyncio.create_task(_borrar_cuenta(app, cliente))
+        assert await _esperando(motor)
+        assert not baja_en_curso.done() and almacen.borrados == []
+        # El perfil sigue libre: quien confirma puede escribir a su nombre (FOR KEY SHARE) sin esperar.
+        await escribiendo.execute(
+            text("select id from public.profiles where id = cast(:u as uuid) for key share nowait"), {"u": cliente})
+        await escribiendo.rollback()
+        await confirmando.rollback()
+    assert (await baja_en_curso).status_code == 204
+
+
+@SIN_POSTGRES
+async def test_dos_bajas_a_la_vez_la_segunda_espera_a_la_primera_lo_que_haga_falta(atencion, monkeypatch) -> None:  # noqa: F811
+    """El cerrojo del perfil NO tiene el límite de los otros dos: la segunda
+    baja espera a que la primera termine de borrar archivos y contesta 204,
+    no un 503."""
+    app, motor, _ = atencion
+    nadie = await _persona(motor)
+    monkeypatch.setattr(limites, "ESPERA_DEL_CERROJO_MS", 300)
+    dentro, seguir = _con_storage_detenido(monkeypatch)
+    primera = asyncio.create_task(_borrar_cuenta(app, nadie))
+    await asyncio.wait_for(dentro.wait(), 20)
+    segunda = asyncio.create_task(_borrar_cuenta(app, nadie))
+    assert await _esperando(motor)
+    await asyncio.sleep(1.2)  # cuatro veces el límite de los otros cerrojos
+    assert not segunda.done() and not primera.done()
+    seguir.set()
+    assert [(await primera).status_code, (await segunda).status_code] == [204, 204]
+    assert not await _existe(motor, nadie)
+
+
+# =========================================================================== #
+# 6b. La base no tiene por qué tener todas las migraciones
+# =========================================================================== #
+_TABLAS_DE_LA_0094 = ("service_reviews", "service_incident_entries", "service_incidents", "service_attendances")
+_TABLAS_DE_LA_0093 = ("service_booking_events", "service_booking_acceptances", "service_booking_intakes",
+                  "service_bookings", "service_orders")
+
+
+async def _borrar_en_una_base_sin(app, motor, uid: str, tablas: tuple[str, ...]):
+    """La baja de `uid` con `tablas` quitadas, todo dentro de una transacción
+    que SE DESHACE: la base de la prueba no cambia."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    normal = app.dependency_overrides[get_db]
+    async with motor.connect() as conexion:
+        transaccion = await conexion.begin()
+        sesion = AsyncSession(bind=conexion, expire_on_commit=False)
+        app.dependency_overrides[get_db] = _siempre(sesion)
+        try:
+            await conexion.execute(text("drop table " + ", ".join(f"public.{t}" for t in tablas) + " cascade"))
+            return await _borrar_cuenta(app, uid)
+        finally:
+            app.dependency_overrides[get_db] = normal
+            await sesion.close()
+            if transaccion.is_active:
+                await transaccion.rollback()
+
+
+@SIN_POSTGRES
+async def test_sin_las_tablas_de_la_contratacion_la_baja_sigue_y_con_parte_de_ellas_mira_lo_que_hay(atencion) -> None:  # noqa: F811
+    """Hallazgo de la revisión: la baja exigía que existieran las tablas de
+    Servicios y, sin ellas, contestaba 503 para siempre. El código no puede
+    exigir que su migración esté aplicada."""
+    app, motor, almacen = atencion
+    h = await _reservado(app, motor)
+    await _llevar(motor, h["reserva"]["id"], minutos=-3 * 60)
+    limpia = await _persona(motor)
+    antes = await _foto(motor)
+    # Sin la atención (0094) y con la contratación (0093): la reserva frena igual.
+    for parte in (h["cliente"], h["perfil"]):
+        r = await _borrar_en_una_base_sin(app, motor, parte, _TABLAS_DE_LA_0094)
+        assert r.status_code == 409 and _codigo(r) == CODIGO, r.text
+    # Sin ninguna de las dos: no hay historia contractual que mirar, y la baja no se rompe.
+    r = await _borrar_en_una_base_sin(app, motor, limpia, (*_TABLAS_DE_LA_0094, *_TABLAS_DE_LA_0093))
+    assert r.status_code == 204, r.text
+    # Todo se deshizo: la base y sus tablas siguen como estaban.
+    assert await _foto(motor) == antes and await _existe(motor, limpia)
+    await _frenada(app, motor, almacen, h["cliente"])
 
 
 # =========================================================================== #

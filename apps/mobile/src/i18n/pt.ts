@@ -127,6 +127,8 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'settings.deleteAccountBlocked': 'Ainda não podemos encerrar sua conta',
   'settings.deleteAccountBlockedBody':
     'Ela tem vendas, pedidos ou reclamações que precisamos manter. Escreva para nós e encerramos com você.',
+  'settings.deleteAccountHistoryBody':
+    'Ela tem reservas ou atendimentos que precisamos manter e não pode ser excluída automaticamente. Escreva para o suporte para atendermos sua solicitação.',
   'settings.deleteAccountUnknown': 'Não conseguimos confirmar a exclusão',
   'settings.deleteAccountUnknownBody':
     'Tente de novo quando tiver conexão: se sua conta já foi excluída, a sessão será encerrada.',

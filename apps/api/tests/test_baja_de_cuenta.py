@@ -221,8 +221,12 @@ async def test_con_historia_de_servicios_es_409_antes_de_borrar_y_de_tocar_un_ar
         }
         assert await _existe(sesiones, ANA)
         assert almacen.borrados == [] and len(almacen.de("post-media", ANA)) == 2
-    # La respuesta no dice qué tiene ni cuánto.
-    assert "service_orders" not in r.text and "1" not in r.json()["error"]["message"]
+    # La respuesta no dice qué tiene ni cuánto, remite a soporte y NO PROMETE
+    # cerrar la cuenta: hoy nadie puede cerrarla sin destruir su historia.
+    mensaje = r.json()["error"]["message"]
+    assert "service_orders" not in r.text and "1" not in mensaje
+    assert "soporte" in mensaje and "no se puede eliminar de forma automática" in mensaje
+    assert "cerramos" not in mensaje and "la cerraremos" not in mensaje
 
 
 async def test_la_historia_de_otra_persona_no_frena_la_mia(entorno) -> None:
@@ -274,6 +278,62 @@ async def test_la_puerta_de_la_0089_va_antes_que_la_historia(entorno, monkeypatc
     r = await _borrar(app)
     assert r.status_code == 503 and r.json()["error"]["code"] == "account_deletion_unavailable", r.text
     assert miradas == [] and almacen.borrados == []
+
+
+#: Lo que añade cada migración de la contratación (0093) y de la atención (0094).
+_DE_LA_0094 = ("service_reviews", "service_incident_entries", "service_incidents", "service_attendances")
+_DE_LA_0093 = ("service_booking_events", "service_booking_acceptances", "service_booking_intakes",
+               "service_bookings", "service_orders")
+
+
+async def _sin_las_tablas(sesiones, *tablas: str) -> None:
+    from sqlalchemy import text
+
+    async with sesiones() as db:
+        for tabla in tablas:
+            await db.execute(text(f"drop table {tabla}"))
+        await db.commit()
+
+
+async def test_una_base_anterior_a_la_contratacion_no_rompe_la_baja(entorno) -> None:
+    """Hallazgo de la revisión (02/10/2026). El código no exige que su
+    migración esté aplicada: en una base sin las tablas de la contratación no
+    puede haber historia contractual, y la baja sigue como siempre. Antes
+    contestaba 503 para siempre."""
+    app, sesiones, almacen, _ = entorno
+    _archivos(almacen)
+    await _sin_las_tablas(sesiones, *_DE_LA_0094, *_DE_LA_0093)
+    assert (await _borrar(app)).status_code == 204
+    assert not await _existe(sesiones, ANA)
+
+
+async def test_con_la_contratacion_y_sin_la_atencion_se_mira_lo_que_hay(entorno) -> None:
+    """Una base con la 0093 y sin la 0094: las familias de la atención no
+    pueden tener nada, y las de la contratación se miran igual."""
+    app, sesiones, almacen, estado = entorno
+    await _con_un_pedido(sesiones, contrata=ANA, presta=BEA)
+    await _sin_las_tablas(sesiones, *_DE_LA_0094)
+    r = await _borrar(app)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "service_history_requires_support", r.text
+    assert await _existe(sesiones, ANA) and almacen.borrados == []
+    # Y quien no tiene nada en las que hay, se borra.
+    estado["uid"] = "33333333-3333-4333-8333-333333333333"
+    async with sesiones() as db:
+        db.add(Profile(id=estado["uid"], full_name="Cora", username="cora", role="user"))
+        await db.commit()
+    assert (await _borrar(app)).status_code == 204
+
+
+async def test_si_no_se_puede_saber_que_tablas_hay_es_503(entorno, monkeypatch) -> None:
+    app, sesiones, almacen, _ = entorno
+
+    async def _revienta(db):
+        raise RuntimeError("el catálogo no contesta")
+
+    monkeypatch.setattr(conservacion, "_tablas", _revienta)
+    r = await _borrar(app)
+    assert r.status_code == 503 and r.json()["error"]["code"] == "account_deletion_unavailable", r.text
+    assert await _existe(sesiones, ANA) and almacen.borrados == []
 
 
 class _Interbloqueo(Exception):

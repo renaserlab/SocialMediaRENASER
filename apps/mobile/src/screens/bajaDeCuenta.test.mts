@@ -57,9 +57,22 @@ describe('Borrar la cuenta', () => {
     const bloqueada = bloque(AJUSTES, 'const BAJA_BLOQUEADA', ';');
     assert.ok(bloqueada.includes("'account_deletion_blocked'"));
     assert.ok(bloqueada.includes("'service_history_requires_support'"));
+    // Con reservas NO se promete cerrarla («la cerramos contigo»): tiene su texto.
+    const rama = bloque(manejador, 'BAJA_BLOQUEADA.includes(error.code)', 'return;');
+    assert.ok(/error\.code === 'account_deletion_blocked'\s*\?\s*t\('settings\.deleteAccountBlockedBody'\)\s*:\s*t\('settings\.deleteAccountHistoryBody'\)/.test(rama));
     // Va ANTES que «no se sabe» y que «inténtalo de nuevo»: un 409 no llega a ellas.
     assert.ok(manejador.indexOf('BAJA_BLOQUEADA.includes') < manejador.indexOf('sinSaberComoTermino(error)'));
     assert.ok(!bloque(AJUSTES, 'const BAJA_NO_HECHA', ';').includes('service_history_requires_support'));
+  });
+
+  it('el texto de las reservas pide escribir a soporte y no promete un cierre que hoy no existe', () => {
+    const promesas = { es: 'cerramos contigo', en: 'close it with you', pt: 'encerramos com você' };
+    const soporte = { es: 'soporte', en: 'support', pt: 'suporte' };
+    for (const idioma of ['es', 'en', 'pt'] as const) {
+      const cuerpo = bloque(fuente(`i18n/${idioma}.ts`), "'settings.deleteAccountHistoryBody':", "',\n");
+      assert.ok(cuerpo.includes(soporte[idioma]), `${idioma}: remite a soporte`);
+      assert.ok(!cuerpo.includes(promesas[idioma]), `${idioma}: no promete cerrarla`);
+    }
   });
 
   it('sin respuesta de la API NO afirma que la cuenta sigue activa (la baja pudo terminar)', () => {
@@ -107,7 +120,7 @@ describe('Borrar la cuenta', () => {
   it('los textos nuevos existen en los tres idiomas', () => {
     for (const idioma of ['es', 'en', 'pt']) {
       const textos = fuente(`i18n/${idioma}.ts`);
-      for (const clave of ['deleteAccountBlocked', 'deleteAccountBlockedBody', 'deleteAccountUnknown', 'deleteAccountUnknownBody']) {
+      for (const clave of ['deleteAccountBlocked', 'deleteAccountBlockedBody', 'deleteAccountHistoryBody', 'deleteAccountUnknown', 'deleteAccountUnknownBody']) {
         assert.ok(textos.includes(`'settings.${clave}':`), `${idioma}: ${clave}`);
       }
     }
