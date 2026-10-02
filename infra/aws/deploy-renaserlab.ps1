@@ -122,13 +122,23 @@ $ClaveDeCabecera = 'CLOUDFRONT_ORIGIN_SECRET'
 # nadie lo decida.
 $ClavesQueFijaLaPlantilla = @('APP_NAME', 'ENVIRONMENT', 'PORT', 'CORS_ORIGINS',
     'SUPABASE_JWT_ALGORITHM', 'SUPABASE_JWT_AUDIENCE', 'FEATURE_RECOMMENDATIONS_V1',
-    'PAYMENTS_ENABLED', 'PAYMENTS_RETURN_URL', 'BETA_FREE_ACCESS_ENABLED')
+    'PAYMENTS_ENABLED', 'PAYMENTS_RETURN_URL', 'BETA_FREE_ACCESS_ENABLED',
+    'FEATURE_SERVICES', 'FEATURE_SERVICE_BOOKING', 'FEATURE_SERVICE_PAYMENTS',
+    'SERVICE_PAYMENTS_PROVIDER', 'SERVICES_PUBLIC_ACCESS', 'SERVICES_CATALOG_MODALITIES',
+    'SERVICES_CATALOG_CURRENCIES')
+
+# El piloto de Z Servicios: los perfiles autorizados. Va en el secreto y no en
+# un parametro porque son identificadores de personas: un parametro acabaria en
+# los perfiles del repositorio, en las evidencias y en la consola. Vacia = no
+# entra nadie. Aqui solo se comprueba su FORMA; nunca se imprime su valor.
+$ClaveDelPiloto = 'SERVICES_PILOT_PROFILE_IDS'
+$PatronDelPiloto = '^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})*$'
 
 # Lo que mueve dinero nace apagado y se enciende a mano, en otra decision.
 $BanderasDeDinero = @('PAYMENTS_ENABLED', 'STRIPE_PAYMENTS_ENABLED', 'STRIPE_REFUNDS_ENABLED',
     'STRIPE_CONNECT_ENABLED', 'CREATOR_TRANSFERS_ENABLED', 'FEATURE_COURSE_REFUNDS',
     'FEATURE_PRODUCT_SALES', 'FEATURE_EVENT_PAYMENTS', 'REVENUECAT_VERIFICATION_ENABLED',
-    'REVENUECAT_WEBHOOK_ENABLED', 'BETA_FREE_ACCESS_ENABLED')
+    'REVENUECAT_WEBHOOK_ENABLED', 'BETA_FREE_ACCESS_ENABLED', 'FEATURE_SERVICE_PAYMENTS')
 
 # Estados en los que una pila existe y tiene salidas que leer.
 $EstadosConPila = @('CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE',
@@ -344,7 +354,8 @@ function Test-ParidadDelPerfil([System.Collections.IDictionary] $Configuracion) 
             -not $Configuracion.Contains($_) -and $_ -notin $ParametrosInyectados -and $_ -notin $ParametrosPorDefectoAProposito })
     if ($sobran) { throw "El perfil trae parametros que la plantilla no tiene: $($sobran -join ', ')" }
     if ($faltan) { throw "El perfil no fija estos parametros (se aplicaria su valor por defecto): $($faltan -join ', ')" }
-    foreach ($bandera in 'PaymentsEnabled', 'BetaFreeAccessEnabled') {
+    foreach ($bandera in 'PaymentsEnabled', 'BetaFreeAccessEnabled', 'FeatureServices',
+        'FeatureServiceBooking', 'ServicesPublicAccess') {
         if ($Configuracion[$bandera] -ne 'false') {
             Write-Aviso "$bandera vale '$($Configuracion[$bandera])' en el perfil: se desplegaria encendido."
         }
@@ -686,6 +697,12 @@ function Read-FicheroDeSecretos([string] $Ruta) {
     }
     if ($secreto.Contains('SUPABASE_URL') -and [string] $secreto['SUPABASE_URL'] -notmatch '^https://') {
         $problemas.Add('SUPABASE_URL tiene que ser https://')
+    }
+    # La API cierra el piloto entero si UNA entrada no es un UUID. Mejor
+    # saberlo aqui que con Servicios encendido y nadie pudiendo entrar. Solo
+    # se dice que esta mal: el valor no se imprime.
+    if ($secreto.Contains($ClaveDelPiloto) -and [string] $secreto[$ClaveDelPiloto] -notmatch $PatronDelPiloto) {
+        $problemas.Add("$ClaveDelPiloto tiene que ser una lista de UUID separados por comas, sin espacios (o vacia)")
     }
     if ($problemas.Count -gt 0) { throw "El fichero de secretos no vale: $($problemas -join '; ')." }
     return $secreto

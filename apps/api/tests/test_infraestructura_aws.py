@@ -274,3 +274,123 @@ def test_el_guion_solo_borra_la_pila_vacia_de_un_plan() -> None:
     assert "REVIEW_IN_PROGRESS" in descartar and ".Count -eq 0" in descartar
     for prohibido in ("delete-repository", "delete-secret", "delete-bucket", "force-delete"):
         assert prohibido not in texto, f"el guion no borra datos: {prohibido}"
+
+
+# --------------------------------------------------------------------------- #
+# Z Servicios: se despliega apagado, sin «a domicilio», en soles y sin cobrar
+# --------------------------------------------------------------------------- #
+#: Lo que la plantilla escribe en el entorno de la API para Servicios.
+DE_SERVICIOS = {
+    "FEATURE_SERVICES": "FeatureServices",
+    "FEATURE_SERVICE_BOOKING": "FeatureServiceBooking",
+    "SERVICES_PUBLIC_ACCESS": "ServicesPublicAccess",
+    "SERVICES_CATALOG_MODALITIES": "ServicesCatalogModalities",
+    "SERVICES_CATALOG_CURRENCIES": "ServicesCatalogCurrencies",
+}
+#: Lo que va FIJO: cobrar un servicio no se enciende desde la infraestructura.
+FIJAS_DE_SERVICIOS = {"FEATURE_SERVICE_PAYMENTS": "false", "SERVICE_PAYMENTS_PROVIDER": "none"}
+CLAVE_DEL_PILOTO = "SERVICES_PILOT_PROFILE_IDS"
+
+
+def _entorno_que_escribe_la_plantilla() -> dict[str, str]:
+    """`VARIABLE -> valor` de cada línea que la plantilla añade a `api.env`."""
+    texto = PLATAFORMA.read_text(encoding="utf-8")
+    bloque = re.search(r'echo "APP_NAME=.*?\} >> /etc/renaser/api\.env', texto, re.S)
+    assert bloque, "no encuentro el bloque que escribe /etc/renaser/api.env"
+    return dict(re.findall(r'echo "([A-Z][A-Z0-9_]*)=(.*)"', bloque.group(0)))
+
+
+@pytest.mark.parametrize("fichero", PERFILES, ids=lambda p: p.stem)
+def test_ningun_perfil_enciende_servicios(fichero: Path) -> None:
+    """El primer despliegue lleva Servicios apagado, y el piloto se enciende
+    después y a mano. La primera versión es virtual y presencial, en soles."""
+    perfil = _perfil(fichero)
+    assert perfil["FeatureServices"] == "false"
+    assert perfil["FeatureServiceBooking"] == "false"
+    assert perfil["ServicesPublicAccess"] == "false", (
+        "la apertura general de Servicios se decide aparte: no viene encendida en un perfil"
+    )
+    assert perfil["ServicesCatalogModalities"] == "virtual,in_person"
+    assert perfil["ServicesCatalogCurrencies"] == "PEN"
+
+
+def test_la_plantilla_trae_servicios_apagado_de_fabrica() -> None:
+    parametros = _parametros(PLATAFORMA)
+    for nombre in ("FeatureServices", "FeatureServiceBooking", "ServicesPublicAccess"):
+        assert re.search(r"^    Default: 'false'$", parametros[nombre], re.M), nombre
+        assert "AllowedValues: ['true', 'false']" in parametros[nombre], nombre
+    assert re.search(r"^    Default: 'virtual,in_person'$", parametros["ServicesCatalogModalities"], re.M)
+    assert re.search(r"^    Default: 'PEN'$", parametros["ServicesCatalogCurrencies"], re.M)
+
+
+def test_la_plantilla_solo_admite_modalidades_y_monedas_bien_escritas() -> None:
+    """Un valor con espacios o con una modalidad inventada llegaria a la API
+    como una lista que no reconoce: lo para CloudFormation antes."""
+    parametros = _parametros(PLATAFORMA)
+
+    def patron(nombre: str) -> re.Pattern[str]:
+        return re.compile(re.search(r"AllowedPattern: '(.+)'", parametros[nombre]).group(1))
+
+    modalidades = patron("ServicesCatalogModalities")
+    for buena in ("virtual", "virtual,in_person", "virtual,in_person,at_home"):
+        assert modalidades.fullmatch(buena), buena
+    for mala in ("", "virtual, in_person", "virtual,", "a_domicilio", "VIRTUAL", "virtual;in_person"):
+        assert not modalidades.fullmatch(mala), mala
+    monedas = patron("ServicesCatalogCurrencies")
+    for buena in ("PEN", "PEN,USD"):
+        assert monedas.fullmatch(buena), buena
+    for mala in ("", "pen", "PEN, USD", "SOLES", "PEN,"):
+        assert not monedas.fullmatch(mala), mala
+
+
+def test_el_entorno_de_la_api_recibe_la_configuracion_de_servicios() -> None:
+    entorno = _entorno_que_escribe_la_plantilla()
+    for variable, parametro in DE_SERVICIOS.items():
+        assert entorno.get(variable) == "${" + parametro + "}", variable
+    # EL COBRO, FIJO: sin parametro, y por tanto sin forma de encenderlo en un despliegue.
+    for variable, valor in FIJAS_DE_SERVICIOS.items():
+        assert entorno.get(variable) == valor, variable
+    parametros = _parametros(PLATAFORMA)
+    for prohibido in ("FeatureServicePayments", "ServicePaymentsProvider"):
+        assert prohibido not in parametros, prohibido
+
+
+def test_lo_que_fija_la_plantilla_no_puede_venir_tambien_del_secreto() -> None:
+    """El secreto se escribe antes y la plantilla después, en el mismo fichero:
+    una variable en los dos sitios tendria dos valores. El guion lo rechaza."""
+    guion = GUION.read_text(encoding="utf-8")
+    lista = re.search(r"\$ClavesQueFijaLaPlantilla = @\((.*?)\)", guion, re.S).group(1)
+    en_el_guion = set(re.findall(r"'([A-Z][A-Z0-9_]*)'", lista))
+    assert set(_entorno_que_escribe_la_plantilla()) == en_el_guion
+    assert "FEATURE_SERVICE_PAYMENTS" in re.search(r"\$BanderasDeDinero = @\((.*?)\)", guion, re.S).group(1)
+
+
+def test_la_lista_del_piloto_va_en_el_secreto_y_no_en_el_repositorio() -> None:
+    """Son identificadores de personas: en un parametro acabarian en los
+    perfiles versionados, en las evidencias y en la consola de CloudFormation."""
+    assert "ServicesPilot" not in "".join(_parametros(PLATAFORMA))
+    assert CLAVE_DEL_PILOTO not in _entorno_que_escribe_la_plantilla()
+    for fichero in PERFILES:
+        assert "Pilot" not in fichero.read_text(encoding="utf-8"), fichero.name
+    ejemplo = json.loads((INFRA / "secretos.ejemplo.json").read_text(encoding="utf-8"))
+    assert ejemplo[CLAVE_DEL_PILOTO] == "", "el ejemplo no trae perfiles de nadie: vacia es «no entra nadie»"
+    guion = GUION.read_text(encoding="utf-8")
+    assert f"$ClaveDelPiloto = '{CLAVE_DEL_PILOTO}'" in guion
+    lista = re.search(r"\$ClavesQueFijaLaPlantilla = @\((.*?)\)", guion, re.S).group(1)
+    assert CLAVE_DEL_PILOTO not in lista
+
+
+def test_el_guion_rechaza_una_lista_del_piloto_mal_escrita() -> None:
+    """La API cierra el piloto entero si una entrada no es un UUID
+    (`services/acceso.py`). El guion lo avisa antes de escribir el secreto."""
+    guion = GUION.read_text(encoding="utf-8")
+    patron = re.compile(re.search(r"\$PatronDelPiloto = '(.+)'", guion).group(1))
+    uno, otro = "0b1f0d9e-6c0a-4a57-9a39-0f6a4c1b2d3e", "9F3C2A10-1B2C-4D5E-8F90-A1B2C3D4E5F6"
+    for buena in ("", uno, f"{uno},{otro}"):
+        assert patron.search(buena) and patron.fullmatch(buena), buena
+    for mala in (" ", f"{uno}, {otro}", f"{uno},", "todos", uno.replace("-", ""), f"{uno};{otro}", f"{uno},no-es-un-uuid"):
+        assert not patron.fullmatch(mala), mala
+    assert "-notmatch $PatronDelPiloto" in guion
+    # Y nunca imprime el valor: el problema solo nombra la clave.
+    problema = re.search(r"\$problemas\.Add\(\"\$ClaveDelPiloto[^\n]*", guion).group(0)
+    assert "$secreto[" not in problema

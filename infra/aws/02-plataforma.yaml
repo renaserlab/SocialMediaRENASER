@@ -41,6 +41,8 @@ Metadata:
         Parameters: [FrenteHttpsDeEmergencia, NombreDeDominio, CertificadoDeCloudFrontArn, CertificadoAcmArn, SoloDesdeCloudFront, VerificarCabeceraDeOrigen, ListaDePrefijosDeCloudFront, ProteccionContraBorrado, LogsDeAccesoDelBalanceador]
       - Label: {default: Aplicacion}
         Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl, BetaFreeAccessEnabled]
+      - Label: {default: Z Servicios (apagado de fabrica)}
+        Parameters: [FeatureServices, FeatureServiceBooking, ServicesPublicAccess, ServicesCatalogModalities, ServicesCatalogCurrencies]
       - Label: {default: Observabilidad y escalado}
         Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, UmbralLatenciaP95Segundos, UmbralErrores5xxDeLaApi, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
     ParameterLabels:
@@ -359,6 +361,71 @@ Parameters:
       cobro: escribe un derecho en `entitlements` con source_provider
       'beta_free' y sin transaction_id, y no toca el precio del curso.
       Apagarlo no revoca los accesos ya concedidos.
+
+  # --- Z Servicios ----------------------------------------------------------
+  # TODO APAGADO DE FABRICA, igual que en el codigo (`core/config.py`). Estos
+  # parametros existen para que encender Servicios sea una decision escrita y
+  # revisable en un Change Set, no un valor por defecto que nadie eligio.
+  #
+  # EL ORDEN PARA UN PILOTO: (1) aplicar las migraciones pendientes en
+  # Supabase; (2) desplegar con todo apagado; (3) poner los perfiles del piloto
+  # en el secreto (`SERVICES_PILOT_PROFILE_IDS`); (4) encender FeatureServices.
+  # Con FeatureServices encendido y la lista vacia NO ENTRA NADIE.
+  #
+  # LO QUE NO ESTA AQUI, A PROPOSITO:
+  #   * `SERVICES_PILOT_PROFILE_IDS` va en el SECRETO, no en un parametro: son
+  #     identificadores de personas, y un parametro acaba en los perfiles del
+  #     repositorio, en las evidencias y en la consola de CloudFormation.
+  #   * `FEATURE_SERVICE_PAYMENTS` y `SERVICE_PAYMENTS_PROVIDER` no tienen
+  #     parametro: se escriben fijos (`false` y `none`) en el arranque. Cobrar
+  #     un servicio no se enciende desde la infraestructura.
+  FeatureServices:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Z Servicios. `false`: sus rutas contestan 503 `services_disabled` sin
+      tocar la base y la app no ensena ninguna entrada. `true` NO lo abre a
+      todos: solo a los perfiles del piloto (ver ServicesPublicAccess).
+
+  FeatureServiceBooking:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Contratar servicios GRATUITOS (apartar un horario, reservar y atender).
+      No hace nada sin FeatureServices, y vale solo para quien ya puede usar
+      Servicios. No cobra: el cobro no se enciende desde aqui.
+
+  ServicesPublicAccess:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      LA APERTURA GENERAL de Z Servicios. `false` (el piloto): con
+      FeatureServices encendido solo entran los perfiles de
+      SERVICES_PILOT_PROFILE_IDS, que va en el secreto; con esa lista vacia no
+      entra nadie. `true`: entra todo el mundo y la lista deja de mirarse. No
+      se deduce de una lista vacia: hay que escribirlo.
+
+  ServicesCatalogModalities:
+    Type: String
+    Default: 'virtual,in_person'
+    AllowedPattern: '^(virtual|in_person|at_home)(,(virtual|in_person|at_home))*$'
+    ConstraintDescription: Una lista separada por comas de virtual, in_person y at_home, sin espacios.
+    Description: >-
+      Modalidades que un prestador puede ofrecer. La primera version (politica
+      P5) son dos: en linea y en el local del prestador. `at_home` existe en el
+      modelo, pero anadirla exige construir antes la aceptacion del prestador.
+
+  ServicesCatalogCurrencies:
+    Type: String
+    Default: 'PEN'
+    AllowedPattern: '^[A-Z]{3}(,[A-Z]{3})*$'
+    ConstraintDescription: Codigos de moneda de tres letras mayusculas, separados por comas y sin espacios.
+    Description: >-
+      Monedas en las que se admite un precio. La primera version (politica P2)
+      solo usa soles. No se convierte ninguna moneda.
 
   RetencionDeLogsEnDias:
     Type: Number
@@ -1413,6 +1480,16 @@ Resources:
                 echo "PAYMENTS_ENABLED=${PaymentsEnabled}"
                 echo "PAYMENTS_RETURN_URL=${PaymentsReturnUrl}"
                 echo "BETA_FREE_ACCESS_ENABLED=${BetaFreeAccessEnabled}"
+                # Z Servicios. Las dos ultimas van FIJAS: cobrar un servicio no
+                # se enciende desde la infraestructura. La lista del piloto
+                # (SERVICES_PILOT_PROFILE_IDS) viene del secreto, mas arriba.
+                echo "FEATURE_SERVICES=${FeatureServices}"
+                echo "FEATURE_SERVICE_BOOKING=${FeatureServiceBooking}"
+                echo "SERVICES_PUBLIC_ACCESS=${ServicesPublicAccess}"
+                echo "SERVICES_CATALOG_MODALITIES=${ServicesCatalogModalities}"
+                echo "SERVICES_CATALOG_CURRENCIES=${ServicesCatalogCurrencies}"
+                echo "FEATURE_SERVICE_PAYMENTS=false"
+                echo "SERVICE_PAYMENTS_PROVIDER=none"
               } >> /etc/renaser/api.env
               chmod 600 /etc/renaser/api.env
 

@@ -26,6 +26,12 @@
   { "ParameterKey": "PaymentsReturnUrl", "ParameterValue": "https://social-media-renaser.vercel.app/pago" },
   { "ParameterKey": "BetaFreeAccessEnabled", "ParameterValue": "false" },
 
+  { "ParameterKey": "FeatureServices", "ParameterValue": "false" },
+  { "ParameterKey": "FeatureServiceBooking", "ParameterValue": "false" },
+  { "ParameterKey": "ServicesPublicAccess", "ParameterValue": "false" },
+  { "ParameterKey": "ServicesCatalogModalities", "ParameterValue": "virtual,in_person" },
+  { "ParameterKey": "ServicesCatalogCurrencies", "ParameterValue": "PEN" },
+
   { "ParameterKey": "RetencionDeLogsEnDias", "ParameterValue": "30" },
   { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "renaserlab@gmail.com" },
   { "ParameterKey": "UmbralLatenciaP95Segundos", "ParameterValue": "2" },
