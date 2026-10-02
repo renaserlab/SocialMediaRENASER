@@ -214,6 +214,18 @@ class Settings(BaseSettings):
     #: `feature_products` y `feature_product_sales`.
     feature_services: bool = False
 
+    #: EL PILOTO DE SERVICIOS (politica P101). Con `feature_services` encendida,
+    #: Servicios NO se abre a todo el mundo: solo a los perfiles de esta lista
+    #: (UUID separados por comas). VACIA = NADIE: desplegar con la bandera
+    #: encendida y la lista vacia no abre nada por descuido. Una lista mal
+    #: escrita tampoco abre nada (`services/acceso.py`). Las rutas de
+    #: administracion no pasan por aqui: siguen dependiendo del rol de cada
+    #: persona, y estar en la lista no da ninguno.
+    services_pilot_profile_ids: str = ""
+    #: LA APERTURA GENERAL, y es EXPLICITA: solo con esto en `True` Servicios
+    #: deja de mirar la lista del piloto. No se deduce de una lista vacia.
+    services_public_access: bool = False
+
     #: EL CATALOGO DE SERVICIOS (Incremento 2). Listas separadas por comas.
     #: Las modalidades y la moneda son POLITICA DE LA PRIMERA VERSION
     #: (02/10/2026, P2, P4 y P5; `docs/Z_REQUISITOS_Y_DECISIONES.md`): virtual y

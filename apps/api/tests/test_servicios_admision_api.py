@@ -546,9 +546,19 @@ async def test_sin_permiso_de_revision_es_403_incluso_con_la_bandera_apagada(ent
 
 
 @pytest.mark.asyncio
-async def test_sin_sesion_es_401(entorno) -> None:
+async def test_sin_sesion_es_401(entorno, monkeypatch) -> None:
+    """En administración, siempre 401. En las rutas de `/services` manda antes
+    la puerta de quién entra (el piloto, `services/acceso.py`): con Servicios
+    apagado no hay nada que pedirle a nadie, y se contesta lo mismo que a
+    cualquiera (503 `services_disabled`); encendido y abierto, 401."""
     http, _, _, app = entorno
     app.dependency_overrides.pop(get_current_user)
+    assert get_settings().feature_services is False
+    assert (await http.get(BANDEJA)).status_code == 401
+    for metodo, ruta in (("GET", MIA), ("POST", f"{MIA}/submit")):
+        r = await http.request(metodo, ruta, json={})
+        assert (r.status_code, _codigo(r)) == (503, "services_disabled")
+    monkeypatch.setattr(get_settings(), "feature_services", True)
     for metodo, ruta in (("GET", MIA), ("POST", f"{MIA}/submit"), ("GET", BANDEJA)):
         assert (await http.request(metodo, ruta, json={})).status_code == 401
 
