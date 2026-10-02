@@ -92,16 +92,19 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. Al 01/10/2026 la
-última **escrita y aplicada** es la **0095** (la política operativa de cada
-reserva de Servicios, congelada al confirmarla): ejecutada a mano en Supabase
+antes de usarla, y sigue funcionando cuando no lo está. Al 02/10/2026 la
+última **escrita y aplicada** es la **0096** (las rutas opacas de las imágenes
+de Servicios): ejecutada a mano en Supabase y verificada en solo lectura ese
+día (19:51 UTC) **sin divergencias**, también con las seis puertas de esquema
+y la conexión y el rol reales de la API; ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §131](Z_SERVICIOS_ARQUITECTURA.md). Solo
+sustituye el cuerpo de una función de la 0090. La anterior es la **0095** (la
+política operativa de cada reserva de Servicios, congelada al confirmarla):
+ejecutada a mano en Supabase
 y verificada en solo lectura el 01/10/2026 (18:05 UTC) **sin divergencias**,
 también con las seis puertas de esquema y la conexión y el rol reales de la
 API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §118](Z_SERVICIOS_ARQUITECTURA.md).
-La última **escrita** es la **0096** (las rutas opacas de las imágenes de
-Servicios, 02/10/2026): **sin aplicar**. Sin ella el catálogo de Servicios
-contesta 503, y hay que aplicarla antes de desplegar ese código (§124).
-Con ella quedan técnicamente cerrados los seis incrementos de Servicios
+Con la 0095 quedan técnicamente cerrados los seis incrementos de Servicios
 (§119). La anterior es la **0094** (atención, posventa y cierre,
 Incremento 6 de Servicios): ejecutada a mano en Supabase y verificada en solo
 lectura el 01/10/2026 (14:28 UTC) **sin divergencias**, también con las seis

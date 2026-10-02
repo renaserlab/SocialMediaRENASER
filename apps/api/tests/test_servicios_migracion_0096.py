@@ -88,10 +88,14 @@ def test_es_la_ultima_y_sigue_a_la_0095() -> None:
     assert nombres[-2].startswith("0095_")
 
 
-def test_todavia_no_consta_como_aplicada() -> None:
-    """Escrita y probada en local. Mientras no se aplique en Supabase y se
-    verifique, no entra en `APLICADAS` y todavía se puede corregir."""
-    assert ARCHIVO.name not in APLICADAS
+def test_consta_como_aplicada_y_ya_no_se_edita() -> None:
+    """Ejecutada a mano en Supabase y verificada el 02/10/2026 (19:51 UTC),
+    sin divergencias: su huella consta en `APLICADAS` y el fichero es ese,
+    byte a byte. Su cabecera sigue diciendo «SIN APLICAR», como las
+    anteriores: cambiarla sería editar lo aplicado."""
+    assert APLICADAS[ARCHIVO.name] == "f1abca52f0a48c0d92e346666fff7dfb763661c7"
+    contenido = ARCHIVO.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha1(f"blob {len(contenido)}\0".encode() + contenido).hexdigest() == APLICADAS[ARCHIVO.name]
     assert "-- SIN APLICAR." in TEXTO
 
 

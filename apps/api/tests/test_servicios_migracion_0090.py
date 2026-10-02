@@ -80,6 +80,14 @@ APLICADAS = {
     # cambiarla sería editar lo aplicado. No se deshace: se corrige hacia
     # delante, con otra.
     "0095_servicios_politica_operativa_congelada.sql": "9e46e8bfdc5e2e55034bad6a76bbcdb4cbc2dd1b",
+    # Ejecutada a mano en Supabase (PostgreSQL 17.6) y verificada en solo
+    # lectura, sin divergencias, el 02/10/2026 a las 19:51 UTC (14:51 en
+    # Lima; Z_SERVICIOS_ARQUITECTURA.md §131): desde entonces tampoco se
+    # edita. Solo sustituye el cuerpo de la función de las imágenes: en
+    # Supabase es, carácter a carácter, el de este fichero. Su cabecera dice
+    # «SIN APLICAR» a propósito, como las anteriores: cambiarla sería editar
+    # lo aplicado. No se deshace: se corrige hacia delante, con otra.
+    "0096_servicios_rutas_opacas.sql": "f1abca52f0a48c0d92e346666fff7dfb763661c7",
 }
 
 

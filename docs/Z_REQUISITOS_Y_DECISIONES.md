@@ -77,16 +77,16 @@ supone una aprobación legal.
 **Cinco políticas se cerraron en el código el 02/10/2026** (apartado II, al
 final): las rutas opacas de los archivos (P29), sin «a domicilio» (P5), solo
 en soles (P2), la capacidad fuera de lo público (P51) y el piloto por perfiles
-(P101). Queda **aplicar la migración 0096** en Supabase: está escrita y
-probada en local, y sin ella el catálogo de Servicios contesta 503. Otras
+(P101). La **migración 0096** que necesitaban se aplicó en Supabase y se
+verificó ese mismo día, sin divergencias. Otras
 cuatro políticas siguen dependiendo de la operación o de trabajo futuro, y
 ninguna impide empezar un piloto.
 
 **Estado.** `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y
 `FEATURE_SERVICE_PAYMENTS` están **apagadas**; la pasarela es `none`; no hay
 Stripe conectado, ni transferencias, ni devoluciones automáticas. Las
-migraciones 0086–0095 están aplicadas, verificadas y registradas, y no se
-tocan; **la 0096 está escrita y sin aplicar**. El QA físico sigue pendiente
+migraciones 0086–0096 están aplicadas, verificadas y registradas, y no se
+tocan. El QA físico sigue pendiente
 (`Z_QA_FISICO_PENDIENTE.md`).
 
 ## II. Políticas decididas para la primera versión
@@ -144,7 +144,7 @@ en la operación; la última, qué identificadores históricos cierra o toca.
 | P26 | Retirar un servicio es definitivo | Lo impone la 0090 | C11 |
 | P27 | Las imágenes y las evidencias se guardan en depósitos privados | Depósitos privados, verificados en Supabase | C15 |
 | P28 | Los archivos se entregan con enlaces firmados temporales | 3600 s las imágenes del catálogo; 120 s los documentos y las evidencias | C15, G10 |
-| P29 | Ruta opaca para los archivos nuevos: no exponer sin necesidad el identificador del prestador | `<servicio>/<32 hexadecimales al azar>.<ext>`: la arma el servidor y no lleva el perfil. **Falta aplicar la migración 0096** (escrita y probada en local) | C15, D6 |
+| P29 | Ruta opaca para los archivos nuevos: no exponer sin necesidad el identificador del prestador | `<servicio>/<32 hexadecimales al azar>.<ext>`: la arma el servidor y no lleva el perfil. La migración 0096 está aplicada y verificada (02/10/2026) | C15, D6 |
 | P30 | Las reseñas de Cursos, Eventos o Productos no se reutilizan en Servicios | Las reseñas de servicio son una tabla propia (0094) | D11 |
 
 ### D. Descubrimiento y recomendaciones
@@ -279,7 +279,7 @@ adelante).
 
 | Política | Qué se hizo | Qué falta fuera del código |
 |---|---|---|
-| P29 · Ruta opaca | La ruta de una imagen es `<servicio>/<32 hexadecimales al azar>.<ext>`: sin el perfil, puesta por el servidor y con la extensión que dicen los bytes. La baja de la cuenta barre la carpeta de cada servicio | **Aplicar la migración 0096** en Supabase y reiniciar la API. Sin ella, el catálogo de Servicios contesta 503 |
+| P29 · Ruta opaca | La ruta de una imagen es `<servicio>/<32 hexadecimales al azar>.<ext>`: sin el perfil, puesta por el servidor y con la extensión que dicen los bytes. La baja de la cuenta barre la carpeta de cada servicio | Nada: la migración 0096 está aplicada y verificada sin divergencias (02/10/2026) |
 | P5 · A domicilio | De fábrica solo `virtual,in_person`. El borrador y el filtro público rechazan otra modalidad, y la app no la ofrece | Nada |
 | P2 · PEN | El formulario y el filtro de la app ofrecen solo soles; otra moneda escrita a mano contesta un error del dominio | Nada |
 | P51 · Capacidad | La ficha pública y los horarios ya no traen el número. El prestador y administración lo conservan | Nada |
@@ -531,7 +531,7 @@ sigue más abajo, en la sección de su incremento.
 | **C12** | Conservación de versiones e imágenes superadas o retiradas | `REQUIERE_EMPRESA` | Requiere revisión legal: plazos de conservación (IV-19) | Se guardan mientras exista la cuenta del prestador y se borran con ella | 0090 | Privacidad y evidencia | Con la política de privacidad |
 | **C13** | Información pública del prestador en la ficha | `DECIDIDA_PRIMERA_VERSION` | Solo el nombre público (P12) | La ficha no enseña datos privados del prestador | Inc. 2, decisión 6 | Ninguno | Tras el piloto |
 | **C14** | Pauta de redacción de los motivos del personal en el catálogo | `REQUIERE_EMPRESA` | Igual que S11 (IV-12) | Los motivos se guardan tal cual; la auditoría no los copia | Inc. 2, tabla C | Privacidad | Antes del piloto |
-| **C15** | El identificador del prestador en la ruta de las imágenes | `DECIDIDA_PRIMERA_VERSION` | Ruta opaca para los archivos nuevos (P29): `<servicio>/<32 hexadecimales al azar>.<ext>`, sin el perfil. **Implementada en el código (02/10/2026); la migración 0096 está escrita y SIN APLICAR** | La dirección de una imagen no debe delatar de qué prestador es | `catalogo_imagenes.py`; migración 0096; la puerta del catálogo exige su cuerpo | Hay que aplicar la 0096 antes de desplegar: sin ella el catálogo de Servicios contesta 503 | **Al aplicar la 0096** |
+| **C15** | El identificador del prestador en la ruta de las imágenes | `DECIDIDA_PRIMERA_VERSION` | Ruta opaca para los archivos nuevos (P29): `<servicio>/<32 hexadecimales al azar>.<ext>`, sin el perfil. **Implementada en el código y con la migración 0096 aplicada y verificada (02/10/2026)** | La dirección de una imagen no debe delatar de qué prestador es | `catalogo_imagenes.py`; migración 0096; la puerta del catálogo exige su cuerpo | Ninguno pendiente: la 0096 está aplicada y verificada sin divergencias | Cerrada el 02/10/2026 |
 | **C16** | Monedas que ofrece el formulario del servicio | `DECIDIDA_PRIMERA_VERSION` | Solo PEN (P2), en el formulario y en el filtro. Corregido el 02/10/2026 | La app ya no ofrece dólares ni euros | `MONEDAS` (`serviciosCatalogo.ts`); otra moneda escrita a mano contesta `service_currency_not_allowed` | Ninguno | Al ampliar países |
 
 ### Serie D — Incremento 3 · descubrimiento
@@ -543,7 +543,7 @@ sigue más abajo, en la sección de su incremento.
 | **D3** | Filtros visibles | `DECIDIDA_PRIMERA_VERSION` | P33: categoría, modalidad, precio, moneda, zona y credencial vigente | Solo hay filtros para los que existen datos | `descubrimiento.py` | Ninguno | Tras el piloto |
 | **D4** | Qué se enseña de una credencial | `DECIDIDA_PRIMERA_VERSION` | P12: solo «credencial profesional verificada por Z y vigente»; nunca el número ni el archivo | El público sabe que Z la comprobó, no cuál es | `_credencial_vigente` (`descubrimiento.py`) | Ninguno | Con la matriz documental |
 | **D5** | Qué significa comercialmente «verificado por Z» | `REQUIERE_EMPRESA` | Requiere revisión legal: la responsabilidad de Z (IV-20) | Hoy se nombra exactamente lo que se comprobó y se dice que no garantiza el resultado | Inc. 3, requisitos | Legal | Antes del piloto |
-| **D6** | La ruta de las imágenes con el catálogo público (amplía C15) | `DECIDIDA_PRIMERA_VERSION` | La misma decisión que C15: ruta opaca, implementada; **falta aplicar la 0096** | Cada tarjeta del catálogo lleva esa dirección, también sin sesión | Ver C15 | Ver C15 | **Al aplicar la 0096** |
+| **D6** | La ruta de las imágenes con el catálogo público (amplía C15) | `DECIDIDA_PRIMERA_VERSION` | La misma decisión que C15: ruta opaca, implementada, con la 0096 aplicada y verificada | Cada tarjeta del catálogo lleva esa dirección, también sin sesión | Ver C15 | Ver C15 | Cerrada el 02/10/2026 |
 | **D7** | Guardados que dejan de estar disponibles | `DECIDIDA_PRIMERA_VERSION` | P38: se quedan con el título que tenían al guardarse y «ya no está disponible» | Lo guardado no desaparece sin explicación, y se puede quitar | Inc. 3, decisión 7 | Ninguno | Tras el piloto |
 | **D8** | Información pública de una persona frente a una empresa | `DECIDIDA_PRIMERA_VERSION` | Nombre público y tipo (profesional o empresa); sin foto ni ciudad (P12) | Se enseña lo mínimo | Inc. 3, decisión 6 | Ninguno | Tras el piloto |
 | **D9** | Criterio de las recomendaciones | `DECIDIDA_PRIMERA_VERSION` | P35–P37: cada sugerencia lleva su razón; sin datos sensibles | Si Z sugiere algo, dice por qué | `MOTIVOS` (`descubrimiento.py`) | Ninguno | Tras el piloto |
@@ -3717,3 +3717,23 @@ que no aplican.
 
 No se escribió en Supabase, no se ejecutó nada en AWS, no se activó ninguna
 bandera y no se movió dinero. El código sigue **sin desplegar**.
+
+### La 0096, aplicada y verificada (02/10/2026)
+
+**La migración 0096 se ejecutó a mano en Supabase y se verificó el 02/10/2026
+(19:51 UTC) en solo lectura: sin divergencias.** Su huella consta en
+`APLICADAS`. El detalle, en `Z_SERVICIOS_ARQUITECTURA.md`, §131–§134.
+
+- **C15 y D6 (P29) quedan cerradas**: ruta opaca en el código y en la base.
+- Las cinco políticas que el sistema no imponía —P29, P5, P2, P51 y P101—
+  funcionan juntas: un recorrido con la API real, 92 de 92 comprobaciones.
+- De paso se corrigió la primera puerta de esquema: un error al mirarla era un
+  500 y ahora es el 503 controlado de las demás.
+
+**Qué NO se decidió.** Nada de la empresa. **F21 sigue siendo la primera.** Ni
+quién participa en el piloto ni su fecha (IV-48). Los recuentos no cambian: 43
+decididas, 14 provisionales, 25 de la empresa, 3 integraciones, 5 mejoras y 6
+que no aplican.
+
+No se desplegó nada, no se ejecutó nada en AWS, no se activó ninguna bandera y
+no se movió dinero. El código sigue en `Edson`, **sin push**.

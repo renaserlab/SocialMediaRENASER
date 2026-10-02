@@ -461,6 +461,10 @@ renovar las máquinas, y solo entonces cambiar `FeatureServices` a `true` con
 un Change Set revisado. Apagarlo es volver ese parámetro a `false`. El
 detalle está en `Z_SERVICIOS_ARQUITECTURA.md`, §127 y §128.
 
+Al 02/10/2026 **no queda ninguna migración pendiente**: la última, la 0096,
+está aplicada y verificada (§131 de ese documento). Lo siguiente es el
+despliegue con todo apagado. Nada de esto se ejecutó en AWS.
+
 ### 7 · GitHub
 
 En **Settings > Secrets and variables > Actions > Variables**, crear la variable

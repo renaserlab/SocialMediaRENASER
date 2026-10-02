@@ -22,7 +22,8 @@ El 02/10/2026 se consolidaron las **políticas de la primera versión** y se
 depuró el registro de decisiones (§121): solo documentación, sin código ni
 migraciones. Ese mismo día, la **Parte VIII** (§122 en adelante) cerró en el
 código cinco de las políticas que el sistema todavía no imponía (P29, P5, P2,
-P51 y P101), con la migración **0096, escrita y sin aplicar**.
+P51 y P101), con la migración **0096**, que se aplicó a mano en Supabase y se
+verificó ese mismo día (19:51 UTC) en solo lectura, **sin divergencias** (§131).
 
 ## Estado
 
@@ -46,7 +47,7 @@ P51 y P101), con la migración **0096, escrita y sin aplicar**.
 | **Migración 0095** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (18:05 UTC) en solo lectura: **sin divergencias** (§118). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y no se deshace |
 | **Políticas de la primera versión** | **consolidadas el 02/10/2026** (§121): 105 políticas iniciales. De las 96 decisiones, 43 decididas para la primera versión, 14 valores provisionales y 25 que siguen necesitando a la empresa |
 | **Cinco políticas cerradas en el código** | **implementadas y probadas el 02/10/2026** (§122): rutas opacas (P29), sin «a domicilio» (P5), solo en soles (P2), la capacidad fuera de lo público (P51) y el piloto por perfiles (P101). Código en `Edson`, **sin desplegar** |
-| **Migración 0096** | **ESCRITA Y SIN APLICAR**. Probada solo contra PostgreSQL 17 local. No consta en `APLICADAS`: hasta que se aplique y se verifique, se puede corregir. Sin ella, el catálogo de Servicios contesta 503 (§124) |
+| **Migración 0096** | **APLICADA** a mano en Supabase y verificada el 02/10/2026 (19:51 UTC) en solo lectura: **sin divergencias** (§131). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y no se deshace |
 | **Los seis incrementos** | **técnicamente cerrados** (§119): quedan el QA físico, las decisiones de la empresa y las integraciones externas (§120) |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
@@ -4925,18 +4926,18 @@ imposible (`services_booking_instant_modalities`).
 ## 122. Estado
 
 **Las cinco brechas entre las políticas consolidadas (§121) y el
-comportamiento real están cerradas en el código y probadas. Queda aplicar y
-verificar la migración 0096 en Supabase, y el QA físico.** No es un
-incremento nuevo: no añade funciones, pantallas ni rutas.
+comportamiento real están cerradas en el código y probadas.** No es un
+incremento nuevo: no añade funciones, pantallas ni rutas. La migración 0096
+se aplicó y se verificó después, el mismo día (§131); queda el QA físico.
 
 | | |
 |---|---|
 | **Código** | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
-| **Migración 0096** | **ESCRITA Y SIN APLICAR**. Probada solo contra PostgreSQL 17 local. No consta en `APLICADAS` |
+| **Migración 0096** | **APLICADA** a mano en Supabase y verificada el 02/10/2026 (19:51 UTC) en solo lectura: **sin divergencias** (§131). Consta en `APLICADAS` |
 | **Migraciones 0086–0095** | intactas: sus huellas siguen siendo las de `APLICADAS` |
 | **Banderas** | `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`; `SERVICES_PUBLIC_ACCESS`, apagada; `SERVICES_PILOT_PROFILE_IDS`, vacía |
 | **AWS** | la plantilla, los perfiles y el guion **preparados**; no se ejecutó ningún Change Set ni ningún despliegue |
-| **Supabase** | no se escribió nada ni se aplicó ninguna migración |
+| **Supabase** | desde aquí no se escribió nada. La 0096 la ejecutó Edson a mano; después solo se leyó, para verificarla |
 
 | Política | Qué faltaba | Qué se hizo | Dónde |
 |---|---|---|---|
@@ -5007,6 +5008,10 @@ hay ninguna migración de objetos de Storage, ni hace falta: el 29/09/2026 el
 depósito tenía 0 objetos y la tabla 0 filas.
 
 ## 124. La 0096: qué hace, cómo aplicarla y cómo verificarla
+
+> **Hecho el 02/10/2026.** La 0096 está aplicada, verificada sin divergencias y
+> registrada en `APLICADAS` (§131). Lo que sigue es lo que hace y el
+> procedimiento que se siguió.
 
 `supabase/migrations/0096_servicios_rutas_opacas.sql`. **Sustituye el cuerpo
 de una función** —`service_version_images_solo_en_borrador()`, la de la
@@ -5274,7 +5279,7 @@ Lo que la plantilla (`02-plataforma.yaml`) escribe ahora en el entorno de la API
 
 **Para encender un piloto, en este orden** (nada de esto se hizo):
 
-1. aplicar y verificar la 0096 en Supabase (§124);
+1. aplicar y verificar la 0096 en Supabase (§124): **hecho el 02/10/2026** (§131);
 2. desplegar `Edson` con todo apagado, que es lo que traen los perfiles;
 3. poner los perfiles del piloto en el secreto (`SERVICES_PILOT_PROFILE_IDS`)
    y renovar las máquinas;
@@ -5346,8 +5351,8 @@ Pruebas nuevas:
 
 ## 130. Lo que sigue pendiente
 
-- **Aplicar y verificar la 0096** en Supabase (§124) y registrar su huella en
-  `APLICADAS`. La hace Edson, a mano; aquí no se escribió nada en Supabase.
+- ~~Aplicar y verificar la 0096~~: **hecho el 02/10/2026** (§131). La ejecutó
+  Edson, a mano; se verificó en solo lectura y su huella consta en `APLICADAS`.
 - **QA físico** de los seis incrementos y de estas cinco políticas
   (`Z_QA_FISICO_PENDIENTE.md`).
 - **Cuatro políticas** siguen dependiendo de la operación o de trabajo futuro
@@ -5355,3 +5360,176 @@ Pruebas nuevas:
 - **De la empresa**: los 48 asuntos y las seis integraciones del apartado IV
   y V. **F21 sigue siendo la primera** y no se tocó.
 - **Desplegar**: nada se desplegó, ni se hizo push, PR ni merge.
+
+## 131. La 0096, aplicada y verificada (02/10/2026)
+
+**La 0096 se ejecutó a mano en Supabase y se verificó el 02/10/2026 a las
+19:51 UTC (14:51 en Lima), en solo lectura: SIN DIVERGENCIAS.** Su huella
+consta en `APLICADAS` (`f1abca52f0a48c0d92e346666fff7dfb763661c7`): desde
+entonces no se edita, y no se deshace. No se volvió a ejecutar, no se escribió
+nada en Supabase y no hizo falta ninguna 0097.
+
+**Cómo se miró.** Cinco sesiones, todas de solo lectura y todas demostradas
+antes de consultar nada: `transaction_read_only = on`, una sonda de escritura
+(`create temp table`) rechazada con `SQLSTATE 25006`, ningún identificador de
+escritura asignado, y `ROLLBACK` al terminar. Una con psycopg, para los
+catálogos; cuatro con asyncpg y SQLAlchemy —la conexión y el rol de la API—,
+para el código real de las puertas. La cadena de conexión no se imprimió ni se
+guardó.
+
+**Contra qué.** Dos referencias sobre PostgreSQL 17 local desechable:
+
+| Referencia | Resultado frente a Supabase (PostgreSQL 17.6) |
+|---|---|
+| prólogo + 0001–0096 | **ninguna diferencia** |
+| prólogo + 0001–0095 | **una sola**: la función de las imágenes (su huella en el esquema y su definición) |
+
+**Qué se comparó**, por definición y no por existencia:
+
+| | |
+|---|---|
+| Esquema público entero | 1781 columnas, 1348 restricciones, 552 índices, 104 disparadores, 63 funciones, RLS en 169 de 169 tablas, 149 políticas, 0 vistas |
+| Las 28 tablas de Servicios | columnas, restricciones, índices, disparadores (también los internos de las claves), propietario, RLS, políticas y permisos: declarados, por columna, en la ACL y efectivos |
+| Las 27 funciones de Servicios | argumentos, retorno, lenguaje, propietario, seguridad, configuración, cuerpo (huella exacta y normalizada), ACL y `EXECUTE` efectivo |
+
+**La función** `service_version_images_solo_en_borrador()`: sin argumentos,
+devuelve `trigger`, `plpgsql`, `SECURITY INVOKER`, `search_path = public,
+pg_temp`, del mismo propietario que en la referencia, sin `EXECUTE` para
+`PUBLIC`, `anon` ni `authenticated` (ni en la ACL ni efectivo). Su cuerpo en
+Supabase tiene 2002 caracteres y es, **carácter a carácter, el del fichero de
+la 0096 y el de la referencia** (`222bdbbd898701ecf458747cd45f6ef9`). El de la
+0090 (`b8aa892aaaf500ceaf19e4ae52a457af`) ya no está: la consulta de la puerta
+escrita con esa huella da «no».
+
+**El disparador**, intacto: `BEFORE INSERT OR DELETE OR UPDATE ON
+service_version_images FOR EACH ROW`, sobre esa función, `tgtype` 31, activo
+(`O`), sin argumentos ni columnas.
+
+**La tabla de imágenes:** 14 columnas, 11 restricciones (1 clave primaria, 1
+ajena, 1 única y 8 CHECK), 5 índices, 1 disparador, RLS activa, 0 políticas y
+ningún permiso para los de fuera. Igual que en la referencia.
+
+**RLS y permisos.** Las 28 tablas de Servicios tienen RLS, ninguna tiene
+políticas y ninguna da nada a `PUBLIC`, `anon` ni `authenticated`.
+
+**El depósito `service-media`:** privado, 5 MB, JPEG, PNG y WebP; **0
+objetos**. `storage.objects` tiene RLS y sus 11 políticas son las mismas del
+29/09/2026 (§32): ninguna nombra este depósito ni deja de filtrar por
+depósito. La fila del depósito es la misma versión de fila que aquel día:
+nadie la reescribió.
+
+**Los datos** (recuentos, nunca valores): 0 imágenes, 0 servicios, 0
+versiones, 0 objetos; 366 claves ajenas de `public` revisadas, ninguna
+huérfana y ninguna sin validar. **Que haya cero no demuestra la regla**: la
+demuestran el cuerpo —que es el del fichero— y lo que ese cuerpo hace en una
+base igual (las 20 pruebas de la 0096 contra PostgreSQL y el recorrido de
+§133: admite la ruta opaca del servicio, no pide el perfil, y rechaza con
+`23514` la forma anterior que no es una copia, la de otro servicio y la de
+otra extensión).
+
+**Lo que escribió su transacción:** una fila de `pg_proc` (la función) y sus
+dependencias. Ninguna fila de datos en las 215 tablas revisadas. Las otras
+seis funciones de la 0090 conservan la misma versión de fila que el 29/09.
+
+**Las migraciones anteriores:** las huellas de la 0086 a la 0095 en
+`APLICADAS` no cambiaron (las pruebas las recalculan), y su esquema en
+Supabase es el de la referencia.
+
+### El verificador, probado antes de usarlo
+
+Contra la referencia local correcta dijo «sin divergencias». Después se
+estropeó esa base, **de una forma cada vez**, y las detectó las quince:
+
+| Alteración (solo en la base local desechable) | Verificador | Puerta de la API |
+|---|---|---|
+| el cuerpo anterior, el de la 0090 | detectada | cierra |
+| la función ausente | detectada | cierra |
+| la función con `SECURITY DEFINER` | detectada | no la mira |
+| la función con otro `search_path` | detectada | no la mira |
+| el disparador ausente | detectada | cierra |
+| el disparador deshabilitado | detectada | cierra |
+| el disparador hacia otra función | detectada | cierra |
+| el disparador con otra forma | detectada | cierra |
+| RLS apagada | detectada | cierra |
+| un permiso indebido en la tabla | detectada | no la mira |
+| un permiso indebido en la función | detectada | no la mira |
+| una política nueva | detectada | no la mira |
+| el depósito público | detectada | cierra |
+| el depósito sin límite de peso | detectada | no la mira |
+| una imagen con una ruta incoherente | detectada | no la mira |
+
+La puerta de la API no es el verificador: mira lo que el código necesita para
+no romperse y para que el depósito no sea público. La seguridad de la función,
+los permisos y las políticas los comprueba la propia 0096 antes de confirmar,
+y esta verificación después.
+
+### La puerta de esquema, con el código real
+
+| Caso | Resultado |
+|---|---|
+| Base local con 0001–0095, API encendida | 503 `services_not_ready` en el catálogo; la admisión sigue |
+| Se aplica la 0096 (dos veces) con la API en marcha | el MISMO proceso sigue en 503: recuerda el «no» |
+| Se reinicia la API | abre |
+| **Supabase, con un proceso nuevo y la conexión de la API** | las seis puertas dicen que sí; con las banderas como están, 503 `services_disabled` sin mirar la base |
+| Un error al inspeccionar (en Supabase, provocado en el proceso; en local, la tabla de depósitos apartada) | 503 `services_not_ready`, nunca un 500, nadie entra y **no se recuerda**: pasado el fallo, el mismo proceso vuelve a mirar y abre |
+
+## 132. La puerta de la admisión: un error al mirar también es un 503
+
+Al repasar las puertas apareció una que no cumplía lo de la tabla anterior.
+`hay_admision` —la primera, la de las 0086–0088— no capturaba un error al
+inspeccionar: la excepción subía y la ruta contestaba **500**. No concedía
+acceso, pero no era el 503 controlado de las otras cinco, y el fallo no venía
+de este bloque: estaba así desde el Incremento 1.
+
+Ahora hace lo mismo que las demás: registra el aviso, contesta 503
+`services_not_ready` y **no recuerda** el error. `test_servicios_admision_api.py`
+lo prueba (se puso roja antes del arreglo): con la inspección rota, la
+postulación y el catálogo contestan 503; reparada, la misma aplicación abre.
+
+## 133. El recorrido final de las cinco políticas
+
+La API real en seis procesos locales, cada uno con su configuración, sesiones
+HS256 de verdad, PostgreSQL 17 local y el almacén de pruebas —guardado en
+disco, con un diario de cada operación—. **92 de 92 comprobaciones, 125
+peticiones, ningún 500.** Nada tocó Supabase ni AWS.
+
+| Tramo | Qué se vio |
+|---|---|
+| **Servicios apagado** (la configuración de fábrica) | 13 rutas de Servicios, 503 `services_disabled`; la app recibe «no» para todos, también administración; apartar un horario y las reservas, apagados; Cursos, Eventos y Productos contestan. PostgreSQL registró 53 sentencias de la API en ese tramo y **ninguna nombra una tabla de Servicios** |
+| **Sin la 0096** | lo de la tabla de §131 |
+| **Rutas opacas (P29)** | la ruta es `<servicio>/<32 hexadecimales>.<ext>` y no lleva el perfil; la extensión la dicen los bytes (un JPEG llamado `.png` se guarda `.jpg`; un WebP sin extensión, `.webp`); el teléfono no la elige ni con el nombre del archivo ni con campos de más; un PNG que dice ser JPEG y un archivo que no es una imagen, 422 `service_image_invalid` y no llegan al almacén; el mismo contenido subido dos veces recibe dos nombres; cuatro rutas escritas a mano en la base, `23514` |
+| **Lo compartido** | abrir una versión nueva deja diez filas y cinco archivos; quitar del borrador una imagen que la publicada sigue usando no borra el archivo; quitar una que solo estaba en el borrador sí, y **después** de que la base confirme (al pedirse el borrado, ninguna fila confirmada la nombraba) |
+| **La baja** | la carpeta del servicio queda vacía en el almacén; lo de otro prestador no se toca |
+| **Los enlaces** | 113 enlaces en las respuestas, todos firmados; ninguna URL pública |
+| **Modalidades y moneda (P5, P2)** | «a domicilio» y dólares, 422 al escribir y al filtrar; virtual y en soles, sí |
+| **Capacidad (P51)** | fuera de la ficha, del calendario y de los horarios; su prestador y administración la ven |
+| **El piloto (P101)** | solo los perfiles de la lista (normalizada); administración por su rol; lista mal escrita, nadie y sin nombrar a nadie en el registro; apertura general, cualquiera; apagado, nadie |
+
+En la baja, los archivos se borran **antes** de confirmar la base, a propósito
+(`Z_BAJA_DE_CUENTA.md`): si no se pueden borrar, la baja se deshace entera.
+
+## 134. Listo para el push; lo que sigue pendiente
+
+| Qué | Resultado |
+|---|---|
+| Backend completo con PostgreSQL 17 | 4416 aprobadas, ninguna saltada |
+| Backend completo sin PostgreSQL | 3154 aprobadas; 1262 se saltan por no tener PostgreSQL |
+| Móvil | sin cambios desde §129; las 210 pruebas que vigilan cuándo se enseña Servicios, repetidas, pasan |
+
+**El bloque previo al despliegue está técnicamente cerrado.** Para encender un
+piloto (§128), el primer paso ya está hecho; quedan, en este orden:
+
+1. push de `Edson`, CI remoto y PR;
+2. desplegar con todo apagado, que es lo que traen los perfiles. Producción
+   no corre todavía este código: al desplegarlo arrancan procesos nuevos, que
+   miran la base por primera vez;
+3. poner los perfiles del piloto en el secreto y renovar las máquinas;
+4. encender `FeatureServices` con un Change Set revisado.
+
+Nada de eso se hizo aquí: ni push, ni PR, ni despliegue, ni Change Sets, ni
+cambios en AWS, GitHub o Supabase. Las banderas siguen apagadas y no se movió
+dinero.
+
+Sigue pendiente lo de §130 menos la 0096: el **QA físico**, las cuatro
+políticas que dependen de la operación o de trabajo futuro, y lo de la empresa
+(**F21, la primera**).

@@ -1932,12 +1932,15 @@ reiniciarla. Nada de esto se probó en un teléfono.
 Las políticas están en `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo. Cinco se
 cerraron en el código ese día (`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII) y
 están probadas contra el servidor y con las baterías del móvil. **Nada de esto
-se probó en un teléfono**, y la migración 0096 está **sin aplicar**.
+se probó en un teléfono.** La migración 0096 está aplicada y verificada desde
+el 02/10/2026 (`Z_SERVICIOS_ARQUITECTURA.md` §131).
 
 **Antes de nada (la 0096).**
 
-- [ ] La 0096 está aplicada en Supabase y verificada (`Z_SERVICIOS_ARQUITECTURA.md`
-      §124), y la API se reinició después. *(En una base sin la 0096, todo el
+- [x] La 0096 está aplicada en Supabase y verificada (`Z_SERVICIOS_ARQUITECTURA.md`
+      §131), el 02/10/2026.
+- [ ] El código de `Edson` está desplegado en el entorno de la prueba: son
+      procesos nuevos, que miran la base al arrancar. *(En una base sin la 0096, todo el
       catálogo de Servicios dice que todavía no está disponible; la app no se
       cierra ni enseña un error técnico.)*
 
