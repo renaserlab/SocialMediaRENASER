@@ -598,6 +598,30 @@ async def test_encendida_sin_las_migraciones_contesta_503_services_not_ready(enc
 
 
 @pytest.mark.asyncio
+async def test_un_error_al_mirar_la_admision_es_503_y_no_se_recuerda(entorno, encendida, monkeypatch) -> None:
+    """La primera puerta, como las demás: si el esquema no se puede mirar, 503
+    `services_not_ready` —nunca un 500—, nadie entra, y la respuesta no se
+    recuerda: un fallo pasajero no deja Servicios cerrado hasta reiniciar."""
+    http, quien, _, _ = entorno
+    _como(quien, PRESTADORA)
+    esquema.olvidar()
+    de_verdad = esquema.inspect
+
+    def _rota(_conexion):
+        raise RuntimeError("la base no contesta")
+
+    monkeypatch.setattr(esquema, "inspect", _rota)
+    for ruta in (MIA, f"{API}/services/catalog"):
+        r = await http.get(ruta)
+        assert (r.status_code, _codigo(r)) == (503, "services_not_ready"), (ruta, r.text)
+    assert "admision" not in esquema._cache
+    # Pasado el fallo, la MISMA aplicación vuelve a mirar y abre.
+    monkeypatch.setattr(esquema, "inspect", de_verdad)
+    assert (await http.get(MIA)).status_code in (200, 404)
+    assert esquema._cache["admision"] is True
+
+
+@pytest.mark.asyncio
 async def test_la_configuracion_publica_dice_si_servicios_esta_encendido(entorno) -> None:
     http, *_ = entorno
     assert (await http.get(f"{API}/platform/config")).json() == {

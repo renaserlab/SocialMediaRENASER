@@ -81,8 +81,13 @@ def olvidar_guardados() -> None:
 
 
 async def hay_admision(db: AsyncSession) -> bool:
+    """¿Tiene la base las 0086–0088? Ante la duda, no.
+
+    La respuesta se recuerda hasta reiniciar la API, también el «no». Un error
+    al mirar NO se recuerda y cierra la puerta, como en las demás: es un 503 y
+    no un 500, y un fallo pasajero no deja Servicios cerrado hasta reiniciar.
+    """
     if "admision" not in _cache:
-        conexion = await db.connection()
 
         def _mirar(sync) -> bool:  # noqa: ANN001
             inspector = inspect(sync)
@@ -94,7 +99,16 @@ async def hay_admision(db: AsyncSession) -> bool:
                     return False
             return True
 
-        _cache["admision"] = await conexion.run_sync(_mirar)
+        try:
+            conexion = await db.connection()
+            completa = await conexion.run_sync(_mirar)
+        except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
+            logger.warning(
+                "Servicios: no se pudieron comprobar las migraciones 0086–0088; las rutas contestan 503.",
+                exc_info=True,
+            )
+            return False
+        _cache["admision"] = completa
         if not _cache["admision"]:
             logger.warning(
                 "Servicios: faltan las migraciones 0086–0088. Las rutas contestan 503."
