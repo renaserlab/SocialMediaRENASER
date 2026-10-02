@@ -168,6 +168,10 @@ def base_aplicada():
 async def entorno(base_aplicada, monkeypatch):
     ajustes = get_settings()
     monkeypatch.setattr(ajustes, "feature_services", True)
+    # Las pruebas del catálogo ejercitan los CUATRO modelos de precio, que
+    # siguen en el código y en la base. De fábrica el piloto admite dos
+    # (gratuito y «a consultar»): `test_servicios_politicas_del_piloto.py`.
+    monkeypatch.setattr(ajustes, "services_catalog_price_models", "free,fixed,from,on_request")
     # Valores DE PRUEBA: el almacén es el de mentira de arriba.
     monkeypatch.setattr(ajustes, "supabase_url", ALMACEN)
     monkeypatch.setattr(ajustes, "supabase_service_role_key", "clave-de-prueba")

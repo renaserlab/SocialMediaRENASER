@@ -233,9 +233,13 @@ class Settings(BaseSettings):
     #: modelo y en la base (0090): volver a ofrecerla es anadirla aqui, y
     #: construir antes la aceptacion del prestador.
     services_catalog_modalities: str = "virtual,in_person"
-    #: `from` («desde») lo permite el blueprint; `on_request` es el precio no
-    #: publicado. Quitar uno aqui lo deja fuera de los envios nuevos.
-    services_catalog_price_models: str = "free,fixed,from,on_request"
+    #: EL PILOTO ES GRATUITO (politica de la primera version, 02/10/2026): una
+    #: ficha es gratuita o dice «a consultar», que es solo informacion (no se
+    #: reserva ni se paga en Z). `fixed` y `from` («desde») siguen en el modelo
+    #: y en la base: una ficha con importe no se puede ENVIAR a revision
+    #: (`price_model_not_allowed`) hasta que se anadan aqui, y eso es de una
+    #: version con pagos.
+    services_catalog_price_models: str = "free,on_request"
     #: SIN MONEDA CONFIGURADA NO SE ENVIA un precio con importe. Solo PEN.
     services_catalog_currencies: str = "PEN"
     services_catalog_min_duration_minutes: int = 5

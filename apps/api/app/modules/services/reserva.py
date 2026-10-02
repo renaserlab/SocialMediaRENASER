@@ -420,9 +420,16 @@ async def _anotar(
     return evento
 
 
-async def _vencer(db: AsyncSession, filtro, *, ahora: datetime, lote: int | None = None) -> int:
+async def _vencer(
+    db: AsyncSession, filtro, *, ahora: datetime, lote: int | None = None, una_a_una: bool = False
+) -> int:
     """Marca VENCIDAS las activas cuyo plazo pasó, con su línea en el
-    historial. Idempotente: una ya vencida no se vuelve a tocar."""
+    historial. Idempotente: una ya vencida no se vuelve a tocar.
+
+    `una_a_una` es EL BARRIDO (`vencer_retenciones`): cada retención en su
+    punto de guardado, para que una fila que falla no deshaga el lote. Quien
+    retiene o suelta un horario vence antes lo de ESE servicio todo junto, y
+    ahí un fallo sí tiene que detenerlo."""
     candidatas = select(ServiceHold.id).where(
         ServiceHold.status == RETENCION_ACTIVA, ServiceHold.expires_at <= ahora, filtro
     ).order_by(ServiceHold.expires_at, ServiceHold.id)
@@ -434,6 +441,8 @@ async def _vencer(db: AsyncSession, filtro, *, ahora: datetime, lote: int | None
     ids = list(await db.scalars(candidatas))
     if not ids:
         return 0
+    if una_a_una:
+        return await _vencer_una_a_una(db, ids, ahora=ahora)
     filas = (
         await db.execute(
             update(ServiceHold)
@@ -449,6 +458,36 @@ async def _vencer(db: AsyncSession, filtro, *, ahora: datetime, lote: int | None
             hasta=RETENCION_VENCIDA, ahora=ahora, retencion_id=retencion_id, rol=SISTEMA,
         )
     return len(filas)
+
+
+async def _vencer_una_a_una(db: AsyncSession, ids: list[str], *, ahora: datetime) -> int:
+    """Cada retención del lote, en su punto de guardado: la que falla se
+    deshace ELLA SOLA (sigue activa, sin su línea), se registra y queda para
+    la próxima pasada; las demás se vencen. Un cerrojo que no llega o un
+    interbloqueo no es de una fila: sube, y `sin_esperas_largas` contesta."""
+    vencidas = 0
+    for retencion_id in ids:
+        try:
+            async with db.begin_nested():
+                servicio_id = await db.scalar(
+                    update(ServiceHold)
+                    .where(ServiceHold.id == retencion_id, ServiceHold.status == RETENCION_ACTIVA)
+                    .values(status=RETENCION_VENCIDA, expired_at=ahora, updated_at=ahora)
+                    .returning(ServiceHold.service_id)
+                    .execution_options(synchronize_session=False)
+                )
+                if servicio_id is None:
+                    continue
+                await _anotar(
+                    db, servicio_id=servicio_id, accion=RETENCION_VENCIO, desde=RETENCION_ACTIVA,
+                    hasta=RETENCION_VENCIDA, ahora=ahora, retencion_id=retencion_id, rol=SISTEMA,
+                )
+            vencidas += 1
+        except Exception as error:  # noqa: BLE001 - una fila no tumba el lote
+            if isinstance(error, DBAPIError) and _estado_sql(error) in _ESPERAS_FALLIDAS:
+                raise
+            avisos.logger.exception("[servicios] no se pudo vencer la retención %s", retencion_id)
+    return vencidas
 
 
 async def _publico_para(db: AsyncSession, servicio_id: str, cliente_id: str) -> tuple:
@@ -1234,11 +1273,12 @@ async def reservas_para_administrar(
 @sin_esperas_largas
 async def vencer_retenciones(db: AsyncSession, *, lote: int | None = None, ahora: datetime | None = None) -> int:
     """EL BARRIDO: marca vencidas, por lotes, las activas cuyo plazo pasó.
-    Idempotente (una vencida no se toca dos veces) y sin esperar a nadie (lo
-    que otra transacción tiene bloqueado se salta y queda para la próxima).
+    Idempotente (una vencida no se toca dos veces), sin esperar a nadie (lo
+    que otra transacción tiene bloqueado se salta y queda para la próxima) y
+    fila a fila (la que falla no deshace las demás).
     NO ES LA AUTORIDAD: el vencimiento ya lo decide la hora."""
     lote = max(1, min(int(lote or limites.LOTE_DEL_BARRIDO), limites.LOTE_MAXIMO_DEL_BARRIDO))
-    return await _vencer(db, true(), ahora=ahora or _ahora(), lote=lote)
+    return await _vencer(db, true(), ahora=ahora or _ahora(), lote=lote, una_a_una=True)
 
 
 __all__ = [

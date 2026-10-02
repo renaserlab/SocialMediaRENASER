@@ -152,6 +152,8 @@ def test_de_fabrica_servicios_esta_cerrado_y_no_cobra() -> None:
     # La primera versión (P5 y P2): sin «a domicilio» y solo en soles.
     assert de_fabrica["services_catalog_modalities"] == "virtual,in_person"
     assert de_fabrica["services_catalog_currencies"] == "PEN"
+    # El piloto es gratuito: ninguna ficha con importe.
+    assert de_fabrica["services_catalog_price_models"] == "free,on_request"
 
 
 def test_hay_rutas_que_proteger() -> None:

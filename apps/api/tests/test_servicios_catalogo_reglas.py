@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.modules.services import catalogo_estados as estados
 from app.modules.services.catalogo_requisitos import CODIGOS, Reglas, faltantes
 from app.modules.services.states import ADMINISTRACION, PRESTADOR, REVISOR, SISTEMA
@@ -126,8 +126,30 @@ def _faltan(version=None, *, prestador="active", categoria="active", imagenes=No
     )
 
 
+@pytest.fixture(autouse=True)
+def _los_cuatro_modelos_de_precio(monkeypatch):
+    """Las reglas del precio se prueban con los CUATRO modelos, que siguen en
+    el código y en la base. De fábrica el piloto solo admite dos: lo dice
+    `test_de_fabrica_el_piloto_solo_admite_gratis_y_a_consultar`."""
+    monkeypatch.setattr(get_settings(), "services_catalog_price_models", "free,fixed,from,on_request")
+
+
 def test_una_version_completa_no_tiene_nada_pendiente() -> None:
     assert _faltan() == []
+
+
+def test_de_fabrica_el_piloto_solo_admite_gratis_y_a_consultar(monkeypatch) -> None:
+    """Política de la primera versión (02/10/2026): el piloto es gratuito. Una
+    ficha con importe (`fixed`, `from`) no se puede enviar; «a consultar» sí,
+    y es solo información: no se reserva en Z."""
+    de_fabrica = Settings.model_fields["services_catalog_price_models"].default
+    assert de_fabrica == "free,on_request"
+    monkeypatch.setattr(get_settings(), "services_catalog_price_models", de_fabrica)
+    assert Reglas.de().modelos_de_precio == frozenset({"free", "on_request"})
+    assert _faltan(_completa(price_model="free", price_minor=None, currency=None)) == []
+    assert _faltan(_completa(price_model="on_request", price_minor=None, currency=None)) == []
+    assert _faltan(_completa(price_model="fixed")) == ["price_model_not_allowed"]
+    assert _faltan(_completa(price_model="from")) == ["price_model_not_allowed"]
 
 
 def test_sin_precio_configurado_no_es_gratis() -> None:
