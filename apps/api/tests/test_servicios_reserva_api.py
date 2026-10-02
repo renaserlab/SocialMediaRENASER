@@ -321,8 +321,11 @@ async def test_a_consultar_y_desde_no_apartan_un_horario(reservas) -> None:
 # =========================================================================== #
 # 3. A domicilio
 # =========================================================================== #
-async def test_a_domicilio_lo_acepta_el_prestador_y_hoy_no_se_confirma(reservas) -> None:
+async def test_a_domicilio_lo_acepta_el_prestador_y_hoy_no_se_confirma(reservas, monkeypatch) -> None:
     app, motor, _ = reservas
+    # «A domicilio» sigue en el modelo, pero no se ofrece en la primera versión
+    # (P5): se enciende aquí para probar lo que el modelo conserva.
+    monkeypatch.setattr(get_settings(), "services_catalog_modalities", "virtual,in_person,at_home")
     _, servicio, jefa, _ = await _servicio(app, motor, modality="at_home", location_area="Miraflores, Lima")
     await _condiciones(app, jefa)
     assert (await _pedir(app, "GET", _publica(servicio), None)).json()["booking_available"] is False
@@ -333,6 +336,9 @@ async def test_a_domicilio_lo_acepta_el_prestador_y_hoy_no_se_confirma(reservas)
 
 async def test_a_domicilio_si_se_configura_pide_la_direccion_y_solo_la_ve_el_prestador(reservas, monkeypatch) -> None:
     app, motor, _ = reservas
+    # «A domicilio» sigue en el modelo, pero no se ofrece en la primera versión
+    # (P5): se enciende aquí para probar lo que el modelo conserva.
+    monkeypatch.setattr(get_settings(), "services_catalog_modalities", "virtual,in_person,at_home")
     monkeypatch.setattr(get_settings(), "services_booking_instant_modalities", "virtual,in_person,at_home")
     perfil, servicio, jefa, _ = await _servicio(app, motor, modality="at_home", location_area="Miraflores, Lima")
     await _condiciones(app, jefa)

@@ -188,10 +188,13 @@ async def test_recorrido_integral_con_los_cinco_actores(entorno, monkeypatch) ->
                           "where profile_id = cast(:u as uuid)", u=ana)
 
     await editar(title=CONTENIDO["title"], summary=CONTENIDO["summary"], description=CONTENIDO["description"])
-    # Modalidad: fuera de lo configurado, presencial sin zona, y virtual.
-    monkeypatch.setattr(ajustes, "services_catalog_modalities", "in_person,at_home")
-    assert "modality_not_allowed" in await editar(modality="virtual")
-    monkeypatch.setattr(ajustes, "services_catalog_modalities", "virtual,in_person,at_home")
+    # Modalidad: lo que Z no ofrece no entra en el borrador (P5); un borrador
+    # que ya la tenía lo dice al enviar; presencial sin zona; y virtual.
+    await _espera(app, ana, "PATCH", f"{mio}/draft", 422, "service_modality_not_allowed", {"modality": "at_home"})
+    await editar(modality="virtual")
+    monkeypatch.setattr(ajustes, "services_catalog_modalities", "in_person")
+    assert "modality_not_allowed" in await que_falta()
+    monkeypatch.setattr(ajustes, "services_catalog_modalities", "virtual,in_person")
     assert "location_area" in await editar(modality="in_person")
     assert "location_area" not in await editar(location_area="Miraflores, Lima")
     # Duración: fuera del rango configurado, y dentro.
@@ -205,7 +208,14 @@ async def test_recorrido_integral_con_los_cinco_actores(entorno, monkeypatch) ->
     monkeypatch.setattr(ajustes, "services_catalog_price_models", "free,fixed,from,on_request")
     faltan = await editar(price_model="fixed")
     assert "price" in faltan and "currency" in faltan
-    assert "currency_not_allowed" in await editar(price_minor=12000, currency="USD")
+    # Una moneda que Z no admite no entra en el borrador (P2); un borrador que
+    # ya la tenía lo dice al enviar.
+    await _espera(app, ana, "PATCH", f"{mio}/draft", 422, "service_currency_not_allowed",
+                  {"price_minor": 12000, "currency": "USD"})
+    monkeypatch.setattr(ajustes, "services_catalog_currencies", "PEN,USD")
+    await editar(price_minor=12000, currency="USD")
+    monkeypatch.setattr(ajustes, "services_catalog_currencies", "PEN")
+    assert "currency_not_allowed" in await que_falta()
     faltan = await editar(currency="PEN")
     assert not {"price", "currency", "currency_not_allowed", "price_model"} & set(faltan)
     await editar(scope=CONTENIDO["scope"], includes=CONTENIDO["includes"], excludes=CONTENIDO["excludes"],
@@ -238,7 +248,7 @@ async def test_recorrido_integral_con_los_cinco_actores(entorno, monkeypatch) ->
     assert "too_many_images" in await que_falta()
     monkeypatch.setattr(ajustes, "services_catalog_max_images", 8)
     assert await que_falta() == []
-    assert len(almacen.de("service-media", ana)) == 2
+    assert len(almacen.de("service-media", ident)) == 2
     # LOS 21, todos vistos, y ninguno fuera de la lista estable.
     assert vistos == set(CODIGOS), sorted(set(CODIGOS) ^ vistos)
     assert len(CODIGOS) == 21
@@ -359,7 +369,7 @@ async def test_recorrido_integral_con_los_cinco_actores(entorno, monkeypatch) ->
     ficha = (await _espera(app, publico, "GET", f"{FICHA}/{ident}", 200)).json()
     assert ficha["title"] == "Diagnóstico contable y plan de ahorro"
     # Los archivos de la versión superada siguen (la publicada usa la misma ruta).
-    assert len(almacen.de("service-media", ana)) == 2
+    assert len(almacen.de("service-media", ident)) == 2
 
     # ------------------------------------------------------------------ #
     # 16. Suspender: desaparece del público

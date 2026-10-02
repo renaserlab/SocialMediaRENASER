@@ -16,7 +16,7 @@ import { confirm } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import {
   LARGOS,
-  MODALIDADES,
+  MODALIDADES_OFRECIDAS,
   MODELOS_DE_PRECIO,
   MONEDAS,
   cambiosDelBorrador,
@@ -225,7 +225,7 @@ export function EditarServicioScreen() {
       <SectionTitle title={f('servicios.catalogo.editar.seccionModalidad')} />
       <Text weight="600">{etiqueta('servicios.catalogo.campo.modality', 'modality')}</Text>
       <View style={styles.fila} accessibilityRole="radiogroup">
-        {MODALIDADES.map((m) => (
+        {MODALIDADES_OFRECIDAS.map((m) => (
           <Chip
             key={m}
             rol="radio"

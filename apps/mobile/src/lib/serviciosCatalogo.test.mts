@@ -126,6 +126,24 @@ describe('los valores cerrados son los del servidor', () => {
     assert.deepEqual(tupla(modelos, 'ACCIONES'), [...C.SUCESOS]);
   });
 
+  it('lo que se OFRECE en la primera versión es lo que el servidor trae de fábrica (P5 y P2)', () => {
+    const ajustes = readFileSync(join(API, '..', '..', 'core', 'config.py'), 'utf8');
+    const deFabrica = (nombre: string) => {
+      const linea = ajustes.match(new RegExp(`^    ${nombre}: str = "([^"]*)"$`, 'm'));
+      assert.ok(linea, nombre);
+      return (linea[1] as string).split(',');
+    };
+    assert.deepEqual(deFabrica('services_catalog_modalities'), [...C.MODALIDADES_OFRECIDAS]);
+    assert.deepEqual(deFabrica('services_catalog_currencies'), [...C.MONEDAS]);
+    // «A domicilio» sigue en el modelo —lo que ya la tuviera se sigue
+    // nombrando—, pero ningún formulario ni filtro la ofrece. Y solo soles.
+    assert.ok((C.MODALIDADES as readonly string[]).includes('at_home'));
+    assert.ok(!(C.MODALIDADES_OFRECIDAS as readonly string[]).includes('at_home'));
+    assert.deepEqual([...C.MONEDAS], ['PEN']);
+    assert.deepEqual(C.FILTROS_DE_MODALIDAD, [null, 'virtual', 'in_person']);
+    for (const m of C.MODALIDADES) assert.deepEqual(enLosTres(C.claveDeLaModalidad(m)), [], m);
+  });
+
   it('los requisitos y los campos que Z puede señalar', () => {
     const requisitos = servidor('catalogo_requisitos.py');
     assert.deepEqual(tupla(requisitos, 'CODIGOS'), [...C.REQUISITOS]);

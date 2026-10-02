@@ -356,8 +356,9 @@ async def test_lo_publico_solo_trae_horarios_y_respeta_el_horizonte(mundo) -> No
     assert calendario["from_date"] == _hoy().isoformat() and len(calendario["days"]) >= 29
     assert all(d["count"] in (1, 2) for d in calendario["days"])
     siguiente = calendario["next"]
-    assert set(siguiente) == {"starts_at", "ends_at", "date", "time", "end_time", "utc_offset", "capacity"}
-    assert siguiente["utc_offset"] == "-05:00" and siguiente["capacity"] == 1
+    # SIN LA CAPACIDAD (P51): al público le basta con que el horario exista.
+    assert set(siguiente) == {"starts_at", "ends_at", "date", "time", "end_time", "utc_offset"}
+    assert siguiente["utc_offset"] == "-05:00"
     # Lo abusivo, un 422 estable.
     for params, codigo in (
         ({"from": _dia(0), "to": _dia(40)}, "service_availability_range_invalid"),

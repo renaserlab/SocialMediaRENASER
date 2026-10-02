@@ -17,7 +17,7 @@
  */
 import { importeEscrito } from '@/lib/proveedorDeProductos';
 import {
-  MODALIDADES,
+  MODALIDADES_OFRECIDAS,
   MONEDAS,
   type CategoriaPublica,
   type Contenido,
@@ -186,7 +186,8 @@ export function filtrosDesdeRuta(params: Record<string, unknown>): Filtros {
   return {
     q: texto(params.q).slice(0, LARGO_MAXIMO_DE_BUSQUEDA),
     categoria: UUID.test(categoria) ? categoria : null,
-    modalidad: uno(MODALIDADES, texto(params.modalidad)),
+    // Solo las que Z ofrece: un enlace con «a domicilio» se abre sin ese filtro.
+    modalidad: uno(MODALIDADES_OFRECIDAS, texto(params.modalidad)),
     precio,
     moneda: !sinImporte && (MONEDAS as readonly string[]).includes(moneda) ? moneda : null,
     minimo: sinImporte ? '' : texto(params.minimo).slice(0, 20),

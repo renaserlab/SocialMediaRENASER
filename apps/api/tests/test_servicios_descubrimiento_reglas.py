@@ -76,7 +76,17 @@ def test_sin_moneda_no_hay_rango_ni_orden_por_precio(kwargs) -> None:
 def test_la_moneda_implica_importe_y_no_se_convierte() -> None:
     f = d.filtros(moneda="pen", minimo=0, maximo=12000)
     assert f.moneda == "PEN" and f.precio == "priced" and (f.minimo, f.maximo) == (0, 12000)
-    assert d.filtros(moneda="USD", orden="price_desc").precio == "priced"
+    assert d.filtros(moneda="PEN", orden="price_desc").precio == "priced"
+    # Una moneda que Z no admite (P2) no es un filtro sin resultados: no es un filtro.
+    for ajena in ("USD", "eur"):
+        with pytest.raises(d.FiltroInvalido) as error:
+            d.filtros(moneda=ajena)
+        assert error.value.details == {"field": "currency"}
+    # Igual que una modalidad que no se ofrece (P5).
+    with pytest.raises(d.FiltroInvalido) as error:
+        d.filtros(modalidad="at_home")
+    assert error.value.details == {"field": "modality"}
+    assert d.filtros(modalidad="in_person").modalidad == "in_person"
     # Gratis y a consultar son precios distintos de «con importe».
     assert d.filtros(precio="free").precio == "free"
     assert d.filtros(precio="on_request").precio == "on_request"

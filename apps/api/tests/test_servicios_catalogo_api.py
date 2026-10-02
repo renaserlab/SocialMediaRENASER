@@ -274,7 +274,7 @@ async def test_enviar_incompleto_dice_que_falta_y_no_cambia_nada(entorno) -> Non
     ) == "draft"
 
 
-async def test_gratis_no_es_sin_precio_y_un_importe_va_con_moneda(entorno) -> None:
+async def test_gratis_no_es_sin_precio_y_un_importe_va_con_moneda(entorno, monkeypatch) -> None:
     app, motor, _ = entorno
     jefa, _ = await _equipo(motor)
     perfil = await _prestador(motor)
@@ -285,9 +285,18 @@ async def test_gratis_no_es_sin_precio_y_un_importe_va_con_moneda(entorno) -> No
     # Fijo sin moneda: falta la moneda.
     cuerpo = (await _editar(app, perfil, servicio, price_model="fixed", price_minor=5000)).json()
     assert "currency" in cuerpo["missing"] and cuerpo["open_version"]["price"]["amount_minor"] == 5000
-    # Una moneda sin configurar no vale.
-    cuerpo = (await _editar(app, perfil, servicio, currency="USD")).json()
-    assert "currency_not_allowed" in cuerpo["missing"]
+    # Una moneda que Z no admite NO ENTRA en el borrador (P2): un error del
+    # dominio, con su código, y el borrador se queda como estaba.
+    r = await _editar(app, perfil, servicio, currency="USD")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "service_currency_not_allowed", r.text
+    assert r.json()["error"]["details"] == {"field": "currency", "allowed": ["PEN"]}
+    # Un borrador que YA la tenía (se guardó cuando se admitía) no se pierde ni
+    # se convierte: sigue ahí, y al enviarlo se le dice qué le falta.
+    monkeypatch.setattr(get_settings(), "services_catalog_currencies", "PEN,USD")
+    assert (await _editar(app, perfil, servicio, currency="USD")).status_code == 200
+    monkeypatch.setattr(get_settings(), "services_catalog_currencies", "PEN")
+    cuerpo = (await _editar(app, perfil, servicio, title="Asesoría contable")).json()
+    assert "currency_not_allowed" in cuerpo["missing"] and cuerpo["open_version"]["price"]["currency"] == "USD"
     # Pasar a gratis limpia el importe; y gratis NO es «sin configurar».
     cuerpo = (await _editar(app, perfil, servicio, price_model="free")).json()
     assert cuerpo["open_version"]["price"] == {"model": "free", "amount_minor": None, "currency": None}
@@ -705,12 +714,12 @@ async def test_quitar_una_imagen_del_borrador_no_borra_la_de_lo_publicado(entorn
     ident = (await _publicado(app, perfil, jefa, moderador))["id"]
     borrador = (await _accion(app, perfil, f"{MIOS}/{ident}/draft")).json()
     copia = borrador["open_version"]["images"][0]["id"]
-    rutas = set(almacen.de("service-media", perfil))
+    rutas = set(almacen.de("service-media", ident))
     assert len(rutas) == 1
     async with _cliente(app, perfil) as http:
         assert (await http.delete(f"{MIOS}/{ident}/draft/images/{copia}")).status_code == 200
     # El archivo sigue: lo nombra la versión publicada.
-    assert set(almacen.de("service-media", perfil)) == rutas
+    assert set(almacen.de("service-media", ident)) == rutas
     assert (await _ficha(app, ident)).json()["images"][0]["url"]
 
 
@@ -724,7 +733,7 @@ async def test_un_reintento_de_subida_no_sube_dos_veces(entorno) -> None:
     dos = await _imagen(app, perfil, ident, clave=clave)
     assert uno.status_code == 201 and dos.status_code == 200
     assert len(dos.json()["open_version"]["images"]) == 1
-    assert len(almacen.de("service-media", perfil)) == 1
+    assert len(almacen.de("service-media", ident)) == 1
 
 
 # =========================================================================== #
@@ -805,8 +814,11 @@ async def test_un_aviso_que_falla_no_deshace_la_decision(entorno, monkeypatch) -
 # =========================================================================== #
 # 9. Bandeja, categorías y bandera
 # =========================================================================== #
-async def test_la_bandeja_filtra_y_pagina_por_cursor(entorno) -> None:
+async def test_la_bandeja_filtra_y_pagina_por_cursor(entorno, monkeypatch) -> None:
     app, motor, _ = entorno
+    # La bandeja filtra por las tres modalidades del modelo. «A domicilio» no se
+    # ofrece en la primera versión (P5): aquí se enciende para poder crearla.
+    monkeypatch.setattr(get_settings(), "services_catalog_modalities", "virtual,in_person,at_home")
     jefa, moderador = await _equipo(motor)
     perfil = await _prestador(motor)
     categoria = await _categoria(app, jefa)
@@ -892,9 +904,36 @@ async def _puerta_con(motor, *cambios: str) -> bool:
             esquema.olvidar()
 
 
-async def test_la_puerta_reconoce_la_0090_completa(entorno) -> None:
+def _funcion_de_las_imagenes(migracion: str) -> str:
+    """La sentencia que define `service_version_images_solo_en_borrador()` en
+    esa migración, tal cual: para poner en una base de prueba el cuerpo de la
+    0090 (como estaría sin la 0096)."""
+    from tests.test_migraciones_reales import MIGRACIONES
+
+    sql = next(MIGRACIONES.glob(f"{migracion}_*.sql")).read_text(encoding="utf-8").replace("\r\n", "\n")
+    inicio = sql.index("create or replace function public.service_version_images_solo_en_borrador()")
+    return sql[inicio:sql.index("$$;", inicio) + len("$$;")]
+
+
+async def test_la_puerta_reconoce_la_0090_completa_con_la_0096(entorno) -> None:
     _, motor, _ = entorno
     assert await _puerta_con(motor) is True
+
+
+async def test_la_puerta_exige_la_0096_y_no_solo_el_nombre_de_la_funcion(entorno) -> None:
+    """La 0096 no cambia el nombre de nada: cambia el CUERPO de la función que
+    valida la ruta de una imagen. Una base con el cuerpo de la 0090 tiene el
+    mismo disparador y la misma función, y aun así el catálogo no puede
+    abrirse: la API ya solo arma la ruta nueva, y esa base la rechazaría."""
+    _, motor, _ = entorno
+    de_la_0090 = _funcion_de_las_imagenes("0090")
+    assert "perfil::text || '/' || new.service_id::text" in de_la_0090 and "[0-9a-f]{32}" not in de_la_0090
+    assert await _puerta_con(motor, de_la_0090) is False
+    # Un cuerpo que no es de nadie, tampoco.
+    retocada = _funcion_de_las_imagenes("0096").replace("[0-9a-f]{32}", "[0-9a-f]{31}")
+    assert await _puerta_con(motor, retocada) is False
+    # Y el de la 0096, sí (el control: la sentencia en sí no cierra la puerta).
+    assert await _puerta_con(motor, _funcion_de_las_imagenes("0096")) is True
 
 
 @pytest.mark.parametrize(
@@ -1050,14 +1089,14 @@ async def test_la_baja_del_prestador_se_lleva_sus_servicios_e_imagenes(entorno) 
     perfil = await _prestador(motor)
     ident = (await _publicado(app, perfil, jefa, moderador))["id"]
     await _accion(app, perfil, f"{MIOS}/{ident}/draft")
-    assert almacen.de("service-media", perfil)
+    assert almacen.de("service-media", ident)
     r = await _borrar_cuenta(app, perfil)
     assert r.status_code == 204, r.text
     assert not await _existe(motor, perfil)
     for tabla, columna in (("services", "id"), ("service_versions", "service_id"),
                            ("service_version_images", "service_id"), ("service_events", "service_id")):
         assert await _uno(motor, f"select count(*) from public.{tabla} where {columna} = cast(:s as uuid)", s=ident) == 0
-    assert almacen.de("service-media", perfil) == []
+    assert almacen.de("service-media", ident) == []
     assert (await _ficha(app, ident)).status_code == 404
     # La auditoría de lo que hizo el equipo sigue, y la suya queda anónima.
     assert await _uno(
@@ -1204,7 +1243,7 @@ async def test_quitar_una_imagen_borra_el_archivo_solo_despues_de_confirmar(ento
     perfil = await _prestador(motor)
     ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
     imagen = (await _imagen(app, perfil, ident)).json()["open_version"]["images"][0]["id"]
-    antes = almacen.de("service-media", perfil)
+    antes = almacen.de("service-media", ident)
     assert len(antes) == 1
     original = AsyncSession.commit
 
@@ -1220,14 +1259,16 @@ async def test_quitar_una_imagen_borra_el_archivo_solo_despues_de_confirmar(ento
     assert await _uno(
         motor, "select count(*) from public.service_version_images where id = cast(:i as uuid)", i=imagen
     ) == 1
-    assert almacen.de("service-media", perfil) == antes
+    assert almacen.de("service-media", ident) == antes
     # Y cuando sí se confirma, el archivo se va.
     async with _cliente(app, perfil) as http:
         assert (await http.delete(f"{MIOS}/{ident}/draft/images/{imagen}")).status_code == 200
-    assert almacen.de("service-media", perfil) == []
+    assert almacen.de("service-media", ident) == []
 
 
-async def test_con_clave_la_subida_pisa_un_archivo_huerfano_del_intento_anterior(entorno, monkeypatch) -> None:
+async def test_cada_subida_escribe_una_ruta_nueva_y_nunca_pisa(entorno, monkeypatch) -> None:
+    """Antes de la 0096, con clave la ruta salía de la clave y un reintento
+    pisaba el archivo. Ahora la ruta es al azar: nada se pisa nunca."""
     from app.modules.services import catalogo_imagenes
 
     app, motor, _ = entorno
@@ -1244,8 +1285,7 @@ async def test_con_clave_la_subida_pisa_un_archivo_huerfano_del_intento_anterior
     monkeypatch.setattr(catalogo_imagenes.storage, "subir_objeto", espia)
     assert (await _imagen(app, perfil, ident, clave="subida-con-clave-1")).status_code == 201
     assert (await _imagen(app, perfil, ident, PNG_AZUL)).status_code == 201
-    # Con clave, la ruta sale de la clave y se pisa; sin clave, la ruta es nueva.
-    assert vistas == [True, False]
+    assert vistas == [False, False]
 
 
 async def test_crear_sin_clave_no_devuelve_otro_servicio_si_la_base_protesta(entorno, monkeypatch) -> None:
@@ -1294,3 +1334,181 @@ async def test_un_choque_de_la_base_al_crear_categoria_no_se_llama_slug_repetido
     monkeypatch.setattr(categorias, "_exigir_jerarquia", sin_mirar)
     with pytest.raises(IntegrityError):
         await _categoria(app, jefa, parent_id=hija["id"])
+
+
+# =========================================================================== #
+# 13. Las políticas de la primera versión: P29 (ruta opaca), P5 (modalidades),
+#     P2 (moneda) y P51 (la capacidad no es pública)
+# =========================================================================== #
+async def _rutas_en_la_base(motor, servicio: str) -> list[str]:
+    juntas = await _uno(
+        motor,
+        "select string_agg(storage_path, '|' order by storage_path) from public.service_version_images "
+        "where service_id = cast(:s as uuid)",
+        s=servicio,
+    )
+    return juntas.split("|") if juntas else []
+
+
+async def test_la_ruta_de_una_imagen_es_opaca_y_no_lleva_el_perfil(entorno) -> None:
+    from app.modules.services import catalogo_imagenes
+
+    app, motor, almacen = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    prestador = str(await _uno(
+        motor, "select id from public.service_providers where profile_id = cast(:u as uuid)", u=perfil
+    ))
+    assert (await _imagen(app, perfil, ident)).status_code == 201
+    assert (await _imagen(app, perfil, ident, datos=PNG_AZUL)).status_code == 201
+    # LA MISMA FOTO OTRA VEZ: otra ruta. La ruta no sale del contenido.
+    assert (await _imagen(app, perfil, ident)).status_code == 201
+
+    rutas = sorted(almacen.objetos["service-media"])
+    assert len(rutas) == 3 and len(set(rutas)) == 3
+    for ruta in rutas:
+        assert catalogo_imagenes.RUTA_OPACA.match(ruta), ruta
+        assert ruta.startswith(f"{ident}/") and ruta.endswith(".png")
+        # Ni el perfil ni el prestador, ni enteros ni a trozos reconocibles.
+        for ajeno in (perfil, prestador, perfil.replace("-", ""), prestador.replace("-", "")):
+            assert ajeno not in ruta
+    # Nada cuelga ya de la carpeta del perfil, y la base guarda esas mismas rutas.
+    assert almacen.de("service-media", perfil) == []
+    assert await _rutas_en_la_base(motor, ident) == rutas
+
+
+async def test_el_telefono_no_elige_la_ruta_ni_la_extension(entorno) -> None:
+    """Ni un campo con la ruta, ni el nombre del archivo, ni su extensión: la
+    ruta la arma el servidor, y la extensión sale de los BYTES."""
+    from app.modules.services import catalogo_imagenes
+
+    app, motor, almacen = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    elegida = f"{perfil}/{ident}/x/la-que-yo-quiero.jpg"
+    async with _cliente(app, perfil) as http:
+        r = await http.post(
+            f"{MIOS}/{ident}/draft/images",
+            data={
+                "alt_text": "Escritorio con facturas", "storage_path": elegida, "path": elegida,
+                "ruta": elegida, "id": str(uuid.uuid4()),
+            },
+            files={"file": ("../../la-que-yo-quiero.jpg", PNG_VERDE, "image/png")},
+        )
+    assert r.status_code == 201, r.text
+    (ruta,) = almacen.objetos["service-media"]
+    assert catalogo_imagenes.RUTA_OPACA.match(ruta) and ruta.startswith(f"{ident}/")
+    # Es un PNG aunque el nombre dijera .jpg, y nada de lo enviado está en la ruta.
+    assert ruta.endswith(".png")
+    for enviado in ("la-que-yo-quiero", "..", perfil, "/x/"):
+        assert enviado not in ruta
+    assert await _rutas_en_la_base(motor, ident) == [ruta]
+    # La ruta nunca sale en la respuesta: solo una URL firmada que caduca.
+    assert "storage_path" not in r.text and ruta not in r.text.replace(r.json()["open_version"]["images"][0]["url"], "")
+    assert "/object/sign/" in r.json()["open_version"]["images"][0]["url"]
+
+
+async def test_abrir_una_version_nueva_copia_la_referencia_y_no_el_archivo(entorno) -> None:
+    app, motor, almacen = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _publicado(app, perfil, jefa, moderador))["id"]
+    (ruta,) = almacen.de("service-media", ident)
+    assert (await _accion(app, perfil, f"{MIOS}/{ident}/draft")).status_code in (200, 201)
+    # Dos filas (la publicada y el borrador) nombran UN archivo.
+    assert await _rutas_en_la_base(motor, ident) == [ruta, ruta]
+    assert almacen.de("service-media", ident) == [ruta]
+    # Una imagen nueva en el borrador es otro archivo, con otra ruta.
+    assert (await _imagen(app, perfil, ident, datos=PNG_AZUL)).status_code == 201
+    assert len(almacen.de("service-media", ident)) == 2
+
+
+async def test_la_baja_barre_tambien_lo_que_se_subio_y_se_quedo_sin_fila(entorno) -> None:
+    """Un archivo sin fila (un intento que se cortó) no consta en la base: lo
+    encuentra la baja, que barre la carpeta entera del servicio. Y lo de
+    otro prestador ni se toca."""
+    app, motor, almacen = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil, otro = await _prestador(motor), await _prestador(motor)
+    ident = (await _publicado(app, perfil, jefa, moderador))["id"]
+    ajeno = (await _publicado(app, otro, jefa, moderador))["id"]
+    almacen.objetos["service-media"][f"{ident}/{'0' * 32}.png"] = PNG_AZUL
+    assert len(almacen.de("service-media", ident)) == 2 and len(almacen.de("service-media", ajeno)) == 1
+    r = await _borrar_cuenta(app, perfil)
+    assert r.status_code == 204, r.text
+    assert almacen.de("service-media", ident) == []
+    assert len(almacen.de("service-media", ajeno)) == 1
+    assert (await _ficha(app, ajeno)).status_code == 200
+
+
+async def test_a_domicilio_no_entra_aunque_se_escriba_a_mano(entorno) -> None:
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    r = await _editar(app, perfil, ident, modality="at_home", location_area="San Isidro", title="Clases en tu casa")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "service_modality_not_allowed", r.text
+    assert r.json()["error"]["details"] == {"field": "modality", "allowed": ["in_person", "virtual"]}
+    # NADA de esa petición se guardó: ni la modalidad ni el título que venía con ella.
+    assert await _uno(
+        motor, "select coalesce(modality, '') || '|' || coalesce(title, '') from public.service_versions "
+               "where service_id = cast(:s as uuid)", s=ident,
+    ) == "|"
+    # Las dos que Z ofrece entran.
+    for modalidad in ("virtual", "in_person"):
+        r = await _editar(app, perfil, ident, modality=modalidad)
+        assert r.status_code == 200 and r.json()["open_version"]["modality"] == modalidad
+    # Una modalidad que no existe la para el contrato, antes del dominio.
+    assert (await _editar(app, perfil, ident, modality="a_caballo")).status_code == 422
+
+
+async def test_el_catalogo_publico_no_filtra_por_lo_que_z_no_ofrece(entorno) -> None:
+    app, motor, _ = entorno
+    await _equipo(motor)
+    async with _cliente(app, str(uuid.uuid4())) as http:
+        for filtro, campo in (({"modality": "at_home"}, "modality"), ({"currency": "USD"}, "currency"),
+                              ({"currency": "EUR", "min_price": 100}, "currency")):
+            r = await http.get(FICHA, params=filtro)
+            assert r.status_code == 422 and r.json()["error"]["code"] == "service_catalog_filter_invalid", (filtro, r.text)
+            assert r.json()["error"]["details"] == {"field": campo}
+        for filtro in ({"modality": "virtual"}, {"modality": "in_person"}, {"currency": "PEN"},
+                       {"currency": "pen", "min_price": 100, "max_price": 20000}):
+            assert (await http.get(FICHA, params=filtro)).status_code == 200, filtro
+
+
+async def test_lo_gratuito_y_a_consultar_no_llevan_moneda(entorno) -> None:
+    """P2 no cambia lo que no tiene importe: ni pide moneda ni la guarda."""
+    app, motor, _ = entorno
+    jefa, _ = await _equipo(motor)
+    perfil = await _prestador(motor)
+    ident = (await _crear(app, perfil, (await _categoria(app, jefa))["id"])).json()["id"]
+    for modelo in ("free", "on_request"):
+        cuerpo = (await _editar(app, perfil, ident, price_model=modelo)).json()
+        assert cuerpo["open_version"]["price"] == {"model": modelo, "amount_minor": None, "currency": None}
+        assert not {"price", "currency", "currency_not_allowed"} & set(cuerpo["missing"])
+    # Y un importe en soles sigue en unidades menores, sin convertir.
+    cuerpo = (await _editar(app, perfil, ident, price_model="fixed", price_minor=4990, currency="pen")).json()
+    assert cuerpo["open_version"]["price"] == {"model": "fixed", "amount_minor": 4990, "currency": "PEN"}
+
+
+async def test_la_capacidad_no_sale_en_la_ficha_publica(entorno) -> None:
+    """P51: cuántas personas caben es de quien gestiona el servicio. La ficha
+    pública no trae el número; el prestador y administración, sí."""
+    app, motor, _ = entorno
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    servicio = await _publicado(app, perfil, jefa, moderador, capacity=12)
+    ident = servicio["id"]
+    for visita in (None, perfil, jefa):
+        ficha = (await _ficha(app, ident, visita)).json()
+        assert ficha["title"] == CONTENIDO["title"]
+        assert "capacity" not in json.dumps(ficha)
+    # Quien lo gestiona lo sigue viendo.
+    async with _cliente(app, perfil) as http:
+        privada = (await http.get(f"{MIOS}/{ident}")).json()
+    assert privada["published_version"]["capacity"] == 12
+    async with _cliente(app, jefa) as http:
+        r = await http.get(f"{BANDEJA}/{ident}")
+    assert r.status_code == 200 and '"capacity":12' in r.text.replace(" ", "")

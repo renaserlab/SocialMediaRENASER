@@ -253,8 +253,11 @@ async def test_solo_sale_lo_publicado_de_un_prestador_activo_en_una_categoria_ac
 # =========================================================================== #
 # 2. Búsqueda
 # =========================================================================== #
-async def test_buscar_por_titulo_categoria_descripcion_prestador_y_zona(mundo) -> None:
+async def test_buscar_por_titulo_categoria_descripcion_prestador_y_zona(mundo, monkeypatch) -> None:
     app, motor, _ = mundo
+    # «A domicilio» sigue en el modelo, pero no se ofrece en la primera versión
+    # (P5): se enciende aquí para probar lo que el modelo conserva.
+    monkeypatch.setattr(get_settings(), "services_catalog_modalities", "virtual,in_person,at_home")
     jefa, moderador = await _equipo(motor)
     legal = (await _categoria(app, jefa, name="Orientación legal", name_en="Legal advice"))["id"]
     hogar = (await _categoria(app, jefa, name="Reparaciones del hogar"))["id"]

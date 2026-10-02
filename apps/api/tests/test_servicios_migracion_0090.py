@@ -283,13 +283,28 @@ COMPLETAR = (
 )
 
 
+def _ruta_de_imagen(pg, perfil: str, servicio: str, version: str) -> str:
+    """La ruta que la base admite HOY para una imagen nueva: la opaca si ya
+    tiene la 0096 (`<servicio>/<al azar>.png`), la de la 0090 si no. Las
+    pruebas de cada migración montan la base hasta donde les toca, y este
+    ayudante lo comparten todas."""
+    opaca = _uno(
+        pg,
+        "select position('[0-9a-f]{32}' in p.prosrc) > 0 from pg_catalog.pg_proc p "
+        "where p.oid = to_regprocedure('public.service_version_images_solo_en_borrador()')",
+    )
+    if opaca:
+        return f"{servicio}/{uuid.uuid4().hex}.png"
+    return f"{perfil}/{servicio}/{version}/{uuid.uuid4()}.png"
+
+
 def _imagen(pg, perfil: str, servicio: str, version: str, *, portada: bool = True) -> str:
     return str(_uno(
         pg,
         "insert into public.service_version_images (version_id, service_id, storage_path, alt_text, is_cover, "
         "content_type, byte_size, width, height, checksum_sha256) values (%s, %s, %s, 'Una foto', %s, "
         "'image/png', 10, 4, 4, repeat('a', 64)) returning id",
-        version, servicio, f"{perfil}/{servicio}/{version}/{uuid.uuid4()}.png", portada,
+        version, servicio, _ruta_de_imagen(pg, perfil, servicio, version), portada,
     ))
 
 
@@ -502,7 +517,7 @@ def test_las_imagenes_solo_cambian_en_un_borrador_y_con_su_ruta(completa) -> Non
         pg,
         "insert into public.service_version_images (version_id, service_id, storage_path, alt_text, content_type, "
         "byte_size, width, height, checksum_sha256) values (%s, %s, %s, 'Cruzada', 'image/png', 1, 1, 1, repeat('d', 64))",
-        borrador, otro, f"{perfil2}/{otro}/{borrador}/x.png",
+        borrador, otro, _ruta_de_imagen(pg, perfil2, otro, borrador),
     )
 
 
@@ -651,7 +666,11 @@ def test_sobre_la_0089_con_datos_no_toca_nada(pg) -> None:
 
 @SIN_POSTGRES
 def test_reejecutarla_deja_exactamente_lo_mismo(pg) -> None:
-    _montar(pg)
+    # Hasta la 0095. CON LA 0096 ENCIMA YA NO: la 0090 volvería a poner el
+    # cuerpo anterior de `service_version_images_solo_en_borrador()` (la ruta
+    # con el perfil) y habría que reaplicar la 0096. Lo prueba, con la puerta
+    # del catálogo cerrándose, `test_servicios_migracion_0096.py`.
+    _montar(pg, hasta="0095")
     antes = _foto(pg)
     _hacer(pg, TEXTO)
     assert _foto(pg) == antes

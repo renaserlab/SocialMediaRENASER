@@ -61,6 +61,7 @@ from app.modules.services.catalogo_models import (
     ServiceVersion,
     ServiceVersionImage,
 )
+from app.modules.services.catalogo_requisitos import Reglas
 from app.modules.services.descubrimiento_models import SavedService
 from app.modules.services.models import (
     ACTIVO,
@@ -236,14 +237,18 @@ def filtros(
 
     if categoria is not None and not _uuid_valido(categoria):
         raise FiltroInvalido(details={"field": "category_id"})
-    if modalidad is not None and modalidad not in MODALIDADES:
+    # SOLO LO QUE Z OFRECE (`SERVICES_CATALOG_MODALITIES` y `…_CURRENCIES`):
+    # filtrar por «a domicilio» o por dólares en la primera versión no es una
+    # búsqueda sin resultados, es un filtro que la app no enseña.
+    reglas = Reglas.de()
+    if modalidad is not None and modalidad not in reglas.modalidades:
         raise FiltroInvalido(details={"field": "modality"})
     if precio is not None and precio not in TIPOS_DE_PRECIO:
         raise FiltroInvalido(details={"field": "price"})
 
     if moneda is not None:
         moneda = moneda.strip().upper()
-        if len(moneda) != 3 or not moneda.isalpha() or not moneda.isascii():
+        if len(moneda) != 3 or not moneda.isalpha() or not moneda.isascii() or moneda not in reglas.monedas:
             raise FiltroInvalido(details={"field": "currency"})
     for nombre, valor in (("min_price", minimo), ("max_price", maximo)):
         if valor is not None and valor < 0:

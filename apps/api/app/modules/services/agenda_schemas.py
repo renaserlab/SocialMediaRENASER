@@ -116,7 +116,12 @@ class BloqueoCrear(_Entrada):
 # Salidas
 # --------------------------------------------------------------------------- #
 class HorarioRead(BaseModel):
-    """Un horario POSIBLE. No está apartado para nadie."""
+    """Un horario POSIBLE. No está apartado para nadie.
+
+    SIN LA CAPACIDAD (P51): es lo que lee el público, y al público le basta
+    con que el horario exista. Lo ya ocupado quita el horario entero cuando se
+    llena; nunca se enseña un «quedan» ni un «hasta N». El prestador tiene el
+    número en su agenda (`service.capacity` y cada regla)."""
 
     starts_at: datetime
     ends_at: datetime
@@ -126,9 +131,6 @@ class HorarioRead(BaseModel):
     time: str
     end_time: str
     utc_offset: str
-    #: Capacidad TEÓRICA (personas por horario). Lo ya ocupado quita el
-    #: horario entero cuando se llena, pero nunca se enseña un «quedan» (E5).
-    capacity: int
 
     @classmethod
     def desde(cls, h: calc.Horario, zona: str) -> "HorarioRead":
@@ -141,7 +143,6 @@ class HorarioRead(BaseModel):
             time=inicio.strftime("%H:%M"),
             end_time=fin.strftime("%H:%M"),
             utc_offset=calc.desplazamiento(inicio),
-            capacity=h.capacidad,
         )
 
 

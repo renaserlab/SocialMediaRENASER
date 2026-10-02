@@ -14,7 +14,7 @@ import { TarjetaDeServicio } from '@/components/TarjetaDeServicio';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import {
-  MODALIDADES,
+  MODALIDADES_OFRECIDAS,
   MONEDAS,
   claveDeLaModalidad,
   nombreDeLaCategoria,
@@ -353,7 +353,7 @@ export function ServiciosScreen() {
             <View style={styles.chips} accessibilityRole="radiogroup">
               <Chip label={f('servicios.descubrir.filtros.cualquiera')} rol="radio" selected={hoja.modalidad === null}
                 onPress={() => setHoja({ ...hoja, modalidad: null })} />
-              {MODALIDADES.map((m) => (
+              {MODALIDADES_OFRECIDAS.map((m) => (
                 <Chip key={m} label={f(claveDeLaModalidad(m))} rol="radio" selected={hoja.modalidad === m}
                   onPress={() => setHoja({ ...hoja, modalidad: m })} />
               ))}

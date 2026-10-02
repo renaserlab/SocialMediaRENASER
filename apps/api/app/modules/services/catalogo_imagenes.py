@@ -7,9 +7,17 @@ recortes.
 
 LAS REGLAS:
 
-  1. LA RUTA LA PONE EL SERVIDOR: `<perfil>/<servicio>/<versión>/<id>.<ext>`.
-     Nada viene del cliente, y el perfil delante hace que borrar la cuenta la
-     barra. La base comprueba el prefijo (0090).
+  1. LA RUTA LA PONE EL SERVIDOR Y ES OPACA (P29, 0096):
+     `<servicio>/<32 hexadecimales al azar>.<ext>`. Nada viene del cliente y
+     nada sale del título, del prestador ni de su perfil: la URL firmada de
+     una tarjeta, que se ve sin sesión, ya no lleva el identificador del
+     perfil de nadie. El del servicio sí: es el mismo que lleva la dirección
+     de su ficha, y con él delante la base comprueba que la ruta es de ese
+     servicio y la baja de la cuenta barre la carpeta entera (también lo que
+     se subió y se quedó sin fila). LAS RUTAS ANTERIORES (0090,
+     `<perfil>/<servicio>/<versión>/<id>.<ext>`) siguen valiendo donde ya
+     existan: se firman, se copian a una versión nueva y se borran igual. Lo
+     que no se puede es REGISTRAR una nueva con esa forma: lo impide la base.
   2. SE MIRAN LOS BYTES y el peso (5 MB). JPEG, PNG o WebP; nada más.
   3. SOLO EN EL BORRADOR, SOLO EL DUEÑO. Lo enviado está congelado (y la base
      no deja tocar imágenes fuera del borrador).
@@ -18,13 +26,17 @@ LAS REGLAS:
      si ninguna otra versión lo nombra; así la publicada nunca se queda sin su
      imagen.
   5. LA URL SE FIRMA AL LEER Y CADUCA. Nunca se guarda ni se devuelve la ruta.
-  6. UN DOBLE TOQUE NO SUBE DOS VECES: el id se deriva de la clave de
-     idempotencia (como en Productos).
+  6. UN DOBLE TOQUE NO SUBE DOS VECES: el id de la FILA se deriva de la clave
+     de idempotencia (como en Productos), y un reintento devuelve la imagen
+     que ya está. La ruta no: cada subida que llega a escribir un archivo
+     tiene un nombre que no se puede adivinar ni repetir.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -48,6 +60,10 @@ DEPOSITO = "service-media"
 #: Una hora, como las fotos de Productos: pintar una pantalla y volver atrás.
 SEGUNDOS_DE_LA_FIRMA = 3600
 _EXTENSION = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+#: La forma de una ruta nueva, LA MISMA que exige la 0096. 128 bits al azar.
+RUTA_OPACA = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{32}\.(jpg|png|webp)$"
+)
 #: CONSTANTE. Cambiarla haría que la misma clave diera otro id.
 _ESPACIO = uuid.UUID("6b1f3a2e-9c4d-5e7f-8a1b-2c3d4e5f6a7b")
 
@@ -74,6 +90,12 @@ class AlmacenamientoNoDisponible(ServiceUnavailableError):
 
 def _ahora() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def ruta_nueva(servicio_id: str, content_type: str) -> str:
+    """La ruta de un archivo que se va a escribir. La extensión sale del tipo
+    que dijeron LOS BYTES (`_medir`), nunca del nombre que mandó el teléfono."""
+    return f"{servicio_id}/{secrets.token_hex(16)}.{_EXTENSION[content_type]}"
 
 
 async def _borrador(db: AsyncSession, servicio: Service) -> ServiceVersion:
@@ -141,16 +163,15 @@ async def subir(
         raise DemasiadasImagenes(details={"max": Reglas.de().maximo_de_imagenes})
 
     medida = _medir(datos, declarado)
-    ruta = f"{prestador.profile_id}/{servicio.id}/{version.id}/{imagen_id}.{_EXTENSION[medida.content_type]}"
+    ruta = ruta_nueva(servicio.id, medida.content_type)
 
     # EL ARCHIVO PRIMERO: si falla, no queda una fila que promete una imagen.
     try:
-        # CON CLAVE, LA RUTA SALE DE LA CLAVE: si un intento anterior dejó el
-        # archivo escrito pero sin respuesta, el reintento lo pisa en vez de
-        # chocar con él para siempre. Sin clave, la ruta es nueva y no se pisa.
-        await storage.subir_objeto(
-            DEPOSITO, ruta, datos, medida.content_type, sobrescribir=bool(clave and clave.strip())
-        )
+        # LA RUTA ES NUEVA SIEMPRE, así que nunca pisa nada. Si un intento
+        # anterior escribió su archivo y se cortó antes de guardar la fila, ese
+        # archivo queda sin nombre en la base, bajo la carpeta del servicio: lo
+        # barre la baja de la cuenta. El reintento sube el suyo.
+        await storage.subir_objeto(DEPOSITO, ruta, datos, medida.content_type, sobrescribir=False)
     except (storage.StorageNoConfigurado, storage.StorageFallo):
         raise AlmacenamientoNoDisponible() from None
     except Exception:  # noqa: BLE001 - httpx y compañía
@@ -225,7 +246,8 @@ async def _sigue_nombrado(db: AsyncSession, ruta: str, *, salvo: str | None) -> 
 
 async def borrar_archivo(ruta: str) -> None:
     """Sin romper nada: lo que no se pueda borrar lo barre el borrado de la
-    cuenta (mismo prefijo). Nunca se registra la ruta."""
+    cuenta (la carpeta del servicio, o la del perfil en una ruta anterior).
+    Nunca se registra la ruta."""
     try:
         await storage.borrar_objeto(DEPOSITO, ruta)
     except Exception:  # noqa: BLE001
@@ -276,9 +298,11 @@ __all__ = [
     "DemasiadasImagenes",
     "ImagenInvalida",
     "ImagenNoEncontrada",
+    "RUTA_OPACA",
     "borrar_archivo",
     "firmar",
     "ordenar",
     "quitar",
+    "ruta_nueva",
     "subir",
 ]

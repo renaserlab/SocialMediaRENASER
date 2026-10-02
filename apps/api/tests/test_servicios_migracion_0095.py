@@ -1,6 +1,6 @@
 """La migración 0095: la política operativa de una reserva, congelada (G18).
 
-1. ESTÁTICA: es la última y sigue a la 0094; una sola transacción que
+1. ESTÁTICA: sigue a la 0094 y la sigue la 0096; una sola transacción que
    comprueba lo anterior antes de cambiar nada; ADITIVA (tres columnas, cuatro
    CHECK, una función y un disparador, todo en `service_bookings`); no
    concede, no borra, no trae dinero; sus claves, sus cotas y su versión son
@@ -75,10 +75,11 @@ HUELLA = limites.huella_de_la_fotografia(VERSION, FOTO)
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0094() -> None:
+def test_sigue_a_la_0094_y_la_sigue_la_0096() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0094_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0094_")
+    assert nombres[posicion + 1].startswith("0096_")
 
 
 def test_consta_como_aplicada_y_ya_no_se_edita() -> None:

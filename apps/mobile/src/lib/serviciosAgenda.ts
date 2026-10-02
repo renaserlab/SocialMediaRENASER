@@ -43,7 +43,12 @@ export const MOTIVOS = [
 // --------------------------------------------------------------------------- //
 // Contratos de la API
 // --------------------------------------------------------------------------- //
-/** Un horario POSIBLE. No está apartado para nadie. */
+/**
+ * Un horario POSIBLE. No está apartado para nadie. SIN CAPACIDAD (política
+ * P51): el servidor ya no la manda en un horario, porque es lo que lee el
+ * público. Quien gestiona la agenda la tiene en `service.capacity` y en cada
+ * regla.
+ */
 export type Horario = {
   starts_at: string;
   ends_at: string;
@@ -51,8 +56,6 @@ export type Horario = {
   time: string;
   end_time: string;
   utc_offset: string;
-  /** Capacidad TEÓRICA por horario; no es «quedan». */
-  capacity: number;
 };
 
 export type Regla = {

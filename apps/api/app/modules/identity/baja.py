@@ -12,7 +12,9 @@ EL ORDEN, Y POR QUÉ:
      si no se puede comprobar, 503 y no se toca nada: con la versión a medias
      de la 0089 borrar se llevaba en cascada órdenes en las que se movió dinero.
   1. Se apuntan sus conversaciones: sus adjuntos de chat no van bajo su
-     carpeta, y después de borrar ya no se podría saber cuáles eran.
+     carpeta, y después de borrar ya no se podría saber cuáles eran. Y, por lo
+     mismo, los servicios que ofrecía: las imágenes de su catálogo van bajo la
+     carpeta de cada servicio, sin su perfil en la ruta (0096).
   2. Se borra en la base SIN CONFIRMAR, y se fuerzan ya las comprobaciones
      diferidas. Si algo lo impide —una venta, un saldo, un pedido—, la
      transacción se deshace y NO SE HA TOCADO NINGÚN ARCHIVO: 409.
@@ -142,6 +144,29 @@ async def _conversaciones(db: AsyncSession, usuario_id: str) -> tuple[list[str],
     return suyas, enteras
 
 
+async def _servicios(db: AsyncSession, usuario_id: str) -> list[str]:
+    """Los servicios que esta persona ofrecía. Se van en cascada con su
+    perfil, y con ellos el único sitio donde consta qué carpetas de
+    `service-media` eran suyas.
+
+    SI NO SE PUEDE MIRAR, NINGUNO: una base anterior al catálogo de Servicios
+    no tiene esas tablas ni esas imágenes, y la baja no puede romperse por
+    eso. El punto de guardado deja la transacción como estaba.
+    """
+    try:
+        async with db.begin_nested():
+            filas = await db.execute(
+                text(
+                    "select s.id from services s join service_providers p on p.id = s.provider_id "
+                    "where p.profile_id = :perfil"
+                ),
+                {"perfil": usuario_id},
+            )
+            return sorted({str(f[0]) for f in filas})
+    except DBAPIError:
+        return []
+
+
 #: Lo que la baja necesita de la base, mirado en el catálogo pieza a pieza: no
 #: el número de la migración ni una fila de un historial de migraciones, sino
 #: cada protección de la 0089 de la que depende que borrar sea seguro. Una base
@@ -231,6 +256,7 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     if not await _hay_0089(db):
         raise BajaNoDisponible()
     suyas, enteras = await _conversaciones(db, usuario_id)
+    servicios = await _servicios(db, usuario_id)
     postgres = (await db.connection()).dialect.name == "postgresql"
 
     try:
@@ -260,8 +286,9 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
         raise CuentaConRegistrosQueConservar(details={"reason": _area(tabla)}) from None
 
     try:
-        # Lo suyo en TODAS sus conversaciones, también en las que creó.
-        await storage.delete_user_files(usuario_id, conversaciones=suyas + enteras)
+        # Lo suyo en TODAS sus conversaciones, también en las que creó, y las
+        # imágenes de los servicios que ofrecía.
+        await storage.delete_user_files(usuario_id, conversaciones=suyas + enteras, servicios=servicios)
     except (storage.StorageFallo, storage.StorageNoConfigurado):
         await db.rollback()
         logger.warning("Baja de %s deshecha: no se pudieron borrar sus archivos", usuario_id)

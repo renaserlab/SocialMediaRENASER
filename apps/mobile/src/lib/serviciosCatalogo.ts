@@ -19,11 +19,7 @@
  * EL DINERO NO SE REINVENTA: escribir «49.90» y guardar 4990 (y al revés) es lo
  * mismo que en Productos, con los decimales de cada moneda, y se usa de allí.
  */
-import {
-  MONEDAS_OFRECIDAS,
-  importeComoTexto,
-  importeEscrito,
-} from '@/lib/proveedorDeProductos';
+import { importeComoTexto, importeEscrito } from '@/lib/proveedorDeProductos';
 import { falloDeCarga, hayQueRecargar, type FalloDeCarga } from '@/lib/serviciosAdmision';
 
 // --------------------------------------------------------------------------- //
@@ -46,6 +42,16 @@ export type EstadoDeLaVersion = (typeof ESTADOS_DE_LA_VERSION)[number];
 
 export const MODALIDADES = ['virtual', 'in_person', 'at_home'] as const;
 export type Modalidad = (typeof MODALIDADES)[number];
+
+/**
+ * LAS QUE Z OFRECE en la primera versión (política P5): en línea y en el local
+ * del prestador. «A domicilio» sigue en el modelo —un servicio que ya la tuviera
+ * se sigue leyendo y nombrando—, pero ningún formulario ni filtro la ofrece. El
+ * servidor es quien manda (`SERVICES_CATALOG_MODALITIES`): si alguien la envía
+ * a mano, contesta `service_modality_not_allowed`. Volver a ofrecerla es
+ * añadirla aquí Y allí.
+ */
+export const MODALIDADES_OFRECIDAS = ['virtual', 'in_person'] as const satisfies readonly Modalidad[];
 
 export const MODELOS_DE_PRECIO = ['free', 'fixed', 'from', 'on_request'] as const;
 export type ModeloDePrecio = (typeof MODELOS_DE_PRECIO)[number];
@@ -152,8 +158,13 @@ export const MAXIMO_DE_FRASES = 20;
 export const DURACION = [5, 1440] as const;
 export const CAPACIDAD = [1, 1000] as const;
 
-/** Las monedas que se ofrecen: las mismas que en Productos. El servidor decide cuáles valen. */
-export const MONEDAS = MONEDAS_OFRECIDAS;
+/**
+ * La moneda de la primera versión (política P2): soles. Es una lista propia de
+ * Servicios, no la de Productos, que ofrece también dólares y euros. El
+ * servidor es quien manda (`SERVICES_CATALOG_CURRENCIES`): otra moneda escrita
+ * a mano contesta `service_currency_not_allowed`. No se convierte nada.
+ */
+export const MONEDAS = ['PEN'] as const;
 
 // --------------------------------------------------------------------------- //
 // Contratos de la API (`catalogo_schemas.py`)
@@ -198,7 +209,12 @@ export type Contenido = {
   description: string | null;
   modality: string | null;
   duration_minutes: number | null;
-  capacity: number | null;
+  /**
+   * SOLO LLEGA A QUIEN GESTIONA el servicio (su prestador y administración).
+   * La ficha pública no la trae (política P51): al público le basta con saber
+   * si hay horario.
+   */
+  capacity?: number | null;
   price: Precio;
   scope: string | null;
   includes: string[];
@@ -522,6 +538,11 @@ const ERRORES: Record<string, string> = {
   service_version_pending: 'servicios.catalogo.error.versionPendiente',
   service_catalog_incomplete: 'servicios.catalogo.error.incompleto',
   service_price_invalid: 'servicios.catalogo.error.precio',
+  // Lo que Z no ofrece en la primera versión (P5 y P2). La app no lo enseña,
+  // así que solo llega si el servidor cambió sus reglas con el borrador abierto:
+  // el mismo texto que ya se da cuando eso falta al enviar.
+  service_modality_not_allowed: 'servicios.catalogo.falta.modality_not_allowed',
+  service_currency_not_allowed: 'servicios.catalogo.falta.currency_not_allowed',
   service_reason_required: 'servicios.catalogo.error.motivo',
   service_field_unknown: 'servicios.error.datosInvalidos',
   service_catalog_transition_invalid: 'servicios.catalogo.error.yaCambio',
@@ -605,7 +626,7 @@ export function textoDesdeLista(lista: readonly string[] | null | undefined): st
   return (lista ?? []).join('\n');
 }
 
-const MONEDA_DE_FABRICA = MONEDAS_OFRECIDAS[0];
+const MONEDA_DE_FABRICA = MONEDAS[0];
 
 /** El formulario nace de lo que dice el servidor. */
 export function formularioDesde(version: Version, categoriaId: string): FormularioDelServicio {
@@ -617,7 +638,7 @@ export function formularioDesde(version: Version, categoriaId: string): Formular
     descripcion: version.description ?? '',
     modalidad: esUno(MODALIDADES, version.modality) ? version.modality : null,
     duracion: version.duration_minutes === null ? '' : String(version.duration_minutes),
-    capacidad: version.capacity === null ? '' : String(version.capacity),
+    capacidad: version.capacity == null ? '' : String(version.capacity),
     modeloDePrecio: esUno(MODELOS_DE_PRECIO, version.price.model) ? version.price.model : null,
     importe:
       version.price.amount_minor === null ? '' : importeComoTexto(version.price.amount_minor, moneda),
@@ -863,7 +884,7 @@ export function esReenvio(servicio: Pick<ServicioPrivado, 'open_version' | 'last
 // Bandeja de administración
 // --------------------------------------------------------------------------- //
 export const FILTROS_DE_VERSION = [null, 'submitted', 'under_review', 'approved'] as const;
-export const FILTROS_DE_MODALIDAD: (Modalidad | null)[] = [null, ...MODALIDADES];
+export const FILTROS_DE_MODALIDAD: (Modalidad | null)[] = [null, ...MODALIDADES_OFRECIDAS];
 
 export function consultaDelCatalogo(opciones: {
   cola: Cola;

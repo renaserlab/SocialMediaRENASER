@@ -127,6 +127,13 @@ TABLAS_DEL_CATALOGO = (
 #: PostgreSQL: cada disparador en su tabla, con su función, su forma y activo;
 #: los índices únicos que impiden dos abiertas o dos publicadas; RLS en las
 #: cinco tablas; y el depósito privado. No el número de la migración.
+#:
+#: Y LA 0096 (las rutas opacas, P29): el disparador de las imágenes es el
+#: mismo, pero su CUERPO es el que admite `<servicio>/<al azar>.<ext>`. La API
+#: ya solo arma esa ruta: con el cuerpo de la 0090, subir una imagen chocaría
+#: con la base. Por eso aquí se mira el cuerpo, por su huella, y no solo el
+#: nombre de la función.
+CUERPO_DE_LAS_IMAGENES = "222bdbbd898701ecf458747cd45f6ef9"
 _LO_QUE_NECESITA_EL_CATALOGO = text(
     """
     select
@@ -188,6 +195,13 @@ _LO_QUE_NECESITA_EL_CATALOGO = text(
            and c.relrowsecurity
       ) = 5
       and exists (select 1 from storage.buckets b where b.id = 'service-media' and not b.public)
+      and exists (
+        select 1 from pg_catalog.pg_proc p
+         where p.oid = to_regprocedure('public.service_version_images_solo_en_borrador()')
+           and md5(replace(p.prosrc, E'\r', '')) = '"""
+    + CUERPO_DE_LAS_IMAGENES
+    + """'
+      )
     """
 )
 
@@ -208,7 +222,7 @@ def _columnas_completas(sync) -> bool:  # noqa: ANN001
 
 
 async def hay_catalogo(db: AsyncSession) -> bool:
-    """¿Tiene la base la 0090 COMPLETA? Ante la duda, no.
+    """¿Tiene la base la 0090 COMPLETA y la 0096? Ante la duda, no.
 
     Como `hay_admision`, la respuesta se recuerda hasta reiniciar la API,
     también el «no». Un error al mirar NO se recuerda y cierra la puerta.
@@ -220,11 +234,13 @@ async def hay_catalogo(db: AsyncSession) -> bool:
             if completa and conexion.dialect.name == "postgresql":
                 completa = bool(await db.scalar(_LO_QUE_NECESITA_EL_CATALOGO))
         except Exception:  # noqa: BLE001 - cerrada ante cualquier fallo al mirar
-            logger.warning("Servicios: no se pudo comprobar la 0090; el catálogo contesta 503.", exc_info=True)
+            logger.warning(
+                "Servicios: no se pudo comprobar la 0090 y la 0096; el catálogo contesta 503.", exc_info=True
+            )
             return False
         _cache["catalogo"] = completa
         if not completa:
-            logger.warning("Servicios: falta la 0090 completa. El catálogo contesta 503.")
+            logger.warning("Servicios: falta la 0090 completa o la 0096. El catálogo contesta 503.")
     return _cache["catalogo"]
 
 

@@ -308,12 +308,15 @@ class PrecioRead(BaseModel):
 
 
 class _Contenido(BaseModel):
+    """Lo que se lee de una versión, SIN LA CAPACIDAD: cuántas personas caben
+    es de la gestión del prestador y de administración (P51). El público solo
+    sabe si hay horario; por eso el número vive en `VersionRead` y no aquí."""
+
     title: str | None
     summary: str | None
     description: str | None
     modality: str | None
     duration_minutes: int | None
-    capacity: int | None
     price: PrecioRead
     scope: str | None
     includes: list[str]
@@ -330,7 +333,6 @@ def _contenido(v: ServiceVersion) -> dict:
         "description": v.description,
         "modality": v.modality,
         "duration_minutes": v.duration_minutes,
-        "capacity": v.capacity,
         "price": PrecioRead.desde(v),
         "scope": v.scope,
         "includes": list(v.includes or []),
@@ -348,6 +350,8 @@ class VersionRead(_Contenido):
     version: int
     status: str
     based_on_version: int | None
+    #: Solo aquí: nunca en lo que lee el público (`ServicioPublicoRead`).
+    capacity: int | None
     images: list[ImagenRead]
     created_at: datetime
     updated_at: datetime
@@ -370,6 +374,7 @@ class VersionRead(_Contenido):
             version=v.version,
             status=v.status,
             based_on_version=base,
+            capacity=v.capacity,
             images=[ImagenRead.desde(i, firmadas) for i in imagenes],
             created_at=v.created_at,
             updated_at=v.updated_at,

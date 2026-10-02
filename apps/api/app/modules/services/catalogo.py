@@ -145,6 +145,19 @@ class PrecioInvalido(ValidationAppError):
     message = "Un importe solo va con precio fijo o «desde»."
 
 
+class ModalidadNoPermitida(ValidationAppError):
+    """La modalidad existe en el modelo, pero Z no la ofrece ahora
+    (`SERVICES_CATALOG_MODALITIES`): a domicilio, en la primera versión."""
+
+    code = "service_modality_not_allowed"
+    message = "Z no ofrece esa modalidad por ahora."
+
+
+class MonedaNoPermitida(ValidationAppError):
+    code = "service_currency_not_allowed"
+    message = "Z no admite esa moneda por ahora."
+
+
 class MotivoRequerido(ValidationAppError):
     code = "service_reason_required"
     message = "Este paso lleva un motivo que el prestador pueda leer."
@@ -566,6 +579,17 @@ async def editar_borrador(
             raise CategoriaFija()
         await categoria_utilizable(db, cambios["category_id"], prestador)
         servicio.category_id = cambios["category_id"]
+
+    # LO QUE Z NO OFRECE NO ENTRA NI EN EL BORRADOR. La app no lo enseña, así
+    # que solo llega una petición escrita a mano; y guardarlo para rechazarlo
+    # al enviar dejaría un borrador que no se puede enviar sin saber por qué.
+    # Solo se mira lo que LLEGA: un borrador anterior conserva lo que tenía
+    # (y `faltantes` se lo sigue diciendo al enviar).
+    reglas = requisitos.Reglas.de()
+    if cambios.get("modality") is not None and cambios["modality"] not in reglas.modalidades:
+        raise ModalidadNoPermitida(details={"field": "modality", "allowed": sorted(reglas.modalidades)})
+    if cambios.get("currency") is not None and cambios["currency"] not in reglas.monedas:
+        raise MonedaNoPermitida(details={"field": "currency", "allowed": sorted(reglas.monedas)})
 
     for campo in CAMPOS_DEL_BORRADOR:
         if campo in cambios:
@@ -1054,6 +1078,8 @@ __all__ = [
     "CategoriaNoDisponible",
     "CategoriaNoEncontrada",
     "EsTuPropioServicio",
+    "ModalidadNoPermitida",
+    "MonedaNoPermitida",
     "MotivoRequerido",
     "PrecioInvalido",
     "PrestadorNoActivo",

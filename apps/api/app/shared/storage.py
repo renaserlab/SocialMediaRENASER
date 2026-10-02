@@ -35,10 +35,11 @@ logger = logging.getLogger(__name__)
 #: pertenece a una persona (ver `services/storage.ts` en el movil).
 #: `seller-documents` (0085) sigue la misma regla: `<perfil>/<postulación>/...`,
 #: y `service-provider-documents` (0088, Servicios) también. Las imágenes del
-#: catálogo de Servicios (`service-media`, 0090) van bajo
-#: `<perfil>/<servicio>/<versión>/`: el perfil del prestador, primero. Las
-#: evidencias de un caso (`service-incident-evidence`, 0094) van bajo
-#: `<quien la sube>/<caso>/`.
+#: catálogo de Servicios (`service-media`) iban bajo
+#: `<perfil>/<servicio>/<versión>/` (0090) y desde la 0096 van bajo
+#: `<servicio>/`, sin el perfil: por eso la baja recibe además los servicios
+#: de la cuenta (ver `DEPOSITO_DE_SERVICIOS`). Las evidencias de un caso
+#: (`service-incident-evidence`, 0094) van bajo `<quien la sube>/<caso>/`.
 USER_BUCKETS = (
     "post-media",
     "avatars",
@@ -55,6 +56,12 @@ _TIMEOUT = httpx.Timeout(15.0)
 #: `<conversacion>/<quien sube>/<archivo>`, así que se barren conversación a
 #: conversación (ver `delete_user_files` y `borrar_conversaciones`).
 DEPOSITO_DE_CHAT = "message-media"
+
+#: Imágenes del catálogo de Servicios con RUTA OPACA (0096). Tampoco van bajo
+#: `<perfil>/`: van bajo `<servicio>/<archivo>`, así que se barren servicio a
+#: servicio. Las que se subieron antes de la 0096 siguen bajo `<perfil>/` y
+#: las barre `USER_BUCKETS`, que conserva este depósito.
+DEPOSITO_DE_SERVICIOS = "service-media"
 
 #: Cuántos nombres se piden borrar en una sola petición.
 LOTE_DE_BORRADO = 100
@@ -160,13 +167,17 @@ async def _borrar_nombres(client: httpx.AsyncClient, bucket: str, rutas: list[st
     return len(rutas)
 
 
-async def delete_user_files(user_id: str, *, conversaciones: Sequence[str] = ()) -> int:
+async def delete_user_files(
+    user_id: str, *, conversaciones: Sequence[str] = (), servicios: Sequence[str] = ()
+) -> int:
     """Borra todo lo que haya subido `user_id`. Devuelve cuantos ficheros quito.
 
     - En cada depósito de `USER_BUCKETS`, todo lo que cuelga de `<perfil>/`,
       bajando a las carpetas.
     - En `message-media`, lo suyo dentro de cada una de sus conversaciones
       (`<conversacion>/<perfil>/`).
+    - En `service-media`, la carpeta de cada uno de los servicios que ofrecía
+      (`<servicio>/`, 0096): sus imágenes ya no llevan su perfil en la ruta.
 
     SOLO LO SUYO. Lo de las demás personas en las conversaciones que se van
     enteras con la cuenta lo retira `borrar_conversaciones`, y DESPUÉS de
@@ -201,6 +212,7 @@ async def delete_user_files(user_id: str, *, conversaciones: Sequence[str] = ())
 
     objetivos = [(bucket, user_id) for bucket in USER_BUCKETS]
     objetivos += [(DEPOSITO_DE_CHAT, f"{c}/{user_id}") for c in conversaciones]
+    objetivos += [(DEPOSITO_DE_SERVICIOS, str(s)) for s in servicios]
 
     borrados = 0
     fallidos: list[str] = []

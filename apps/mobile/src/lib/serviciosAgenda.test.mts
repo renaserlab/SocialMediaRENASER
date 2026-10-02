@@ -307,7 +307,7 @@ describe('fechas y horarios, sin zonas', () => {
 
   it('la hora repetida del cambio de hora lleva su desplazamiento; las demás, no', () => {
     const h = (starts_at: string, time: string, utc_offset: string) =>
-      ({ starts_at, ends_at: starts_at, date: '2026-11-01', time, end_time: time, utc_offset, capacity: 1 }) as Horario;
+      ({ starts_at, ends_at: starts_at, date: '2026-11-01', time, end_time: time, utc_offset }) satisfies Horario;
     const dia = [h('2026-11-01T05:00:00Z', '01:00', '-04:00'), h('2026-11-01T06:00:00Z', '01:00', '-05:00'),
       h('2026-11-01T07:00:00Z', '02:00', '-05:00')];
     assert.deepEqual(dia.map((x) => A.etiquetaDelHorario(x, dia)), ['01:00 (UTC-04:00)', '01:00 (UTC-05:00)', '02:00']);
