@@ -1929,17 +1929,63 @@ reiniciarla. Nada de esto se probó en un teléfono.
 
 ### Las políticas de la primera versión (02/10/2026): qué comprobar antes de encender
 
-Las políticas están en `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo. Estas
-cuatro dependen de una configuración o de un trabajo que todavía no se hizo.
-Nada de esto se probó en un teléfono.
+Las políticas están en `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo. Cinco se
+cerraron en el código ese día (`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII) y
+están probadas contra el servidor y con las baterías del móvil. **Nada de esto
+se probó en un teléfono**, y la migración 0096 está **sin aplicar**.
 
-- [ ] El entorno tiene `SERVICES_CATALOG_MODALITIES=virtual,in_person`. Un
-      prestador que intenta enviar un servicio **a domicilio** recibe el aviso
-      de que esa modalidad no está permitida, y no lo puede enviar.
-- [ ] En el formulario de un servicio, elegir **USD o EUR** y guardar: aparece
-      «Z no admite esa moneda por ahora» y no se puede enviar (C16).
-- [ ] **No encender Servicios con imágenes subidas** antes de implementar la
-      ruta opaca (C15): hoy la dirección firmada de una imagen lleva el
-      identificador del perfil del prestador.
-- [ ] Solo hay condiciones publicadas para **Perú**. Un prestador de otro país
-      no puede enviar su postulación.
+**Antes de nada (la 0096).**
+
+- [ ] La 0096 está aplicada en Supabase y verificada (`Z_SERVICIOS_ARQUITECTURA.md`
+      §124), y la API se reinició después. *(En una base sin la 0096, todo el
+      catálogo de Servicios dice que todavía no está disponible; la app no se
+      cierra ni enseña un error técnico.)*
+
+**Las imágenes (P29).**
+
+- [ ] Subir dos fotos a un borrador, publicar, abrir otro borrador y quitar
+      una: las fotos se ven en la ficha, en el borrador y en la bandeja de
+      administración, y la publicada no pierde la suya.
+- [ ] Con un servicio publicado con fotos, borrar la cuenta del prestador:
+      termina bien, y la ficha deja de existir.
+- [ ] En ninguna pantalla aparece una ruta de archivo.
+
+**Modalidades y moneda (P5 y P2).**
+
+- [ ] El formulario del servicio ofrece **dos** modalidades (en línea y en el
+      local). «A domicilio» no aparece.
+- [ ] El filtro del catálogo y el de la bandeja de administración ofrecen
+      esas dos.
+- [ ] Con precio fijo o «desde», la única moneda que se ofrece es **PEN**, en
+      el formulario y en el filtro.
+- [ ] Un servicio gratuito y uno «a consultar» se guardan, se envían y se ven
+      sin moneda ni importe.
+
+**La capacidad (P51).**
+
+- [ ] En un servicio con capacidad para varias personas, la ficha pública no
+      dice cuántas caben, y los horarios tampoco.
+- [ ] Su prestador sí la ve al editarlo y en su agenda, y administración en la
+      revisión.
+
+**El piloto (P101).** Hace falta un entorno donde se puedan cambiar las
+variables de la API y reiniciarla, y tres cuentas: una en la lista del piloto,
+otra fuera y una de administración.
+
+- [ ] Con Servicios encendido y la **lista vacía**: ninguna de las tres
+      cuentas ve entradas de Servicios en Explorar ni en el perfil. La de
+      administración sí ve su sección en el panel de administración.
+- [ ] Con una cuenta en la lista: esa cuenta ve las entradas y las usa. La
+      otra no las ve y, si abre un enlace a un servicio, lee que no está
+      disponible.
+- [ ] **Sin sesión**, el catálogo y la ficha de un servicio no se ven.
+- [ ] Cerrar sesión con la cuenta del piloto y entrar con la otra, sin cerrar
+      la app: las entradas desaparecen. Al revés, aparecen.
+- [ ] La cuenta de administración que no está en la lista ve la bandeja de
+      Servicios en administración y puede revisar, pero no ve el catálogo como
+      cliente.
+- [ ] La cuenta del piloto que no es de administración no puede abrir ninguna
+      pantalla de administración.
+- [ ] Con la apertura general encendida, cualquier cuenta ve Servicios.
+- [ ] Apagar `FEATURE_SERVICES`: desaparece para todos, también para el piloto
+      y para la sección del panel de administración.

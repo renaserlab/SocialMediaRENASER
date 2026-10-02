@@ -886,3 +886,26 @@ ubicación, cambios de alcance, cobro, comisión, saldos, devoluciones
 ejecutadas, comprobantes, finanzas del prestador, fotos en una reseña, una
 pantalla para configurar la política, mensajes por reserva y «añadir al
 calendario». El push abre la aplicación, no la reserva.
+
+## Z Servicios · las políticas de la primera versión, en las vistas (02/10/2026)
+
+Ninguna pantalla ni ruta nueva. Cambia lo que cinco vistas ya existentes
+ofrecen o enseñan (`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII):
+
+| Vista | Qué cambia | Política |
+|---|---|---|
+| `EditarServicioScreen` | ofrece dos modalidades (sin «a domicilio») y una moneda (PEN) | P5, P2 |
+| `ServiciosScreen` (filtros) | el filtro de modalidad ofrece dos; el de moneda, PEN | P5, P2 |
+| `AdminCatalogoScreen` (filtros) | el filtro de modalidad ofrece dos | P5 |
+| `FichaDeServicioScreen` y `DisponibilidadEnLaFicha` | no enseñan la capacidad: el servidor ya no la manda en la ficha pública ni en un horario | P51 |
+| `AccesosAVerticales`, `ProfileScreen` | las entradas de Servicios aparecen solo a quien el servidor dice que entra (`useServiciosEncendido`, ahora por persona) | P101 |
+| `PanelDeAdministracionScreen` | la sección de Servicios aparece a quien administra, por su rol, esté o no en el piloto (`useServiciosDeAdministracion`) | P101 |
+
+Quien gestiona un servicio sigue viendo su capacidad (`EditarServicioScreen`,
+la agenda, la revisión de administración). Un servicio que ya tuviera «a
+domicilio» se seguiría nombrando bien: la etiqueta sigue en los tres idiomas.
+
+**El piloto no añade pantallas.** A quien no entra, las rutas de Servicios le
+contestan lo mismo que con Servicios apagado, y las pantallas ya sabían
+pintarlo («no disponible»). La protección es del servidor; esconder la
+entrada es comodidad.

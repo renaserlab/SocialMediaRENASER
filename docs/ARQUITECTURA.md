@@ -98,6 +98,9 @@ reserva de Servicios, congelada al confirmarla): ejecutada a mano en Supabase
 y verificada en solo lectura el 01/10/2026 (18:05 UTC) **sin divergencias**,
 también con las seis puertas de esquema y la conexión y el rol reales de la
 API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §118](Z_SERVICIOS_ARQUITECTURA.md).
+La última **escrita** es la **0096** (las rutas opacas de las imágenes de
+Servicios, 02/10/2026): **sin aplicar**. Sin ella el catálogo de Servicios
+contesta 503, y hay que aplicarla antes de desplegar ese código (§124).
 Con ella quedan técnicamente cerrados los seis incrementos de Servicios
 (§119). La anterior es la **0094** (atención, posventa y cierre,
 Incremento 6 de Servicios): ejecutada a mano en Supabase y verificada en solo
@@ -194,8 +197,10 @@ Todas nacen apagadas y se encienden por entorno.
 | *Los nueve anteriores de la atención, salvo el aviso y la moderación* | **Se congelan en cada reserva al confirmarla** (0095, G18): cambiarlos solo vale para las reservas que se confirmen después. `services_booking_reminder_hours` y `services_reviews_premoderation` no se congelan. |
 | `services_agenda_notice_minutes` | Antelación mínima de un horario de Servicios. **120** (provisional del documento de reglas; decisión E1). |
 | `services_agenda_horizon_days` | Hasta cuántos días por delante se ofrecen horarios. **60** (provisional; decisión E2). |
-| `services_catalog_modalities` | Modalidades que un prestador puede publicar. De fábrica, las tres que admite la 0090 (`virtual,in_person,at_home`). **Política de la primera versión (02/10/2026): `virtual,in_person`**; a domicilio queda desactivada y **hay que fijar la variable al desplegar** (decisión C4). |
-| `services_catalog_currencies` | Monedas en las que se admite un precio. **`PEN`** (política de la primera versión; decisión C5). |
+| `services_catalog_modalities` | Modalidades que un prestador puede publicar. **`virtual,in_person`** de fábrica desde el 02/10/2026 (política de la primera versión; decisión C4). `at_home` sigue en el modelo y en la 0090: lo que no está aquí no entra en un borrador (422 `service_modality_not_allowed`) ni se filtra. |
+| `services_pilot_profile_ids` | **El piloto de Servicios** (P101): con `feature_services` encendida solo entran estos perfiles (UUID separados por comas). **Vacía = nadie**; mal escrita, tampoco. Administración entra por su rol. Ver `services/acceso.py`. |
+| `services_public_access` | La apertura general de Servicios. **`False`**. Solo con `True` deja de mirarse la lista del piloto: no se deduce de una lista vacía. |
+| `services_catalog_currencies` | Monedas en las que se admite un precio. **`PEN`** (política de la primera versión; decisión C5). Otra moneda no entra en un borrador (422 `service_currency_not_allowed`) ni se filtra. |
 | *Cuáles de los anteriores son política decidida, cuáles provisionales y cuáles esperan a la empresa* | `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo (apartados II, III y IV). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
 | `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |

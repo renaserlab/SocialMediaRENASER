@@ -20,7 +20,9 @@ cerrados **los seis incrementos** (§119).
 
 El 02/10/2026 se consolidaron las **políticas de la primera versión** y se
 depuró el registro de decisiones (§121): solo documentación, sin código ni
-migraciones.
+migraciones. Ese mismo día, la **Parte VIII** (§122 en adelante) cerró en el
+código cinco de las políticas que el sistema todavía no imponía (P29, P5, P2,
+P51 y P101), con la migración **0096, escrita y sin aplicar**.
 
 ## Estado
 
@@ -42,7 +44,9 @@ migraciones.
 | **Migración 0094** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (14:28 UTC) en solo lectura: **sin divergencias** (§102). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y **no se deshace**: se corrige hacia delante (§104) |
 | **Política operativa congelada (G18)** | **técnicamente cerrada; únicamente queda pendiente el QA físico** (§118). Cada reserva guarda al confirmarse los nueve plazos y topes con los que después se decide, y solo se decide con esos: cambiar la configuración ya no cambia una reserva hecha |
 | **Migración 0095** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (18:05 UTC) en solo lectura: **sin divergencias** (§118). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y no se deshace |
-| **Políticas de la primera versión** | **consolidadas el 02/10/2026** (§121): 105 políticas iniciales, 42 decisiones decididas para la primera versión, 14 valores provisionales y 25 que siguen necesitando a la empresa. La ruta opaca de los archivos (C15) está decidida y **sin implementar** |
+| **Políticas de la primera versión** | **consolidadas el 02/10/2026** (§121): 105 políticas iniciales. De las 96 decisiones, 43 decididas para la primera versión, 14 valores provisionales y 25 que siguen necesitando a la empresa |
+| **Cinco políticas cerradas en el código** | **implementadas y probadas el 02/10/2026** (§122): rutas opacas (P29), sin «a domicilio» (P5), solo en soles (P2), la capacidad fuera de lo público (P51) y el piloto por perfiles (P101). Código en `Edson`, **sin desplegar** |
+| **Migración 0096** | **ESCRITA Y SIN APLICAR**. Probada solo contra PostgreSQL 17 local. No consta en `APLICADAS`: hasta que se aplique y se verifique, se puede corregir. Sin ella, el catálogo de Servicios contesta 503 (§124) |
 | **Los seis incrementos** | **técnicamente cerrados** (§119): quedan el QA físico, las decisiones de la empresa y las integraciones externas (§120) |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
@@ -4915,3 +4919,439 @@ imposible (`services_booking_instant_modalities`).
   políticas (`Z_QA_FISICO_PENDIENTE.md`).
 - Las banderas siguen **apagadas**, la pasarela es `none` y el código, **sin
   desplegar**.
+
+# Parte VIII · Cinco políticas, cerradas en el código (02/10/2026)
+
+## 122. Estado
+
+**Las cinco brechas entre las políticas consolidadas (§121) y el
+comportamiento real están cerradas en el código y probadas. Queda aplicar y
+verificar la migración 0096 en Supabase, y el QA físico.** No es un
+incremento nuevo: no añade funciones, pantallas ni rutas.
+
+| | |
+|---|---|
+| **Código** | en `Edson`, **sin desplegar** (sin push, PR ni merge) |
+| **Migración 0096** | **ESCRITA Y SIN APLICAR**. Probada solo contra PostgreSQL 17 local. No consta en `APLICADAS` |
+| **Migraciones 0086–0095** | intactas: sus huellas siguen siendo las de `APLICADAS` |
+| **Banderas** | `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`; `SERVICES_PUBLIC_ACCESS`, apagada; `SERVICES_PILOT_PROFILE_IDS`, vacía |
+| **AWS** | la plantilla, los perfiles y el guion **preparados**; no se ejecutó ningún Change Set ni ningún despliegue |
+| **Supabase** | no se escribió nada ni se aplicó ninguna migración |
+
+| Política | Qué faltaba | Qué se hizo | Dónde |
+|---|---|---|---|
+| **P29** rutas opacas | la ruta de una imagen llevaba el perfil del prestador, y la 0090 lo exigía | ruta al azar bajo la carpeta del servicio; migración 0096; la baja barre esa carpeta | §123, §124 |
+| **P5** sin «a domicilio» | el catálogo admitía de fábrica las tres modalidades | de fábrica, dos; el borrador y el filtro rechazan otra; la app no la ofrece | §125 |
+| **P2** solo PEN | el formulario ofrecía también USD y EUR | la app ofrece solo soles; otra moneda es un error del dominio | §125 |
+| **P51** la capacidad | la ficha pública y cada horario traían el número | retirado de los contratos públicos | §126 |
+| **P101** piloto | las banderas abrían Servicios a todas las cuentas | una lista de perfiles y una apertura general explícita | §127 |
+
+## 123. P29: la ruta opaca de las imágenes
+
+**Qué había.** `catalogo_imagenes.subir` armaba la ruta
+`<perfil>/<servicio>/<versión>/<id>.<ext>`, y el disparador
+`service_version_images_solo_en_borrador` de la 0090 rechazaba cualquier otra.
+Esa ruta va dentro de la URL firmada de cada tarjeta del catálogo, que se ve
+sin sesión: delataba el perfil de quien presta.
+
+**La ruta nueva** es `<servicio>/<32 hexadecimales>.<jpg|png|webp>`:
+
+- la pone **solo el servidor** (`catalogo_imagenes.ruta_nueva`): 128 bits de
+  `secrets.token_hex`, distintos en cada subida. El teléfono no manda una
+  ruta, ni la elige con el nombre de su archivo ni con un campo de más;
+- la **extensión** sale del tipo que dijeron los bytes (`_medir`), no del
+  nombre ni del tipo declarado;
+- **no lleva el perfil**, ni el prestador, ni nada derivado del título, el
+  correo, el teléfono o el nombre;
+- lleva el **identificador del servicio**, que no delata a nadie —es el mismo
+  de la dirección de su ficha— y sirve para dos cosas: la base comprueba que
+  la ruta es de ESE servicio, y la baja de una cuenta barre la carpeta entera.
+
+**Lo que se conserva, igual que antes:**
+
+| | |
+|---|---|
+| Depósito | `service-media`, privado, sin políticas de `storage.objects` |
+| Enlaces | firmados al leer, 3600 s; la ruta nunca sale en una respuesta |
+| Validación | por los bytes reales, 5 MB, JPEG/PNG/WebP |
+| Copia entre versiones | abrir un borrador copia las filas con su misma ruta: un archivo, varias filas |
+| Recuento de referencias | quitar una imagen borra el archivo solo si ninguna otra fila lo nombra |
+| Orden del borrado | la fila primero; el archivo, después de confirmar la base |
+| Idempotencia | el id de la FILA sigue saliendo de la clave: un reintento devuelve la imagen que ya está, sin subir otra |
+
+**Una diferencia, a propósito.** Antes, con clave de idempotencia, la ruta
+salía de la clave y un reintento pisaba el archivo de un intento cortado.
+Ahora la ruta es siempre nueva y nunca pisa nada: si un intento escribe su
+archivo y se corta antes de guardar la fila, ese archivo queda sin fila bajo la
+carpeta del servicio, y lo barre la baja de la cuenta. **Un límite:** si un
+perfil se borrara por fuera de la API (desde el panel de Supabase), la baja no
+corre, y esos archivos quedan en la carpeta de un servicio que ya no existe.
+Su ruta ya no dice de quién eran: hay que retirarlos a mano.
+
+**La baja de la cuenta.** Las imágenes ya no cuelgan de `<perfil>/`, así que
+`identity/baja.py` apunta ANTES de borrar los servicios que la persona ofrecía
+(`_servicios`) y `storage.delete_user_files` barre, además de `<perfil>/` en
+cada depósito, `service-media/<servicio>/` de cada uno. Es el mismo patrón que
+los adjuntos de chat. Lo ajeno no se toca: la carpeta es del servicio.
+
+Si esa lista no se puede leer, la baja **se detiene** (500, y se reintenta):
+seguir borraría los servicios en cascada y dejaría sus imágenes sin nada que
+diga de quién eran. La única excepción es una base que todavía no tiene las
+tablas de Servicios (`42P01`): ahí no hay nada que barrer.
+
+**Las rutas anteriores conviven.** Una fila con la ruta de la 0090 se sigue
+firmando, copiando y borrando igual, y la baja la sigue barriendo por la
+carpeta del perfil (`service-media` sigue en `USER_BUCKETS`). Lo que ya no se
+puede es registrar una ruta nueva con esa forma: lo impide la base (§124). No
+hay ninguna migración de objetos de Storage, ni hace falta: el 29/09/2026 el
+depósito tenía 0 objetos y la tabla 0 filas.
+
+## 124. La 0096: qué hace, cómo aplicarla y cómo verificarla
+
+`supabase/migrations/0096_servicios_rutas_opacas.sql`. **Sustituye el cuerpo
+de una función** —`service_version_images_solo_en_borrador()`, la de la
+0090— y nada más: ni tablas, ni columnas, ni índices, ni disparadores, ni
+permisos, ni políticas, ni el depósito, ni un solo archivo. La 0090 no se
+edita.
+
+**Qué admite el disparador desde la 0096**, al insertar una imagen o al
+cambiarle la ruta:
+
+1. la ruta nueva: `^<service_id>/[0-9a-f]{32}[.](jpg|png|webp)$`;
+2. una ruta anterior, **solo si es una copia**: tiene la forma de la 0090
+   (`<perfil>/<servicio>/…`) Y otra fila del mismo servicio ya la nombra. Es
+   lo que hace la API al abrir una versión nueva; sin esto, un servicio con
+   imágenes anteriores no se podría volver a editar.
+
+Todo lo demás se rechaza con `check_violation`. Lo que el disparador ya hacía
+(las imágenes solo cambian en un borrador; fuera de él solo se van en cascada)
+queda igual.
+
+**Sus garantías:** una sola transacción; comprueba antes de cambiar nada que
+están las tablas, la 0095 (su función, su disparador activo y su columna), el
+disparador de la 0090 activo y sobre esta función, que el cuerpo es el de la
+0090 (`b8aa892a…`) o el suyo (una reejecución), y que el depósito es privado;
+después verifica que dejó su cuerpo (`222bdbbd…`), `security invoker`, el
+`search_path` fijo, el disparador intacto, la función sin ejecución para
+`anon` ni `authenticated`, RLS activa, cero políticas, cero permisos sueltos y
+el depósito privado. Si algo no cuadra, no confirma. Es reejecutable y dice
+cuántas imágenes con ruta anterior hay.
+
+**La puerta.** `esquema.hay_catalogo` exige ahora, además de lo de la 0090,
+ese cuerpo por su huella (`CUERPO_DE_LAS_IMAGENES`). El nombre de la función
+no cambia, así que mirar solo el nombre daría por buena una base sin la 0096,
+y subir una imagen chocaría con ella. **Sin la 0096, todo el catálogo de
+Servicios contesta 503 `services_not_ready`** (y con él la agenda, la reserva
+y la atención, que dependen del catálogo). Nunca un 500.
+
+### Cómo aplicarla
+
+**EL ORDEN: primero la migración, después el código.** Producción corre hoy
+un código anterior a Servicios, así que aplicar la 0096 no le cambia nada.
+
+1. **Antes, en solo lectura** (editor SQL de Supabase). Lo esperado: `0`, `0`
+   y `b8aa892aaaf500ceaf19e4ae52a457af`.
+
+   ```sql
+   select
+     (select count(*) from storage.objects where bucket_id = 'service-media') as objetos,
+     (select count(*) from public.service_version_images)                    as filas,
+     (select md5(replace(p.prosrc, E'\r', '')) from pg_catalog.pg_proc p
+       where p.oid = to_regprocedure('public.service_version_images_solo_en_borrador()')) as cuerpo;
+   ```
+
+   Si `objetos` o `filas` no fueran 0, la migración se puede aplicar igual
+   (convive con las rutas anteriores), pero conviene saberlo antes: esas
+   imágenes conservarán en su URL firmada el perfil del prestador hasta que
+   se vuelvan a subir.
+
+   Si `cuerpo` no fuera ese, **la 0096 se negará a aplicarse** y no cambiará
+   nada. No hay que forzarla: primero hay que entender por qué la función de
+   producción no es la de la 0090 (por ejemplo, si se aplicó con otra
+   codificación de caracteres).
+2. **Ejecutar el fichero entero**, tal cual, una vez. Debe terminar sin error
+   y avisar `La 0096: 0 imagen(es) con ruta anterior`.
+3. **Después, en solo lectura.** Lo esperado: `222bdbbd898701ecf458747cd45f6ef9`,
+   `31`, `O`, `false`.
+
+   ```sql
+   select md5(replace(p.prosrc, E'\r', '')) as cuerpo, t.tgtype, t.tgenabled, p.prosecdef
+     from pg_catalog.pg_trigger t join pg_catalog.pg_proc p on p.oid = t.tgfoid
+    where t.tgrelid = 'public.service_version_images'::regclass and not t.tgisinternal;
+   ```
+4. **Registrar su huella en `APLICADAS`** (en el repositorio, en el bloque
+   siguiente) y, cuando el código esté desplegado, **reiniciar la API**: la
+   puerta recuerda el «no».
+
+**No se deshace en producción** (§104). Y una advertencia: **la 0090 es
+reejecutable y define esta misma función**. Si alguien la vuelve a ejecutar
+después de la 0096, vuelve el cuerpo anterior. No es silencioso —la puerta lo
+nota y el catálogo contesta 503— y se arregla reaplicando la 0096.
+
+## 125. P5 y P2: dos modalidades y una moneda
+
+**El servidor manda**, con la configuración de siempre (`catalogo_requisitos.Reglas`):
+
+| Variable | De fábrica | Antes |
+|---|---|---|
+| `SERVICES_CATALOG_MODALITIES` | `virtual,in_person` | `virtual,in_person,at_home` |
+| `SERVICES_CATALOG_CURRENCIES` | `PEN` | `PEN` |
+
+«A domicilio» **sigue en el modelo**: en `MODALIDADES`, en el CHECK de la
+0090, en la agenda y en la reserva. No se reescribió nada. Volver a ofrecerla
+es añadirla a esa variable (y a `MODALIDADES_OFRECIDAS` en la app), después de
+construir la aceptación del prestador, que sigue sin existir.
+
+**Dónde se rechaza lo que Z no ofrece**, siempre con un error del dominio y
+nunca con un 500:
+
+| Dónde | Qué pasa |
+|---|---|
+| `PATCH …/draft` con `modality: "at_home"` | 422 `service_modality_not_allowed`, con las permitidas en `details`. **No se guarda nada** de esa petición |
+| `PATCH …/draft` con `currency: "USD"` | 422 `service_currency_not_allowed` |
+| Un borrador que ya la tenía | se conserva; al enviarlo, `missing` trae `modality_not_allowed` o `currency_not_allowed`, como antes |
+| `GET /services/catalog?modality=at_home` o `?currency=USD` | 422 `service_catalog_filter_invalid`, con el campo |
+| Contratar a domicilio | sigue sin poderse (`SERVICES_BOOKING_INSTANT_MODALITIES`), como antes |
+
+Antes, un valor no ofrecido se guardaba en el borrador y solo se avisaba al
+enviar. Ahora no entra: la app ya no lo enseña, así que solo llega una
+petición escrita a mano.
+
+**Lo que no cambia:** no se convierte ninguna moneda, el importe sigue en
+unidades menores, y «gratis» y «a consultar» siguen sin moneda ni importe.
+
+**En la app** (`lib/serviciosCatalogo.ts`): `MODALIDADES_OFRECIDAS` (las dos)
+alimenta el formulario del prestador, el filtro público y el de la bandeja de
+administración; `MODALIDADES` (las tres) se queda para nombrar lo que ya
+existiera. `MONEDAS` es `['PEN']`, propia de Servicios: ya no es la lista de
+Productos. Una prueba compara las dos con los valores de fábrica del
+servidor. No hay textos nuevos: los dos códigos reutilizan los que ya
+existían en los tres idiomas.
+
+## 126. P51: la capacidad no es pública
+
+El número de personas que caben es de la gestión del prestador y de
+administración. Salía en dos contratos públicos, y de los dos se retiró:
+
+| Contrato | Antes | Ahora |
+|---|---|---|
+| Ficha pública (`ServicioPublicoRead`, `FichaPublicaRead`) | `capacity` | no lo trae |
+| Un horario (`HorarioRead`: calendario, horarios de un día, «próximo») | `capacity` | no lo trae |
+
+`capacity` salió de `_Contenido`, que compartían lo público y lo privado, y
+vive solo en `VersionRead` (lo que leen el prestador y administración). La
+agenda privada conserva `service.capacity` y la capacidad de cada regla y de
+cada excepción. **La reserva sigue respetando la capacidad por dentro**: lo ya
+ocupado quita el horario entero cuando se llena, como antes.
+
+Al público se le enseña solo lo que es cierto y útil: si hay horarios, cuáles,
+o que no hay. No se inventó ningún «quedan pocos». `DiaRead.count` (cuántos
+horarios posibles tiene un día) no es una capacidad y se queda.
+
+En la app, `Contenido.capacity` pasa a opcional y `Horario` ya no lo declara;
+`ContenidoDelServicio` lo pinta solo si llega, es decir, solo a quien gestiona.
+
+## 127. P101: el piloto
+
+**Dos variables**, y ninguna tabla, panel ni motor de cohortes:
+
+| Variable | De fábrica | Qué hace |
+|---|---|---|
+| `SERVICES_PILOT_PROFILE_IDS` | vacía | los perfiles que entran durante el piloto: UUID separados por comas |
+| `SERVICES_PUBLIC_ACCESS` | `false` | la apertura general. Solo con `true` deja de mirarse la lista |
+
+**La regla** (`services/acceso.py`, `abierto_para`), sin consultar la base:
+
+| `FEATURE_SERVICES` | `SERVICES_PUBLIC_ACCESS` | Lista | Quién entra |
+|---|---|---|---|
+| `false` | — | — | nadie |
+| `true` | `false` | vacía | **nadie** |
+| `true` | `false` | mal escrita | **nadie**, y se registra un error |
+| `true` | `false` | con perfiles | solo esos perfiles, con sesión |
+| `true` | `true` | — | todos, también sin sesión |
+
+- **La lista vacía no abre nada.** Desplegar con la bandera encendida y sin
+  lista deja Servicios cerrado. La apertura general no se deduce: se escribe.
+- **Una lista mal escrita cierra el piloto entero**, también a los perfiles
+  bien escritos. Se registra **cuántas** entradas fallan, una vez por valor, y
+  **nunca cuáles**: ni un identificador ni un trozo de la variable van al
+  registro.
+- **Se normaliza**: mayúsculas, espacios, llaves o sin guiones son el mismo
+  perfil.
+- **A quien no entra se le contesta lo mismo que con Servicios apagado**: 503
+  `services_disabled`. Es una respuesta estable que la app ya sabe pintar, y
+  no dice a nadie que hay un piloto ni quién participa.
+- **El catálogo público también se cierra.** Durante el piloto, la búsqueda,
+  la ficha, los horarios, las reseñas y el perfil de un prestador son de los
+  participantes con sesión. Una visita sin sesión recibe el mismo 503.
+- **Administración entra por su rol**, esté o no en la lista: las rutas de
+  `/admin/services` no pasan por esta puerta, y en ellas el rol se comprueba
+  primero, como siempre. **Estar en la lista no da ningún rol**: quien
+  participa y no es de administración sigue recibiendo 403. Y una persona de
+  administración que no está en la lista no usa Servicios como cliente.
+- **`FEATURE_SERVICE_BOOKING`** sigue siendo su propia bandera, y solo vale
+  para quien ya entra. **Los pagos siguen apagados**, sin excepción.
+
+**Una sola comprobación.** `exigir_participante` cuelga de los seis routers de
+`/services` en `main.py`, una vez, y va antes que cualquier otra puerta.
+Ninguna ruta repite la condición. Se comprueba por HTTP en todas las rutas de
+Servicios, sacadas de la propia aplicación.
+
+**Lo que sabe la app.** `GET /platform/config` contesta dos cosas **para
+quien pregunta**, y la lista nunca sale del servidor:
+
+| Campo | Vale `true` | Lo usa |
+|---|---|---|
+| `feature_services` | si esa persona entra: está en la lista, o hay apertura general | las entradas de Servicios del perfil y de los accesos (`useServiciosEncendido`) |
+| `feature_services_admin` | si a esa persona le toca administrar Servicios, por su **rol** (`permissions.funcion_de`), con Servicios encendido | la sección de Servicios del panel de administración (`useServiciosDeAdministracion`) |
+
+Son dos porque administración no entra por la lista. Con una sola respuesta,
+a una administradora de fuera del piloto la app le escondía su bandeja aunque
+el servidor la dejara pasar, y nadie podía revisar la primera postulación. La
+segunda es la única que mira la base, y solo con Servicios encendido y con
+sesión; si no puede mirarla, es que no, y la app recibe igualmente su
+configuración.
+
+En el móvil (`services/plataforma.ts`) la pregunta va con la sesión y se
+repite al cambiar de cuenta, también cuando hay sesión y el perfil todavía no
+cargó (`quienPregunta`). Ocultar un botón no es la protección: lo es el
+servidor.
+
+**Un token que viene y no vale es un 401**, no un «no participas»
+(`acceso.quien_pregunta`, sobre `security.get_user_if_token`). A un
+participante con la sesión caducada hay que decirle que la renueve;
+contestarle que Servicios no está disponible lo dejaría fuera sin saber por
+qué. Contesta igual con Servicios apagado que en el piloto, así que un token
+roto no dice a nadie si hay un piloto. **Con la apertura general la puerta ya
+no mira el token**: no necesita saber quién pregunta, y cada ruta decide como
+siempre. `/platform/config` no cambia: con un token que no vale contesta como
+a una visita sin sesión.
+
+**Tres cambios de comportamiento que conviene conocer.** La puerta de quién
+entra va antes que la sesión, en todas las rutas de `/services`:
+
+- **sin token**, con Servicios apagado, una ruta privada contestaba 401;
+  ahora contesta 503 `services_disabled`, como cualquier otra;
+- **con un token que no vale**, apagado o en el piloto, una ruta pública (el
+  catálogo, la ficha) lo trataba como una visita sin sesión; ahora contesta
+  401. Con la apertura general sigue como antes: una visita sin sesión;
+- **un token fabricado cuyo `alg` no es texto** era un 500 en cualquier ruta
+  de la API, no solo en Servicios (PyJWT no comprueba el tipo); ahora es un
+  401 `invalid_token`.
+
+En `/admin/services` nada cambia: sin sesión, 401.
+
+## 128. AWS: la configuración, preparada y sin desplegar
+
+**No se ejecutó nada en AWS.** Solo cambian ficheros de `infra/aws/`.
+
+Lo que la plantilla (`02-plataforma.yaml`) escribe ahora en el entorno de la API:
+
+| Variable | Parámetro | Valor inicial |
+|---|---|---|
+| `FEATURE_SERVICES` | `FeatureServices` | `false` |
+| `FEATURE_SERVICE_BOOKING` | `FeatureServiceBooking` | `false` |
+| `SERVICES_PUBLIC_ACCESS` | `ServicesPublicAccess` | `false` |
+| `SERVICES_CATALOG_MODALITIES` | `ServicesCatalogModalities` | `virtual,in_person` |
+| `SERVICES_CATALOG_CURRENCIES` | `ServicesCatalogCurrencies` | `PEN` |
+| `FEATURE_SERVICE_PAYMENTS` | *(ninguno: va fijo)* | `false` |
+| `SERVICE_PAYMENTS_PROVIDER` | *(ninguno: va fijo)* | `none` |
+| `SERVICES_PILOT_PROFILE_IDS` | *(va en el secreto)* | vacía |
+
+- **El cobro no tiene parámetro.** `FEATURE_SERVICE_PAYMENTS=false` y
+  `SERVICE_PAYMENTS_PROVIDER=none` se escriben fijos: no se pueden encender
+  en un despliegue.
+- **La lista del piloto va en el secreto**, no en un parámetro: son
+  identificadores de personas, y un parámetro acabaría en los perfiles
+  versionados (`parametros/*.json`), en las evidencias y en la consola de
+  CloudFormation. El guion comprueba su **forma** antes de escribir el secreto
+  y nunca imprime su valor. `secretos.ejemplo.json` la trae vacía.
+- Los dos perfiles (`alta-disponibilidad`, `costo-controlado`) fijan los cinco
+  parámetros con sus valores iniciales, y el guion avisa si alguno de los tres
+  interruptores viene encendido.
+- Los patrones de la plantilla rechazan una lista de modalidades o de monedas
+  mal escrita antes de que llegue a la API.
+
+**Para encender un piloto, en este orden** (nada de esto se hizo):
+
+1. aplicar y verificar la 0096 en Supabase (§124);
+2. desplegar `Edson` con todo apagado, que es lo que traen los perfiles;
+3. poner los perfiles del piloto en el secreto (`SERVICES_PILOT_PROFILE_IDS`)
+   y renovar las máquinas;
+4. encender `FeatureServices` (y, si toca, `FeatureServiceBooking`) con un
+   Change Set revisado.
+
+**Para apagarlo**, lo contrario del paso 4: es reversible, no borra nada y no
+necesita ninguna migración.
+
+## 129. Pruebas (02/10/2026)
+
+| Qué | Resultado |
+|---|---|
+| Backend completo con PostgreSQL 17 | 4414 aprobadas, ninguna saltada |
+| Backend completo sin PostgreSQL | 3152 aprobadas; 1262 se saltan por no tener PostgreSQL |
+| Móvil: batería completa, `tsc --noEmit` y exportación web | 3657 aprobadas, 0 fallidas; `tsc --noEmit` limpio; exportación web correcta |
+| Recorrido con la API real (base local, sin Supabase ni AWS) | 66 de 66 comprobaciones, 91 peticiones, cinco procesos de la API |
+
+**El recorrido.** Cada caso es un proceso de la API arrancado con otras
+variables de entorno, con sesiones HS256 reales, no un parche en memoria:
+
+1. **Sin la 0096** (base 0001–0095): el catálogo, «mis servicios» y la bandeja
+   de administración contestan 503 `services_not_ready`; la admisión sigue.
+   Aplicada la 0096 dos veces, el mismo proceso sigue en 503; reiniciado, abre.
+2. **El piloto**, con la lista escrita con mayúsculas, espacios y llaves: la
+   app recibe «sí» solo para las dos participantes, y la sección de
+   administración solo para quien administra, esté o no en la lista; quien no
+   participa, una visita sin sesión y administración como cliente reciben 503;
+   un token caducado o fabricado, 401. Administración crea la categoría y
+   publica por su rol.
+   «A domicilio» y dólares, 422. La ruta de cada imagen es opaca y su URL
+   firmada no lleva el perfil. La ficha no trae la capacidad; la prestadora y
+   administración sí la ven. Abrir un borrador deja cuatro filas y dos archivos.
+3. **Una lista mal escrita**: no entra nadie; el registro dice cuántas
+   entradas fallan, una vez, y no nombra ningún perfil.
+4. **La apertura general**: entra cualquiera, también sin sesión, y el
+   catálogo trata un token caducado como una visita; lo privado sigue siendo
+   un 401. Ni el calendario ni los horarios de un día traen la capacidad. La prestadora
+   borra su cuenta y se va con su servicio y sus imágenes.
+5. **Apagado**: nadie, ni el piloto ni con la apertura general escrita.
+
+Ningún proceso dejó una traza ni un 500.
+
+**Mutaciones dirigidas** (en un árbol de trabajo desechable, sobre el código
+confirmado): 46 de 46 muertas. Cada una rompe una sola cosa —la lista vacía abre
+Servicios, un router sin la puerta, la ruta vuelve a llevar el perfil, la
+0096 deja registrar una ruta anterior, un perfil de AWS trae Servicios
+encendido…— y la prueba que la vigila se pone roja.
+
+**Una revisión independiente del diff**, en solo lectura, antes de cerrar. No
+encontró nada bloqueante. Encontró un defecto del piloto —una administradora
+de fuera de la lista no veía su sección en la app— y cuatro menores, y todo
+quedó corregido y con su prueba: los dos campos de `/platform/config`, la
+puerta que no mira el token con la apertura general, el 401 del token
+fabricado, la baja que se detiene si no puede leer los servicios, y la
+pregunta de la app cuando hay sesión sin perfil. Una de las mutaciones de
+esa tanda sobrevivió la primera vez: la prueba del token fabricado no llegaba
+al código que decía probar. Se corrigió la prueba, no el resultado.
+
+Pruebas nuevas:
+
+| Batería | Qué prueba |
+|---|---|
+| `test_servicios_migracion_0096.py` | la 0096, estática y contra PostgreSQL: lo que admite y lo que rechaza, la copia de una ruta anterior, que no toca ninguna fila, la reejecución, un fallo a mitad, cada dependencia y la 0090 reejecutada encima |
+| `test_servicios_piloto.py` | el piloto: la regla, todas las rutas de `/services` por HTTP, administración, las dos respuestas de la app, los tokens que no valen (caducado, mal firmado, fabricado) y los valores de fábrica |
+| `test_servicios_catalogo_api.py` (§13) | por la API: la ruta opaca, que el teléfono no la elige, la copia entre versiones, la baja (y que se detiene si no puede leer los servicios), «a domicilio», la moneda, los filtros públicos, la capacidad y la puerta sin la 0096 |
+| `test_infraestructura_aws.py` | los perfiles apagados, el entorno que escribe la plantilla, el cobro fijo, la lista del piloto fuera del repositorio y su validación |
+| `plataforma.test.mts`, `serviciosCatalogo.test.mts` | en el móvil: la bandera por persona, la de administración aparte, para quién se pregunta, y que lo ofrecido es lo que el servidor trae de fábrica |
+
+## 130. Lo que sigue pendiente
+
+- **Aplicar y verificar la 0096** en Supabase (§124) y registrar su huella en
+  `APLICADAS`. La hace Edson, a mano; aquí no se escribió nada en Supabase.
+- **QA físico** de los seis incrementos y de estas cinco políticas
+  (`Z_QA_FISICO_PENDIENTE.md`).
+- **Cuatro políticas** siguen dependiendo de la operación o de trabajo futuro
+  (P1, P7 y P8, P15 y P42): `Z_REQUISITOS_Y_DECISIONES.md`, apartado II.
+- **De la empresa**: los 48 asuntos y las seis integraciones del apartado IV
+  y V. **F21 sigue siendo la primera** y no se tocó.
+- **Desplegar**: nada se desplegó, ni se hizo push, PR ni merge.

@@ -1,6 +1,8 @@
 # Z Servicios: políticas de la primera versión y decisiones pendientes
 
-**Consolidado al 02/10/2026 · «Políticas iniciales v1».** Este apartado es la
+**Consolidado al 02/10/2026 · «Políticas iniciales v1».** Puesto al día ese
+mismo día, al cerrarse en el código cinco de las políticas que el sistema
+todavía no imponía. Este apartado es la
 referencia vigente de las decisiones de Z Servicios. Todo lo que sigue debajo
 de él es el registro histórico, que se conserva tal como se escribió: Cursos,
 Eventos y Productos y, desde «Z Servicios, Incremento 1», las tablas
@@ -23,11 +25,11 @@ estados:
 
 | Estado | Cuántas | Qué quiere decir |
 |---|---|---|
-| **Decidida para la primera versión** | 42 | Ya hay una regla y el sistema trabaja con ella. Es una regla inicial, no un contrato ni una aprobación legal |
+| **Decidida para la primera versión** | 43 | Ya hay una regla y el sistema trabaja con ella. Es una regla inicial, no un contrato ni una aprobación legal |
 | **Valor provisional configurable** | 14 | Hay un número de partida (por ejemplo, 24 horas) que se cambia sin programar |
 | **Requiere a la empresa** | 25 | Nadie del equipo técnico puede decidirla: es estratégica, legal, financiera u operativa |
 | **Requiere integración externa** | 3 | Depende de contratar o conectar un servicio de fuera |
-| **Mejora futura** | 6 | No hace falta para empezar; se anota para después |
+| **Mejora futura** | 5 | No hace falta para empezar; se anota para después |
 | **No aplica a la primera versión** | 6 | Queda fuera de la primera versión a propósito, o no es de Servicios |
 | **Total** | 96 | S1–S14, C1–C16, D1–D15, E1–E12, F1–F21 y G1–G18 |
 
@@ -72,18 +74,20 @@ supone una aprobación legal.
 5. **Quién pone en marcha las tareas automáticas** (IV-44, V-53): sin ellas
    no hay recordatorios ni cierre automático.
 
-**Decidido, pero el sistema todavía no lo impone.** Nueve políticas están
-adoptadas y todavía dependen de una configuración, de un ajuste o de un bloque
-de trabajo aparte (apartado II, al final). Las dos que hay que resolver antes
-de encender Servicios: fijar las modalidades sin «a domicilio» (P5) y la
-**ruta opaca de los archivos (P29), que hoy contradice a la migración 0090 ya
-aplicada** y necesita código y una migración nueva.
+**Cinco políticas se cerraron en el código el 02/10/2026** (apartado II, al
+final): las rutas opacas de los archivos (P29), sin «a domicilio» (P5), solo
+en soles (P2), la capacidad fuera de lo público (P51) y el piloto por perfiles
+(P101). Queda **aplicar la migración 0096** en Supabase: está escrita y
+probada en local, y sin ella el catálogo de Servicios contesta 503. Otras
+cuatro políticas siguen dependiendo de la operación o de trabajo futuro, y
+ninguna impide empezar un piloto.
 
 **Estado.** `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y
 `FEATURE_SERVICE_PAYMENTS` están **apagadas**; la pasarela es `none`; no hay
 Stripe conectado, ni transferencias, ni devoluciones automáticas. Las
 migraciones 0086–0095 están aplicadas, verificadas y registradas, y no se
-tocan. El QA físico sigue pendiente (`Z_QA_FISICO_PENDIENTE.md`).
+tocan; **la 0096 está escrita y sin aplicar**. El QA físico sigue pendiente
+(`Z_QA_FISICO_PENDIENTE.md`).
 
 ## II. Políticas decididas para la primera versión
 
@@ -99,10 +103,10 @@ en la operación; la última, qué identificadores históricos cierra o toca.
 | P | Política | Cómo se sostiene hoy | Ids |
 |---|---|---|---|
 | P1 | Z Servicios opera inicialmente en Perú | Se abre publicando condiciones solo para Perú (las condiciones son por país del prestador). El código no bloquea otros países | C5, F15 |
-| P2 | La moneda inicial es PEN | `SERVICES_CATALOG_CURRENCIES=PEN`: sin moneda admitida no se envía un precio | C5, C16, F15 |
+| P2 | La moneda inicial es PEN | `SERVICES_CATALOG_CURRENCIES=PEN`: el borrador y el filtro rechazan otra moneda, y la app solo ofrece soles | C5, C16, F15 |
 | P3 | Postulan personas naturales y empresas | Los dos tipos de prestador de la 0086 | — |
 | P4 | Modalidades: virtual y presencial en el establecimiento del prestador | Las dos se publican y se confirman al momento | C4, F3 |
-| P5 | La atención a domicilio permanece desactivada | No se puede contratar. **Falta fijar `SERVICES_CATALOG_MODALITIES=virtual,in_person`** para que tampoco se publique | C4, F3, G14 |
+| P5 | La atención a domicilio permanece desactivada | `SERVICES_CATALOG_MODALITIES=virtual,in_person` de fábrica: no se publica, no se filtra y no se contrata. Escrita a mano contesta `service_modality_not_allowed` | C4, F3, G14 |
 | P6 | Las solicitudes abiertas de propuesta quedan fuera | No existen; «a consultar» y «desde» no se contratan | F14 |
 | P7 | Las categorías reguladas permanecen deshabilitadas mientras no haya matriz documental aprobada | No hay categorías sembradas y solo las crea administración. Sin bloqueo automático | C2, C3, S3 |
 | P8 | Se prohíben actividades ilegales, fraude, falsificación, armas, explotación, contenido sexual, servicios financieros no autorizados y lo que ponga en riesgo inmediato a una persona | Se aplica en la revisión de cada servicio, que se aprueba a mano. Sin filtro automático; debe constar en las condiciones cuando se redacten | C2 |
@@ -140,7 +144,7 @@ en la operación; la última, qué identificadores históricos cierra o toca.
 | P26 | Retirar un servicio es definitivo | Lo impone la 0090 | C11 |
 | P27 | Las imágenes y las evidencias se guardan en depósitos privados | Depósitos privados, verificados en Supabase | C15 |
 | P28 | Los archivos se entregan con enlaces firmados temporales | 3600 s las imágenes del catálogo; 120 s los documentos y las evidencias | C15, G10 |
-| P29 | Ruta opaca para los archivos nuevos: no exponer sin necesidad el identificador del prestador | **Decidida y sin implementar.** Hoy la ruta de una imagen empieza por el identificador del perfil y la 0090 lo exige. Necesita código y una migración nueva, en un bloque aparte y antes de encender | C15, D6 |
+| P29 | Ruta opaca para los archivos nuevos: no exponer sin necesidad el identificador del prestador | `<servicio>/<32 hexadecimales al azar>.<ext>`: la arma el servidor y no lleva el perfil. **Falta aplicar la migración 0096** (escrita y probada en local) | C15, D6 |
 | P30 | Las reseñas de Cursos, Eventos o Productos no se reutilizan en Servicios | Las reseñas de servicio son una tabla propia (0094) | D11 |
 
 ### D. Descubrimiento y recomendaciones
@@ -176,7 +180,7 @@ en la operación; la última, qué identificadores históricos cierra o toca.
 | P48 | Los feriados se gestionan con excepciones del prestador | «Cerrar todo el día» | E4, F11 |
 | P49 | No se integran calendarios externos | No construido | E9 |
 | P50 | No hay lista de espera | No construido | E10 |
-| P51 | No se muestra la capacidad interna exacta; basta con la disponibilidad | La app no la enseña. La API pública todavía devuelve la capacidad teórica | E5, F8 |
+| P51 | No se muestra la capacidad interna exacta; basta con la disponibilidad | Ni la ficha pública ni los horarios traen el número; solo lo ven el prestador y administración | E5, F8 |
 | P52 | Un cierre, una excepción o un bloqueo siempre prevalecen sobre la semana | Precedencia de la agenda (Inc. 4, decisión 2) | E12 |
 
 ### F. Reserva y contratación
@@ -261,29 +265,37 @@ en la operación; la última, qué identificadores históricos cierra o toca.
 | P98 | Los procesos automáticos son idempotentes y por lotes | `POST /admin/services/tasks/run` | F13, G12 |
 | P99 | Una fila fallida no derriba todo el lote | Cada fila se confirma antes de pasar a la siguiente | — |
 | P100 | Los pagos, Stripe, las devoluciones automáticas y las transferencias siguen apagados | `FEATURE_SERVICE_PAYMENTS=false`, pasarela `none`, sin adaptador | F16–F18, G13 |
-| P101 | Servicios se habilita progresivamente: equipo interno, prestadores piloto, clientes piloto y público | Es un plan de operación. Las banderas son globales: el paso de prestadores lo da la admisión (solo publica quien Z admite); limitar a clientes piloto necesita un entorno aparte o un mecanismo que no existe | — |
+| P101 | Servicios se habilita progresivamente: equipo interno, prestadores piloto, clientes piloto y público | `SERVICES_PILOT_PROFILE_IDS` y `SERVICES_PUBLIC_ACCESS` (`services/acceso.py`): con la bandera encendida solo entran los perfiles del piloto; la lista vacía no deja entrar a nadie y la apertura general se escribe | — |
 | P102 | El primer despliegue mantiene las banderas apagadas | Las tres son `False` de fábrica | — |
 | P103 | Un error de esquema cierra la funcionalidad con 503; nunca se continúa a medias | Las puertas de esquema: 503 `services_not_ready` | — |
 | P104 | No se crean datos ficticios ni se asume que un pago se ejecutó | No se siembra nada; el efecto económico es una solicitud | G13 |
 | P105 | Las notificaciones no contienen textos libres sensibles | 19 tipos de aviso con texto fijo, en tres idiomas | S11 |
 
+### Cerradas en el código el 02/10/2026
+
+Estas cinco estaban decididas y el sistema no las imponía. Ya las impone: el
+detalle técnico está en `Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII (§122 en
+adelante).
+
+| Política | Qué se hizo | Qué falta fuera del código |
+|---|---|---|
+| P29 · Ruta opaca | La ruta de una imagen es `<servicio>/<32 hexadecimales al azar>.<ext>`: sin el perfil, puesta por el servidor y con la extensión que dicen los bytes. La baja de la cuenta barre la carpeta de cada servicio | **Aplicar la migración 0096** en Supabase y reiniciar la API. Sin ella, el catálogo de Servicios contesta 503 |
+| P5 · A domicilio | De fábrica solo `virtual,in_person`. El borrador y el filtro público rechazan otra modalidad, y la app no la ofrece | Nada |
+| P2 · PEN | El formulario y el filtro de la app ofrecen solo soles; otra moneda escrita a mano contesta un error del dominio | Nada |
+| P51 · Capacidad | La ficha pública y los horarios ya no traen el número. El prestador y administración lo conservan | Nada |
+| P101 · Piloto por etapas | Con Servicios encendido solo entran los perfiles de `SERVICES_PILOT_PROFILE_IDS`; a los demás, también sin sesión, se les contesta como si estuviera apagado. La lista vacía no deja entrar a nadie. Administración entra por su rol | Poner los perfiles del piloto en el secreto de AWS antes de encender |
+
 ### Decidido, pero el sistema todavía no lo impone
 
-Estas políticas están adoptadas. Lo que sigue dice qué falta para que el
-sistema las haga cumplir por sí solo. **Ninguna se arregló en este bloque**,
-que solo toca documentación.
+Estas cuatro están adoptadas y siguen dependiendo de la operación o de
+trabajo futuro. Ninguna impide empezar un piloto.
 
 | Política | Qué pasa hoy | Qué falta | Cuándo |
 |---|---|---|---|
-| P5 · A domicilio | El catálogo admite de fábrica las tres modalidades: un servicio a domicilio se podría publicar, aunque no contratar | Fijar `SERVICES_CATALOG_MODALITIES=virtual,in_person` en el entorno. Es configuración, no código | Antes de encender |
-| P29 · Ruta opaca | La ruta de una imagen empieza por el identificador del perfil y la 0090, ya aplicada, exige ese comienzo | Un bloque aparte: la ruta en `catalogo_imagenes.py`, una migración nueva que relaje el disparador y el barrido de la baja de cuenta. Hoy hay 0 archivos: no hay nada que mover | Antes de encender |
-| P2 · PEN | El formulario de la app ofrece también USD y EUR; el servidor los rechaza al guardar (C16) | Ajuste menor de la app | Antes de encender |
 | P1 · Perú | El código no bloquea países: una categoría puede limitarse a un país, y las condiciones son por país | Publicar condiciones solo para Perú. Es operación, no código | Al publicar las condiciones |
 | P7 y P8 · Reguladas y prohibidas | No hay bloqueo automático de categorías ni de actividades | Se cumple en la creación de categorías y en la aprobación manual de cada servicio; la lista debe ir en las condiciones | Al redactar las condiciones |
 | P15 · Credencial vencida | La señal pública ya se retira. No existe la relación entre credenciales y categorías que impediría publicar en una regulada | Se construye al abrir la primera categoría regulada | Antes de abrir una regulada |
 | P42 · Otra zona horaria | Se avisa de que el teléfono está en otra zona; no se calcula la equivalencia | Mejora opcional de la app | Al ampliar países |
-| P51 · Capacidad | La app no la enseña, pero la API pública devuelve la capacidad teórica | Quitarla de la respuesta pública: ajuste menor de código | Antes de abrir al público |
-| P101 · Piloto por etapas | Las banderas son globales: encender Servicios lo abre a todas las cuentas | Un entorno de piloto, o un mecanismo de acceso por lista que hoy no existe | Antes del piloto |
 
 ## III. Valores provisionales configurables
 
@@ -321,7 +333,9 @@ definitivos son de la empresa (IV-47).
 |---|---|---|---|---|
 | `SERVICES_CATALOG_CURRENCIES` | `PEN` | **`PEN`** | P2 | ya es el valor de fábrica |
 | `SERVICES_BOOKING_INSTANT_MODALITIES` | `virtual,in_person` | **`virtual,in_person`** | P56, P57 | ya es el valor de fábrica |
-| `SERVICES_CATALOG_MODALITIES` | `virtual,in_person,at_home` | **`virtual,in_person`** | P4, P5 | **hay que fijarla en el entorno al desplegar** |
+| `SERVICES_CATALOG_MODALITIES` | `virtual,in_person` | **`virtual,in_person`** | P4, P5 | ya es el valor de fábrica (02/10/2026) |
+| `SERVICES_PILOT_PROFILE_IDS` | `` | **`los perfiles del piloto`** | P101 | vacía: no entra nadie |
+| `SERVICES_PUBLIC_ACCESS` | `false` | **`false`** | P101 | el piloto; `true` es la apertura general |
 | `FEATURE_SERVICES` | `false` | **`false`** | P102 | apagada |
 | `FEATURE_SERVICE_BOOKING` | `false` | **`false`** | P102 | apagada |
 | `FEATURE_SERVICE_PAYMENTS` | `false` | **`false`** | P100 | apagada |
@@ -417,7 +431,7 @@ identificadores históricos viene («nueva» es una que no estaba anotada).
 | IV-45 | Frecuencia definitiva de recordatorios y cierres | Un recordatorio 24 horas antes (provisional); sin frecuencia de ejecución | G12 | Antes del piloto |
 | IV-46 | Política definitiva de cancelación antes de activar pagos | Hasta la hora de inicio, sin coste y sin plazo configurable | G1, F6 | Antes de pagos |
 | IV-47 | Valores definitivos de los nueve campos de la política operativa | Los provisionales de la tabla III, congelados en cada reserva | G2, G3, G4, G7, G8, G11, G18 | Tras el piloto |
-| IV-48 | Activación pública y fecha del piloto | Las tres banderas, apagadas | nueva | — |
+| IV-48 | Activación pública, perfiles y fecha del piloto | Las tres banderas, apagadas. El piloto ya se puede limitar a los perfiles que se elijan (P101) | nueva | — |
 
 ## V. Integraciones externas
 
@@ -445,12 +459,10 @@ No hacen falta para la primera versión. Ninguna está empezada.
 |---|---|---|
 | Varias personas por empresa y teléfono verificado | No hace falta para un piloto | S4 |
 | Análisis antivirus de los archivos | Hoy se valida el tipo real del archivo y su peso | S5 |
-| Que el formulario ofrezca solo las monedas admitidas | El servidor ya rechaza las demás | C16 |
 | Orden editorial («seleccionados por Z») | No hay datos ni criterio todavía | D2 |
 | Recursos y varios profesionales en una agenda | La agenda es del servicio | E8 |
 | Avisar cuando vence un horario apartado | La app ya lo dice en pantalla | F12 |
 | Mostrar la hora local equivalente a quien está en otra zona | En Perú hay una sola zona | E6 (P42) |
-| Quitar la capacidad teórica de la respuesta pública | La app no la enseña | E5 (P51) |
 | Reprogramación pedida por el prestador y cancelación directa por administración | No son necesarias para una atención gratuita | G2, G1 |
 | QR como prueba de asistencia, fotos en una reseña e índice de desempeño del prestador | El PIN basta; lo demás necesita volumen | G5, G11 |
 | Pantalla de configuración de la política | Los valores son variables de entorno | — |
@@ -464,22 +476,22 @@ sigue más abajo, en la sección de su incremento.
 | Serie | Total | Decidida para la primera versión | Valor provisional configurable | Requiere a la empresa | Requiere integración externa | Mejora futura | No aplica a la primera versión |
 |---|---|---|---|---|---|---|---|
 | **S** · Incremento 1 · admisión | 14 | 1 | — | 9 | — | 2 | 2 |
-| **C** · Incremento 2 · catálogo | 16 | 8 | 3 | 4 | — | 1 | — |
+| **C** · Incremento 2 · catálogo | 16 | 9 | 3 | 4 | — | — | — |
 | **D** · Incremento 3 · descubrimiento | 15 | 12 | — | 2 | — | 1 | — |
 | **E** · Incremento 4 · agenda | 12 | 7 | 2 | — | — | 1 | 2 |
 | **F** · Incremento 5 · reserva | 21 | 9 | 3 | 6 | 1 | 1 | 1 |
 | **G** · Incremento 6 · atención y posventa | 18 | 5 | 6 | 4 | 2 | — | 1 |
-| **Total** | 96 | **42** | **14** | **25** | **3** | **6** | **6** |
+| **Total** | 96 | **43** | **14** | **25** | **3** | **5** | **6** |
 
 **Qué identificadores hay en cada estado:**
 
 | Estado | Identificadores |
 |---|---|
-| `DECIDIDA_PRIMERA_VERSION` | S7, C2, C4, C5, C9, C10, C11, C13, C15, D1, D3, D4, D6, D7, D8, D9, D10, D11, D13, D14, D15, E3, E4, E5, E6, E7, E11, E12, F3, F4, F5, F6, F8, F10, F11, F15, F19, G1, G5, G9, G10, G18 |
+| `DECIDIDA_PRIMERA_VERSION` | S7, C2, C4, C5, C9, C10, C11, C13, C15, C16, D1, D3, D4, D6, D7, D8, D9, D10, D11, D13, D14, D15, E3, E4, E5, E6, E7, E11, E12, F3, F4, F5, F6, F8, F10, F11, F15, F19, G1, G5, G9, G10, G18 |
 | `PROVISIONAL_CONFIGURABLE` | C6, C7, C8, E1, E2, F1, F2, F7, G2, G3, G4, G7, G8, G11 |
 | `REQUIERE_EMPRESA` | S1, S2, S3, S6, S8, S9, S10, S11, S13, C1, C3, C12, C14, D5, D12, F9, F16, F17, F18, F20, F21, G6, G13, G15, G16 |
 | `INTEGRACION_EXTERNA` | F13, G12, G17 |
-| `MEJORA_FUTURA` | S4, S5, C16, D2, E8, F12 |
+| `MEJORA_FUTURA` | S4, S5, D2, E8, F12 |
 | `NO_APLICA_PRIMERA_VERSION` | S12, S14, E9, E10, F14, G14 |
 
 ### Serie S — Incremento 1 · admisión
@@ -508,7 +520,7 @@ sigue más abajo, en la sección de su incremento.
 | **C1** | Categorías iniciales | `REQUIERE_EMPRESA` | Sin decidir; no se inventa ninguna (IV-2) | Sin categorías nadie puede crear un servicio. Las crea administración desde la app | No hay ninguna sembrada | Bloquea el catálogo | Antes del piloto |
 | **C2** | Categorías prohibidas o reguladas | `DECIDIDA_PRIMERA_VERSION` | P7 y P8: las reguladas quedan deshabilitadas mientras no haya matriz documental, y hay una lista de actividades prohibidas. Cuáles operar y qué exigen sigue siendo de la empresa (IV-3, IV-5) | Z no abre categorías como salud, legal o finanzas hasta que la empresa diga qué papeles pide | Sin bloqueo automático: se cumple porque las categorías las crea administración y cada servicio se aprueba a mano | Operativo | Al definir las categorías (C1) |
 | **C3** | Documentos adicionales por categoría para publicar | `REQUIERE_EMPRESA` | Falta la matriz documental (IV-4, con S3) | No se piden | Inc. 2, tabla C | Sin matriz no hay categorías reguladas | Antes de abrir una categoría regulada |
-| **C4** | Modalidades permitidas | `DECIDIDA_PRIMERA_VERSION` | Virtual y presencial en el establecimiento del prestador; a domicilio, desactivada (P4, P5) | Se puede atender en línea o en el local del prestador. Nadie va a la casa de nadie | Contratar a domicilio ya es imposible (`SERVICES_BOOKING_INSTANT_MODALITIES=virtual,in_person`). **`SERVICES_CATALOG_MODALITIES` admite de fábrica las tres: hay que fijarla en `virtual,in_person` al desplegar** | Sin fijar la variable, alguien podría publicar (no contratar) un servicio a domicilio | Antes de encender |
+| **C4** | Modalidades permitidas | `DECIDIDA_PRIMERA_VERSION` | Virtual y presencial en el establecimiento del prestador; a domicilio, desactivada (P4, P5) | Se puede atender en línea o en el local del prestador. Nadie va a la casa de nadie | `SERVICES_CATALOG_MODALITIES=virtual,in_person` de fábrica (02/10/2026): el borrador rechaza otra (`service_modality_not_allowed`), el filtro público también, y la app no la ofrece. Tampoco se contrata | Ninguno | Si se decide abrir domicilio (IV-7) |
 | **C5** | Monedas y países | `DECIDIDA_PRIMERA_VERSION` | Perú y PEN (P1, P2); no se convierte ninguna moneda (P34) | Se empieza en Perú y en soles | `SERVICES_CATALOG_CURRENCIES=PEN`. El país no está bloqueado en el código: lo limita que solo se publiquen condiciones para Perú | Publicar condiciones de otro país lo abriría | Al ampliar países |
 | **C6** | Precio «desde» y precio a consultar | `PROVISIONAL_CONFIGURABLE` | Los cuatro modelos: gratis, fijo, desde y a consultar. Solo lo gratuito se contrata | Se puede anunciar un precio, pero hoy solo se reserva lo que es gratis | `SERVICES_CATALOG_PRICE_MODELS=free,fixed,from,on_request` | Ninguno sin pagos | Antes de pagos |
 | **C7** | Duración mínima y máxima de un servicio | `PROVISIONAL_CONFIGURABLE` | De 5 a 1440 minutos (los límites técnicos) | Un servicio dura entre cinco minutos y un día | `SERVICES_CATALOG_MIN_DURATION_MINUTES`, `SERVICES_CATALOG_MAX_DURATION_MINUTES` | Ninguno | Con las categorías |
@@ -519,8 +531,8 @@ sigue más abajo, en la sección de su incremento.
 | **C12** | Conservación de versiones e imágenes superadas o retiradas | `REQUIERE_EMPRESA` | Requiere revisión legal: plazos de conservación (IV-19) | Se guardan mientras exista la cuenta del prestador y se borran con ella | 0090 | Privacidad y evidencia | Con la política de privacidad |
 | **C13** | Información pública del prestador en la ficha | `DECIDIDA_PRIMERA_VERSION` | Solo el nombre público (P12) | La ficha no enseña datos privados del prestador | Inc. 2, decisión 6 | Ninguno | Tras el piloto |
 | **C14** | Pauta de redacción de los motivos del personal en el catálogo | `REQUIERE_EMPRESA` | Igual que S11 (IV-12) | Los motivos se guardan tal cual; la auditoría no los copia | Inc. 2, tabla C | Privacidad | Antes del piloto |
-| **C15** | El identificador del prestador en la ruta de las imágenes | `DECIDIDA_PRIMERA_VERSION` | **Ruta opaca para los archivos nuevos (P29). Decidida y SIN IMPLEMENTAR**: hoy la ruta es `<perfil>/<servicio>/<versión>/<id>` y la 0090 exige ese comienzo | La dirección de una imagen no debe delatar de qué prestador es | `catalogo_imagenes.py`; disparador de la 0090; 0 archivos en el depósito | Exige un bloque aparte, con código y una migración nueva. Sin archivos, no hay nada que mover | **Antes de encender Servicios** |
-| **C16** | Monedas que ofrece el formulario del servicio | `MEJORA_FUTURA` | El formulario ofrece PEN, USD y EUR; el servidor solo admite PEN (P2). Ajuste menor de la app | Si se elige otra moneda, al guardar aparece «Z no admite esa moneda por ahora» | `SERVICES_CATALOG_CURRENCIES`; `currency_not_allowed` | Confunde, no rompe | Antes de encender |
+| **C15** | El identificador del prestador en la ruta de las imágenes | `DECIDIDA_PRIMERA_VERSION` | Ruta opaca para los archivos nuevos (P29): `<servicio>/<32 hexadecimales al azar>.<ext>`, sin el perfil. **Implementada en el código (02/10/2026); la migración 0096 está escrita y SIN APLICAR** | La dirección de una imagen no debe delatar de qué prestador es | `catalogo_imagenes.py`; migración 0096; la puerta del catálogo exige su cuerpo | Hay que aplicar la 0096 antes de desplegar: sin ella el catálogo de Servicios contesta 503 | **Al aplicar la 0096** |
+| **C16** | Monedas que ofrece el formulario del servicio | `DECIDIDA_PRIMERA_VERSION` | Solo PEN (P2), en el formulario y en el filtro. Corregido el 02/10/2026 | La app ya no ofrece dólares ni euros | `MONEDAS` (`serviciosCatalogo.ts`); otra moneda escrita a mano contesta `service_currency_not_allowed` | Ninguno | Al ampliar países |
 
 ### Serie D — Incremento 3 · descubrimiento
 
@@ -531,7 +543,7 @@ sigue más abajo, en la sección de su incremento.
 | **D3** | Filtros visibles | `DECIDIDA_PRIMERA_VERSION` | P33: categoría, modalidad, precio, moneda, zona y credencial vigente | Solo hay filtros para los que existen datos | `descubrimiento.py` | Ninguno | Tras el piloto |
 | **D4** | Qué se enseña de una credencial | `DECIDIDA_PRIMERA_VERSION` | P12: solo «credencial profesional verificada por Z y vigente»; nunca el número ni el archivo | El público sabe que Z la comprobó, no cuál es | `_credencial_vigente` (`descubrimiento.py`) | Ninguno | Con la matriz documental |
 | **D5** | Qué significa comercialmente «verificado por Z» | `REQUIERE_EMPRESA` | Requiere revisión legal: la responsabilidad de Z (IV-20) | Hoy se nombra exactamente lo que se comprobó y se dice que no garantiza el resultado | Inc. 3, requisitos | Legal | Antes del piloto |
-| **D6** | La ruta de las imágenes con el catálogo público (amplía C15) | `DECIDIDA_PRIMERA_VERSION` | La misma decisión que C15: ruta opaca, **sin implementar** | Cada tarjeta del catálogo lleva esa dirección, también sin sesión | Ver C15 | Ver C15 | **Antes de encender Servicios** |
+| **D6** | La ruta de las imágenes con el catálogo público (amplía C15) | `DECIDIDA_PRIMERA_VERSION` | La misma decisión que C15: ruta opaca, implementada; **falta aplicar la 0096** | Cada tarjeta del catálogo lleva esa dirección, también sin sesión | Ver C15 | Ver C15 | **Al aplicar la 0096** |
 | **D7** | Guardados que dejan de estar disponibles | `DECIDIDA_PRIMERA_VERSION` | P38: se quedan con el título que tenían al guardarse y «ya no está disponible» | Lo guardado no desaparece sin explicación, y se puede quitar | Inc. 3, decisión 7 | Ninguno | Tras el piloto |
 | **D8** | Información pública de una persona frente a una empresa | `DECIDIDA_PRIMERA_VERSION` | Nombre público y tipo (profesional o empresa); sin foto ni ciudad (P12) | Se enseña lo mínimo | Inc. 3, decisión 6 | Ninguno | Tras el piloto |
 | **D9** | Criterio de las recomendaciones | `DECIDIDA_PRIMERA_VERSION` | P35–P37: cada sugerencia lleva su razón; sin datos sensibles | Si Z sugiere algo, dice por qué | `MOTIVOS` (`descubrimiento.py`) | Ninguno | Tras el piloto |
@@ -550,7 +562,7 @@ sigue más abajo, en la sección de su incremento.
 | **E2** | Horizonte: hasta cuántos días por delante | `PROVISIONAL_CONFIGURABLE` | 60 días (P44) | Se ofrecen horarios hasta dos meses vista | `SERVICES_AGENDA_HORIZON_DAYS=60` | Ninguno | Tras el piloto |
 | **E3** | Si el prestador elige su antelación y su horizonte | `DECIDIDA_PRIMERA_VERSION` | No: son de la plataforma | Todos los prestadores juegan con las mismas reglas | `agenda_politica.py` | Ninguno | Tras el piloto |
 | **E4** | Feriados | `DECIDIDA_PRIMERA_VERSION` | P48: los marca cada prestador como «Cerrar todo el día» | Z no carga un calendario de feriados | Excepciones de la agenda (0092) | Ninguno | Tras el piloto |
-| **E5** | Enseñar la capacidad al público | `DECIDIDA_PRIMERA_VERSION` | P51: no se enseña; basta con que haya o no horario | La app nunca dice «quedan N» | La app no la muestra. La API pública todavía devuelve la capacidad teórica (nunca lo ocupado) | Menor: quitarla de la respuesta pública es un ajuste de código | Antes de abrir al público |
+| **E5** | Enseñar la capacidad al público | `DECIDIDA_PRIMERA_VERSION` | P51: no se enseña; basta con que haya o no horario | La app nunca dice «quedan N» | Ni la ficha pública ni los horarios traen el número (retirado de los contratos públicos el 02/10/2026). El prestador y administración lo conservan | Ninguno | Tras el piloto |
 | **E6** | Cómo se enseña la hora a quien está en otra zona | `DECIDIDA_PRIMERA_VERSION` | P41 y P42: manda la hora del lugar del servicio; la equivalencia local es opcional | Se ve la hora del sitio donde se presta, con su zona | Hoy: horas de la agenda con su zona y un aviso si el teléfono está en otra. La equivalencia no se calcula | Ninguno en Perú (una sola zona) | Al ampliar países |
 | **E7** | Límites de uso de la agenda | `DECIDIDA_PRIMERA_VERSION` | Los técnicos: 50 reglas, 200 excepciones, 200 bloqueos, un bloqueo de 31 días como mucho | Topes para que una agenda no crezca sin control | `agenda_politica.py` | Ninguno | Tras el piloto |
 | **E8** | Recursos y varios profesionales de una empresa | `MEJORA_FUTURA` | No existen: la agenda es del servicio | Una empresa con varios profesionales usa una agenda por servicio | Inc. 4, tabla E | Ninguno para el piloto | Tras el piloto |
@@ -570,7 +582,7 @@ sigue más abajo, en la sección de su incremento.
 | **F5** | Qué ve el prestador de quien contrata | `DECIDIDA_PRIMERA_VERSION` | Usuario y nombre públicos y lo que escribió; nunca correo ni teléfono | El prestador no recibe datos de contacto privados | Inc. 5, decisión 12 | Ninguno | Tras el piloto |
 | **F6** | Cancelación y reprogramación (planteamiento del Incremento 5) | `DECIDIDA_PRIMERA_VERSION` | Sustituida por G1 (cancelar) y G2 (reprogramar), ya implementadas | Se resolvió en el Incremento 6 | Ver G1 y G2 | Ver G1 | Ver G1 y G2 |
 | **F7** | Antelación y horizonte de la contratación | `PROVISIONAL_CONFIGURABLE` | Los de la agenda (E1 y E2), medidos desde que se retuvo el horario | Un horario apartado a tiempo no caduca mientras se lee el resumen | Inc. 5, decisión 7 | Ninguno | Tras el piloto |
-| **F8** | Capacidad visible («quedan N plazas») | `DECIDIDA_PRIMERA_VERSION` | P51: no se enseña (igual que E5) | La app no dice cuántas plazas quedan | Ver E5 | Ver E5 | Antes de abrir al público |
+| **F8** | Capacidad visible («quedan N plazas») | `DECIDIDA_PRIMERA_VERSION` | P51: no se enseña (igual que E5) | La app no dice cuántas plazas quedan | Ver E5 | Ninguno | Tras el piloto |
 | **F9** | Texto de las condiciones de contratación, por país | `REQUIERE_EMPRESA` | Sin texto. Requiere revisión legal (IV-16) | Sin condiciones publicadas no se confirma ninguna reserva | No hay ninguna `booking_terms` publicada | Bloquea la contratación | Antes del piloto |
 | **F10** | Qué pasa con una reserva si cambia la agenda | `DECIDIDA_PRIMERA_VERSION` | P62: nada (igual que E11) | La reserva sigue | Ver E11 | Ninguno | Tras el piloto |
 | **F11** | Feriados y reservas ya hechas | `DECIDIDA_PRIMERA_VERSION` | P48: los marca el prestador; una reserva ya hecha no se toca | Marcar un feriado no cancela lo reservado | Ver E4 | Ninguno | Tras el piloto |
@@ -3670,3 +3682,38 @@ sigue **sin desplegar**.
 > quedaron decididas para la primera versión, como valor provisional, como
 > integración externa, como mejora futura o fuera de alcance. El detalle está
 > al comienzo de este documento.
+
+### Cinco políticas cerradas en el código (02/10/2026)
+
+**Las cinco brechas entre las políticas de la primera versión y el
+comportamiento real están cerradas en el código y probadas; queda aplicar y
+verificar la migración 0096, y el QA físico.** El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII (§122–§130).
+
+- **P29, rutas opacas.** La ruta de una imagen ya no lleva el perfil del
+  prestador: es `<servicio>/<al azar>.<ext>` y la pone el servidor. La
+  migración **0096, escrita y sin aplicar**, sustituye el cuerpo del
+  disparador de la 0090 (que no se edita). C15 y D6 quedan decididas e
+  implementadas, a falta de aplicarla.
+- **P5 y P2.** De fábrica, dos modalidades y soles. Lo que Z no ofrece no
+  entra en un borrador ni se filtra, y la app no lo enseña. C4 y C16.
+- **P51.** La capacidad salió de la ficha pública y de los horarios. E5 y F8.
+- **P101.** El piloto: con Servicios encendido solo entran los perfiles
+  autorizados; la lista vacía no deja entrar a nadie y la apertura general se
+  escribe. Administración entra por su rol, y la app le enseña su sección
+  por ese mismo rol, esté o no en la lista.
+- **AWS**, preparado y sin desplegar: los parámetros, los dos perfiles y la
+  validación del secreto.
+
+**Qué NO se decidió.** Nada que fuera de la empresa: ni las ciudades, ni las
+categorías, ni quién participa en el piloto, ni su fecha (IV-48). **F21 sigue
+siendo la primera** y no se tocó. Los nueve valores de la política operativa
+siguen siendo provisionales.
+
+**Una reclasificación:** C16 (las monedas del formulario) pasa de «mejora
+futura» a «decidida para la primera versión», porque ya está hecha. Quedan 43
+decididas, 14 provisionales, 25 de la empresa, 3 integraciones, 5 mejoras y 6
+que no aplican.
+
+No se escribió en Supabase, no se ejecutó nada en AWS, no se activó ninguna
+bandera y no se movió dinero. El código sigue **sin desplegar**.
