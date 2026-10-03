@@ -90,7 +90,7 @@ export function ResenaDeLaReservaScreen() {
     setFormulario((ya) => ({ ...ya, ejes: { ...ya.ejes, [eje]: ya.ejes[eje] === nota ? 0 : nota } }));
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       {fallo !== null ? (
         <EstadoDeServicios fallo={fallo} onRetry={() => void cargar()} />

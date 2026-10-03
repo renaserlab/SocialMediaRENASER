@@ -15,14 +15,13 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import {
   MODALIDADES_OFRECIDAS,
-  MONEDAS,
   claveDeLaModalidad,
   nombreDeLaCategoria,
   type FalloDelCatalogo,
 } from '@/lib/serviciosCatalogo';
 import {
   SIN_FILTROS,
-  TIPOS_DE_PRECIO,
+  TIPOS_DE_PRECIO_OFRECIDOS,
   categoriasFrecuentes,
   claveDeLaSeccion,
   claveDelOrden,
@@ -360,42 +359,13 @@ export function ServiciosScreen() {
             </View>
             <Text weight="700">{f('servicios.descubrir.filtros.precio')}</Text>
             <View style={styles.chips} accessibilityRole="radiogroup">
-              {[null, ...TIPOS_DE_PRECIO].map((p) => (
+              {/* En el piloto no hay fichas con importe: solo se ofrece
+                  filtrar por lo que existe. Sin moneda ni rango. */}
+              {[null, ...TIPOS_DE_PRECIO_OFRECIDOS].map((p) => (
                 <Chip key={p ?? 'cualquiera'} label={f(claveDelTipoDePrecio(p))} rol="radio" selected={hoja.precio === p}
-                  onPress={() => setHoja({ ...hoja, precio: p, ...(p === 'priced' ? {} : { moneda: null, minimo: '', maximo: '' }) })} />
+                  onPress={() => setHoja({ ...hoja, precio: p, moneda: null, minimo: '', maximo: '' })} />
               ))}
             </View>
-            {hoja.precio === 'priced' ? (
-              <>
-                <Text variant="caption" color={colors.textMuted}>
-                  {f('servicios.descubrir.filtros.monedaAviso')}
-                </Text>
-                <View style={styles.chips} accessibilityRole="radiogroup">
-                  {MONEDAS.map((m) => (
-                    <Chip key={m} label={m} rol="radio" selected={hoja.moneda === m}
-                      onPress={() => setHoja({ ...hoja, moneda: hoja.moneda === m ? null : m })} />
-                  ))}
-                </View>
-                <View style={styles.fila}>
-                  <Input
-                    containerStyle={styles.flexible}
-                    label={f('servicios.descubrir.filtros.desde')}
-                    value={hoja.minimo}
-                    keyboardType="decimal-pad"
-                    editable={hoja.moneda !== null}
-                    onChangeText={(v) => setHoja({ ...hoja, minimo: v })}
-                  />
-                  <Input
-                    containerStyle={styles.flexible}
-                    label={f('servicios.descubrir.filtros.hasta')}
-                    value={hoja.maximo}
-                    keyboardType="decimal-pad"
-                    editable={hoja.moneda !== null}
-                    onChangeText={(v) => setHoja({ ...hoja, maximo: v })}
-                  />
-                </View>
-              </>
-            ) : null}
             <Input
               label={f('servicios.descubrir.filtros.zona')}
               placeholder={f('servicios.descubrir.filtros.zonaPlaceholder')}
@@ -427,5 +397,4 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   bloque: { gap: spacing.sm },
   hoja: { gap: spacing.md, padding: spacing.lg },
-  flexible: { flex: 1, minWidth: 120 },
 });

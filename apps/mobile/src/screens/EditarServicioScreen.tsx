@@ -17,7 +17,7 @@ import { toast } from '@/lib/toast';
 import {
   LARGOS,
   MODALIDADES_OFRECIDAS,
-  MODELOS_DE_PRECIO,
+  MODELOS_DE_PRECIO_OFRECIDOS,
   MONEDAS,
   cambiosDelBorrador,
   categoriasEnArbol,
@@ -28,6 +28,7 @@ import {
   etiquetaDeCategoria,
   formularioDesde,
   llevaImporte,
+  seOfrece,
   type Categoria,
   type Fallo,
   type FormularioDelServicio,
@@ -44,8 +45,9 @@ import { useAppTheme } from '@/theme/useAppTheme';
  * - SOLO VIAJA LO QUE CAMBIÓ, y nunca un estado. Guardar a medias no exige
  *   nada: lo que falta para ENVIAR lo dice el servidor (`missing`), y se
  *   enseña debajo después de cada guardado.
- * - GRATIS NO ES «SIN PRECIO»: el modelo se elige expresamente, y el importe
- *   solo se pide en «precio fijo» y «desde».
+ * - GRATIS NO ES «SIN PRECIO»: el modelo se elige expresamente. EN EL PILOTO
+ *   SOLO SE OFRECEN «GRATIS» Y «A CONSULTAR» (lo que el servidor admite); un
+ *   borrador antiguo con importe no marca ninguna opción y dice por qué.
  * - LA CATEGORÍA solo se cambia mientras el servicio nunca se publicó.
  * - SALIR CON CAMBIOS SIN GUARDAR PREGUNTA ANTES: no se pierde lo escrito.
  * - Si Z pidió cambios, los campos que señaló llevan la marca.
@@ -170,7 +172,7 @@ export function EditarServicioScreen() {
   };
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={() => void salir()} />
       <Text variant="secondary">{f('servicios.catalogo.editar.intro')}</Text>
 
@@ -193,7 +195,7 @@ export function EditarServicioScreen() {
         </>
       ) : (
         <Text variant="caption" color={colors.textMuted}>
-          {f('servicios.catalogo.editar.categoriaFija')}
+          {f(categoriaCambiable ? 'servicios.catalogo.nuevo.sinCategorias' : 'servicios.catalogo.editar.categoriaFija')}
         </Text>
       )}
       <Input
@@ -266,7 +268,7 @@ export function EditarServicioScreen() {
       <SectionTitle title={f('servicios.catalogo.editar.seccionPrecio')} />
       <Text weight="600">{etiqueta('servicios.catalogo.campo.price', 'price')}</Text>
       <View style={styles.fila} accessibilityRole="radiogroup">
-        {MODELOS_DE_PRECIO.map((m) => (
+        {MODELOS_DE_PRECIO_OFRECIDOS.map((m) => (
           <Chip
             key={m}
             rol="radio"
@@ -276,7 +278,14 @@ export function EditarServicioScreen() {
           />
         ))}
       </View>
-      {llevaImporte(formulario.modeloDePrecio) ? (
+      {formulario.modeloDePrecio && !seOfrece(formulario.modeloDePrecio) ? (
+        <Text variant="caption" color={colors.danger} accessibilityRole="alert">
+          {f('servicios.catalogo.editar.precioNoAdmitido')}
+        </Text>
+      ) : null}
+      {/* El importe y la moneda, solo con un modelo que se ofrezca Y lleve
+          importe: hoy ninguno. Un borrador antiguo no vuelve a pedirlos. */}
+      {seOfrece(formulario.modeloDePrecio) && llevaImporte(formulario.modeloDePrecio) ? (
         <>
           <Input
             label={f('servicios.catalogo.editar.importe')}

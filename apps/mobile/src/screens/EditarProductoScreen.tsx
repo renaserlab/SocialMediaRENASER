@@ -37,7 +37,6 @@ import {
   sePuedeEditarProducto,
   sePuedePostularProducto,
   sonCambiosDeUnPublicado,
-  validarProducto,
   varianteVacia,
   versionEnBorrador,
   type Fallo,
@@ -265,7 +264,10 @@ export function EditarProductoScreen() {
   const volver = () =>
     router.canGoBack() ? router.back() : router.replace('/proveedor/productos' as never);
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez. Guardar vuelve a leer el producto,
+  // y cambiar el formulario entero por «Cargando…» lo devolvía arriba del todo
+  // después de cada guardado.
+  if (cargando && producto === null) {
     return (
       <AppScreen contentStyle={styles.contenido}>
         <AppHeader title={f('proveedorProductos.editar.tituloEditar')} onBack={volver} />
@@ -759,11 +761,19 @@ export function EditarProductoScreen() {
         </Text>
       ) : null}
 
+      {/*
+        EL BOTÓN SOLO SE APAGA MIENTRAS GUARDA. Se apagaba también con el
+        formulario inválido, y los avisos de cada campo solo se pintan dentro de
+        `guardar()`: con el botón apagado no corría nunca, así que quedaba un
+        botón muerto sin una palabra de por qué. Ahora el toque es lo que enseña
+        qué falta, campo por campo. Nada inválido viaja: `guardar()` no manda la
+        petición si `peticionDeVersion` encuentra fallos.
+      */}
       <Button
         label={esNuevo ? f('proveedorProductos.editar.crear') : f('proveedorProductos.editar.guardar')}
         onPress={guardar}
         loading={ocupado}
-        disabled={ocupado || validarProducto(formulario).length > 0}
+        disabled={ocupado}
       />
 
       {/* «Postula tu producto»: se postula lo GUARDADO, no lo que se escribe. */}

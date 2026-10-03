@@ -49,6 +49,7 @@ export function ListaDeReservas({
         {AMBITOS_DE_RESERVAS.map((a) => (
           <Chip
             key={a}
+            rol="button"
             label={f(`servicios.reserva.ambito.${a}`)}
             selected={ambito === a}
             onPress={() => alCambiarDeAmbito(a)}

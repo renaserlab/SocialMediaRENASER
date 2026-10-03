@@ -131,7 +131,7 @@ export function PeopleList({
             style={styles.info}
             onPress={() => (onPersonPress ? onPersonPress(item) : irAlPerfil(router, item.id))}
             accessibilityRole="button"
-            accessibilityLabel={`Ver perfil de ${item.fullName}`}
+            accessibilityLabel={t('post.viewProfileOf', { nombre: item.fullName })}
           >
             <ExpoImage
               source={item.avatarUrl ? { uri: item.avatarUrl } : assets.avatar}
@@ -140,8 +140,8 @@ export function PeopleList({
               cachePolicy="memory-disk"
             />
             <View style={{ flex: 1 }}>
-              <Text variant="body" weight="700">{item.fullName}</Text>
-              <Text variant="secondary" color={colors.textMuted}>{item.username}</Text>
+              <Text variant="body" weight="700" numberOfLines={1}>{item.fullName}</Text>
+              <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>{item.username}</Text>
             </View>
           </Pressable>
           {onToggleFollow && item.id !== currentUserId ? (

@@ -67,6 +67,7 @@ import {
   claveDeErrorPorEstado,
   esFaltaDeSesion,
 } from '@/lib/productos';
+import { useSeccionActiva } from '@/navigation/foco';
 import { ProductOrderRepository } from '@/repositories/ProductOrderRepository';
 import { useClaveDeProductos } from '@/screens/ProductosScreen';
 import { radius, spacing } from '@/theme/tokens';
@@ -113,7 +114,19 @@ export function PedidoDeProductoScreen() {
 
   const [pedido, setPedido] = useState<Pedido | null>(null);
   const [cargando, setCargando] = useState(true);
-  const [ocupado, setOcupado] = useState(false);
+  /**
+   * QUÉ acción está en curso, y no solo si hay alguna.
+   *
+   * Con un `ocupado` a secas, cancelar hacía girar el botón de «Pagar» y le
+   * cambiaba el texto a «Abriendo…», y pagar ponía «Cancelando…» en el de
+   * cancelar: el indicador salía en el botón que NO se había tocado. Todos se
+   * siguen apagando mientras hay una en curso —eso es `ocupado`—; lo que cambia
+   * es cuál lo dice.
+   */
+  const [enCurso, setEnCurso] = useState<
+    'pagar' | 'cancelar' | 'recepcion' | 'conformidad' | null
+  >(null);
+  const ocupado = enCurso !== null;
   const [fallo, setFallo] = useState<
     'red' | 'sinConexion' | 'noDisponible' | 'sinSesion' | 'noEncontrado' | null
   >(null);
@@ -165,9 +178,17 @@ export function PedidoDeProductoScreen() {
     }
   }, [orderId]);
 
+  /*
+    AL ENTRAR, Y CADA VEZ QUE SE VUELVE A MIRAR ESTA PANTALLA. El cobro ocurre
+    en el navegador del sistema: al volver, lo que había en pantalla era el
+    pedido de ANTES de pagar. `useSeccionActiva` y no solo el foco de
+    navegación: irse al navegador y volver no cambia de pantalla, cambia de
+    aplicación. Y de paso se relee al volver de reportar o de valorar.
+  */
+  const activa = useSeccionActiva();
   useEffect(() => {
-    void cargar();
-  }, [cargar]);
+    if (activa) void cargar();
+  }, [activa, cargar]);
 
   const textoDelError = (error: unknown) => {
     if (error instanceof ApiError) {
@@ -189,7 +210,7 @@ export function PedidoDeProductoScreen() {
   const pagar = () => {
     if (ocupadoRef.current || pedido === null) return;
     ocupadoRef.current = true;
-    setOcupado(true);
+    setEnCurso('pagar');
     void (async () => {
       try {
         const checkout = await ProductOrderRepository.iniciarPago(pedido.id);
@@ -201,7 +222,7 @@ export function PedidoDeProductoScreen() {
         notify(f('carrito.noSePudo'), textoDelError(error));
       } finally {
         ocupadoRef.current = false;
-        setOcupado(false);
+        setEnCurso(null);
       }
     })();
   };
@@ -219,7 +240,7 @@ export function PedidoDeProductoScreen() {
       });
       if (!acepta || ocupadoRef.current) return;
       ocupadoRef.current = true;
-      setOcupado(true);
+      setEnCurso('conformidad');
       try {
         await ProductBuyerMoneyRepository.darLaConformidad(pedido.id);
         setPedido(await ProductOrderRepository.leer(pedido.id));
@@ -232,7 +253,7 @@ export function PedidoDeProductoScreen() {
         );
       } finally {
         ocupadoRef.current = false;
-        setOcupado(false);
+        setEnCurso(null);
       }
     })();
   };
@@ -248,14 +269,14 @@ export function PedidoDeProductoScreen() {
       });
       if (!acepta || ocupadoRef.current) return;
       ocupadoRef.current = true;
-      setOcupado(true);
+      setEnCurso('cancelar');
       try {
         setPedido(await ProductOrderRepository.cancelar(pedido.id));
       } catch (error) {
         notify(f('carrito.noSePudo'), textoDelError(error));
       } finally {
         ocupadoRef.current = false;
-        setOcupado(false);
+        setEnCurso(null);
       }
     })();
   };
@@ -282,7 +303,7 @@ export function PedidoDeProductoScreen() {
     });
     if (!seguro || ocupadoRef.current) return;
     ocupadoRef.current = true;
-    setOcupado(true);
+    setEnCurso('recepcion');
     void (async () => {
       try {
         setPedido(await ProductOrderRepository.confirmarRecepcion(pedido.id));
@@ -291,7 +312,7 @@ export function PedidoDeProductoScreen() {
         void cargar();
       } finally {
         ocupadoRef.current = false;
-        setOcupado(false);
+        setEnCurso(null);
       }
     })();
   };
@@ -301,7 +322,9 @@ export function PedidoDeProductoScreen() {
 
   const encabezado = <AppHeader title={f('pedidoDeProducto.detalle.titulo')} onBack={volver} />;
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez: releer el pedido al volver del
+  // pago no puede cambiarlo entero por «Cargando…».
+  if (cargando && pedido === null) {
     return (
       <AppScreen contentStyle={styles.contenido}>
         {encabezado}
@@ -793,6 +816,7 @@ export function PedidoDeProductoScreen() {
                   icon="check-circle"
                   onPress={darLaConformidad}
                   disabled={ocupado}
+                  loading={enCurso === 'conformidad'}
                 />
               </>
             ) : (
@@ -855,7 +879,7 @@ export function PedidoDeProductoScreen() {
                 label={f('envio.detalle.confirmarRecepcion')}
                 onPress={confirmarRecepcion}
                 disabled={ocupado}
-                loading={ocupado}
+                loading={enCurso === 'recepcion'}
                 icon="check-circle"
               />
               <Text variant="caption" color={colors.textMuted}>
@@ -869,20 +893,29 @@ export function PedidoDeProductoScreen() {
                 {f('pedidoDeProducto.pagar.fuera')}
               </Text>
               <Button
-                label={ocupado ? f('pedidoDeProducto.pagar.abriendo') : f('pedidoDeProducto.pagar.accion')}
+                label={
+                  enCurso === 'pagar'
+                    ? f('pedidoDeProducto.pagar.abriendo')
+                    : f('pedidoDeProducto.pagar.accion')
+                }
                 onPress={pagar}
                 disabled={ocupado || vencida}
-                loading={ocupado}
+                loading={enCurso === 'pagar'}
                 icon="external-link"
               />
             </>
           ) : null}
           {sePuedeCancelar(pedido) ? (
             <Button
-              label={ocupado ? f('pedidoDeProducto.accion.cancelando') : f('pedidoDeProducto.accion.cancelar')}
+              label={
+                enCurso === 'cancelar'
+                  ? f('pedidoDeProducto.accion.cancelando')
+                  : f('pedidoDeProducto.accion.cancelar')
+              }
               onPress={cancelar}
               variant="ghost"
               disabled={ocupado}
+              loading={enCurso === 'cancelar'}
             />
           ) : null}
         </View>

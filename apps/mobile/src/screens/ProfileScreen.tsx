@@ -234,6 +234,7 @@ export function ProfileScreen() {
     audios,
     loading: postsLoading,
     error: postsError,
+    reload: recargarPublicaciones,
   } = useProfilePosts(galleryOwnerId);
 
   const aplicarPerfil = React.useCallback((p: UserProfile) => {
@@ -311,7 +312,7 @@ export function ProfileScreen() {
     if (avisadoRef.current === clave) return;
     avisadoRef.current = clave;
 
-    const nombre = publicProfile?.fullName?.split(' ')[0] ?? 'esta persona';
+    const nombre = publicProfile?.fullName?.split(' ')[0] ?? t('profile.thisPerson');
 
     // Un respiro antes de preguntar. Da tiempo a que el dialogo propio de la
     // aplicacion este montado —si no, se cae al del navegador, que anuncia
@@ -359,6 +360,8 @@ export function ProfileScreen() {
     } catch {
       setFollowing(wasFollowing);
       setFollowersCount((c) => Math.max(0, c + (wasFollowing ? 1 : -1)));
+      // El boton volvia solo a su sitio y nadie decia que habia fallado.
+      toast(t('common.tryAgain'), 'alert-circle');
     } finally {
       setFollowBusy(false);
     }
@@ -1133,6 +1136,7 @@ export function ProfileScreen() {
             audios={audios}
             loading={postsLoading}
             error={postsError}
+            onRetry={() => void recargarPublicaciones()}
             emptyHint={
               isPublic ? t('profile.emptyGalleryOther') : t('profile.emptyGalleryOwn')
             }

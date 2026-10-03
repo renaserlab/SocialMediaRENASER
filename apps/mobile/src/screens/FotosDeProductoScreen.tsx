@@ -81,6 +81,11 @@ export function FotosDeProductoScreen() {
 
   const [fotos, setFotos] = useState<FotoDelProveedor[]>([]);
   const [cargando, setCargando] = useState(true);
+  /**
+   * Si la galería ya se leyó alguna vez. `fotos` nace como lista vacía, así que
+   * no sirve para saberlo: una galería sin fotos también está vacía.
+   */
+  const [yaCargo, setYaCargo] = useState(false);
   const [fallo, setFallo] = useState<
     'red' | 'sinConexion' | 'sinSesion' | 'sinPermiso' | 'noEncontrado' | 'noDisponible' | null
   >(null);
@@ -119,6 +124,7 @@ export function FotosDeProductoScreen() {
     setFallo(null);
     try {
       setFotos(enOrden(await ProductMediaRepository.mias(productoId)));
+      setYaCargo(true);
     } catch (error) {
       setFallo(leerFallo(error));
     } finally {
@@ -245,7 +251,10 @@ export function FotosDeProductoScreen() {
 
   const titulo = f('fotos.titulo');
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez. Subir o quitar una fotografía
+  // vuelve a leer la galería, y cambiarla entera por «Cargando…» hacía
+  // parpadear la pantalla después de cada una.
+  if (cargando && !yaCargo) {
     return (
       <AppScreen contentStyle={styles.contenido}>
         <AppHeader title={titulo} onBack={volver} />

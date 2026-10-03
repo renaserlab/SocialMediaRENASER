@@ -123,6 +123,7 @@ export function AdminCatalogoScreen() {
         title={f('servicios.catalogo.admin.titulo')}
         onBack={volver}
         rightIcon="grid"
+        rightLabel={f('servicios.catalogo.categorias.titulo')}
         onRightPress={() => router.push('/admin/servicios/categorias' as never)}
       />
       <Text variant="caption" color={colors.textMuted}>

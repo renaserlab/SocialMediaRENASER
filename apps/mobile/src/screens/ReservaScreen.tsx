@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { RefreshControl, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
@@ -49,11 +49,31 @@ export function ReservaScreen() {
     }, [cargar]),
   );
 
+  // La otra parte confirma, reprograma o cancela mientras se mira: tirar hacia
+  // abajo vuelve a pedirla, sin salir y volver a entrar.
+  const [refrescando, setRefrescando] = useState(false);
+  const refrescar = () =>
+    void (async () => {
+      setRefrescando(true);
+      try {
+        await cargar();
+      } finally {
+        setRefrescando(false);
+      }
+    })();
+
   const titulo = f('servicios.reserva.tuReserva');
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/servicios/reservas' as never));
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen
+      contentStyle={styles.contenido}
+      scrollProps={{
+        refreshControl: (
+          <RefreshControl refreshing={refrescando} onRefresh={refrescar} tintColor={colors.text} colors={[colors.text]} />
+        ),
+      }}
+    >
       <AppHeader title={titulo} onBack={volver} />
       {fallo !== null ? (
         <EstadoDeServicios fallo={fallo} onRetry={() => void cargar()} />

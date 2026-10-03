@@ -95,7 +95,7 @@ export function AjustesDeAgendaScreen() {
   );
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
 
       <Text weight="700">{f('servicios.agenda.campo.zona')}</Text>

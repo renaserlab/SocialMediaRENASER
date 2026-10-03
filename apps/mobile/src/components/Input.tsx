@@ -60,7 +60,7 @@ export function Input({
         />
       </View>
       {error && (
-        <View style={styles.errorContainer}>
+        <View style={styles.errorContainer} accessibilityRole="alert" accessibilityLiveRegion="polite">
           <Feather name="alert-circle" size={14} color={colors.danger} />
           <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
         </View>

@@ -35,6 +35,23 @@ import { useTranslation } from '@/i18n/useTranslation';
  */
 type MediaChange = null | 'remove' | PickedMedia;
 
+/**
+ * Si lo que hay en el editor se puede guardar. La MISMA regla para el boton y
+ * para `save`, que antes pedian texto cada uno por su lado.
+ *
+ * Una publicacion puede ser solo foto o solo video, y esas no se podian editar:
+ * el boton nacia apagado. Vale sin texto cuando sigue teniendo adjunto (el que
+ * ya tenia o uno nuevo) Y ya estaba sin texto. Lo segundo no es capricho: el
+ * servidor rechaza un `body` vacio al editar, y con el texto como estaba el
+ * campo ni siquiera viaja.
+ */
+function sePuedeGuardar(post: Post, text: string, media: MediaChange): boolean {
+  if (text.trim() !== '') return true;
+  const quedaConAdjunto =
+    media === null ? Boolean(post.mediaUrl || post.imageKey) : media !== 'remove';
+  return quedaConAdjunto && post.body.trim() === '';
+}
+
 export function EditPostScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
@@ -56,6 +73,13 @@ export function EditPostScreen() {
   const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState<UploadProgress['phase'] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /*
+    La carga fallo por algo que se puede reintentar (sin red, servidor caido).
+    Antes todo fallo acababa en «Publicación no encontrada», que ante un corte
+    de red es mentira. Mismo criterio que `PostDetailScreen`.
+  */
+  const [cargaFallida, setCargaFallida] = useState(false);
+  const [intento, setIntento] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -87,6 +111,10 @@ export function EditPostScreen() {
       })
       .catch((error) => {
         console.warn('[editar publicacion] no se pudo cargar', error);
+        if (!alive) return;
+        // 404/403 es «ya no existe o no es tuya»; el resto se puede reintentar.
+        const status = (error as { status?: number })?.status;
+        if (status !== 404 && status !== 403) setCargaFallida(true);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -94,7 +122,7 @@ export function EditPostScreen() {
     return () => {
       alive = false;
     };
-  }, [id, posts, currentUserId]);
+  }, [id, posts, currentUserId, intento]);
 
   const choose = async (kind: 'image' | 'video' | 'audio') => {
     try {
@@ -108,7 +136,7 @@ export function EditPostScreen() {
 
   const save = async () => {
     if (!post) return;
-    if (!text.trim()) {
+    if (!sePuedeGuardar(post, text, media)) {
       setError(t('editPost.emptyPost'));
       return;
     }
@@ -172,7 +200,23 @@ export function EditPostScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title={t('post.editTitle')} back />
-        <StateView state="empty" title={t('editPost.notFound')} />
+        {cargaFallida ? (
+          <StateView
+            state="error"
+            icon="wifi-off"
+            title={t('post.loadFailed')}
+            description={t('common.checkConnection')}
+            onRetry={() => {
+              // El efecto no pone la carga por su cuenta: depende de `posts` y
+              // taparia el editor cada vez que cambiara el feed.
+              setCargaFallida(false);
+              setLoading(true);
+              setIntento((n) => n + 1);
+            }}
+          />
+        ) : (
+          <StateView state="empty" title={t('editPost.notFound')} />
+        )}
       </View>
     );
   }
@@ -294,7 +338,7 @@ export function EditPostScreen() {
             }
             onPress={() => void save()}
             loading={saving}
-            disabled={!text.trim()}
+            disabled={!sePuedeGuardar(post, text, media)}
           />
         </AppScreen>
       </SinTecladoDelante>

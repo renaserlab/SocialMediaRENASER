@@ -124,9 +124,13 @@ export function AdminServiciosCondicionesScreen({ tipo = 'provider_terms' }: { t
       } else {
         const creada = await ServiceAdmissionRepository.crearBorrador(peticion, tipo);
         // Si ya había un borrador de ese país, el servidor devuelve ESE, sin
-        // tocarlo: se dice, para que nadie crea que se guardó lo escrito.
+        // tocarlo. Ni se dice «guardado» ni se tira lo escrito: el formulario
+        // pasa a editar ese borrador, y guardar otra vez lo reemplaza.
         if (creada.title !== peticion.title || creada.body !== peticion.body) {
+          setEditando(creada);
           toast(f('servicios.politica.yaHabiaBorrador'));
+          await cargar();
+          return;
         }
       }
       setFormulario(null);
@@ -156,7 +160,7 @@ export function AdminServiciosCondicionesScreen({ tipo = 'provider_terms' }: { t
     });
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="caption" color={colors.textMuted}>
         {f(deContratacion ? 'servicios.politica.introContratacion' : 'servicios.politica.intro')}

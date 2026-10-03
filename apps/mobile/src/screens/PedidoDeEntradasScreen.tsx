@@ -17,6 +17,7 @@ import {
   estaCerrado,
   siguePagable,
 } from '@/lib/pedidoDeEntradas';
+import { useSeccionActiva } from '@/navigation/foco';
 import { EventOrderRepository, type Pedido } from '@/repositories/EventOrderRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -84,9 +85,17 @@ export function PedidoDeEntradasScreen() {
     }
   }, [id]);
 
+  /*
+    AL ENTRAR, Y CADA VEZ QUE SE VUELVE A MIRAR ESTA PANTALLA. El cobro ocurre
+    en el navegador del sistema: al volver, el pedido ya no está como estaba y
+    nadie lo releía, así que seguía diciendo «pendiente de pago» después de
+    pagar. `useSeccionActiva` y no solo el foco de navegación: irse al
+    navegador y volver no cambia de pantalla, cambia de aplicación.
+  */
+  const activa = useSeccionActiva();
   useEffect(() => {
-    void cargar();
-  }, [cargar]);
+    if (activa) void cargar();
+  }, [activa, cargar]);
 
   useEffect(() => {
     if (pedido === null || !siguePagable(pedido.status, restantes)) return;
@@ -153,7 +162,9 @@ export function PedidoDeEntradasScreen() {
     router.replace((evento ? `/eventos/${evento}` : '/mis-eventos') as never);
   };
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez: releer el pedido al volver del
+  // pago no puede sustituir el resumen por «Cargando…».
+  if (cargando && !pedido) {
     return (
       <AppScreen>
         <AppHeader title={t('pedido.titulo')} onBack={volver} />

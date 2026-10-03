@@ -128,7 +128,10 @@ export function EventoScreen() {
   const volver = () =>
     router.canGoBack() ? router.back() : router.replace('/events');
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez. Tras reservar o cancelar se vuelve
+  // a pedir el evento, y sustituir la ficha entera por «Cargando…» la hacía
+  // parpadear y perder la posición.
+  if (cargando && !evento) {
     return (
       <AppScreen>
         <AppHeader title={t('evento.titulo')} onBack={volver} />

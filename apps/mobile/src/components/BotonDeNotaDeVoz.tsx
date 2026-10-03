@@ -1,10 +1,18 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { useTranslation } from '@/i18n/useTranslation';
 import type { FaseDeNotaDeVoz } from '@/hooks/useGrabadoraDeVoz';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { formatearDuracion } from '@/lib/notaDeVoz';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -96,7 +104,7 @@ export function BotonDeNotaDeVoz({
       */}
       {fase === 'grabando' ? (
         <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={[styles.punto, { backgroundColor: colors.danger }]} />
+          <PuntoQueLate color={colors.danger} />
           <Text style={[styles.reloj, { color: colors.text }]}>
             {formatearDuracion(segundos)}
           </Text>
@@ -237,6 +245,45 @@ export function BotonDeNotaDeVoz({
         </Pressable>
       )}
     </>
+  );
+}
+
+/**
+ * El punto rojo que LATE mientras el micrófono está abierto.
+ *
+ * Quieto no se distinguía de un adorno: la barra de grabación era un punto, un
+ * reloj y una palabra, y hasta que el reloj saltaba de segundo no había nada
+ * que dijera «esto está grabando AHORA». El latido es esa señal, la misma que
+ * usa cualquier grabadora.
+ *
+ * Con «reducir movimiento» activado en el sistema se queda fijo, igual que
+ * `Skeleton`: el punto y el reloj siguen diciendo lo mismo sin parpadear.
+ *
+ * Es `Animated` de React Native con el hilo nativo, no un temporizador: el
+ * latido no depende de que el hilo de JavaScript esté libre, y ese hilo está
+ * ocupado justo ahora leyendo el reloj del grabador.
+ */
+function PuntoQueLate({ color }: { color: string }) {
+  const sinMovimiento = useReduceMotion();
+  const latido = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (sinMovimiento) {
+      latido.setValue(1);
+      return undefined;
+    }
+    const bucle = Animated.loop(
+      Animated.sequence([
+        Animated.timing(latido, { toValue: 0.25, duration: 600, useNativeDriver: true }),
+        Animated.timing(latido, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]),
+    );
+    bucle.start();
+    return () => bucle.stop();
+  }, [latido, sinMovimiento]);
+
+  return (
+    <Animated.View style={[styles.punto, { backgroundColor: color, opacity: latido }]} />
   );
 }
 

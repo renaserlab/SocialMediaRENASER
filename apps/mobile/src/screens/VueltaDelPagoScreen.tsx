@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppScreen } from '@/components/AppScreen';
@@ -93,7 +93,29 @@ export function VueltaDelPagoScreen({ cancelada = false }: { cancelada?: boolean
   if (estado === 'verificando') {
     return (
       <AppScreen contentStyle={styles.pantalla}>
-        <StateView state="loading" title={t('pago.verificando')} />
+        {/*
+          «COMPROBANDO TU PAGO…», NO «CARGANDO…». El texto ya se le pasaba en
+          `title`, pero `StateView` no pinta el título mientras carga: quien
+          volvía de pagar leía un «Cargando…» cualquiera, justo cuando lo que
+          quiere saber es que se está mirando SU pago.
+        */}
+        <StateView
+          state="loading"
+          loadingComponent={
+            <View
+              style={styles.contenido}
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel={t('pago.verificando')}
+              accessibilityLiveRegion="polite"
+            >
+              <ActivityIndicator color={colors.textMuted} />
+              <Text style={[styles.cuerpo, { color: colors.textMuted }]}>
+                {t('pago.verificando')}
+              </Text>
+            </View>
+          }
+        />
       </AppScreen>
     );
   }

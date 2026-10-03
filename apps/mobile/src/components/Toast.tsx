@@ -1,8 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Animated, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
+import { haptics } from '@/lib/haptics';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -29,16 +32,32 @@ export function Toast({
 }: ToastProps) {
   const { colors } = useAppTheme();
   const slideAnim = useRef(new Animated.Value(-100)).current;
+  const reducirMovimiento = useReduceMotion();
+  // Debajo de la barra de estado o de la muesca, esté donde esté.
+  const arriba = useSafeAreaInsets().top + spacing.md;
+
+  useEffect(() => {
+    if (!visible) return;
+    // Quien no ve la pantalla también se entera, y una confirmación se nota
+    // en la mano. Un aviso de error (`alert-circle`) no vibra como un éxito.
+    AccessibilityInfo.announceForAccessibility(message);
+    if (icon === 'check-circle') haptics.success();
+  }, [visible, message, icon]);
 
   useEffect(() => {
     if (visible) {
-      // Slide down
-      Animated.spring(slideAnim, {
-        toValue: 50, // Position from top
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
+      if (reducirMovimiento) {
+        // Sin muelle: aparece en su sitio.
+        slideAnim.setValue(arriba);
+      } else {
+        // Slide down
+        Animated.spring(slideAnim, {
+          toValue: arriba, // Position from top
+          useNativeDriver: true,
+          tension: 50,
+          friction: 8,
+        }).start();
+      }
 
       const timer = setTimeout(() => {
         // Slide up
@@ -55,12 +74,14 @@ export function Toast({
     } else {
       slideAnim.setValue(-100);
     }
-  }, [visible, slideAnim, duration, onHide]);
+  }, [visible, slideAnim, duration, onHide, reducirMovimiento, arriba]);
 
   if (!visible) return null;
 
   return (
     <Animated.View
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
       style={[
         styles.container,
         {

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -54,6 +54,15 @@ export function SettingsScreen() {
 
   const isLoggedIn = authStatus === 'authenticated';
 
+  /*
+    LA BAJA EN CURSO. Tras las dos confirmaciones el borrado puede tardar hasta
+    un minuto, y mientras tanto la fila seguia igual y se podia volver a pulsar.
+    El `ref` es el cerrojo (no espera a que React repinte) y el estado es lo que
+    se ve: un indicador en la propia fila.
+  */
+  const bajaEnCurso = useRef(false);
+  const [borrando, setBorrando] = useState(false);
+
   const handleSignOut = async () => {
     const ok = await confirm({
       title: t('settings.signOut'),
@@ -62,11 +71,19 @@ export function SettingsScreen() {
       destructive: true,
     });
     if (!ok) return;
-    await signOut();
+    try {
+      await signOut();
+    } catch (error) {
+      // Sin esto el fallo se perdia y la fila parecia no hacer nada.
+      console.warn('[ajustes] no se pudo cerrar la sesion', error);
+      notify(t('state.errorTitle'), t('settings.linkFailedBody'));
+      return;
+    }
     router.replace('/');
   };
 
   const handleDeleteAccount = async () => {
+    if (bajaEnCurso.current) return;
     // Doble confirmacion: es irreversible y se lleva todo el contenido. La
     // primera explica lo que pasa; la segunda es la ultima red antes de borrar.
     const ok = await confirm({
@@ -83,6 +100,8 @@ export function SettingsScreen() {
       destructive: true,
     });
     if (!reallySure) return;
+    bajaEnCurso.current = true;
+    setBorrando(true);
     try {
       await deleteAccount();
       router.replace('/');
@@ -110,6 +129,9 @@ export function SettingsScreen() {
         return;
       }
       notify(t('settings.deleteAccountFailed'), t('settings.deleteAccountFailedBody'));
+    } finally {
+      bajaEnCurso.current = false;
+      setBorrando(false);
     }
   };
 
@@ -209,13 +231,21 @@ export function SettingsScreen() {
             onPress={() => router.push('/compras' as never)}
           />
         ) : null}
-        <ListRow
-          title={t('settings.verification')}
-          subtitle={t('settings.verificationBody')}
-          leftIcon="check-circle"
-          rightIcon="chevron-right"
-          onPress={() => router.push('/verification')}
-        />
+        {/*
+          «Verificación de cuenta» lleva a una pantalla cuyo boton de solicitar
+          todavia no envia nada. Hasta que lo haga se esconde igual que
+          «Reiniciar aplicacion», con `__DEV__`: en produccion no se ofrece una
+          puerta que promete un plazo y no hace la solicitud.
+        */}
+        {__DEV__ ? (
+          <ListRow
+            title={t('settings.verification')}
+            subtitle={t('settings.verificationBody')}
+            leftIcon="check-circle"
+            rightIcon="chevron-right"
+            onPress={() => router.push('/verification')}
+          />
+        ) : null}
         {isLoggedIn ? (
           <ListRow
             title={t('settings.blocked')}
@@ -237,6 +267,8 @@ export function SettingsScreen() {
             subtitle={t('settings.deleteAccountBody')}
             leftIcon="trash-2"
             destructive
+            // Mientras dura la baja se ve que algo esta pasando.
+            rightComponent={borrando ? <ActivityIndicator color={colors.danger} /> : undefined}
             onPress={handleDeleteAccount}
           />
         ) : (

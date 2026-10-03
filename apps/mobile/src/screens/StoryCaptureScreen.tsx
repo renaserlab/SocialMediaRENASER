@@ -489,7 +489,7 @@ export function StoryCaptureScreen({
 
       {/* Barra superior: cerrar y flash. */}
       <View style={styles.topBar} pointerEvents="box-none">
-        <Pressable onPress={onClose} hitSlop={12} style={styles.roundButton} accessibilityRole="button" accessibilityLabel="Cerrar">
+        <Pressable onPress={onClose} hitSlop={12} style={styles.roundButton} accessibilityRole="button" accessibilityLabel={t('common.close')}>
           <Feather name="x" size={24} color={media.text} />
         </Pressable>
         <Pressable

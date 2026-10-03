@@ -90,7 +90,7 @@ export function ServiciosInicioScreen() {
   }
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="secondary">{f('servicios.inicio.pregunta')}</Text>
       <View style={styles.fila} accessibilityRole="radiogroup">

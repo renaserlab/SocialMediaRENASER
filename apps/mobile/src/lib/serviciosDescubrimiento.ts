@@ -37,6 +37,15 @@ export type Orden = (typeof ORDENES)[number];
 export const TIPOS_DE_PRECIO = ['free', 'priced', 'on_request'] as const;
 export type TipoDePrecio = (typeof TIPOS_DE_PRECIO)[number];
 
+/**
+ * LOS QUE SE OFRECEN COMO FILTRO EN EL PILOTO, que es gratuito: no hay fichas
+ * con importe, así que «con precio», la moneda, el rango y el orden por
+ * precio no devolverían nada. El servidor los sigue entendiendo (`priced`
+ * está arriba); aquí no se ofrecen, y un enlace viejo que los traiga se abre
+ * sin ese filtro. Volver a ofrecerlos es de una versión con pagos.
+ */
+export const TIPOS_DE_PRECIO_OFRECIDOS = ['free', 'on_request'] as const satisfies readonly TipoDePrecio[];
+
 export const MOTIVOS = [
   'matches_search',
   'similar_to_saved',
@@ -179,10 +188,11 @@ function texto(valor: unknown): string {
 export function filtrosDesdeRuta(params: Record<string, unknown>): Filtros {
   const categoria = texto(params.categoria);
   const moneda = texto(params.moneda).trim().toUpperCase();
-  const precio = uno(TIPOS_DE_PRECIO, texto(params.precio));
-  // «Gratis» y «a consultar» no tienen importe: una moneda o un rango con
-  // ellos es un enlace contradictorio, y se descartan.
-  const sinImporte = precio === 'free' || precio === 'on_request';
+  // Solo los que se ofrecen: un enlace con «con precio» se abre sin ese filtro.
+  const precio = uno(TIPOS_DE_PRECIO_OFRECIDOS, texto(params.precio));
+  // Ninguno de los que se ofrecen tiene importe: la moneda y el rango de un
+  // enlace viejo se descartan con él.
+  const sinImporte = !(TIPOS_DE_PRECIO_OFRECIDOS as readonly string[]).includes('priced');
   return {
     q: texto(params.q).slice(0, LARGO_MAXIMO_DE_BUSQUEDA),
     categoria: UUID.test(categoria) ? categoria : null,

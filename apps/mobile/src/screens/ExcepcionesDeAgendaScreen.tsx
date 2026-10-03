@@ -127,7 +127,7 @@ export function ExcepcionesDeAgendaScreen() {
   const abre = campos !== null && campos.tipo !== 'closed';
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="caption" color={colors.textMuted}>
         {f('servicios.agenda.precedencia')}

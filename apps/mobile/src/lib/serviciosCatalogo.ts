@@ -56,8 +56,23 @@ export const MODALIDADES_OFRECIDAS = ['virtual', 'in_person'] as const satisfies
 export const MODELOS_DE_PRECIO = ['free', 'fixed', 'from', 'on_request'] as const;
 export type ModeloDePrecio = (typeof MODELOS_DE_PRECIO)[number];
 
+/**
+ * LOS QUE Z OFRECE EN EL PILOTO, que es gratuito: una ficha es gratuita o dice
+ * «a consultar». «Precio fijo» y «desde» siguen en el modelo —una ficha que ya
+ * los tuviera se sigue leyendo y pintando—, pero el formulario no los ofrece.
+ * El servidor es quien manda (`SERVICES_CATALOG_PRICE_MODELS`): si alguien los
+ * envía a mano, contesta `service_price_model_not_allowed`. Volver a
+ * ofrecerlos es añadirlos aquí Y allí, y eso es de una versión con pagos.
+ */
+export const MODELOS_DE_PRECIO_OFRECIDOS = ['free', 'on_request'] as const satisfies readonly ModeloDePrecio[];
+
 /** Los modelos que llevan importe. Los demás NO lo admiten. */
 export const CON_IMPORTE: readonly ModeloDePrecio[] = ['fixed', 'from'];
+
+/** ¿Se puede elegir hoy ese modelo en el formulario? */
+export function seOfrece(modelo: string | null | undefined): boolean {
+  return (MODELOS_DE_PRECIO_OFRECIDOS as readonly string[]).includes(modelo ?? '');
+}
 
 export const TIPOS_DE_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export const PESO_MAXIMO_DE_IMAGEN = 5 * 1024 * 1024;
@@ -543,6 +558,7 @@ const ERRORES: Record<string, string> = {
   // el mismo texto que ya se da cuando eso falta al enviar.
   service_modality_not_allowed: 'servicios.catalogo.falta.modality_not_allowed',
   service_currency_not_allowed: 'servicios.catalogo.falta.currency_not_allowed',
+  service_price_model_not_allowed: 'servicios.catalogo.falta.price_model_not_allowed',
   service_reason_required: 'servicios.catalogo.error.motivo',
   service_field_unknown: 'servicios.error.datosInvalidos',
   service_catalog_transition_invalid: 'servicios.catalogo.error.yaCambio',

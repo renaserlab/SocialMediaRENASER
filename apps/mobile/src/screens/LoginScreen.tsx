@@ -79,7 +79,9 @@ export function LoginScreen() {
       const message = mensajeDeAuth(error, 'acceso', t);
       // Las credenciales se corrigen en el propio formulario; el resto son
       // cosas que no dependen de lo escrito y merecen un aviso aparte.
-      if (/incorrect/i.test(message)) {
+      // Se compara con la CLAVE y no con una palabra del texto: «incorrect»
+      // solo casaba en español; en ingles y portugues el error iba al dialogo.
+      if (message === t('authError.badCredentials')) {
         setErrors({ password: message });
       } else {
         notify(t('auth.signInFailed'), message);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
@@ -69,6 +69,18 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { ApiError, haySesion } from '@/services/api';
 
 /**
+ * El ancho de cada foto de la galería, y lo que avanza el carrusel por foto.
+ *
+ * EL PASO ES EL ANCHO MÁS SU MARGEN, y no el ancho de la pantalla. La galería
+ * usaba `pagingEnabled`, que avanza de pantalla en pantalla, con fotos de un
+ * ancho fijo: cada gesto dejaba la foto cortada en otro sitio, y el contador
+ * —que dividía por el ancho de la pantalla— se quedaba atrás respecto a la
+ * foto que de verdad se veía.
+ */
+const ANCHO_DE_FOTO = 280;
+const PASO_DE_LA_GALERIA = ANCHO_DE_FOTO + spacing.sm;
+
+/**
  * La ficha de un producto, EN EL ORDEN INALTERABLE del blueprint §4.
  *
  * El orden lo recorre `BLOQUES_DE_LA_FICHA`, no el JSX suelto: así reordenar
@@ -115,6 +127,13 @@ export function ProductoScreen() {
     'red' | 'sinConexion' | 'noDisponible' | 'noEncontrado' | null
   >(null);
   const [ocupado, setOcupado] = useState(false);
+  /**
+   * Añadiendo a la bolsa. APARTE de `ocupado`, que es el de guardar: con uno
+   * solo para los dos, tocar «Añadir a la bolsa» hacía girar el botón de
+   * «Guardar». El cerrojo (`ocupadoRef`) sí es común: las dos cosas no van a
+   * la vez.
+   */
+  const [anadiendo, setAnadiendo] = useState(false);
   /**
    * La puntuacion del producto. `null` = todavia no se ha leido; un
    * resumen con `total` en cero = LEIDO Y NO HAY NINGUNA, que no es lo
@@ -260,7 +279,7 @@ export function ProductoScreen() {
         : claveDeLaPulsacion(actual.product_id, varianteId, Date.now());
     claveDeAnadirRef.current = { varianteId, clave };
     ocupadoRef.current = true;
-    setOcupado(true);
+    setAnadiendo(true);
     void (async () => {
       try {
         const bolsa = await ProductCartRepository.anadir({
@@ -289,7 +308,7 @@ export function ProductoScreen() {
         }
       } finally {
         ocupadoRef.current = false;
-        setOcupado(false);
+        setAnadiendo(false);
       }
     })();
   };
@@ -379,11 +398,19 @@ export function ProductoScreen() {
             <SinCambioDeSeccion>
               <ScrollView
                 horizontal
-                pagingEnabled
+                // EN NATIVO, DE FOTO EN FOTO: `pagingEnabled` ahí avanza por
+                // anchos de pantalla. En web se deja, porque react-native-web
+                // lo convierte en un encaje POR HIJO —que ya es foto a foto— y
+                // no entiende `snapToInterval`: quitarlo dejaría el carrusel
+                // sin encaje ninguno en la web.
+                pagingEnabled={Platform.OS === 'web'}
+                snapToInterval={Platform.OS === 'web' ? undefined : PASO_DE_LA_GALERIA}
+                decelerationRate="fast"
                 showsHorizontalScrollIndicator={false}
                 onMomentumScrollEnd={(evento) => {
-                  const ancho = evento.nativeEvent.layoutMeasurement.width || 1;
-                  setEnLaGaleria(Math.round(evento.nativeEvent.contentOffset.x / ancho));
+                  setEnLaGaleria(
+                    Math.round(evento.nativeEvent.contentOffset.x / PASO_DE_LA_GALERIA),
+                  );
                 }}
               >
                 {leida.gallery.map((media) => (
@@ -753,6 +780,12 @@ export function ProductoScreen() {
         title={f('productos.ficha.titulo')}
         onBack={volver}
         rightIcon="shopping-bag"
+        // El punto del icono solo se VE: lo que cuenta se dice en la etiqueta.
+        rightLabel={
+          enLaBolsa !== null
+            ? f('carrito.contador', { n: enLaBolsa })
+            : f('carrito.acceso.bolsa')
+        }
         onRightPress={() => router.push('/productos/carrito' as never)}
         rightBadge={enLaBolsa !== null}
       />
@@ -789,7 +822,7 @@ export function ProductoScreen() {
             icon={leida.saved ? 'check' : 'heart'}
             onPress={alternarGuardado}
             loading={ocupado}
-            disabled={ocupado}
+            disabled={ocupado || anadiendo}
           />
         </View>
         {/* SIN VARIANTES O SIN PRECIO, NO HAY BOTÓN Y NO SE EXPLICA NADA: no es
@@ -799,7 +832,8 @@ export function ProductoScreen() {
             label={f('carrito.anadir')}
             icon="shopping-bag"
             onPress={anadirALaBolsa}
-            disabled={ocupado}
+            loading={anadiendo}
+            disabled={ocupado || anadiendo}
           />
         ) : null}
         {sePuedeAnadir && varianteElegida === null ? (
@@ -825,8 +859,8 @@ const styles = StyleSheet.create({
   galeria: { gap: spacing.xs },
   imagenFoto: { width: '100%', height: '100%' },
   imagen: {
-    // Una por pantalla: el ancho lo pone el contenedor del scroll horizontal.
-    width: 280,
+    // Ancho fijo: el carrusel avanza de foto en foto (`PASO_DE_LA_GALERIA`).
+    width: ANCHO_DE_FOTO,
     height: 240,
     gap: spacing.xs,
     borderWidth: 1,

@@ -144,6 +144,43 @@ describe('los valores cerrados son los del servidor', () => {
     for (const m of C.MODALIDADES) assert.deepEqual(enLosTres(C.claveDeLaModalidad(m)), [], m);
   });
 
+  it('EL PILOTO ES GRATUITO: solo se ofrecen «gratis» y «a consultar», lo que el servidor admite de fábrica', () => {
+    const ajustes = readFileSync(join(API, '..', '..', 'core', 'config.py'), 'utf8');
+    const linea = ajustes.match(/^    services_catalog_price_models: str = "([^"]*)"$/m);
+    assert.ok(linea, 'services_catalog_price_models');
+    // La app y el servidor, la misma lista: si uno cambia y el otro no, rojo.
+    assert.deepEqual((linea[1] as string).split(','), [...C.MODELOS_DE_PRECIO_OFRECIDOS]);
+    assert.deepEqual([...C.MODELOS_DE_PRECIO_OFRECIDOS], ['free', 'on_request']);
+    // Lo PROHIBIDO no se ofrece: ni «precio fijo» ni «desde» (`from`, que el
+    // blueprint llama `starting_at`), ni nada que lleve importe.
+    for (const prohibido of ['fixed', 'from', 'starting_at']) {
+      assert.ok(!(C.MODELOS_DE_PRECIO_OFRECIDOS as readonly string[]).includes(prohibido), prohibido);
+      assert.equal(C.seOfrece(prohibido), false, prohibido);
+    }
+    assert.deepEqual(C.MODELOS_DE_PRECIO_OFRECIDOS.filter((m) => C.llevaImporte(m)), []);
+    assert.ok(C.seOfrece('free') && C.seOfrece('on_request') && !C.seOfrece(null) && !C.seOfrece(''));
+    // Pero SIGUEN EN EL MODELO: una ficha antigua con importe se lee, se
+    // nombra y se pinta (compatibilidad al visualizar).
+    for (const antiguo of ['fixed', 'from'] as const) {
+      assert.ok((C.MODELOS_DE_PRECIO as readonly string[]).includes(antiguo));
+      assert.deepEqual(enLosTres(C.claveDelModeloDePrecio(antiguo)), [], antiguo);
+      assert.ok(C.llevaImporte(antiguo));
+    }
+    assert.equal(
+      C.precioLegible({ model: 'fixed', amount_minor: 12000, currency: 'PEN' } as never).clave,
+      'servicios.catalogo.precio.fixed',
+    );
+    assert.equal(
+      C.precioLegible({ model: 'from', amount_minor: 8000, currency: 'PEN' } as never).clave,
+      'servicios.catalogo.precio.from',
+    );
+    // El error del servidor, si alguien lo provoca a mano, tiene su texto.
+    assert.equal(
+      C.claveDeErrorDelCatalogo('service_price_model_not_allowed'),
+      'servicios.catalogo.falta.price_model_not_allowed',
+    );
+  });
+
   it('los requisitos y los campos que Z puede señalar', () => {
     const requisitos = servidor('catalogo_requisitos.py');
     assert.deepEqual(tupla(requisitos, 'CODIGOS'), [...C.REQUISITOS]);

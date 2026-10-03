@@ -137,6 +137,16 @@ export function SelectorDeHorarios({
     void pedirDia(dia, null);
   };
 
+  // REINTENTAR ES VOLVER A EMPEZAR: el calendario Y el día. Con solo el
+  // calendario, el día que falló se quedaba «cargando» para siempre, y si lo
+  // que falló fue la primera carga no se elegía ninguna fecha.
+  const reintentar = () =>
+    void (async () => {
+      const c = await pedirCalendario(null, null);
+      const dia = fecha ?? c?.next?.date ?? null;
+      if (dia) elegirFecha(dia);
+    })();
+
   if (fallo === 'noEncontrada') {
     // Dejó de ser público (suspendido, retirado…) o no existe: no hay horarios.
     return (
@@ -149,7 +159,7 @@ export function SelectorDeHorarios({
     );
   }
   if (fallo !== null) {
-    return <EstadoDelCatalogo fallo={fallo} onRetry={() => void pedirCalendario(null, null)} />;
+    return <EstadoDelCatalogo fallo={fallo} onRetry={reintentar} />;
   }
   if (calendario === null) {
     return fueraDeRango ? (

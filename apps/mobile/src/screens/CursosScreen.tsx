@@ -78,6 +78,15 @@ export function CursosScreen() {
   const guardando = useRef<Set<string>>(new Set());
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState<string | null>(null);
+  /**
+   * Si la portada ya se pintó alguna vez.
+   *
+   * LA CARGA A PANTALLA COMPLETA ES SOLO LA PRIMERA. Cada búsqueda vuelve a
+   * pedir el catálogo, y con el retorno temprano de siempre se desmontaba la
+   * pantalla entera —buscador incluido—: el teclado se cerraba a media palabra.
+   * Después de la primera, la carga y el fallo se pintan DEBAJO del buscador.
+   */
+  const [yaCargo, setYaCargo] = useState(false);
 
   /**
    * LA SALIDA DE LA PANTALLA, que antes no existía.
@@ -111,6 +120,7 @@ export function CursosScreen() {
       // sin ver la tienda a quien solo venía a mirar.
       const cursos = await LearningRepository.listCourses(24, { texto: textoAplicado, nivel });
       setCatalogo(cursos);
+      setYaCargo(true);
       try {
         const suyos = await LearningRepository.savedCourses();
         setGuardados(suyos);
@@ -170,7 +180,7 @@ export function CursosScreen() {
     void cargar();
   }, [cargar]);
 
-  if (cargando) {
+  if (cargando && !yaCargo) {
     return (
       <AppScreen>
         {/* También cargando: si la petición se eterniza, la salida tiene que
@@ -181,7 +191,7 @@ export function CursosScreen() {
     );
   }
 
-  if (fallo !== null) {
+  if (fallo !== null && !yaCargo) {
     return (
       <AppScreen>
         {/* Y en el error con más razón: quedarse encerrado en una pantalla que
@@ -204,6 +214,7 @@ export function CursosScreen() {
         title={t('verticales.cursos')}
         onBack={volver}
         rightIcon="book-open"
+        rightLabel={t('library.title')}
         onRightPress={() => router.push('/library' as never)}
       />
       <View style={[styles.buscador, { borderColor: colors.border }]}>
@@ -302,140 +313,151 @@ export function CursosScreen() {
         </ScrollView>
       </SinCambioDeSeccion>
 
-      <ScrollView contentContainerStyle={styles.contenido}>
-        {enCurso.length > 0 ? (
-          <View style={styles.seccion}>
-            <SectionTitle title={t('cursos.continuaAprendiendo')} />
-            {enCurso.map((curso) => (
-              <Pressable
-                key={curso.id}
-                style={({ pressed }) => [
-                  styles.fila,
-                  { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-                ]}
-                onPress={() =>
-                  curso.nextLessonId
-                    ? router.push(`/lesson/${curso.nextLessonId}`)
-                    : router.push(`/course/${curso.id}`)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`${curso.title}. ${t('cursos.progreso').replace(
-                  '{porcentaje}',
-                  String(curso.progressPercent),
-                )}`}
-              >
-                {curso.coverUrl ? (
-                  <ExpoImage source={{ uri: curso.coverUrl }} style={styles.miniatura} />
-                ) : (
-                  <View style={[styles.miniatura, { backgroundColor: colors.surface }]} />
-                )}
-                <View style={styles.textoDeFila}>
-                  <Text numberOfLines={2} style={[styles.tituloDeFila, { color: colors.text }]}>
-                    {curso.title}
-                  </Text>
-                  {/* El porcentaje lo calcula el SERVIDOR y llega en la respuesta:
-                      no se deduce aquí de lecciones vistas, que es como se acaba
-                      enseñando un número distinto en cada pantalla. */}
-                  <Text style={[styles.pieDeFila, { color: colors.textMuted }]}>
-                    {t('cursos.progreso').replace('{porcentaje}', String(curso.progressPercent))}
-                  </Text>
-                </View>
-                <Feather name="play-circle" size={24} color={colors.text} />
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
+      {/*
+        LA CARGA Y EL FALLO, DEBAJO DEL BUSCADOR. Al buscar o cambiar de nivel
+        se vuelve a pedir el catálogo: lo que cambia es esta zona, y el buscador
+        de arriba sigue montado con su texto y su teclado.
+      */}
+      <StateView
+        state={cargando ? 'loading' : fallo !== null ? 'error' : 'content'}
+        description={fallo ?? undefined}
+        onRetry={() => void cargar()}
+      >
+        <ScrollView contentContainerStyle={styles.contenido}>
+          {enCurso.length > 0 ? (
+            <View style={styles.seccion}>
+              <SectionTitle title={t('cursos.continuaAprendiendo')} />
+              {enCurso.map((curso) => (
+                <Pressable
+                  key={curso.id}
+                  style={({ pressed }) => [
+                    styles.fila,
+                    { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                  onPress={() =>
+                    curso.nextLessonId
+                      ? router.push(`/lesson/${curso.nextLessonId}`)
+                      : router.push(`/course/${curso.id}`)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`${curso.title}. ${t('cursos.progreso').replace(
+                    '{porcentaje}',
+                    String(curso.progressPercent),
+                  )}`}
+                >
+                  {curso.coverUrl ? (
+                    <ExpoImage source={{ uri: curso.coverUrl }} style={styles.miniatura} />
+                  ) : (
+                    <View style={[styles.miniatura, { backgroundColor: colors.surface }]} />
+                  )}
+                  <View style={styles.textoDeFila}>
+                    <Text numberOfLines={2} style={[styles.tituloDeFila, { color: colors.text }]}>
+                      {curso.title}
+                    </Text>
+                    {/* El porcentaje lo calcula el SERVIDOR y llega en la respuesta:
+                        no se deduce aquí de lecciones vistas, que es como se acaba
+                        enseñando un número distinto en cada pantalla. */}
+                    <Text style={[styles.pieDeFila, { color: colors.textMuted }]}>
+                      {t('cursos.progreso').replace('{porcentaje}', String(curso.progressPercent))}
+                    </Text>
+                  </View>
+                  <Feather name="play-circle" size={24} color={colors.text} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
-        <CursosParaTi />
+          <CursosParaTi />
 
-        {guardados.length > 0 ? (
+          {guardados.length > 0 ? (
+            <View style={styles.seccion}>
+              <SectionTitle title={t('cursos.guardados')} />
+              <SinCambioDeSeccion>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.carrusel}
+                >
+                  {guardados.map((curso) => (
+                    <Pressable
+                      key={curso.id}
+                      style={styles.guardado}
+                      onPress={() => router.push(`/course/${curso.id}`)}
+                      accessibilityRole="button"
+                      accessibilityLabel={curso.title}
+                    >
+                      {curso.coverUrl ? (
+                        <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                      ) : (
+                        <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                      )}
+                      <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
+                        {curso.title}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </SinCambioDeSeccion>
+            </View>
+          ) : null}
+
           <View style={styles.seccion}>
-            <SectionTitle title={t('cursos.guardados')} />
-            <SinCambioDeSeccion>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.carrusel}
-              >
-                {guardados.map((curso) => (
+            <SectionTitle title={t('cursos.todoElCatalogo')} />
+            {catalogo.length === 0 ? (
+              <StateView state="empty" description={t('cursos.catalogoVacio')} />
+            ) : (
+              <View style={styles.rejilla}>
+                {catalogo.map((curso) => (
                   <Pressable
                     key={curso.id}
-                    style={styles.guardado}
+                    style={({ pressed }) => [
+                      styles.tarjeta,
+                      { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                    ]}
                     onPress={() => router.push(`/course/${curso.id}`)}
                     accessibilityRole="button"
                     accessibilityLabel={curso.title}
                   >
-                    {curso.coverUrl ? (
-                      <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
-                    ) : (
-                      <View style={[styles.portada, { backgroundColor: colors.surface }]} />
-                    )}
+                    <View>
+                      {curso.coverUrl ? (
+                        <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                      ) : (
+                        <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                      )}
+                      <Pressable
+                        onPress={() => void alternarGuardado(curso)}
+                        hitSlop={10}
+                        style={styles.marcador}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: idsGuardados.has(curso.id) }}
+                        accessibilityLabel={
+                          idsGuardados.has(curso.id)
+                            ? t('cursos.quitarDeGuardados')
+                            : t('cursos.guardar')
+                        }
+                      >
+                        <Feather
+                          name={idsGuardados.has(curso.id) ? 'bookmark' : 'bookmark'}
+                          size={18}
+                          color={idsGuardados.has(curso.id) ? colors.text : colors.textMuted}
+                        />
+                      </Pressable>
+                    </View>
                     <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
                       {curso.title}
                     </Text>
+                    {/* Precio y moneda son columnas reales. Valoración, número de
+                        alumnos, duración y nivel NO lo son, y por eso no están. */}
+                    <Text style={[styles.precio, { color: colors.textMuted }]}>
+                      {etiquetaDePrecio(curso.priceMinor, curso.currency)}
+                    </Text>
                   </Pressable>
                 ))}
-              </ScrollView>
-            </SinCambioDeSeccion>
+              </View>
+            )}
           </View>
-        ) : null}
-
-        <View style={styles.seccion}>
-          <SectionTitle title={t('cursos.todoElCatalogo')} />
-          {catalogo.length === 0 ? (
-            <StateView state="empty" description={t('cursos.catalogoVacio')} />
-          ) : (
-            <View style={styles.rejilla}>
-              {catalogo.map((curso) => (
-                <Pressable
-                  key={curso.id}
-                  style={({ pressed }) => [
-                    styles.tarjeta,
-                    { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-                  ]}
-                  onPress={() => router.push(`/course/${curso.id}`)}
-                  accessibilityRole="button"
-                  accessibilityLabel={curso.title}
-                >
-                  <View>
-                    {curso.coverUrl ? (
-                      <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
-                    ) : (
-                      <View style={[styles.portada, { backgroundColor: colors.surface }]} />
-                    )}
-                    <Pressable
-                      onPress={() => void alternarGuardado(curso)}
-                      hitSlop={10}
-                      style={styles.marcador}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: idsGuardados.has(curso.id) }}
-                      accessibilityLabel={
-                        idsGuardados.has(curso.id)
-                          ? t('cursos.quitarDeGuardados')
-                          : t('cursos.guardar')
-                      }
-                    >
-                      <Feather
-                        name={idsGuardados.has(curso.id) ? 'bookmark' : 'bookmark'}
-                        size={18}
-                        color={idsGuardados.has(curso.id) ? colors.text : colors.textMuted}
-                      />
-                    </Pressable>
-                  </View>
-                  <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
-                    {curso.title}
-                  </Text>
-                  {/* Precio y moneda son columnas reales. Valoración, número de
-                      alumnos, duración y nivel NO lo son, y por eso no están. */}
-                  <Text style={[styles.precio, { color: colors.textMuted }]}>
-                    {etiquetaDePrecio(curso.priceMinor, curso.currency)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </StateView>
     </AppScreen>
   );
 }

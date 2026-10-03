@@ -118,7 +118,7 @@ export function DatosDeLaContratacionScreen() {
 
   const l = resumen.limits;
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <CuentaAtrasDeRetencion
         segundos={segundos}

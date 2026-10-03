@@ -118,7 +118,7 @@ export function ServiciosDatosScreen() {
   const empresa = formulario.tipo === 'company';
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="secondary">{f('servicios.datos.intro')}</Text>
       <Text weight="600">{etiqueta('provider_type', 'servicios.campo.provider_type')}</Text>

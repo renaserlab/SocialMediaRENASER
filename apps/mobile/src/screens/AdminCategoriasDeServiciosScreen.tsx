@@ -141,7 +141,7 @@ export function AdminCategoriasDeServiciosScreen() {
   const original = editando?.original ?? null;
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="caption" color={colors.textMuted}>
         {f('servicios.catalogo.categorias.intro')}

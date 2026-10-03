@@ -510,6 +510,8 @@ export function ExploreScreen() {
         {/* Acceso a la galeria de testimonios, debajo de las tarjetas. */}
         <Pressable
           onPress={() => openAdminSection('testimonios')}
+          // Sin perfil al que ir no hace nada: se apaga, como la de Podcast.
+          disabled={!catalogProfileId}
           accessibilityRole="button"
           accessibilityLabel={t('home.seeMore')}
           hitSlop={6}
@@ -616,7 +618,7 @@ export function ExploreScreen() {
         <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
         <View style={styles.heroContent}>
           <Text style={styles.eyebrow}>{t('explore.recommendedProgram')}</Text>
-          <Text style={styles.heroTitle}>
+          <Text style={styles.heroTitle} numberOfLines={2}>
             {featuredCourse?.title ?? t('explore.programsComing')}
           </Text>
           <Text style={styles.heroBody}>

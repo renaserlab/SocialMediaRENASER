@@ -157,7 +157,7 @@ export function AdminServicioDelCatalogoScreen() {
   };
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
 
       <View style={tarjeta}>

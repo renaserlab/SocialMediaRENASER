@@ -434,23 +434,32 @@ export function CourseScreen() {
   };
 
   const retirar = async () => {
-    if (!course) return;
+    if (!course || publicando) return;
     const aceptado = await confirm({
       title: t('course.unpublishTitle'),
       message: t('course.unpublishBody'),
       confirmLabel: t('course.unpublishConfirm'),
     });
     if (!aceptado) return;
+    // EL MISMO ESTADO QUE PUBLICAR: son la misma decision en sentido contrario
+    // y no pueden ir a la vez. Sin el, tras confirmar no cambiaba nada en la
+    // pantalla y un segundo toque mandaba una segunda retirada.
+    setPublicando(true);
     try {
       await LearningRepository.unpublish(course.id);
       toast(t('course.unpublished'));
       reload();
     } catch (e) {
       notify(t('course.unpublishFailed'), e instanceof Error ? e.message : t('common.tryAgain'));
+    } finally {
+      setPublicando(false);
     }
   };
 
-  if (loading) {
+  // SOLO SIN CURSO. `reload()` —tras publicar, comprar o tocar el temario—
+  // vuelve a poner `loading`, y la ficha entera se cambiaba por «Cargando…»
+  // y volvia arriba del todo.
+  if (loading && !course) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title={t('course.headerTitle')} onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
@@ -482,6 +491,7 @@ export function CourseScreen() {
           puntos de alto eso se rellenaba a medias y se abandonaba.
         */
         rightIcon={canManage ? 'edit-2' : undefined}
+        rightLabel={t('catalog.editCourse')}
         onRightPress={canManage ? () => router.push(`/editar-curso/${course?.id}` as never) : undefined}
       />
       <AppScreen contentStyle={{ paddingBottom: spacing.xl }}>
@@ -653,6 +663,13 @@ export function CourseScreen() {
               // detalle del curso, que se pide una sola vez al montar. Sin esto
               // seguian en 0 despues de anadir contenido.
               onChanged={reload}
+              // EL TEMARIO SE VUELVE A PEDIR CUANDO CAMBIA EL ACCESO. Antes lo
+              // hacia de rebote: `reload()` cambiaba la ficha entera por
+              // «Cargando…» y este bloque se montaba de nuevo. Ahora la ficha
+              // se queda en su sitio, asi que comprar el curso —o recibirlo en
+              // la beta— tiene que pedirlo a proposito: con acceso se firman
+              // los videos que antes no se podian firmar.
+              key={hasAccess ? 'con-acceso' : 'sin-acceso'}
             />
           </View>
 
@@ -884,9 +901,11 @@ export function CourseScreen() {
             ) : (
               <Pressable
                 onPress={() => void retirar()}
-                style={styles.retirar}
+                disabled={publicando}
+                style={[styles.retirar, publicando ? { opacity: 0.5 } : null]}
                 accessibilityRole="button"
                 accessibilityLabel={t('course.unpublishTitle')}
+                accessibilityState={{ disabled: publicando, busy: publicando }}
               >
                 <Feather name="eye-off" size={14} color={colors.textMuted} />
                 <Text style={{ color: colors.textMuted, fontSize: 13, fontWeight: '700' }}>

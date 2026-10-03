@@ -131,15 +131,31 @@ describe('los filtros en la ruta', () => {
       q: 'contabilidad pymes',
       categoria: '5b7e2f7a-8d1c-4a55-9d61-0c3f1e2a4b6c',
       modalidad: 'in_person' as const,
-      precio: 'priced' as const,
-      moneda: 'PEN',
-      minimo: '100',
-      maximo: '250,50',
+      precio: 'on_request' as const,
       zona: 'Miraflores',
       conCredencial: true,
-      orden: 'price_asc' as const,
+      orden: 'relevance' as const,
     };
     assert.deepEqual(D.filtrosDesdeRuta(D.rutaDesdeFiltros(f)), f);
+  });
+
+  it('EL PILOTO ES GRATUITO: «con precio», la moneda, el rango y el orden por precio no se ofrecen', () => {
+    assert.deepEqual([...D.TIPOS_DE_PRECIO_OFRECIDOS], ['free', 'on_request']);
+    // El servidor sigue entendiendo `priced`; aquí no se ofrece.
+    assert.ok((D.TIPOS_DE_PRECIO as readonly string[]).includes('priced'));
+    assert.ok(!(D.TIPOS_DE_PRECIO_OFRECIDOS as readonly string[]).includes('priced'));
+    // Un enlace viejo con esos filtros se abre SIN ellos, y no ordena por precio.
+    const f = D.filtrosDesdeRuta({ precio: 'priced', moneda: 'PEN', minimo: '100', maximo: '250', orden: 'price_asc' });
+    assert.deepEqual([f.precio, f.moneda, f.minimo, f.maximo], [null, null, '', '']);
+    assert.deepEqual(D.ordenesPosibles(f), ['recent']);
+    assert.ok(!/price|currency/.test(D.consultaDelCatalogo(f, null)), D.consultaDelCatalogo(f, null));
+    // La pantalla itera la lista ofrecida y ya no pinta ni la moneda ni el rango.
+    const pantalla = readFileSync(join(import.meta.dirname, '..', 'screens', 'ServiciosScreen.tsx'), 'utf8');
+    assert.ok(pantalla.includes('[null, ...TIPOS_DE_PRECIO_OFRECIDOS].map('));
+    assert.ok(!/\.\.\.TIPOS_DE_PRECIO\]/.test(pantalla), 'vuelve a ofrecer «con precio»');
+    for (const resto of ["hoja.precio === 'priced'", 'filtros.monedaAviso', 'filtros.desde', 'filtros.hasta']) {
+      assert.ok(!pantalla.includes(resto), resto);
+    }
   });
 
   it('lo que no se entiende se descarta', () => {

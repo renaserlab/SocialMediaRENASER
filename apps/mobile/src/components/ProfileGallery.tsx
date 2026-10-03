@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
@@ -24,6 +25,8 @@ type Props = {
   error: string | null;
   /** Texto del estado vacío; cambia entre perfil propio y ajeno. */
   emptyHint?: string;
+  /** Vuelve a pedir las publicaciones. Sin el, el fallo no tiene salida. */
+  onRetry?: () => void;
 };
 
 /**
@@ -45,7 +48,7 @@ const PRIMERAS_VISIBLES = GRID_COLUMNS * 4;
  * mostraba contenido que no era suyo (y en tema oscuro parecian recuadros
  * vacios). Ahora sale lo que ha publicado esa persona.
  */
-export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
+export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
@@ -63,13 +66,8 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
   const lado = gridItemSize(anchoCuadricula);
 
   if (error) {
-    return (
-      <View style={styles.center}>
-        <Text variant="secondary" color={colors.textMuted} style={styles.centerText}>
-          {error}
-        </Text>
-      </View>
-    );
+    // Con reintento: antes se pintaba solo el texto y no habia nada que pulsar.
+    return <StateView state="error" description={error} onRetry={onRetry} />;
   }
 
   /*
@@ -92,7 +90,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint }: Props) {
         y se muestran en el podcast del perfil, no como una pestaña aparte.
       */}
       <SegmentedControl
-        options={[esperando ? 'Publicaciones' : `Publicaciones ${gallery.length}`]}
+        options={[esperando ? t('profile.posts') : `${t('profile.posts')} ${gallery.length}`]}
         selectedIndex={0}
         onChange={() => {}}
         style={styles.tabs}

@@ -160,7 +160,7 @@ export function ImagenesDelServicioScreen() {
     });
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="secondary">{f('servicios.catalogo.imagenes.intro')}</Text>
 

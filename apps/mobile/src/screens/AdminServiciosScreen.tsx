@@ -93,6 +93,7 @@ export function AdminServiciosScreen() {
         title={f('servicios.admin.titulo')}
         onBack={volver}
         rightIcon="file-text"
+        rightLabel={f('servicios.politica.titulo')}
         onRightPress={() => router.push('/admin/servicios/condiciones' as never)}
       />
       <Text variant="caption" color={colors.textMuted}>

@@ -702,10 +702,9 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         <ListRow
           title={saved ? t('post.unsave') : t('common.save')}
           leftIcon="bookmark"
-          onPress={() => {
-            setMenuOpen(false);
-            toggleSave(post.id);
-          }}
+          // La MISMA funcion que el boton de la fila: pide cuenta, avisa de
+          // como acabo y ofrece «Ver lista». Antes llamaba al store a secas.
+          onPress={() => closeMenuThen(() => void alternarGuardado())}
         />
         <ListRow
           title={t('post.share')}

@@ -139,6 +139,37 @@ describe('las vistas existen y se llega a ellas desde la app', () => {
 });
 
 // =========================================================================== //
+describe('el formulario del servicio solo ofrece lo que el servidor admite', () => {
+  const EDITAR = fuente('screens/EditarServicioScreen.tsx').replace(/\r\n/g, '\n');
+  const limpio = sinComentarios(EDITAR);
+
+  it('los modelos de precio y las modalidades salen de las listas OFRECIDAS', () => {
+    assert.ok(limpio.includes('MODELOS_DE_PRECIO_OFRECIDOS.map('));
+    assert.ok(limpio.includes('MODALIDADES_OFRECIDAS.map('));
+    // Si alguien vuelve a iterar la lista completa, «precio fijo» y «desde»
+    // (o «a domicilio») vuelven a la pantalla: rojo.
+    assert.ok(!/\bMODELOS_DE_PRECIO\.map\(/.test(limpio), 'vuelve a ofrecer los cuatro modelos');
+    assert.ok(!/\bMODALIDADES\.map\(/.test(limpio), 'vuelve a ofrecer «a domicilio»');
+    assert.ok(!/^\s*MODELOS_DE_PRECIO,$/m.test(EDITAR), 'la pantalla no necesita la lista completa');
+  });
+
+  it('el importe y la moneda no se piden con un modelo que no se ofrece', () => {
+    assert.ok(limpio.includes('seOfrece(formulario.modeloDePrecio) && llevaImporte(formulario.modeloDePrecio)'));
+    assert.ok(!/\{llevaImporte\(formulario\.modeloDePrecio\) \?/.test(limpio));
+  });
+
+  it('un borrador antiguo con importe dice por qué no hay ninguna opción marcada', () => {
+    assert.ok(limpio.includes("f('servicios.catalogo.editar.precioNoAdmitido')"));
+    for (const diccionario of [es, en, pt]) {
+      assert.ok('servicios.catalogo.editar.precioNoAdmitido' in diccionario);
+    }
+    // Y lo que pide elegir ya no nombra lo prohibido.
+    const pide = (es as Record<string, string>)['servicios.catalogo.falta.price_model'] ?? '';
+    assert.ok(pide.length > 0 && !/fijo|desde/i.test(pide), pide);
+  });
+});
+
+// =========================================================================== //
 describe('cada vista se comporta', () => {
   for (const nombre of PANTALLAS) {
     const codigo = pantalla(nombre);

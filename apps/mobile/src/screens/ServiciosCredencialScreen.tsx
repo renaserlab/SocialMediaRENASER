@@ -107,7 +107,7 @@ export function ServiciosCredencialScreen() {
   };
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       {anterior === null ? (
         <>

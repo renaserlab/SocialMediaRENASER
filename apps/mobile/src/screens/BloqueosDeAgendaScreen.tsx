@@ -95,7 +95,7 @@ export function BloqueosDeAgendaScreen() {
   }
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       <Text variant="caption" color={colors.textMuted}>
         {f('servicios.agenda.horasEn', { zona: a.timezone ?? '' })}

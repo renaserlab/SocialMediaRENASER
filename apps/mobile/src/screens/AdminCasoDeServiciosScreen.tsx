@@ -128,7 +128,7 @@ export function AdminCasoDeServiciosScreen() {
   const tarjeta = [styles.tarjeta, { borderColor: colors.border }];
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={f('servicios.atencion.admin.caso')} onBack={volver} />
       {fallo !== null ? (
         <EstadoDeServicios fallo={fallo} onRetry={() => void cargar()} />

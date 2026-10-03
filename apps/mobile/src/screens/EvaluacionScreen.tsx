@@ -59,6 +59,8 @@ export function EvaluacionScreen() {
   const [elegidas, setElegidas] = useState<Elegidas>({});
   const [indice, setIndice] = useState(0);
   const [enviando, setEnviando] = useState(false);
+  /** Abriendo el intento: «Empezar» y «Volver a intentarlo» giran y se apagan. */
+  const [empezando, setEmpezando] = useState(false);
   const [resultado, setResultado] = useState<IntentoDeEvaluacion | null>(null);
 
   /** Cerrojos síncronos: dos toques no abren dos intentos ni envían dos veces. */
@@ -98,6 +100,9 @@ export function EvaluacionScreen() {
   const empezar = async () => {
     if (empezandoRef.current || !curso) return;
     empezandoRef.current = true;
+    // El cerrojo ya impedía el segundo intento, pero el botón no decía nada
+    // mientras tanto: parecía que el toque no había llegado.
+    setEmpezando(true);
     try {
       setIntento(await QuizRepository.empezar(curso));
       setElegidas({});
@@ -107,6 +112,7 @@ export function EvaluacionScreen() {
       notify(t('common.loadFailed'), mensajeDeErrorDeEvaluacion(error, t));
     } finally {
       empezandoRef.current = false;
+      setEmpezando(false);
     }
   };
 
@@ -132,7 +138,10 @@ export function EvaluacionScreen() {
       setResultado(enviado);
       setIntento(null);
     } catch (error) {
-      notify(t('common.loadFailed'), mensajeDeErrorDeEvaluacion(error, t));
+      // Aquí no se estaba CARGANDO nada: se estaba enviando. Con el título de
+      // «no pudimos cargar el contenido» no se sabía si las respuestas habían
+      // llegado.
+      notify(t('common.saveFailed'), mensajeDeErrorDeEvaluacion(error, t));
     } finally {
       enviandoRef.current = false;
       setEnviando(false);
@@ -191,6 +200,7 @@ export function EvaluacionScreen() {
         intento={resultado}
         minimo={evaluacion.notaMinima}
         onReintentar={() => void empezar()}
+        reintentando={empezando}
         onVolver={volverAlCurso}
       />
     );
@@ -229,6 +239,8 @@ export function EvaluacionScreen() {
           <Button
             label={t('evaluacion.empezar')}
             onPress={() => void empezar()}
+            loading={empezando}
+            disabled={empezando}
             style={styles.accion}
           />
         </View>
@@ -343,11 +355,14 @@ function Resultado({
   intento,
   minimo,
   onReintentar,
+  reintentando,
   onVolver,
 }: {
   intento: IntentoDeEvaluacion;
   minimo: number;
   onReintentar: () => void;
+  /** Se está abriendo el intento nuevo. */
+  reintentando: boolean;
   onVolver: () => void;
 }) {
   const { t } = useTranslation();
@@ -387,6 +402,8 @@ function Resultado({
           <Button
             label={t('evaluacion.reintentar')}
             onPress={onReintentar}
+            loading={reintentando}
+            disabled={reintentando}
             style={styles.accion}
           />
         )}

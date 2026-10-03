@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -41,6 +41,8 @@ export function NotificationsScreen() {
 
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  /** La lista ya se pinto una vez: refrescarla no vuelve a taparla. */
+  const hayListaEnPantalla = useRef(false);
 
   /**
    * Aviso de contenido gratuito de Darren. No es una notificacion del backend:
@@ -74,13 +76,19 @@ export function NotificationsScreen() {
   const load = useCallback(() => {
     // Igual que en Mensajes: sin sesion no hay actividad que consultar.
     if (!supabaseEnabled || !signedIn) {
+      // Lo que hubiera era de otra sesion: la siguiente carga parte de cero.
+      hayListaEnPantalla.current = false;
       setItems(demoNotifications);
       setStatus('idle');
       return;
     }
-    setStatus('loading');
+    // «Cargando…» solo cuando no hay lista que enseñar. Esto corre cada vez
+    // que la pantalla recupera el foco, y antes cambiaba la lista ya pintada
+    // por el texto de carga al volver de cualquier aviso.
+    if (!hayListaEnPantalla.current) setStatus('loading');
     NotificationRepository.list()
       .then((data) => {
+        hayListaEnPantalla.current = true;
         setItems(data);
         setStatus('idle');
         // Al abrir, marcamos todas como leídas (limpia el badge). VA DESPUES
@@ -90,7 +98,11 @@ export function NotificationsScreen() {
         // cambio de que se vea lo que estaba sin leer.
         NotificationRepository.markAllRead().catch(() => {});
       })
-      .catch(() => setStatus('error'));
+      .catch(() => {
+        // Sin lista en pantalla, el reintento vuelve a enseñar la carga.
+        hayListaEnPantalla.current = false;
+        setStatus('error');
+      });
   }, [supabaseEnabled, signedIn]);
 
   useFocusEffect(

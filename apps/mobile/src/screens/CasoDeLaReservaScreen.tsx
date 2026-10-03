@@ -184,7 +184,7 @@ export function CasoDeLaReservaScreen({ rol }: { rol: Parte }) {
     });
 
   return (
-    <AppScreen contentStyle={styles.contenido}>
+    <AppScreen teclado contentStyle={styles.contenido}>
       <AppHeader title={titulo} onBack={volver} />
       {fallo !== null ? (
         <EstadoDeServicios fallo={fallo} onRetry={() => void cargar()} />

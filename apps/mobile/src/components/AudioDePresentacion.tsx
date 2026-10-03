@@ -240,7 +240,13 @@ export function AudioDePresentacion({
     if (fase !== 'grabando') return;
     const tic = setInterval(() => {
       try {
-        setMsGrabados((grabadora.currentTime ?? 0) * 1000);
+        // `durationMillis` Y NO `currentTime`. En `expo-audio` 1.1.1 el
+        // `currentTime` de una grabadora solo es lo que lleva en iOS; en
+        // Android el modulo nativo devuelve ahi la HORA a la que empezo
+        // (`AudioModule.kt`: `recorder.startTime`). Multiplicada por mil pasaba
+        // del minuto en el primer tic: la presentacion se cortaba sola a los
+        // 250 ms y se guardaba diciendo que duraba 60 s.
+        setMsGrabados(grabadora.getStatus().durationMillis ?? 0);
       } catch {
         // El objeto nativo ya no esta. Se deja el ultimo valor leido.
       }

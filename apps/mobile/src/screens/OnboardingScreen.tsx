@@ -12,6 +12,7 @@ import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { haptics } from '@/lib/haptics';
 import { postAuthRoute } from '@/lib/postAuthRoute';
+import { toast } from '@/lib/toast';
 import {
   RecommendationRepository,
   type OnboardingCatalog,
@@ -175,7 +176,14 @@ export function OnboardingScreen() {
 
   const salir = useCallback(() => {
     marcarVisto();
-    router.replace((editando ? '/settings' : postAuthRoute()) as never);
+    if (editando) {
+      // Se llego desde Ajustes con `push`: se VUELVE. Reemplazar por
+      // `/settings` dejaba Ajustes dos veces en la pila y «atras» lo repetia.
+      if (router.canGoBack()) router.back();
+      else router.replace('/settings' as never);
+      return;
+    }
+    router.replace(postAuthRoute() as never);
   }, [editando, marcarVisto, router]);
 
   const guardar = async (saltado: boolean) => {
@@ -192,6 +200,8 @@ export function OnboardingScreen() {
         skipped: saltado,
       });
       haptics.light();
+      // Al editar se vuelve a Ajustes sin mas señal: se dice que se guardo.
+      if (editando) toast(t('common.changesSaved'));
       /*
         Se entra INMEDIATAMENTE. Las recomendaciones se calculan cuando la
         pantalla siguiente las pida; quedarse aqui girando una rueda mientras
