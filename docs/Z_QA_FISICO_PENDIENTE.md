@@ -1992,3 +1992,73 @@ otra fuera y una de administración.
 - [ ] Con la apertura general encendida, cualquier cuenta ve Servicios.
 - [ ] Apagar `FEATURE_SERVICES`: desaparece para todos, también para el piloto
       y para la sección del panel de administración.
+
+### La salida del piloto gratuito (02/10/2026): qué comprobar en un teléfono
+
+Nada de esto se probó en un teléfono. Hace falta un entorno de pruebas con
+Servicios y la contratación encendidos, y cuatro cuentas: quien contrata,
+quien presta y dos de administración.
+
+**La baja de una cuenta con historia de Servicios (F21).**
+
+- [ ] Quien **contrató** una reserva (por venir, pasada o cancelada) va a
+      Ajustes → Eliminar cuenta y confirma las dos veces: lee que no se puede
+      cerrar todavía y que escriba a soporte. **No** lee «inténtalo de nuevo
+      en unos momentos». Sigue con su sesión y su cuenta.
+- [ ] Lo mismo con quien **prestó** esa reserva.
+- [ ] Después del aviso, la reserva, el caso, la reseña y las evidencias
+      siguen ahí para las dos partes y para administración.
+- [ ] Repetir la baja da el mismo aviso.
+- [ ] Una cuenta con solo una postulación, o con un servicio publicado que
+      nadie contrató, o que solo guardó un servicio: se elimina con
+      normalidad.
+- [ ] El aviso se lee bien en español, inglés y portugués, y con lector de
+      pantalla.
+
+**Las condiciones de contratación.** Con unas condiciones de **prueba**
+publicadas en el entorno de pruebas (no las del piloto, que siguen sin
+aprobar).
+
+- [ ] El resumen de la contratación enseña la versión y la huella abreviada;
+      «Leer las condiciones completas» abre el texto entero, que se lee sin
+      cortes ni símbolos raros (es texto plano: los apartados numerados se
+      ven como párrafos).
+- [ ] La casilla «Leí y acepto…» aparece **sin marcar**, y «Confirmar» no se
+      puede tocar hasta marcarla.
+- [ ] Con el resumen abierto, publicar otra versión desde administración:
+      al confirmar, la aplicación enseña la versión nueva y la casilla vuelve
+      a estar sin marcar.
+- [ ] El detalle de una reserva hecha enseña qué versión se aceptó, y no
+      cambia al publicar otra.
+- [ ] En el panel de administración → Servicios → Condiciones de
+      contratación: crear el borrador pegando un texto largo, previsualizarlo
+      y comparar la huella abreviada con la que dice el guion **antes** de
+      publicar. Publicar pide confirmación.
+- [ ] Sin ninguna condición publicada, el resumen dice que todavía no se
+      puede contratar.
+
+**El piloto gratuito.**
+
+- [ ] En el formulario de un servicio, elegir «precio fijo» o «desde» y
+      enviarlo: la lista de lo que falta dice que Z no admite ese tipo de
+      precio por ahora, y no se envía. (El formulario todavía ofrece los
+      cuatro tipos: retirarlos de la vista es parte de la mejora de vistas.)
+- [ ] Un servicio gratuito se envía, se publica y se reserva. Uno «a
+      consultar» se publica y se ve, y al intentar reservar un horario la
+      aplicación explica que no se reserva en Z.
+- [ ] En ninguna pantalla del recorrido aparece un botón de pagar, un
+      importe cobrado, un saldo o una devolución.
+
+**Las tareas sin planificador.** Con la cuenta de administración.
+
+- [ ] En la bandeja de reservas, «vencer retenciones» responde con cuántas
+      venció; repetirlo, con cero.
+- [ ] En la bandeja de casos, «ejecutar tareas» dice cuántas recordó y
+      cerró. Sin lanzarla, nadie recibe el recordatorio: es lo esperado
+      mientras no haya planificador.
+
+**Apelaciones.**
+
+- [ ] Con **una** sola cuenta de administración, tras resolver un caso las
+      partes no ven «Apelar». Con dos, sí; y quien resolvió no puede resolver
+      la apelación.

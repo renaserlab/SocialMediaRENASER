@@ -92,7 +92,11 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. Al 02/10/2026 la
+antes de usarla, y sigue funcionando cuando no lo está. El cierre de salida
+del piloto de Servicios (02/10/2026: la baja de cuentas con historia, las
+condiciones del piloto y sus políticas;
+[`Z_SERVICIOS_ARQUITECTURA.md` §135](Z_SERVICIOS_ARQUITECTURA.md)) **no
+necesitó ninguna migración**. Al 02/10/2026 la
 última **escrita y aplicada** es la **0096** (las rutas opacas de las imágenes
 de Servicios): ejecutada a mano en Supabase y verificada en solo lectura ese
 día (19:51 UTC) **sin divergencias**, también con las seis puertas de esquema

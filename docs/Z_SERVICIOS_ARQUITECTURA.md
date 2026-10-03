@@ -24,6 +24,11 @@ migraciones. Ese mismo día, la **Parte VIII** (§122 en adelante) cerró en el
 código cinco de las políticas que el sistema todavía no imponía (P29, P5, P2,
 P51 y P101), con la migración **0096**, que se aplicó a mano en Supabase y se
 verificó ese mismo día (19:51 UTC) en solo lectura, **sin divergencias** (§131).
+Y la **Parte IX** (§135 en adelante), también ese día, cerró la salida del
+piloto gratuito: la historia contractual impide la baja automática (F21,
+decisión provisional), las Condiciones piloto v1 quedaron preparadas sin
+publicar y se consolidaron las políticas operativas de la primera versión.
+Sin migración nueva.
 
 ## Estado
 
@@ -45,9 +50,12 @@ verificó ese mismo día (19:51 UTC) en solo lectura, **sin divergencias** (§13
 | **Migración 0094** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (14:28 UTC) en solo lectura: **sin divergencias** (§102). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y **no se deshace**: se corrige hacia delante (§104) |
 | **Política operativa congelada (G18)** | **técnicamente cerrada; únicamente queda pendiente el QA físico** (§118). Cada reserva guarda al confirmarse los nueve plazos y topes con los que después se decide, y solo se decide con esos: cambiar la configuración ya no cambia una reserva hecha |
 | **Migración 0095** | **APLICADA** a mano en Supabase y verificada el 01/10/2026 (18:05 UTC) en solo lectura: **sin divergencias** (§118). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y no se deshace |
-| **Políticas de la primera versión** | **consolidadas el 02/10/2026** (§121): 105 políticas iniciales. De las 96 decisiones, 43 decididas para la primera versión, 14 valores provisionales y 25 que siguen necesitando a la empresa |
+| **Políticas de la primera versión** | **consolidadas el 02/10/2026** (§121) y puestas al día ese mismo día (§144): 110 políticas iniciales. De las 96 decisiones, 45 decididas para la primera versión, 14 valores provisionales, 19 que siguen necesitando a la empresa y 10 que no aplican a la primera versión |
 | **Cinco políticas cerradas en el código** | **implementadas y probadas el 02/10/2026** (§122): rutas opacas (P29), sin «a domicilio» (P5), solo en soles (P2), la capacidad fuera de lo público (P51) y el piloto por perfiles (P101). Código en `Edson`, **sin desplegar** |
 | **Migración 0096** | **APLICADA** a mano en Supabase y verificada el 02/10/2026 (19:51 UTC) en solo lectura: **sin divergencias** (§131). Las seis puertas de esquema, con la conexión y el rol reales de la API, la reconocen. Ya es histórica: no se edita, y no se deshace |
+| **La baja y la historia contractual (F21)** | **decisión provisional, implementada el 02/10/2026** (§136): una cuenta que es parte de un pedido o de una reserva no se borra sola; `DELETE /auth/me` contesta 409 `service_history_requires_support` sin tocar nada. La anonimización definitiva, pendiente de validación legal |
+| **Condiciones piloto v1** | **preparadas, no publicadas** (§139; `Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`). Pendientes de aprobación empresarial y legal. En Supabase no hay ninguna condición de contratación publicada |
+| **Políticas del piloto gratuito** | **consolidadas el 02/10/2026** (§140–§144): sin dinero, solo fichas gratuitas o «a consultar», solo adultos, sin sala propia ni grabaciones. Sin migración nueva |
 | **Los seis incrementos** | **técnicamente cerrados** (§119): quedan el QA físico, las decisiones de la empresa y las integraciones externas (§120) |
 | **Pagos** | **no existen**: solo se contrata lo gratuito; lo que tiene precio se detiene sin cobrar y la base no admite un pedido con precio (§68). `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**; la pasarela, `none`. Los pagos de la plataforma siguen **apagados** |
 | **Bloqueo para encender** | **Resuelto** (§12): la 0089 aplicada y verificada, y `DELETE /auth/me` corregido en `Edson` |
@@ -4206,6 +4214,10 @@ petición tiene (`SKIP LOCKED`); una fila que falla se deshace sola y se
 reintenta en la pasada siguiente; no duplican avisos; no mueven dinero; y
 dicen cuántas recordaron, cerraron, quedan sin verificar y saltaron.
 
+> *Al 02/10/2026 (§142):* lo de «cada fila» solo era verdad para
+> `tasks/run`. El barrido de retenciones vencía el lote entero en una
+> sentencia y un fallo lo deshacía todo; se corrigió ese día.
+
 **Sin un planificador externo no hay recordatorios automáticos ni cierre
 automático oportuno**: solo ocurren cuando alguien lanza el barrido desde
 administración. Quién lo ejecutará, y cada cuánto, es una decisión operativa
@@ -4237,6 +4249,11 @@ depósitos en producción.** Si aparece un defecto:
    sus archivos: las evidencias son de personas reales.
 
 ## 105. Lo que sigue pendiente y NO se implementó
+
+> *Al 02/10/2026 (Parte IX, §136):* F21 tiene una **decisión provisional
+> implementada**: la baja automática de una cuenta con historia de Servicios
+> se bloquea. Lo que sigue describe lo que pasaba hasta entonces, y es lo que
+> seguiría pasando si alguien borrara el perfil a mano en la base.
 
 > **F21 · La baja de quien presta se lleva su historia. Sin resolver, y es
 > lo más importante que queda antes de encender la contratación.** Hoy, si
@@ -5533,3 +5550,483 @@ dinero.
 Sigue pendiente lo de §130 menos la 0096: el **QA físico**, las cuatro
 políticas que dependen de la operación o de trabajo futuro, y lo de la empresa
 (**F21, la primera**).
+
+> *Ese mismo día:* F21 recibió una decisión provisional y se implementó
+> (Parte IX, a continuación).
+
+# Parte IX · La salida del piloto gratuito (02/10/2026)
+
+## 135. Estado
+
+Último cierre técnico y documental de Servicios antes de pasar a la mejora
+de las vistas. No es un incremento nuevo ni añade funciones: deja impuesta la
+decisión provisional sobre la baja de cuentas (F21), prepara las condiciones
+del piloto y fija las políticas operativas de la primera versión.
+
+| | |
+|---|---|
+| **F21 · la baja y la historia contractual** | **decisión provisional, implementada** (§136): `DELETE /auth/me` contesta 409 `service_history_requires_support` si la persona es parte de un pedido o de una reserva de Servicios. La anonimización definitiva sigue pendiente de validación legal |
+| **Condiciones piloto v1** | **preparadas, no publicadas** (§139): el texto, el guion que dice su huella y el procedimiento con las rutas de administración. Pendientes de aprobación empresarial y legal |
+| **Políticas del piloto gratuito** | **consolidadas** (§140–§144): sin dinero, solo fichas gratuitas o «a consultar», solo adultos, Perú, virtual y presencial, sin sala propia ni grabaciones |
+| **Migraciones** | **ninguna nueva.** La 0086–0096 siguen intactas y con sus huellas (§145) |
+| **Banderas** | apagadas: `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING`, `FEATURE_SERVICE_PAYMENTS`; pasarela `none` |
+| **Despliegue** | ninguno: sin push, PR, merge, Change Sets ni cambios en AWS, GitHub o Supabase |
+
+Son **políticas técnicas y operativas provisionales**, adoptadas por
+indicación de Edson para la primera versión. **No son un dictamen legal ni
+una resolución formal de la empresa.**
+
+## 136. F21: la historia contractual impide la baja automática
+
+**Lo que pasaba.** Borrar la cuenta de quien presta se llevaba en cascada sus
+servicios (0090) y, con ellos, las reservas pasadas y las canceladas, los
+pedidos, lo que aceptó quien contrató, las atenciones, los casos con su
+expediente y las reseñas (§105). La de quien contrata dejaba todo eso sin su
+nombre y se llevaba su nota y sus evidencias. Lo único que frenaba era una
+reserva confirmada y por venir (0093).
+
+**La decisión, provisional.** Mientras no exista la anonimización definitiva,
+el flujo normal de baja **no destruye ni deja a medias** esa historia: una
+cuenta con historia contractual no se borra sola, y la respuesta dice que la
+cierra soporte. Una cuenta sin ella se borra como hasta ahora.
+
+**Dónde.** En la única puerta de la baja, `identity/baja.py`, dentro de la
+transacción de `DELETE /auth/me`. La autoridad de qué es historia contractual
+es `services/conservacion.py`. No hay otra ruta de la aplicación que borre un
+perfil.
+
+**Qué frena.** Todo nace al confirmar una reserva (`reserva.confirmar`, el
+único sitio que escribe un pedido y una reserva) y cuelga de ese pedido o de
+esa reserva. Son nueve tablas, y frenan en **cualquier estado**:
+
+| Tabla | Qué es | Cómo se llega a la persona |
+|---|---|---|
+| `service_orders` | el pedido | es quien contrató (`client_id`) o quien prestó (`provider_id`) |
+| `service_bookings` | la reserva: confirmada, pasada o cancelada | lo mismo |
+| `service_booking_intakes` | la nota de quien contrata | por su reserva |
+| `service_booking_acceptances` | las condiciones aceptadas | por su pedido |
+| `service_booking_events` | el historial **de una reserva** | por su reserva |
+| `service_attendances` | la atención, también cerrada | por su reserva |
+| `service_incidents` | el caso: abierto, retirado, resuelto, apelado o cerrado | por su reserva |
+| `service_incident_entries` | el expediente: mensajes, evidencias, resoluciones, la apelación, notas | por su caso |
+| `service_reviews` | la reseña: publicada, pendiente u oculta | por su reserva |
+
+Se mira **por la parte de la reserva, no por quien escribió una línea**:
+quien resolvió un caso desde administración figura en el expediente y no es
+parte de la reserva; su cuenta no se frena por eso. Y se miran las nueve
+aunque hoy ninguna fila de las otras siete pueda existir sin su reserva: la
+comprobación no depende de que eso siga siendo verdad.
+
+**Qué no frena**, y por qué. Las otras diecinueve tablas de Servicios están
+clasificadas en `conservacion.NO_FRENAN`; una tabla nueva sin clasificar pone
+una prueba en rojo.
+
+| Clase | Tablas | Qué pasa con la baja |
+|---|---|---|
+| **Documental sensible** | `service_providers`, `service_provider_applications`, `…_documents`, `…_credentials`, `…_application_events`, `…_application_submissions` | La postulación y sus documentos de identidad, en cualquier estado, se borran con la cuenta y sus archivos (S7, sin cambios) |
+| **Operativa descartable** | `services`, `service_versions`, `service_version_images`, `service_events`, las cinco de la agenda y `service_holds` | Un servicio que nadie contrató no obliga a nadie: se va con la cuenta, **sin retiro previo**, y sus imágenes con él. Una retención que no llegó a reserva, también |
+| **Dato derivado** | `saved_services` | Lo guardado se va con quien lo guardó, o con el servicio |
+| **De la plataforma** | `service_policies`, `service_categories` | No son de ninguna persona |
+
+Tres casos que se decidieron con esta clasificación, y no por accidente:
+
+- **Solo una postulación**, en borrador, enviada, aprobada, rechazada o
+  suspendida: no frena. No hay obligación contractual, y sus documentos son
+  datos personales que no deben sobrevivir a la cuenta.
+- **Un servicio publicado sin ninguna contratación**: la baja se permite
+  directamente; no hace falta retirarlo antes.
+- **Abrir una pantalla, buscar, guardar un servicio, recibir una sugerencia o
+  configurar la agenda**: nada de eso frena.
+
+**El orden de `DELETE /auth/me`.**
+
+| Paso | Qué | Si falla |
+|---|---|---|
+| 0 | La base tiene la 0089 completa | 503 `account_deletion_unavailable` |
+| **0b** | **Sus servicios y su perfil, en fila; y ¿tiene historia contractual?** | **409 `service_history_requires_support`**; si no se puede mirar, **503** |
+| 1 | Se apuntan sus conversaciones y los servicios que ofrecía | — |
+| 2 | Se borra en la base **sin confirmar**, y se fuerzan las comprobaciones diferidas | 409 `account_deletion_blocked` (ventas, saldos, pedidos; y la reserva por venir de la 0093, que sigue detrás) |
+| 3 | Se borran sus archivos | 503 `account_deletion_storage_failed`; la transacción se deshace |
+| 4 | Se confirma | — |
+| 5 | Lo ajeno de las conversaciones que creó, en segundo plano | se registra |
+
+El paso 0b va **antes de apuntar, de borrar y de llamar a Storage**: cuando
+contesta 409 o 503 no se ha escrito nada ni se ha tocado un archivo, y la
+transacción (que solo tenía cerrojos) se deshace.
+
+**La respuesta.** 409, con el estilo de los códigos de Servicios:
+
+```json
+{"error": {"code": "service_history_requires_support",
+           "message": "Tu cuenta tiene reservas o atenciones de Z Servicios que debemos conservar, y no se puede eliminar de forma automática. Escribe a soporte para atender tu solicitud.",
+           "details": null}}
+```
+
+No dice qué tiene ni cuánto, y **no promete cerrarla**: hoy nadie puede
+cerrar esa cuenta sin destruir su historia. El registro de la API, para
+soporte, nombra las familias (nunca cuántas filas). Repetir la petición
+contesta lo mismo.
+
+**La consulta.** Una sola sentencia con dos `EXISTS` por familia (como quien
+contrató y como quien prestó). No cuenta ni carga filas. Entra por los índices
+que ya existían (`…_de_la_persona`, `…_del_prestador`, la clave de la reserva
+en cada tabla): con los recorridos secuenciales desactivados, el plan no tiene
+ninguno.
+
+**Si no se puede mirar.** Cualquier fallo al tomar los cerrojos o al
+consultar es un 503 `account_deletion_unavailable`: no se borra, no se llama
+a Storage y no se contesta 204. No se recuerda: la siguiente petición vuelve
+a mirar. Y se mira **también con Servicios apagado**: apagar la bandera no
+convierte su historia en descartable.
+
+**No exige que las migraciones estén aplicadas.** Se miran las familias
+cuyas tablas existen: una base con la 0093 y sin la 0094 mira lo de la
+contratación, y una anterior a la contratación no tiene historia que mirar y
+la baja sigue como siempre. Lo que cierra la baja es **no poder mirar**, no
+que falte una tabla. (La primera versión de este cambio exigía las tablas y
+contestaba 503 para siempre sin ellas: lo encontró la revisión.)
+
+**A la vez.** Para que no nazca una reserva entre mirar y borrar, la baja
+toma tres cerrojos antes de mirar y los conserva hasta terminar:
+
+1. los servicios que ofrece, con el mismo cerrojo que toma quien confirma
+   (`FOR NO KEY UPDATE`);
+2. sus horarios apartados (`FOR UPDATE`): confirmar uno necesita esa fila. Y
+   **no** el servicio ajeno en el que apartó, que dejaría esperando a quienes
+   contratan con ese prestador mientras la baja borra archivos;
+3. su perfil (`FOR UPDATE`): escribir un pedido o una reserva a su nombre
+   comprueba la clave ajena a `profiles`, y espera.
+
+En ese orden, que es el de la confirmación. Así, o la reserva nace antes y la
+baja la ve (409), o la baja termina antes y la reserva no nace: las dos
+mitades están probadas, la segunda sin dejarla al azar. Dos bajas a la vez
+de una cuenta con historia son dos 409; de una sin ella, dos 204.
+
+Los dos primeros cerrojos no esperan más que una contratación (5 segundos):
+si alguien retiene esa fila más tiempo, la baja no se queda colgada; es un
+503 que se reintenta. El del perfil espera lo que haga falta, como antes.
+
+**Lo que no cubre.**
+
+- **Borrar el perfil a mano en Supabase** sigue disparando las cascadas de la
+  0090. No se añadió una restricción en la base: no hay otro camino de la
+  aplicación que lo provoque, y haría falta una migración.
+- **Soporte todavía no puede cerrar una cuenta con historia sin destruirla.**
+  No existe la herramienta: hasta que se construya la anonimización, esa
+  cuenta sigue abierta y su solicitud se atiende a mano. Cómo y en qué plazo
+  es una decisión de la empresa (IV-14, IV-18). Por eso el aviso no promete
+  cerrarla.
+- **Quien resolvió un caso sí puede borrar su cuenta**: no es parte de la
+  reserva. Si era la única otra persona habilitada, una apelación pendiente
+  se queda sin quien la revise (§141).
+- **Apartar un horario a la vez que se borra la propia cuenta** puede acabar
+  en un error de clave ajena que `reserva.retener` no trata. Lo señaló la
+  revisión leyendo el código: es anterior a este bloque, no se reprodujo y
+  no se tocó.
+- **Google Play** pide poder solicitar el borrado de la cuenta desde la
+  aplicación (S8). Con historia de Servicios la aplicación remite a soporte,
+  igual que ya hace con las cuentas con ventas.
+
+## 137. Un interbloqueo que ya estaba
+
+Al probar la carrera entre confirmar una reserva y borrar la cuenta apareció
+un fallo **anterior a este cambio**: si quien contrata confirmaba una reserva
+y borraba su cuenta a la vez, la baja contestaba **500**. Borrar el perfil
+dejaba en `NULL` la retención que la confirmación tenía bloqueada, y la
+confirmación esperaba al perfil para escribir su pedido: PostgreSQL deshacía
+una de las dos (40P01). Sin la comprobación nueva ocurría ocho de ocho veces.
+
+No se perdía nada —la transacción de la baja se deshacía entera—, pero era un
+500. Dos correcciones:
+
+- la baja toma primero el cerrojo de la retención, como quien confirma
+  (§136): ya no se esperan la una a la otra;
+- y, como última red, un interbloqueo o un cerrojo que no llega al borrar es
+  un **503 `account_deletion_unavailable`**: nada borrado, ningún archivo
+  tocado, y repetir la petición la termina.
+
+## 138. El móvil
+
+`service_history_requires_support` se trata como una baja bloqueada
+(`SettingsScreen`): el aviso dice que hay que escribir a soporte, no que se
+reintente. Sin ese cambio, el código nuevo habría caído en «inténtalo de
+nuevo en unos momentos», que es mentira: reintentar no cambia nada.
+
+Tiene **su propio texto**, en los tres idiomas. El de las otras bajas
+bloqueadas dice «escríbenos y la cerramos contigo»; con reservas eso sería
+prometer lo que hoy no se puede hacer, y dice solo que se escriba a soporte.
+
+La protección **no depende del móvil**: está en la API.
+
+## 139. Condiciones piloto v1
+
+Preparadas y **sin publicar**: `docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`
+tiene el estado, lo que falta, la correspondencia de cada apartado con lo
+que impone el sistema y el procedimiento exacto de publicación.
+
+- **El texto** está en `docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.txt`, en texto
+  plano (la aplicación lo pinta tal cual). Diecisiete apartados. Lleva dos
+  marcadores a la vista: la aprobación empresarial y legal, y el canal de
+  soporte, que no se inventó.
+- **El mecanismo es el que ya existía** (§67): `service_policies`, tipo
+  `booking_terms`, con las rutas de administración (borrador, vista previa,
+  publicar). Sin tabla, esquema ni migración nuevos, y sin un `INSERT` que se
+  salte la auditoría.
+- **`apps/api/scripts/condiciones_del_piloto.py`** no publica: comprueba el
+  texto, lo deja como lo va a guardar el servidor y dice su huella. Se niega
+  mientras quede un marcador. La huella se compara con la de la vista previa
+  del borrador **antes** de publicar, porque publicar no tiene vuelta atrás
+  por la API: una publicada solo se sustituye con otra versión.
+- **Los plazos del texto son los de la configuración de fábrica**, y una
+  prueba los compara.
+
+Lo que ya hacía el sistema, y ahora está probado con este texto: sin
+condiciones publicadas no se reserva; la reserva guarda la versión y la
+huella del servidor; el cuerpo de la petición no puede inventarlas; no hay
+aceptación silenciosa; un borrador, una sustituida o una retirada no se
+aceptan; una versión nueva no cambia lo ya aceptado; y un reintento no crea
+dos aceptaciones.
+
+## 140. El piloto es gratuito
+
+**No hay ningún camino de dinero**, y este bloque no abrió ninguno:
+
+| | |
+|---|---|
+| Qué se confirma | solo lo gratuito (`CONTRATABLES = ("free",)`), y la base no deja guardar un pedido con importe (§68) |
+| Cobro | `FEATURE_SERVICE_PAYMENTS=false`, `SERVICE_PAYMENTS_PROVIDER=none`, sin adaptador |
+| Comisión, saldo, transferencias, devoluciones, contracargos, comprobantes | no existen en Servicios |
+| Efecto económico de un caso | es una solicitud que siempre «no aplica» |
+
+**Qué fichas se publican.** De fábrica, `SERVICES_CATALOG_PRICE_MODELS` pasa
+de los cuatro modelos a **`free,on_request`**: una ficha es gratuita o dice
+«a consultar». Una ficha con importe (`fixed`, `from`) se puede escribir en
+borrador, pero **no se puede enviar a revisión** (`price_model_not_allowed`,
+que la aplicación ya explica: «Z no admite ese tipo de precio por ahora»).
+«A consultar» se publica y se ve, y **no se reserva en Z**
+(`service_booking_quote_required`): es solo información.
+
+Es la palanca que ya existía, con otro valor de fábrica; los cuatro modelos
+siguen en el código y en la base, y volver a admitirlos es de una versión con
+pagos.
+
+Dos límites, los dos conocidos:
+
+- **Actúa al enviar.** El borrador acepta un importe, y aprobar y publicar no
+  repiten la comprobación: una versión con importe enviada antes del cambio
+  se podría publicar. En Supabase no hay ningún servicio.
+- **El formulario del móvil todavía ofrece los cuatro.** El prestador se
+  entera al enviar. Quitar de la vista los dos que no se admiten es parte de
+  la mejora de vistas.
+
+## 141. Responsables y apelaciones
+
+Las reglas ya existían y funcionaban; no se cambió código. Se añadieron dos
+pruebas donde faltaba evidencia.
+
+| Regla | Dónde | Evidencia |
+|---|---|---|
+| Solo administración resuelve casos, aprueba prestadores y publica servicios; moderación revisa | `permissions.py` (`ROLES_QUE_DECIDEN`) | ya probado |
+| **Nadie resuelve su propia actuación**: quien es parte de la reserva no resuelve, no lee el expediente de administración y no modera la reseña | `posventa._es_parte` → 409 `service_incident_resolver_conflict` | ya probado con quien presta; **añadido** con quien contrata |
+| Nadie se admite a sí mismo, ni revisa, aprueba o publica su servicio | `permissions.exigir_ajena`, `catalogo._ajeno` → 403 `service_self_review_forbidden`; y la base (0086, 0090) | ya probado el primer paso; **añadidos** aprobar y publicar |
+| Quien resolvió no resuelve su apelación | `posventa.resolver` → 409 | ya probado |
+| **Si no hay otra persona habilitada, el servidor no ofrece la apelación** ni la acepta | `atencion.hay_otro_decisor`: cuenta perfiles `admin` distintos de quien resolvió y de las dos partes | ya probado |
+
+Cuenta solo el rol `admin`: un moderador no resuelve apelaciones. No se
+nombró a nadie: quiénes son esas personas lo decide la empresa (IV-8 a
+IV-13). Soporte atiende las bajas bloqueadas (§136) y el responsable técnico
+vigila las tareas de §142.
+
+**Un límite conocido.** Si la segunda persona deja de estar habilitada
+**después** de que alguien apele, el caso se queda en `appealed`: quien
+resolvió no puede cerrarlo. Se destraba dando el rol `admin` a otra persona.
+No se construyó un sistema de turnos ni de reasignación.
+
+## 142. Los procesos sin planificador
+
+No se construyó infraestructura de planificación. Hay dos rutas, solo para
+administración, que hoy lanza una persona desde el panel:
+
+| Ruta | Qué hace |
+|---|---|
+| `POST /admin/services/holds/expire` | marca vencidas las retenciones cuyo plazo pasó. No es la autoridad: el vencimiento ya lo decide la hora |
+| `POST /admin/services/tasks/run` | recuerda las reservas próximas y cierra las atenciones terminadas con código cuyo plazo de confirmación pasó |
+
+| Propiedad | `holds/expire` | `tasks/run` |
+|---|---|---|
+| Se ejecuta a mano | sí | sí |
+| Idempotente | sí | sí |
+| Por lotes (200; tope de 1000) | sí | sí |
+| Una fila con error no detiene el lote | **corregido aquí** | sí |
+| Mueve dinero | no | no |
+
+**Lo corregido.** El barrido de retenciones vencía el lote con una sola
+sentencia y un solo `commit`: una fila que fallaba deshacía todas y la ruta
+contestaba 500 (§103.4 decía otra cosa). Ahora cada retención va en su punto
+de guardado: la que falla se deshace sola, se registra y queda para la
+siguiente pasada. Quien retiene o suelta un horario sigue venciendo lo de
+ese servicio todo junto, como antes.
+
+No es lo mismo que `tasks/run`, que confirma cada fila: aquí el lote sigue
+siendo **una transacción con un solo `commit`**. Sus cerrojos duran todo el
+lote, un fallo al confirmar lo deshace entero, y la respuesta no dice cuántas
+se saltó (queda en el registro). Basta para que una fila con error no tumbe
+las demás; el vencimiento, además, no depende del barrido.
+
+**Para desplegar** hace falta un planificador externo que llame a las dos
+rutas, y decidir quién lo vigila y cada cuánto (F13, G12, IV-44, IV-45,
+V-53). Sin él no hay recordatorios ni cierre automático: solo ocurren cuando
+alguien los lanza. Su programación se resuelve en la fase de despliegue.
+
+## 143. Los valores de la primera versión
+
+Son los de fábrica: un servidor al que nadie le configuró nada aplica esta
+política. No se cambió ninguno de los plazos; todos coincidían.
+
+| Qué | Valor | Ajuste |
+|---|---|---|
+| País | Perú | operación: solo se publican condiciones para `PE` |
+| Moneda | PEN | `SERVICES_CATALOG_CURRENCIES` |
+| Modalidades | virtual y presencial; sin domicilio | `SERVICES_CATALOG_MODALITIES` |
+| Modelos de precio | gratuito y «a consultar» | `SERVICES_CATALOG_PRICE_MODELS` (**cambiado aquí**, §140) |
+| Retención del horario | 10 minutos | `SERVICES_BOOKING_HOLD_MINUTES` |
+| Retenciones por persona | 3 | `SERVICES_BOOKING_MAX_ACTIVE_HOLDS` |
+| Anticipación de la agenda | 2 horas | `SERVICES_AGENDA_NOTICE_MINUTES=120` |
+| Horizonte | 60 días | `SERVICES_AGENDA_HORIZON_DAYS` |
+| Cambios de horario | 1, con 24 horas | `SERVICES_BOOKING_RESCHEDULE_MAX`, `…_MIN_HOURS` |
+| Llegada | 15 minutos | `SERVICES_ATTENTION_CHECKIN_MINUTES` |
+| Tolerancia | 15 minutos | `SERVICES_ATTENTION_TOLERANCE_MINUTES` |
+| Confirmación | 24 horas | `SERVICES_ATTENTION_CONFIRMATION_HOURS` |
+| Incidencia | 48 horas | `SERVICES_INCIDENT_WINDOW_HOURS` |
+| Apelaciones | 1, en 5 días | `SERVICES_INCIDENT_APPEALS_MAX`, `…_APPEAL_DAYS` |
+| Reseña | 30 días, con moderación previa | `SERVICES_REVIEW_WINDOW_DAYS`, `SERVICES_REVIEWS_PREMODERATION` |
+| Recordatorio | 24 horas | `SERVICES_BOOKING_REMINDER_HOURS` |
+
+Lo que el sistema **no impone** y depende de la operación:
+
+- **Solo personas adultas.** No hay fecha de nacimiento ni verificación
+  documental de la mayoría de edad, y no se construyó. Se sostiene en que el
+  piloto es una lista cerrada que elige la empresa (P101), en que las
+  condiciones lo declaran y en que el prestador presenta su documento de
+  identidad, que revisa una persona.
+- **Categorías reguladas y servicios de alto riesgo.** No hay una marca en
+  las categorías. Solo administración las crea, no se sembró ninguna y cada
+  servicio se aprueba a mano.
+- **Perú.** El código no bloquea países: sin condiciones publicadas para su
+  país nadie postula ni confirma, y solo se publicarán para `PE`.
+- **Servicios virtuales.** Z no ofrece sala, no graba y no almacena
+  grabaciones. La integración de 100ms es posterior.
+
+## 144. Las decisiones, puestas al día
+
+`Z_REQUISITOS_Y_DECISIONES.md` recoge cinco políticas nuevas (P106–P110) y
+reclasifica seis de las 96 decisiones. Ninguna decisión financiera se da por
+resuelta.
+
+| Decisión | Antes | Ahora |
+|---|---|---|
+| **F21** · la baja de quien presta | requiere a la empresa | **decidida para la primera versión, provisional**: bloqueo. La anonimización definitiva sigue en IV-18 |
+| **G16** · la baja con un caso o con evidencias | requiere a la empresa | **decidida para la primera versión, provisional**: la frena el mismo bloqueo |
+| **F16, F17, F18, G13** · comprobantes, comisión, devoluciones y efectos económicos | requieren a la empresa | **no aplican al piloto gratuito**; pendientes para una versión con pagos |
+
+Quedan 45 decididas para la primera versión, 14 valores provisionales, 19
+que requieren a la empresa, 3 integraciones externas, 5 mejoras futuras y 10
+que no aplican a la primera versión.
+
+## 145. Pruebas, mutaciones y revisión (02 y 03/10/2026)
+
+| Qué | Resultado |
+|---|---|
+| Backend completo con PostgreSQL 17 | 4489 aprobadas, ninguna saltada |
+| Backend completo sin PostgreSQL | 3180 aprobadas; 1309 se saltan por no tener PostgreSQL |
+| Móvil | 3659 aprobadas (la batería completa) y `tsc --noEmit` sin errores |
+| Huellas de las migraciones 0086–0096 | intactas: las pruebas las recalculan |
+| `git diff --check` y búsqueda de secretos | limpios |
+
+**Pruebas nuevas.**
+
+- `test_servicios_conservacion.py`: la clasificación de las 28 tablas; que
+  frena todo lo que cuelga de un pedido o de una reserva; cada familia, por
+  sí sola, para las dos partes; la reserva por venir, la pasada, la
+  cancelada, la atención cerrada, el caso en cuatro estados y la reseña
+  publicada y oculta; lo que no frena; el token de otra persona; el fallo al
+  mirar; con Servicios apagado; una base sin todas las migraciones; dos bajas
+  a la vez; la baja que espera a una contratación en curso; la carrera real
+  entre confirmar y borrar y, sin dejarla al azar, la mitad en que la baja va
+  primero; que no deja esperando a terceros ni se queda colgada; y el plan
+  por índices.
+- `test_baja_de_cuenta.py`: el contrato sin PostgreSQL (el orden, los códigos
+  y la última red del interbloqueo).
+- `test_servicios_condiciones_piloto.py`: el texto y la publicación (§139).
+- `test_servicios_politicas_del_piloto.py`: los valores de fábrica, que no
+  hay camino de dinero, que nadie resuelve lo suyo y los dos barridos.
+
+**Mutaciones dirigidas:** 52, las 52 muertas (38 sin PostgreSQL y 14 con
+él), en un árbol de trabajo desechable. Cada una rompe una sola cosa del
+código confirmado y comprueba que una prueba se pone en rojo:
+
+- quitar de la comprobación **cada una de las nueve familias**, de la forma
+  más discreta (reclasificándola como descartable);
+- no mirar la historia, mirarla después de borrar y de Storage, dar por
+  limpia la cuenta que no se pudo mirar, seguir adelante con historia, mirar
+  solo a quien contrató o solo a quien prestó, mirar por quien escribió y no
+  por la parte, no mirar con Servicios apagado, exigir las tablas;
+- cada cerrojo: ninguno, el perfil antes que la retención, el servicio ajeno
+  otra vez, sin límite de espera, y el límite aplicado también al perfil;
+- el código del error, una respuesta que dice las familias, un aviso que
+  promete cerrar la cuenta (en la API y en el móvil), y el interbloqueo otra
+  vez como 500;
+- el guion de las condiciones (preparar un texto con marcadores, no
+  normalizarlo) y su texto: un plazo distinto del configurado, un canal de
+  soporte inventado, un reembolso prometido, y cada frase que la revisión
+  hizo corregir. Estas se prueban **sin** la prueba de la huella, para que
+  las mate la comprobación de contenido;
+- el modelo de precio de fábrica, el cobro encendido de fábrica, una ficha
+  con importe que se envía, y el barrido que deshace el lote.
+
+**Revisión independiente.** En solo lectura y sobre todo el cambio: las
+tablas contractuales, la amplitud del bloqueo, el orden frente a Storage, los
+cerrojos, cada frase de las condiciones frente al código, la aceptación, las
+promesas económicas, menores y categorías reguladas, la apelación, los
+barridos y la documentación. **Ningún hallazgo bloqueante.** Confirmó que no
+se omite ninguna tabla contractual, que no hay otro camino de la aplicación
+que borre un perfil y que antes del 409 o del 503 solo hay lecturas y
+cerrojos. Encontró quince cosas:
+
+| Hallazgo | Qué se hizo |
+|---|---|
+| La baja exigía las tablas de Servicios: sin ellas, 503 para siempre | **Corregido** (§136), con una prueba que fallaba |
+| Para ponerse en fila, la baja de quien apartó un horario bloqueaba el servicio de otro prestador mientras borraba archivos | **Corregido**: bloquea su retención |
+| La baja esperaba esos cerrojos sin límite | **Corregido**: lo que una contratación; después, 503 |
+| El aviso decía «la cerramos contigo», y hoy nadie puede cerrarla | **Corregido** en la API y en el móvil (§138) |
+| Cinco frases de las condiciones decían más que el sistema, y faltaba la lista de lo prohibido | **Corregido el texto**: la conservación, los avisos de seguridad, el cambio de horario, la suspensión y el alcance de «sin pagos» |
+| El texto obliga al prestador, y el prestador no lo acepta nunca | **Documentado**: faltan las condiciones del prestador (S1), que no eran de este bloque |
+| Un texto con marcadores también se podría publicar: el freno está en el guion | **Documentado** en el procedimiento. Un freno en el servidor ampliaría el alcance |
+| La prueba de la carrera podía pasar ejercitando una sola rama | **Añadida** la mitad en que la baja va primero, sin dejarla al azar |
+| La lista de promesas prohibidas del texto era corta | **Ampliada** |
+| Los plazos del texto se comparan con los de fábrica, no con los de cada entorno | **Documentado** como comprobación previa a publicar |
+| Filas de la documentación que quedaron viejas (F13, F19, F20, G12) y que no decían «sin desplegar» | **Corregidas** |
+| El formulario del móvil ofrece los cuatro modelos de precio y el borrador los acepta | Sin tocar: es de la mejora de vistas (§140) |
+| La regla del precio actúa solo al enviar | **Documentado** (§140). En Supabase no hay servicios |
+| El barrido de retenciones sigue siendo una sola transacción | **Documentado** (§142) |
+| Apartar un horario a la vez que se borra la propia cuenta: un error de clave ajena no tratado, anterior a este bloque | Sin tocar; anotado (§136) |
+
+No se amplió el alcance por lo que no se pudo reproducir.
+
+## 146. Lo que sigue pendiente
+
+La lógica de Servicios queda cerrada para pasar a la mejora de las vistas.
+Siguen pendientes, y nada de esto se hizo aquí:
+
+- el **push** de `Edson`, el CI remoto y el PR;
+- el **despliegue** con todo apagado, la lista del piloto y `FeatureServices`
+  con un Change Set revisado (§128, §134);
+- el **planificador** de los dos barridos (§142);
+- el **QA físico** (`Z_QA_FISICO_PENDIENTE.md`);
+- la **aprobación empresarial y legal** de las Condiciones piloto v1, su
+  canal de soporte y **publicarlas**;
+- la **anonimización definitiva** de la historia contractual y los plazos de
+  conservación (F21, F20, IV-18, IV-19), con validación legal;
+- quién atiende **soporte** y la segunda persona de las apelaciones;
+- las **integraciones externas**: 100ms, la pasarela, el destino del push;
+- todo lo de **pagos**, que es de otra versión.

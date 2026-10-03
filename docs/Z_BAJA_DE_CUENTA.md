@@ -12,6 +12,7 @@ impidiendo la baja, y cómo aplicar y verificar la **0089**. Escrito el
 | **0086, 0087 y 0088** | **Aplicadas** en Supabase. La 0088 se verificó el 29/09/2026 en una sesión de solo lectura, **sin divergencias** (§9) |
 | **0089** | **Aplicada en Supabase y verificada el 29/09/2026 en solo lectura: sin divergencias** (§15). La primera vez se aplicó la versión de `c6d3cd6`, sin los frenos de las órdenes con dinero; la verificación lo detectó y la versión completa se ejecutó encima |
 | **`DELETE /auth/me`** | Corregido en la rama `Edson`, con la puerta `_hay_0089` endurecida (§5). **El código de `Edson` no está desplegado**: la API de producción sigue con el backend anterior hasta el próximo despliegue |
+| **Historia de Servicios (F21)** | Desde el 02/10/2026, una cuenta que es parte de un pedido o de una reserva de Servicios **no se borra sola**: 409 `service_history_requires_support` (§16). Decisión provisional; en `Edson`, sin desplegar |
 | **`FEATURE_SERVICES`** | **Apagada**, en local y en producción |
 | **Pagos** | **Apagados.** En Supabase hay 0 órdenes de Cursos y 0 de Eventos (§15) |
 | **QA físico** | Pendiente (`docs/Z_QA_FISICO_PENDIENTE.md`) |
@@ -394,6 +395,10 @@ responde 409 y la persona tiene que escribir a soporte:
   devoluciones decididas.
 - **Una orden pagada** de un evento o de un curso, aunque no haya saldo
   (0089, sección 8).
+- **Historia contractual de Servicios** (desde el 02/10/2026, §16): un
+  pedido, una reserva o lo que cuelga de ellos, como quien contrató o como
+  quien prestó, vivos o cerrados. Con su propio código:
+  `service_history_requires_support`.
 
 **No se tocaron** porque son obligaciones con dinero de por medio o con otras
 personas. Qué hacer con ellos (plazo de conservación, si se anonimizan los
@@ -867,3 +872,53 @@ y quedó cazada. Rompen, una por una:
   - quitar los dos frenos de las órdenes con dinero;
   - borrar en cascada un historial de dinero;
 - **Servicios**: no poner en fila los borradores de condiciones.
+
+## 16. La historia contractual de Servicios impide la baja automática (02/10/2026)
+
+**F21, decisión provisional de la primera versión.** El detalle está en
+`Z_SERVICIOS_ARQUITECTURA.md` §136; aquí, lo que cambia en la baja.
+
+Hasta ahora la regla de §1 valía también para Servicios, con un resultado
+que nadie había decidido: la baja de quien presta se llevaba en cascada sus
+servicios y, con ellos, las reservas pasadas, lo aceptado, las atenciones,
+los casos y las reseñas; y la de quien contrata dejaba todo eso sin su
+nombre y se llevaba su nota y sus evidencias. Solo frenaba una reserva por
+venir.
+
+**Ahora `DELETE /auth/me` mira antes de nada** (paso 0b, después de la
+puerta de la 0089 y antes de apuntar, de borrar y de llamar a Storage) si la
+persona es parte de un pedido o de una reserva de Servicios:
+
+| Caso | Respuesta |
+|---|---|
+| Tiene historia contractual, viva o cerrada | **409 `service_history_requires_support`**. No se ha borrado ni tocado nada; la solicitud la atiende soporte |
+| No se pudo mirar | **503 `account_deletion_unavailable`**. No se ha tocado nada; se puede reintentar |
+| No la tiene | La baja sigue como en §5 |
+
+- No frenan: una postulación en cualquier estado, un servicio que nadie
+  contrató, una retención que no llegó a reserva y lo guardado. Se siguen
+  borrando con la cuenta, como antes.
+- La respuesta no dice qué tiene la persona ni cuánto. El registro, para
+  soporte, nombra las familias.
+- Se mira también con Servicios apagado.
+- Para que no nazca una reserva entre mirar y borrar, la baja deja en fila
+  los servicios que la persona ofrece, sus horarios apartados y su perfil, en
+  el orden de quien confirma una reserva. Los dos primeros no esperan más de
+  5 segundos: si no llegan, 503 y se reintenta.
+- No exige que las migraciones de Servicios estén aplicadas: se mira lo que
+  la base tiene, y sin las tablas de la contratación la baja sigue como
+  siempre.
+- El aviso pide escribir a soporte y **no promete cerrar la cuenta**.
+
+**Un fallo que ya estaba.** La baja de quien contrata y una confirmación suya
+a la vez se interbloqueaban, y la baja contestaba 500. Con el orden nuevo de
+los cerrojos no ocurre, y si PostgreSQL deshace la baja por un cerrojo
+(40P01, 55P03) es un 503 `account_deletion_unavailable`: nada borrado, y
+repetir la petición la termina.
+
+**Lo que sigue pendiente.** La anonimización definitiva (qué se conserva sin
+nombrar a la persona, durante cuánto tiempo y cómo cierra soporte esa
+cuenta), que necesita validación legal y cambiar la clave de la 0090. Hoy
+soporte **no puede** cerrar una cuenta con historia sin destruirla. Y quien
+borre la fila del perfil a mano en Supabase sigue disparando las cascadas:
+el bloqueo protege el camino de la aplicación, que es el único que hay.
