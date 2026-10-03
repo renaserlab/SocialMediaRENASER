@@ -13,6 +13,7 @@ impidiendo la baja, y cómo aplicar y verificar la **0089**. Escrito el
 | **0089** | **Aplicada en Supabase y verificada el 29/09/2026 en solo lectura: sin divergencias** (§15). La primera vez se aplicó la versión de `c6d3cd6`, sin los frenos de las órdenes con dinero; la verificación lo detectó y la versión completa se ejecutó encima |
 | **`DELETE /auth/me`** | Corregido en la rama `Edson`, con la puerta `_hay_0089` endurecida (§5). **El código de `Edson` no está desplegado**: la API de producción sigue con el backend anterior hasta el próximo despliegue |
 | **Historia de Servicios (F21)** | Desde el 02/10/2026, una cuenta que es parte de un pedido o de una reserva de Servicios **no se borra sola**: 409 `service_history_requires_support` (§16). Decisión provisional; en `Edson`, sin desplegar |
+| **Lo que dicen las condiciones** | Desde el 03/10/2026 las dos condiciones del piloto (prestador y contratación) lo dicen: con reservas, la cuenta no se elimina de forma automática y hay que escribir a soporte. Preparadas, **sin publicar** |
 | **`FEATURE_SERVICES`** | **Apagada**, en local y en producción |
 | **Pagos** | **Apagados.** En Supabase hay 0 órdenes de Cursos y 0 de Eventos (§15) |
 | **QA físico** | Pendiente (`docs/Z_QA_FISICO_PENDIENTE.md`) |

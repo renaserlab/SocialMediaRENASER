@@ -111,7 +111,7 @@ tocan. El QA físico sigue pendiente
 ## II. Políticas decididas para la primera versión
 
 **«Políticas iniciales v1»**, vigentes desde el 02/10/2026. Alcance: la
-primera versión técnica, en Perú y sin pagos. Son 110, numeradas P1–P110 (las
+primera versión técnica, en Perú y sin pagos. Son 113, numeradas P1–P113 (las
 cinco últimas, del cierre de salida del piloto). La
 columna «Cómo se sostiene hoy» dice qué lo respalda en el código, en la base o
 en la operación; la última, qué identificadores históricos cierra o toca.
@@ -282,7 +282,7 @@ en la operación; la última, qué identificadores históricos cierra o toca.
 
 | P | Política | Cómo se sostiene hoy | Ids |
 |---|---|---|---|
-| P98 | Los procesos automáticos son idempotentes y por lotes | `POST /admin/services/tasks/run` y `POST /admin/services/holds/expire`: a mano mientras no haya planificador | F13, G12 |
+| P98 | Los procesos automáticos son idempotentes y por lotes | `POST /admin/services/tasks/run` y `POST /admin/services/holds/expire`: a mano, o cada 5 minutos con el planificador (P113; preparado, sin activar) | F13, G12 |
 | P99 | Una fila fallida no derriba todo el lote | Cada fila se confirma antes de pasar a la siguiente. En el barrido de retenciones cada fila va en su punto de guardado (corregido el 02/10/2026: antes un fallo deshacía el lote) | — |
 | P100 | Los pagos, Stripe, las devoluciones automáticas y las transferencias siguen apagados | `FEATURE_SERVICE_PAYMENTS=false`, pasarela `none`, sin adaptador | F16–F18, G13 |
 | P101 | Servicios se habilita progresivamente: equipo interno, prestadores piloto, clientes piloto y público | `SERVICES_PILOT_PROFILE_IDS` y `SERVICES_PUBLIC_ACCESS` (`services/acceso.py`): con la bandera encendida solo entran los perfiles del piloto; la lista vacía no deja entrar a nadie y la apertura general se escribe | — |
@@ -319,6 +319,9 @@ provisionales, no un dictamen legal. El detalle está en
 | P108 | Las condiciones de contratación del piloto son un texto versionado con huella, y sin una publicada no se reserva | Mecanismo `booking_terms` (0093). El texto (**Condiciones piloto v1**) está preparado y **sin publicar**: pendiente de aprobación empresarial y legal | F9 |
 | P109 | Solo participan personas adultas | Lo declaran las condiciones, y el piloto es una lista cerrada que elige la empresa (P101). **Sin verificación de edad** | F19 |
 | P110 | Z no proporciona sala propia para los servicios virtuales, no graba y no almacena grabaciones | No existe sala ni grabación en Servicios. 100ms es una integración posterior | G17 |
+| P111 | Las condiciones del prestador del piloto son un texto versionado con huella, operativo y provisional, y sin unas publicadas nadie postula | Mecanismo `provider_terms` (0086). El texto (**Condiciones del prestador v1**, 19 apartados) está preparado y **sin publicar**. Sin parámetros: documentación mínima, y volver a postular sigue sin decidirse. La revisión legal es posterior | S1, S2 |
+| P112 | Un precio con importe no se ofrece, no se guarda, no se envía, no se publica y no se configura | La aplicación solo ofrece «Gratis» y «A consultar»; el borrador y publicar contestan 422 `service_price_model_not_allowed`; `SERVICES_CATALOG_PRICE_MODELS=free,on_request` va fijo en la plantilla de AWS | C6 |
+| P113 | Los procesos automáticos los lanza un planificador cada 5 minutos, con alarma, y la contratación no se enciende sin él | `POST /internal/services/tasks/run` con un secreto que vive en el secreto de la API; regla de EventBridge **preparada y sin activar**; la plantilla rechaza encender la contratación sin planificador | F13, G12 |
 
 Lo que se comprobó que ya funcionaba y no se cambió: los plazos de la tabla
 III (todos coincidían con lo acordado), que nadie resuelve su propia
@@ -423,7 +426,7 @@ identificadores históricos viene («nueva» es una que no estaba anotada).
 | IV-10 | Responsable de las incidencias y de moderar reseñas | Solo administración resuelve casos y publica reseñas | G15, G11 | Antes del piloto |
 | IV-11 | Segunda persona autorizada para las apelaciones | Política (P84–P86): una segunda persona distinta revisa las apelaciones y nadie resuelve lo suyo. Con una sola persona en administración el servidor no las ofrece. Falta nombrarla | G15, G8 | Antes del piloto |
 | IV-12 | Responsable de las suspensiones, y la pauta para redactar motivos | Solo administración suspende, con motivo escrito que el prestador lee | C10, S11, C14 | Antes del piloto |
-| IV-13 | Responsable de supervisar los procesos automáticos | Los lanza a mano una persona de administración; nadie los vigila. Falta nombrar al responsable técnico | F13, G12 | Antes del piloto |
+| IV-13 | Responsable de supervisar los procesos automáticos | Los lanza a mano una persona de administración; nadie los vigila. Falta nombrar al responsable técnico. **03/10:** con el planificador, un fallo avisa al correo de alertas de la pila; sigue sin nombrarse a una persona | F13, G12 | Antes del piloto |
 | IV-14 | Canal y horario oficial de soporte | Sin canal ni horario documentados. La app remite a soporte cuando una cuenta no se puede borrar, también por su historia de Servicios (P106), y las Condiciones piloto v1 llevan un marcador en su lugar | S8 | Antes del piloto |
 | IV-15 | Protocolo de emergencia | Un caso por seguridad se puede abrir sin plazo; no hay protocolo de respuesta | G7 | Antes del piloto |
 
@@ -431,7 +434,7 @@ identificadores históricos viene («nueva» es una que no estaba anotada).
 
 | # | Decisión | Mientras tanto | Ids | Cuándo |
 |---|---|---|---|---|
-| IV-16 | Términos y condiciones definitivos (del prestador y de la contratación) | No hay ninguno publicado: nadie puede postular ni confirmar una reserva. Las de contratación tienen texto preparado (**Condiciones piloto v1**), pendiente de aprobación empresarial y legal; las del prestador, no | S1, S2, F9, D12 | Antes del piloto |
+| IV-16 | Términos y condiciones definitivos (del prestador y de la contratación) | No hay ninguno publicado: nadie puede postular ni confirmar una reserva. Las dos tienen texto operativo provisional preparado (**Condiciones piloto v1** y, desde el 03/10, **Condiciones del prestador v1**), sin publicar; la revisión legal es posterior y no impide el piloto cerrado | S1, S2, F9, D12 | Antes del piloto |
 | IV-17 | Política de privacidad definitiva | Se conserva lo descrito en cada identificador | S9, S10, S12 | Antes del piloto |
 | IV-18 | **F21**: la anonimización definitiva. Qué se conserva, se anonimiza o se elimina de la historia de una reserva cuando alguien borra su cuenta, y cómo cierra soporte esa cuenta | **Bloqueo provisional (P106)**: una cuenta con historia de Servicios no se borra sola. Todavía no hay forma de cerrarla sin destruir esa historia | F21, G16 | **Con validación legal; antes de abrir al público** |
 | IV-19 | Tiempo legal de conservación de reservas, aceptaciones, pagos, incidencias, resoluciones, documentos, evidencias y grabaciones | Todo se guarda sin plazo, hasta la baja de la cuenta | S6, S8, S13, C12, F20, G10 | Antes del piloto |
@@ -472,8 +475,8 @@ todas quedan pendientes para una versión con pagos.
 | IV-41 | Consecuencias por inasistencias reiteradas | Ninguna: la inasistencia es una declaración | G6 | Antes de abrir al público |
 | IV-42 | Umbrales de advertencia, suspensión y expulsión | No hay | G6 | Antes de abrir al público |
 | IV-43 | Qué pasa con las reservas futuras al suspender a un prestador | Suspenderlo no cancela sus reservas ni avisa a nadie | nueva | Antes del piloto |
-| IV-44 | Quién ejecutará y vigilará los barridos | Una persona de administración, a mano, mientras no haya planificador. Sin nombrar | F13, G12 | Antes del piloto |
-| IV-45 | Frecuencia definitiva de recordatorios y cierres | Un recordatorio 24 horas antes (provisional); sin frecuencia de ejecución | G12 | Antes del piloto |
+| IV-44 | Quién ejecutará y vigilará los barridos | Una persona de administración, a mano, mientras no haya planificador. Sin nombrar. **03/10:** los ejecuta la regla de EventBridge (preparada, sin activar); los vigila quien lea el correo de alertas | F13, G12 | Antes del piloto |
+| IV-45 | Frecuencia definitiva de recordatorios y cierres | Un recordatorio 24 horas antes (provisional). **03/10:** se ejecutan cada 5 minutos (P113) | G12 | Antes del piloto |
 | IV-46 | Política definitiva de cancelación antes de activar pagos | Hasta la hora de inicio, sin coste y sin plazo configurable | G1, F6 | Antes de pagos |
 | IV-47 | Valores definitivos de los nueve campos de la política operativa | Los provisionales de la tabla III, congelados en cada reserva | G2, G3, G4, G7, G8, G11, G18 | Tras el piloto |
 | IV-48 | Activación pública, perfiles y fecha del piloto | Las tres banderas, apagadas. El piloto ya se puede limitar a los perfiles que se elijan (P101) | nueva | — |
@@ -489,7 +492,7 @@ ni 100ms, ni un planificador, ni una pasarela.
 | V-50 | Qué servicios tendrán sala virtual | Ninguno | Qué categorías o modalidades la llevan | G17 |
 | V-51 | Acceso, duración y grabación de las salas | No aplica | Quién entra, cuánto dura y si se graba (con IV-22 y IV-23) | G17 |
 | V-52 | Destino profundo de las notificaciones push | Tocar un aviso abre la app, sin llevar a la reserva ni al caso. La bandeja de avisos sí lleva | Nada: es una tarea técnica de la plataforma, pendiente desde el Incremento 1 | tarea de plataforma |
-| V-53 | Proveedor y configuración del planificador externo | La ruta de las tareas existe y está protegida; nadie la llama | Qué servicio la llama y cada cuánto (con IV-44 y IV-45) | F13, G12 |
+| V-53 | Proveedor y configuración del planificador externo | La ruta de las tareas existe y está protegida; nadie la llama. **03/10:** EventBridge, por la ruta interna con secreto; preparado en la plantilla y sin activar (P113) | Qué servicio la llama y cada cuánto (con IV-44 y IV-45) | F13, G12 |
 | V-54 | Proveedor definitivo de pagos | Pasarela `none`; no hay adaptador para Servicios | Qué proveedor, y todo el grupo IV-D | F17 |
 
 La puesta en marcha (desplegar `Edson`, el CI remoto, la revisión del PR y la
@@ -543,7 +546,7 @@ sigue más abajo, en la sección de su incremento.
 
 | Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
 |---|---|---|---|---|---|---|---|
-| **S1** | Texto de las condiciones del prestador, por país | `REQUIERE_EMPRESA` | Sin texto. Requiere revisión legal (IV-16) | Nadie puede enviar su postulación hasta que la empresa publique sus condiciones | No hay ninguna política publicada; Inc. 1, decisión 3 | Bloquea la admisión | Antes del piloto |
+| **S1** | Texto de las condiciones del prestador, por país | `REQUIERE_EMPRESA` | Texto operativo provisional preparado y sin publicar (P111, 03/10). La revisión legal es posterior (IV-16) | Nadie puede enviar su postulación hasta que la empresa publique sus condiciones | No hay ninguna política publicada; Inc. 1, decisión 3 | Bloquea la admisión | Antes del piloto |
 | **S2** | Volver a postular tras un rechazo | `REQUIERE_EMPRESA` | Sin decidir: es un parámetro de las condiciones del prestador (va con S1) | Hoy el sistema contesta que todavía no está decidido: ni sí ni no | `service_reapplication_not_configured` (`admision.py`) | Quien fue rechazado no puede volver a postular | Al publicar S1 |
 | **S3** | Documentos y credenciales adicionales por país o categoría | `REQUIERE_EMPRESA` | Principio decidido (P14): solo en las categorías que lo necesiten. Falta la matriz documental (IV-4) | Hoy solo se pide el mínimo: identidad y, en una empresa, representación legal | Inc. 1, decisión 5 | Sin matriz no se habilita ninguna categoría regulada (P7) | Antes de abrir una categoría regulada |
 | **S4** | Varias personas de una empresa y teléfono verificado | `MEJORA_FUTURA` | No existe en la primera versión | Una empresa postula con una sola cuenta | Inc. 1, límites | Ninguno para el piloto | Después del piloto |
@@ -632,7 +635,7 @@ sigue más abajo, en la sección de su incremento.
 | **F10** | Qué pasa con una reserva si cambia la agenda | `DECIDIDA_PRIMERA_VERSION` | P62: nada (igual que E11) | La reserva sigue | Ver E11 | Ninguno | Tras el piloto |
 | **F11** | Feriados y reservas ya hechas | `DECIDIDA_PRIMERA_VERSION` | P48: los marca el prestador; una reserva ya hecha no se toca | Marcar un feriado no cancela lo reservado | Ver E4 | Ninguno | Tras el piloto |
 | **F12** | Avisar cuando vence lo apartado | `MEJORA_FUTURA` | No se avisa: la app lo dice en pantalla | Si se pasa el tiempo, hay que volver a elegir horario | Inc. 5, decisión 11 | Ninguno | Tras el piloto |
-| **F13** | Quién llama al barrido y cada cuánto | `INTEGRACION_EXTERNA` | Falta el planificador (V-53) y quién lo vigila (IV-44, IV-45) | Las tareas existen y hoy las lanza a mano una persona de administración; nada las llama solas | `POST /admin/services/tasks/run` y `…/holds/expire`: sin planificador | Sin él no hay recordatorios ni cierre automático | Antes del piloto |
+| **F13** | Quién llama al barrido y cada cuánto | `INTEGRACION_EXTERNA` | Planificador preparado y sin activar (P113, 03/10). Falta nombrar a quien lo vigila (IV-44) | Las tareas existen y hoy las lanza a mano una persona de administración; nada las llama solas | `POST /admin/services/tasks/run` y `…/holds/expire`: sin planificador | Sin él no hay recordatorios ni cierre automático | Antes del piloto |
 | **F14** | «A consultar» y «desde»: cómo se cotizan | `NO_APLICA_PRIMERA_VERSION` | P6: las solicitudes de propuesta quedan fuera; no se contratan desde Z | Esos servicios se anuncian, pero no se reservan | Inc. 5, decisión 3 | Ninguno | Antes de pagos |
 | **F15** | Monedas y países de la contratación | `DECIDIDA_PRIMERA_VERSION` | Perú y PEN (P1, P2); las condiciones son por país del prestador | Igual que C5 | Ver C5 | Ver C5 | Al ampliar países |
 | **F16** | Comprobantes | `NO_APLICA_PRIMERA_VERSION` | **No aplica al piloto gratuito (P107).** Pendiente para una versión con pagos: requiere aprobación empresarial antes de pagos (IV-28, IV-29) | No se emiten: lo gratuito no tiene importe | Sin cobro | Bloquea los pagos | En una versión con pagos |
@@ -657,7 +660,7 @@ sigue más abajo, en la sección de su incremento.
 | **G9** | Si una apelación puede deshacer una atención dada por realizada | `DECIDIDA_PRIMERA_VERSION` | P75: no; una atención cerrada es final | La apelación puede cambiar lo decidido, no borrar que la atención ocurrió | Inc. 6, decisión 7; 0094 | Ninguno | Tras el piloto |
 | **G10** | Evidencias: formatos, peso, cuántas y cuánto se conservan | `DECIDIDA_PRIMERA_VERSION` | P77–P79 y P88: PDF, JPEG, PNG y WebP, 10 MB, 10 por parte, privadas y con enlace firmado de 120 s. El plazo de conservación requiere revisión legal (IV-19) | Cada parte puede subir hasta diez pruebas, que solo ve quien debe | `EVIDENCIAS_POR_PARTE=10`; `posventa.py` | Ninguno | Con la política de privacidad |
 | **G11** | Reseñas: plazo, moderación, motivos para esconder e identidad | `PROVISIONAL_CONFIGURABLE` | 30 días y moderación previa encendida (P91, P93). Lo demás está decidido (P89–P97): una por atención, sin nombre de quien la escribe, respuesta del prestador | Hay un mes para reseñar y Z revisa la reseña antes de publicarla | `SERVICES_REVIEW_WINDOW_DAYS=30` (congelado), `SERVICES_REVIEWS_PREMODERATION=true` | Alguien tiene que moderar (IV-10) | Tras el piloto (IV-47) |
-| **G12** | Recordatorios y quién llama a los barridos | `INTEGRACION_EXTERNA` | Falta el planificador (V-53). El recordatorio es 24 horas antes, valor provisional | Sin planificador, los recordatorios solo salen cuando alguien lanza la tarea a mano | `SERVICES_BOOKING_REMINDER_HOURS=24`; ningún planificador llama a la ruta | Sin recordatorios ni cierre automático | Antes del piloto |
+| **G12** | Recordatorios y quién llama a los barridos | `INTEGRACION_EXTERNA` | Planificador preparado y sin activar (P113, 03/10). El recordatorio es 24 horas antes, valor provisional | Sin planificador, los recordatorios solo salen cuando alguien lanza la tarea a mano | `SERVICES_BOOKING_REMINDER_HOURS=24`; ningún planificador llama a la ruta | Sin recordatorios ni cierre automático | Antes del piloto |
 | **G13** | Qué pasa con un efecto económico solicitado cuando haya pagos | `NO_APLICA_PRIMERA_VERSION` | **No aplica al piloto gratuito (P107).** Pendiente para una versión con pagos: requiere aprobación empresarial antes de pagos (IV-32, IV-36) | Hoy siempre «no aplica»: nada se cobra y nada se devuelve | No existe el estado «ejecutado» (P83) | Bloquea los pagos | En una versión con pagos |
 | **G14** | La aceptación del prestador (a domicilio) | `NO_APLICA_PRIMERA_VERSION` | P57: a domicilio sigue desactivada; su uso futuro es de la empresa (IV-7) | No se construye mientras no haya domicilio | No construido | Ninguno | Si se decide abrir domicilio |
 | **G15** | Quién decide en administración y cuántas personas hacen falta | `REQUIERE_EMPRESA` | Política (P84–P86): administración resuelve, una segunda persona distinta revisa las apelaciones y nadie resuelve lo suyo. Falta nombrar a las personas (IV-10, IV-11, IV-12) | Hoy decide solo quien tiene el rol de administración; con una sola persona no hay apelaciones | `ROLES_QUE_DECIDEN` (`permissions.py`) | Sin dos personas no se cumple P84–P86 | Antes del piloto |
@@ -3829,3 +3832,40 @@ piloto y cuándo; nada de pagos.
 No se publicó ninguna condición, no se escribió en Supabase, no se ejecutó
 nada en AWS, no se activó ninguna bandera y no se movió dinero. El código
 sigue en `Edson`, **sin push**.
+
+### Cierre operativo del piloto gratuito (03/10/2026)
+
+Lo que faltaba para poder encender el piloto. **Sin migración nueva** (no hay
+0097), sin pagos y sin ningún servicio nuevo en AWS. El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md`, Parte X (§147–§156); el orden y los comandos,
+en `Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`.
+
+**Qué se preparó:**
+
+- **Condiciones del prestador v1 (P111).** Texto operativo y provisional de 19
+  apartados, con su huella. **Sin publicar.** El canal de soporte es el que ya
+  existía en la aplicación: no se inventó ninguno.
+- **Condiciones de contratación v1**, sin marcadores pendientes y con el mismo
+  canal. **Sin publicar.**
+- **El precio, cerrado en todos los pasos (P112).** Era de fábrica; ahora
+  tampoco se ofrece, ni se guarda en un borrador, ni se publica, ni se puede
+  configurar en un despliegue.
+- **El planificador (P113).** Una ruta interna con secreto y una regla de
+  EventBridge cada 5 minutos, con alarma. **Sin activar.** La contratación no
+  se puede encender sin él.
+- **Las vistas**, para poder presentar la aplicación: `Z_MATRIZ_DE_VISTAS.md`.
+
+**Qué cambia de estado.** Ninguna decisión cambia de clasificación y los
+recuentos son los mismos: 45 decididas, 14 provisionales, 19 de la empresa, 3
+integraciones, 5 mejoras y 10 que no aplican. Cambia lo que dicen S1, F13,
+G12, V-53, IV-13, IV-16, IV-44 e IV-45: lo que era «falta» es «preparado, sin
+publicar» o «preparado, sin activar».
+
+**Qué NO se decidió.** La revisión legal de las dos condiciones; si quien fue
+rechazado puede volver a postular (S2); la anonimización definitiva (F21); a
+qué persona le toca vigilar los procesos (hoy avisa al correo de alertas de la
+pila); quién participa en el piloto y cuándo; nada de pagos.
+
+No se hizo push, no se abrió ningún PR, no se publicó ninguna condición, no se
+escribió en Supabase, no se ejecutó nada en AWS y no se activó ninguna
+bandera. El código sigue en `Edson`.

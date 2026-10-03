@@ -2041,8 +2041,9 @@ aprobar).
 
 - [ ] En el formulario de un servicio, elegir «precio fijo» o «desde» y
       enviarlo: la lista de lo que falta dice que Z no admite ese tipo de
-      precio por ahora, y no se envía. (El formulario todavía ofrece los
-      cuatro tipos: retirarlos de la vista es parte de la mejora de vistas.)
+      precio por ahora, y no se envía. (**Desde el 03/10/2026 el formulario
+      ya no los ofrece**: este punto pasa a «el formulario solo ofrece Gratis
+      y A consultar», en la sección del cierre del piloto.)
 - [ ] Un servicio gratuito se envía, se publica y se reserva. Uno «a
       consultar» se publica y se ve, y al intentar reservar un horario la
       aplicación explica que no se reserva en Z.
@@ -2062,3 +2063,106 @@ aprobar).
 - [ ] Con **una** sola cuenta de administración, tras resolver un caso las
       partes no ven «Apelar». Con dos, sí; y quien resolvió no puede resolver
       la apelación.
+
+## Z Servicios · cierre del piloto y mejora de vistas (03/10/2026)
+
+Lo de abajo está comprobado con pruebas que leen el código, con tipos y con la
+exportación web. **Nada se ha probado en un teléfono.** Es lo único que queda
+por probar antes de encender el piloto, junto con el planificador contra la
+cuenta de AWS.
+
+Hace falta: un Android con navegación de tres botones, un iPhone, y tres
+cuentas (una prestadora aprobada, una clienta del piloto, una de
+administración).
+
+**Primero, lo que más riesgo tiene.**
+
+- [ ] **Nota de voz en Android.** Grabar una nota de 10 segundos: el reloj
+      empieza en 0:00 y sube; no se para sola. (Por el código nativo, antes
+      se paraba en el primer instante marcando 5:00.)
+- [ ] **Audio de presentación en Android** (Perfil › editar): grabar 10
+      segundos; se guarda con 10 segundos, no con 60.
+- [ ] **El chat se abre por el final.** Una conversación larga se abre en el
+      último mensaje. Con dos mensajes, ver dónde quedan (pueden quedar
+      pegados abajo: es el efecto del modo de chat).
+- [ ] **El teclado no tapa.** En Android y en iPhone, en el formulario de un
+      servicio, en cancelar una reserva, en abrir un caso y en escribir una
+      reseña: el último campo se ve mientras se escribe, y no queda un hueco
+      entre el campo y el teclado.
+
+**Notas de voz y chat.**
+
+- [ ] En una instalación limpia, tocar el micrófono: sale el permiso; al
+      concederlo, empieza a grabar sin tener que tocar otra vez.
+- [ ] Negar el permiso: explica por qué hace falta y ofrece abrir Ajustes.
+- [ ] Mientras graba: un punto que late, la duración y «cancelar».
+- [ ] Al parar: se puede escuchar, borrar y enviar. Enviando, lo dice.
+- [ ] Con una nota grabada, tocar «atrás» en la cabecera y el Atrás de
+      Android: pregunta antes de salir. Cancelar se queda; salir la descarta.
+- [ ] Grabando, tocar el nombre de la cabecera (abre el perfil) y volver: el
+      micrófono se cerró y la nota está en la previa.
+- [ ] Abrir un chat con mala cobertura: se ve «cargando», no una pantalla en
+      blanco. Sin red: error con «reintentar». Sin mensajes: lo dice.
+- [ ] Dos envíos fallidos (modo avión): reintentar el primero manda el
+      primero.
+- [ ] Un vídeo y un PDF adjuntos se abren fuera de la aplicación.
+
+**Servicios.**
+
+- [ ] El formulario de un servicio ofrece solo «Gratis» y «A consultar». No
+      hay campo de importe ni de moneda.
+- [ ] El buscador de servicios no ofrece «con precio», moneda ni rango.
+- [ ] En el detalle de una reserva (quien contrata y quien presta), tirar
+      hacia abajo la actualiza.
+- [ ] Elegir horario sin red y tocar «Reintentar» al volver la red: carga el
+      calendario y los horarios del día.
+- [ ] Administración › Condiciones: con un borrador ya creado, escribir otro
+      y guardar: avisa, lo escrito sigue ahí, y guardar otra vez lo reemplaza.
+
+**Botones y avisos, en cualquier pantalla.**
+
+- [ ] Tocar dos veces rápido un botón que guarda o envía: la acción ocurre
+      una vez, y el botón enseña la espera sin cambiar de tamaño.
+- [ ] Un aviso breve (toast) sale por debajo de la cámara o la isla, no
+      tapado por ella.
+- [ ] Con «reducir movimiento» activado: los esqueletos de carga no laten y
+      el punto de grabación queda fijo.
+
+**Cursos, Eventos y Productos.**
+
+- [ ] Pagar una entrada o un producto en el navegador y volver a la
+      aplicación: el pedido se actualiza solo. Volver sin cobertura: el
+      pedido sigue a la vista y sale un aviso breve, no una pantalla de error.
+- [ ] El checkout de productos no nace en rojo; tocar «Reservar y continuar»
+      con algo sin rellenar marca lo que falta y no envía nada.
+- [ ] Sin escribir el país, las condiciones piden el país; con uno sin
+      condiciones, dice que no hay; sin red, error con reintento.
+- [ ] La galería de un producto para en cada foto.
+- [ ] En Eventos, la tarjeta destacada abre la ficha, y hay una fila a «Mis
+      entradas».
+- [ ] Al volver a una ficha de curso, de evento o de producto, lo que se
+      estaba viendo no desaparece mientras se recarga.
+
+**Cuenta.**
+
+- [ ] Registrarse con confirmación de correo: lleva al acceso.
+- [ ] Con el teléfono en inglés, una contraseña equivocada se marca en el
+      campo, no en un diálogo.
+- [ ] Eliminar la cuenta: tras confirmar dos veces, la fila enseña que está
+      en curso y no se puede volver a pulsar.
+
+**Los procesos automáticos**, una vez encendido el planificador
+(`Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`, paso 8).
+
+- [ ] Apartar un horario y no confirmarlo: pasados sus minutos, en menos de
+      cinco más aparece como vencido en la bandeja de administración, sin que
+      nadie lo lance.
+- [ ] Una reserva para mañana: llega el recordatorio.
+- [ ] Una atención terminada con código y sin confirmar: a las 24 horas se
+      cierra sola.
+- [ ] La alarma de los procesos está en `OK`.
+
+Sustituye a «Las tareas sin planificador» de la sección anterior: con el
+planificador encendido ya no hace falta lanzarlas a mano (se puede seguir
+haciendo). Y a la nota sobre el formulario de precios: ya no ofrece los
+cuatro.

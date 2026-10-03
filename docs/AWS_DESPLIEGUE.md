@@ -465,6 +465,22 @@ Al 02/10/2026 **no queda ninguna migración pendiente**: la última, la 0096,
 está aplicada y verificada (§131 de ese documento). Lo siguiente es el
 despliegue con todo apagado. Nada de esto se ejecutó en AWS.
 
+**Desde el 03/10/2026** la plantilla trae además:
+
+| Parámetro o clave | Dónde | Valor inicial |
+|---|---|---|
+| `PlanificadorDeServicios` | parámetro, en los dos perfiles | `No` |
+| `VersionDelSecretoDelPlanificador` | parámetro, en los dos perfiles: un contador que se sube al rotar el secreto | `1` |
+| `SERVICES_CATALOG_PRICE_MODELS` | fijo en la plantilla, sin parámetro | `free,on_request` |
+| `SERVICES_TASKS_TOKEN` | en el secreto; lo genera `-Accion Secretos` | — |
+
+Con `PlanificadorDeServicios=Si` se crean una regla de EventBridge (cada 5
+minutos), su destino HTTPS, su conexión, un rol que solo puede invocar ese
+destino y una alarma. **`FeatureServiceBooking=true` exige
+`PlanificadorDeServicios=Si`**: sin él, CloudFormation rechaza el plan. El
+orden completo, con lo que se espera en cada Change Set, está en
+`Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`. Nada de esto se ejecutó en AWS.
+
 ### 7 · GitHub
 
 En **Settings > Secrets and variables > Actions > Variables**, crear la variable

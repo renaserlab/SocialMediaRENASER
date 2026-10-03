@@ -909,3 +909,118 @@ domicilio» se seguiría nombrando bien: la etiqueta sigue en los tres idiomas.
 contestan lo mismo que con Servicios apagado, y las pantallas ya sabían
 pintarlo («no disponible»). La protección es del servidor; esconder la
 entrada es comodidad.
+
+## Cierre de vistas para la presentación (03/10/2026)
+
+Ninguna pantalla ni ruta nueva, ninguna biblioteca nueva y ningún rediseño. Se
+arregló lo que hacía que una vista **mintiera, se quedara colgada o dejara
+hacer dos veces lo mismo**. Todo está comprobado con tipos (`tsc`), con las
+pruebas que leen el código fuente y con la exportación web; **nada se ha
+probado en un teléfono** (`Z_QA_FISICO_PENDIENTE.md`).
+
+### Componentes comunes
+
+| Componente | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `Button` | un segundo toque mientras la acción seguía en curso la lanzaba otra vez; al esperar, el botón cambiaba de tamaño | si `onPress` devuelve una promesa, queda ocupado hasta que termina y no admite otro toque (`lib/toqueConCerrojo.ts`, con pruebas que lo ejecutan); el indicador va encima del texto, sin cambiar de ancho ni de alto; se hunde un poco al tocarlo; el lector de pantalla lo anuncia como ocupado |
+| `StateView` (cargando) | solo un texto | indicador y texto, anunciado como progreso |
+| `Skeleton` | latía aunque el teléfono pidiera reducir el movimiento | sin bucle con «reducir movimiento» |
+| `Input` | el error no se anunciaba | el error se anuncia al aparecer |
+| `Toast` | no se anunciaba, salía a una altura fija (debajo de la cámara en algunos teléfonos) | se anuncia, respeta la zona segura, vibra en un éxito y no rebota con «reducir movimiento» |
+| `AppScreen` | no apartaba el teclado | `teclado` lo aparta, a petición (ver «Servicios») |
+
+### Servicios
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `EditarServicioScreen` | ofrecía «precio fijo» y «desde», que el servidor rechaza | solo «Gratis» y «A consultar»; un borrador antiguo con importe lo dice y no marca ninguna opción |
+| `EditarServicioScreen` | sin categorías, decía «la categoría ya no se cambia» | dice que todavía no hay categorías |
+| `ServiciosScreen` (filtros) | ofrecía «con precio», moneda y rango | solo «Gratis» y «A consultar»; un enlace antiguo con esos filtros se abre sin ellos |
+| 19 formularios de Servicios | el teclado tapaba el campo de abajo | `AppScreen teclado` (`tecladoEnFormularios.test.mts`) |
+| `SelectorDeHorarios` | tras un fallo, «Reintentar» dejaba el día cargando para siempre | reintentar vuelve a pedir el calendario y el día |
+| `AdminServiciosCondicionesScreen` | si ya había un borrador, decía «guardado» y tiraba lo escrito | lo escrito sigue en el formulario; guardar otra vez reemplaza el borrador que había |
+| `ReservaScreen`, `ReservaDelPrestadorScreen` | para ver un cambio de la otra parte había que salir y volver a entrar | tirar hacia abajo la vuelve a pedir |
+| `AdminCatalogoScreen`, `AdminServiciosScreen` | el icono de la cabecera no decía qué abría | tiene nombre para el lector de pantalla |
+| `ListaDeReservas` | las pestañas se anunciaban como casillas | se anuncian como botones |
+| Seis textos | hablaban de «todavía no se puede reservar» o de precios con importe | dicen lo que el piloto hace: se reserva lo gratuito, «a consultar» es informativo |
+
+### Cursos, Eventos y Productos
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `EventoScreen`, `ConfigurarEntradasScreen`, `PedidoDeEntradasScreen`, `CourseScreen`, `LessonScreen`, `EditarProductoScreen`, `MisProductosScreen`, `InventarioDeProductoScreen`, `FotosDeProductoScreen` | al recargar, la pantalla entera volvía a «cargando» y lo que se estaba leyendo desaparecía | «cargando» solo la primera vez |
+| `PedidoDeEntradasScreen`, `PedidoDeProductoScreen` | al volver del pago en el navegador no se enteraban | se recargan al volver a primer plano; si esa recarga falla, el pedido sigue a la vista y se avisa (`pedidoNoSeBorraAlReleer.test.mts`) |
+| `CheckoutDeProductosScreen` | el formulario nacía en rojo; «no hay condiciones» salía también mientras se pedían, cuando fallaba y sin haber escrito el país | los campos se marcan tras el primer intento; cargando, fallo con reintento, falta el país y «no hay» se distinguen |
+| `PedidoDeProductoScreen` | cualquier acción apagaba todos los botones sin decir cuál estaba en curso | el botón pulsado enseña la espera |
+| `ProductoScreen` | añadir a la bolsa dos veces seguidas; la galería paraba entre dos fotos | cerrojo al añadir; la galería encaja foto a foto |
+| `CourseContentEditor`, `EvaluacionScreen`, `CursosScreen` | se podía guardar un módulo, empezar una evaluación o publicar dos veces | cerrojo mientras dura |
+| `LibraryScreen` | un fallo se leía como «no tienes cursos» | error con reintento |
+| `EventsScreen` | la tarjeta destacada no abría la ficha; no había entrada a «Mis entradas» | abre la ficha; hay una fila a «Mis entradas» |
+| `VueltaDelPagoScreen` | mientras verificaba no decía qué | dice que está verificando el pago |
+
+### Cuenta, perfil y publicaciones
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `RegisterScreen` | tras pedir confirmar el correo llevaba a la pantalla de la insignia | lleva al acceso |
+| `LoginScreen`, `RegisterScreen` | reconocían el error por una palabra en español: en inglés y portugués iba a un diálogo | lo reconocen por su clave |
+| `ResetPasswordScreen` | no tenía salida | flecha de vuelta al acceso |
+| `SettingsScreen` | durante la baja la fila seguía igual y se podía volver a pulsar; un fallo al cerrar sesión se perdía | cerrojo e indicador durante la baja; el fallo se dice |
+| `SettingsScreen` | «Verificación de cuenta» llevaba a un botón que no envía nada | la fila solo aparece en desarrollo (**decisión reversible**: es una línea) |
+| `EditPostScreen` | el botón y la acción no usaban la misma regla; un fallo al cargar parecía «no encontrada» | una sola regla; error con reintento |
+| `ProfileScreen`, `ProfileGallery` | un fallo de la galería no ofrecía reintentar | reintento |
+| `services/storage.ts` | un archivo rechazado enseñaba instrucciones para quien administra Supabase | tres mensajes para quien sube el archivo; el detalle va a la consola |
+
+### Notas de voz y chat
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `useGrabadoraDeVoz`, `AudioDePresentacion` | **en Android la duración se leía de `currentTime`, que en `expo-audio` 1.1.1 devuelve ahí la hora de inicio**: por el código nativo, el tope de duración saltaba en el primer tic y la grabación se paraba sola | leen `getStatus().durationMillis`, igual en Android, iOS y web |
+| `useGrabadoraDeVoz` | conceder el permiso por primera vez abortaba la grabación sin decir nada | tras conceder, empieza a grabar |
+| `useGrabadoraDeVoz` | un fallo al pedir el permiso o al arrancar dejaba el micrófono colgado | vuelve a reposo, cierra el grabador y avisa |
+| `BotonDeNotaDeVoz` | nada indicaba que se estaba grabando salvo el reloj | un punto que late (fijo con «reducir movimiento») |
+| `ChatScreen` | salir con una nota grabada la perdía sin preguntar; abrir un perfil dejaba el micrófono abierto | pregunta antes de salir (botón y Atrás de Android); al perder el foco se detiene y la nota queda en la previa |
+| `ChatScreen` | al abrir, pantalla en blanco: no se distinguía cargar, vacío y fallo | los tres estados, con reintento |
+| `ChatScreen` | con dos envíos fallidos, reintentar el primero mandaba el segundo | cada burbuja reintenta lo suyo |
+| `ChatScreen` | un vídeo se abría en el visor de imágenes (pantalla negra); un documento no se abría | se abren fuera de la aplicación |
+| `ChatScreen` | la conversación se abría por el mensaje más antiguo | anclada abajo (modo de chat de FlashList 2) |
+
+No hay gesto de mantener pulsado ni de deslizar para grabar: no existía, y las
+pruebas (`chatSinMantenerPulsado.test.mts`) prohíben añadirlo.
+
+### Visto y no arreglado
+
+No impiden presentar. Quedan anotados porque se vieron:
+
+- **Textos en duro en español** (se ven bien en español; no se traducen): en
+  Historias, en la captura de historias, en el cuestionario de entrada, en la
+  hoja de sesiones, en los recursos de una lección y cuatro en el chat.
+- `ChatScreen`: el gesto de deslizar-atrás de iOS no pregunta por la nota; la
+  franja de error con burbujas ya pintadas no ofrece reintentar; el audio que
+  suena no se para al perder el foco; la miniatura de un vídeo adjunto es un
+  hueco gris; el enlace firmado de un adjunto dura una hora.
+- Notas de voz, tres casos raros (ninguno deja el micrófono abierto): salir
+  del chat mientras la nota se está **enviando** no pregunta, y si la subida
+  falla después, la nota se pierde; si la pantalla se cierra justo mientras
+  se prepara la grabación, el aviso de «no se pudo grabar» sale en otra
+  pantalla; cancelar y detener a la vez puede dejar una previa sin audio.
+- `SettingsScreen`: la fila de «Verificación de cuenta» está escondida, pero
+  la ruta `/verification` sigue abriéndose por enlace directo, con el mismo
+  botón que no envía nada. Quitar la ruta o devolver la fila es una decisión.
+- `EventsScreen`: el «+» de una fila reserva y cancela sin confirmar; la lista
+  parpadea al volver de la ficha.
+- `CursosScreen`: el marcador de guardado solo se distingue por el color.
+- `EditPostScreen`: no se puede dejar sin texto una publicación con adjunto
+  (la API exige texto al editar).
+- `ProductoScreen` en web: el contador de la galería no se actualiza.
+- `PostCard`: el nombre del autor no se recorta a una línea.
+
+### Cómo se comprobó
+
+| Comprobación | Resultado |
+|---|---|
+| `tsc --noEmit` | sin errores |
+| Pruebas del móvil (`scripts/pruebas.mjs`) | 3712 pasan, 0 fallan (140 ficheros) |
+| Exportación web (`expo export --platform web`, sin el `.env` local) | correcta |
+| Expo Doctor | **no ejecutado**: no está instalado en local y descargarlo no estaba autorizado. Este bloque no toca dependencias ni configuración nativa |
+| Teléfono | **no probado** |

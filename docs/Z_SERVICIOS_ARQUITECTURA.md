@@ -5810,14 +5810,9 @@ Es la palanca que ya existía, con otro valor de fábrica; los cuatro modelos
 siguen en el código y en la base, y volver a admitirlos es de una versión con
 pagos.
 
-Dos límites, los dos conocidos:
-
-- **Actúa al enviar.** El borrador acepta un importe, y aprobar y publicar no
-  repiten la comprobación: una versión con importe enviada antes del cambio
-  se podría publicar. En Supabase no hay ningún servicio.
-- **El formulario del móvil todavía ofrece los cuatro.** El prestador se
-  entera al enviar. Quitar de la vista los dos que no se admiten es parte de
-  la mejora de vistas.
+Dos límites, los dos conocidos **y cerrados el 03/10/2026 (§150)**: el
+borrador ya no acepta un importe, publicar repite la comprobación y el
+formulario del móvil solo ofrece los dos modelos que se admiten.
 
 ## 141. Responsables y apelaciones
 
@@ -5876,7 +5871,8 @@ las demás; el vencimiento, además, no depende del barrido.
 **Para desplegar** hace falta un planificador externo que llame a las dos
 rutas, y decidir quién lo vigila y cada cuánto (F13, G12, IV-44, IV-45,
 V-53). Sin él no hay recordatorios ni cierre automático: solo ocurren cuando
-alguien los lanza. Su programación se resuelve en la fase de despliegue.
+alguien los lanza. **Preparado el 03/10/2026 (§151)**: una regla cada 5
+minutos, con alarma; sin activar.
 
 ## 143. Los valores de la primera versión
 
@@ -6016,7 +6012,9 @@ No se amplió el alcance por lo que no se pudo reproducir.
 ## 146. Lo que sigue pendiente
 
 La lógica de Servicios queda cerrada para pasar a la mejora de las vistas.
-Siguen pendientes, y nada de esto se hizo aquí:
+Siguen pendientes, y nada de esto se hizo aquí (la lista puesta al día está en
+§156; el planificador, las condiciones del prestador y el canal de soporte se
+prepararon en la Parte X):
 
 - el **push** de `Edson`, el CI remoto y el PR;
 - el **despliegue** con todo apagado, la lista del piloto y `FeatureServices`
@@ -6030,3 +6028,353 @@ Siguen pendientes, y nada de esto se hizo aquí:
 - quién atiende **soporte** y la segunda persona de las apelaciones;
 - las **integraciones externas**: 100ms, la pasarela, el destino del push;
 - todo lo de **pagos**, que es de otra versión.
+
+# Parte X · El cierre operativo del piloto gratuito (03/10/2026)
+
+La Parte IX cerró la lógica. Esta parte cierra **lo que faltaba para poder
+encender el piloto**: el texto que acepta el prestador, el precio, quién lanza
+los procesos automáticos, las vistas y el orden de despliegue.
+
+No es un incremento: **no hay migración nueva** (0086–0096 intactas, no existe
+la 0097), no hay pagos, no hay un servicio nuevo en AWS y no cambia ningún
+estado ni ninguna tabla.
+
+**Nada de esta parte está desplegado, publicado ni activado.** Está
+implementado y probado en la rama `Edson`. El procedimiento para lo demás es
+[`Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`](Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md).
+
+## 147. Qué cambia
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| Condiciones del prestador (`provider_terms`) | sin texto: nadie podía postular | texto v1 de 19 apartados, listo para publicar (§148) |
+| Condiciones de contratación (`booking_terms`) | con marcadores pendientes | sin marcadores, lista para publicar (§149) |
+| Publicar unas condiciones | a mano, pegando el texto | un guion que compara la huella y no publica si no se le dice (§148) |
+| Precio con importe | se podía guardar en borrador y la app lo ofrecía | no se ofrece, no se guarda, no se envía, no se publica y no se configura (§150) |
+| Vencer retenciones, recordar y cerrar atenciones | solo si alguien de administración lo lanzaba | una regla cada 5 minutos, con alarma (§151) |
+| Encender la contratación sin planificador | posible | la plantilla rechaza el plan (§151) |
+| Vistas | ver §152 | ver §152 |
+
+## 148. Las condiciones del prestador
+
+`docs/Z_SERVICIOS_CONDICIONES_PRESTADOR_V1.txt` es el texto que acepta quien
+postula como prestador: «Condiciones del prestador de Z Servicios — Piloto
+gratuito v1», 19 apartados, texto plano. Su huella (SHA-256 del cuerpo exacto)
+consta en `Z_SERVICIOS_CONDICIONES_PRESTADOR_V1.md` y una prueba la compara
+con el fichero: cambiar una letra sin cambiar el documento falla.
+
+- **Dice que es provisional**: una versión operativa del piloto, sin revisión
+  legal todavía. No promete nada que el sistema no haga; la tabla del
+  documento liga cada apartado con lo que lo sostiene (el sistema, la
+  operación o nadie todavía).
+- **El canal de soporte es el que ya existe en la aplicación** (el Centro de
+  ayuda y su dirección de correo). Una prueba lee esa dirección de
+  `SupportScreen.tsx` y exige que sea la única que aparece en los dos textos:
+  no se inventó ninguna.
+- **Sin parámetros.** No se exige más documentación que la mínima ya decidida
+  (el documento de identidad y, en una empresa, el que acredita la
+  representación), y **volver a postular tras un rechazo sigue sin decidirse**
+  (S2): no se inventó la respuesta.
+- **La aceptación no cambia**: se guarda la versión, la huella y la hora en la
+  postulación (Parte I). Publicar otra versión no reescribe las aceptadas.
+
+**El guion que publica** (`apps/api/scripts/publicar_condiciones.py`) usa las
+rutas de administración que ya existían:
+
+| Paso | Qué hace | Si algo no cuadra |
+|---|---|---|
+| 1 | lee lo publicado; si ya está ese texto, lo dice y termina | — |
+| 2 | crea el borrador, o corrige el que hubiera con otro texto | se detiene |
+| 3 | lee la vista previa y compara su huella con la del texto local | **no publica** |
+| 4 | solo con `--publicar`: publica y comprueba la respuesta | se detiene |
+
+El token de la sesión de administración se lee de una variable de entorno,
+solo viaja por HTTPS (o a una API en el mismo equipo) y no se imprime. No
+sigue redirecciones: la biblioteca reenviaría el token al destino. Sin red,
+dice una línea y sale; no deja nada a medias que no se pueda repetir.
+
+Dos cosas que encontró la revisión y están corregidas: un borrador que
+hubiera de antes se devolvía **con sus parámetros** (qué documentos se
+exigen, si se puede volver a postular), que la huella no cubre, y se habrían
+publicado sin que nadie los mirase: ahora se vacían, y si no se puede, no se
+publica. Y si la orden de publicar sale y la respuesta no llega, el guion
+dice que **no sabe** si se publicó, en vez de decir que no.
+
+## 149. Las condiciones de contratación, sin marcadores
+
+El texto del piloto (`Z_SERVICIOS_CONDICIONES_PILOTO_V1.txt`) ya no lleva
+marcadores pendientes:
+
+- el primer párrafo dice que es una versión operativa provisional, sin
+  revisión legal, y que habrá una versión nueva cuando la tenga;
+- el alcance nombra lo que no entra: servicios médicos, legales, financieros,
+  de emergencia, los que exijan una autorización que Z no haya comprobado y
+  los dirigidos a menores;
+- el canal de soporte es el mismo que el del prestador.
+
+La huella cambió con el texto y consta en `Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`.
+
+**Lo que el texto promete y depende de un proceso**: «si no la confirma ni
+presenta una incidencia en las 24 horas siguientes…, se da por cerrada». Eso
+lo hace el barrido de atenciones, no una persona. Por eso la contratación no
+se puede encender sin el planificador (§151).
+
+## 150. El precio: gratis o a consultar, en los cinco sitios
+
+La §140 dejaba dos límites anotados: el borrador aceptaba un importe y el
+formulario ofrecía los cuatro modelos. Los dos están cerrados, y hay tres
+cierres más:
+
+| Dónde | Qué pasa con «precio fijo» y «desde» |
+|---|---|
+| La aplicación | el formulario solo ofrece «Gratis» y «A consultar» (`MODELOS_DE_PRECIO_OFRECIDOS`); el buscador ya no ofrece «con precio», ni moneda, ni rango, ni ordenar por precio |
+| El borrador | 422 `service_price_model_not_allowed`: no se guarda |
+| El envío a revisión | 422 `service_catalog_incomplete` con `price_model_not_allowed` (ya estaba) |
+| Publicar | 422 `service_price_model_not_allowed`: una versión enviada cuando se admitía no llega al catálogo |
+| El despliegue | `SERVICES_CATALOG_PRICE_MODELS=free,on_request` va **fijo** en la plantilla, sin parámetro, y el guion rechaza esa clave en el secreto |
+
+- La lista de la aplicación y la del servidor **son la misma**: una prueba del
+  móvil lee el valor de fábrica de `core/config.py` y lo compara con lo que
+  ofrece el formulario.
+- **Los cuatro modelos siguen en el código y en la base.** Una ficha antigua
+  con importe se lee y se pinta; en el formulario aparece sin ninguna opción
+  marcada y con una nota que dice por qué.
+- Aprobar no repite la comprobación; publicar sí, y es el paso que hace
+  visible una ficha. Publicar mira el precio, no la modalidad; y reactivar un
+  servicio suspendido no vuelve a mirar ninguna de las dos. Sin servicios en
+  producción no tiene efecto hoy: queda anotado.
+- En Supabase no hay ningún servicio: no existe ninguna ficha con importe que
+  migrar.
+
+## 151. Los procesos automáticos
+
+La §142 terminaba en «hace falta un planificador externo». Es este.
+
+**La ruta.** `POST /api/v1/internal/services/tasks/run`
+(`services/procesos_router.py`) corre los dos barridos que ya existían, uno
+detrás del otro y cada uno en su transacción: `reserva.vencer_retenciones` y
+`atencion.tareas`. Devuelve cinco cuentas (`expired`, `reminded`, `closed`,
+`unverified`, `skipped`) y las escribe en el registro.
+
+Es la única ruta de Servicios sin sesión de persona, y es estrecha a
+propósito:
+
+| Propiedad | Cómo |
+|---|---|
+| No recibe nada | ni cuerpo, ni parámetros, ni identificadores; lo que llegue se ignora |
+| Se autentica | cabecera `X-Services-Tasks-Token`, comparada en tiempo constante y en bytes |
+| Falla cerrada | sin secreto configurado, o con menos de 32 caracteres, no acepta ninguna cabecera |
+| No delata nada | a quien no reconoce le contesta **lo mismo que con Servicios apagado** (503 `services_disabled`), haya o no un piloto en marcha y haya o no un secreto: es la regla del piloto (P101) |
+| El porqué va al registro | «sin secreto configurado» o «la cabecera no es el secreto», sin lo que llegó; solo lo lee quien opera |
+| Las banderas, después | reconocido el planificador, con la contratación apagada recibe su 503 y no corre nada |
+| No mira la base sin reconocer a quien llama | la puerta de esquema va después de la del secreto |
+| No se anuncia | no aparece en el esquema de la API |
+| No mueve dinero | hace lo que hacían las dos rutas de administración, que siguen existiendo |
+
+**Por qué un secreto y no una sesión.** Las rutas de administración piden la
+sesión de una persona con rol `admin`, que caduca en una hora: una regla no
+puede guardarla. No había ningún mecanismo de máquina para esto; el secreto
+compartido es el mismo patrón que el aviso de 100ms (`live/webhooks.py`).
+
+**El planificador** (`infra/aws/02-plataforma.yaml`, apagado de fábrica con
+`PlanificadorDeServicios=No`):
+
+| Recurso | Qué es |
+|---|---|
+| `ReglaDelPlanificadorDeServicios` | regla de EventBridge, cada 5 minutos, con cuerpo `{}` |
+| `DestinoDelPlanificadorDeServicios` | la llamada HTTPS a la ruta, por CloudFront, como cualquier cliente |
+| `ConexionDelPlanificadorDeServicios` | la cabecera con el secreto, que sale del secreto de la API por referencia dinámica |
+| `RolDelPlanificadorDeServicios` | solo `events:InvokeApiDestination` sobre ese destino; solo lo asume EventBridge de esta cuenta |
+| `AlarmaProcesosDeServicios` | fallos durante dos periodos de 15 minutos seguidos, al tema de alertas de la pila |
+
+- **No es un servicio nuevo**: no hay Lambda, ni cola, ni contenedor.
+- **El secreto no es visible en ningún sitio**: no es un parámetro, no va en
+  un perfil ni en las evidencias. Lo genera el guion de despliegue
+  (`SERVICES_TASKS_TOKEN`, 64 hexadecimales) y lo conserva; nadie lo escribe.
+- **Rotarlo exige subir un contador** (`VersionDelSecretoDelPlanificador`).
+  CloudFormation solo vuelve a leer un secreto cuando cambia el recurso que
+  lo usa: sin el contador, la conexión se quedaba con el secreto viejo y la
+  API con el nuevo. Lo encontró la revisión.
+- **Reintentos**: dos, dentro de la misma ventana de 5 minutos.
+- **Una pasada tiene 5 segundos**: EventBridge corta ahí la llamada. Con el
+  volumen de un piloto cabe; tras un atraso largo puede cortarse, se
+  reintenta, y las pasadas solapadas no se pisan (cada fila se toma con
+  `skip locked`).
+- **Media hora, no un fallo**: durante un despliegue las máquinas que se
+  renuevan contestan 503 un rato; por eso la alarma espera dos periodos.
+- **Entre CloudFront y el balanceador va por HTTP**, como toda cabecera de
+  autorización de esta pila. Es una limitación anterior (el balanceador no
+  tiene certificado) y no de este bloque.
+- **La regla solo está activa con la contratación encendida.** Con
+  `FeatureServices` o `FeatureServiceBooking` apagados existe, desactivada:
+  la API contestaría 503 y la alarma saltaría sin motivo.
+- **La contratación exige el planificador.** Con `FeatureServiceBooking=true`
+  y sin planificador (o sin el frente HTTPS por el que llama), CloudFormation
+  rechaza el plan: «Unresolved resource dependencies
+  [BarreraLaContratacionExigeElPlanificador]». Es la misma barrera que ya
+  protegía la cuenta.
+
+**Quién vigila.** La alarma avisa al tema de alertas de la pila, que envía a
+la dirección de `CorreoDeAlertas`. No hay otro responsable definido: quien lee
+ese correo es quien se entera.
+
+**Si falla un rato**, no pasa nada grave: el vencimiento lo decide la hora, no
+el barrido, y la siguiente pasada recoge lo pendiente. Lo que se retrasa son
+los recordatorios y el cierre automático.
+
+Esto cierra, en lo técnico, F13, G12, IV-44, IV-45 y V-53. Activarlo sigue
+siendo una decisión de despliegue.
+
+## 152. Las vistas
+
+Ninguna pantalla ni ruta nueva, ninguna biblioteca nueva y ningún rediseño.
+Se arregló lo que hacía que una vista mintiera, se quedara colgada o dejara
+hacer dos veces lo mismo. La tabla completa, vista por vista, está en
+[`Z_MATRIZ_DE_VISTAS.md`](Z_MATRIZ_DE_VISTAS.md), «Cierre de vistas para la
+presentación».
+
+Lo que toca a Servicios:
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| Formulario del servicio | ofrecía «precio fijo» y «desde» | solo lo que el servidor admite (§150) |
+| Buscador | ofrecía «con precio», moneda y rango | solo «Gratis» y «A consultar» |
+| 19 formularios | el teclado tapaba el campo de abajo | `AppScreen teclado` |
+| Elegir horario | «Reintentar» dejaba el día cargando para siempre | vuelve a pedir el calendario y el día |
+| Condiciones (administración) | con un borrador previo, decía «guardado» y tiraba lo escrito | lo escrito sigue; guardar otra vez reemplaza el borrador |
+| Detalle de una reserva | había que salir y volver para ver un cambio | tirar hacia abajo la actualiza |
+| Botones (toda la aplicación) | un segundo toque repetía la acción | el botón queda ocupado mientras dura |
+
+Y un fallo que no era de vistas y apareció al revisar el audio: **en Android,
+la duración de una grabación se leía de un campo que ahí devuelve la hora de
+inicio** (`expo-audio` 1.1.1). Por el código nativo, una nota de voz y el
+audio de presentación se paraban solos en el primer instante. Los dos leen
+ahora la duración de verdad. No se ha reproducido en un teléfono: es el primer
+punto del QA físico.
+
+**Comprobado sin teléfono**: tipos, las pruebas que leen el código y la
+exportación web. **No comprobado**: nada de esto en un aparato.
+
+## 153. El orden de activación, corregido
+
+El orden que se había escrito —publicar las condiciones y después encender
+`FEATURE_SERVICES`— **no se puede seguir**: con la bandera apagada, las rutas
+de administración contestan 503 y no hay con qué publicar. El orden posible es:
+
+1. desplegar el código con todo apagado;
+2. actualizar la plataforma, apagada, y generar el secreto del planificador;
+3. encender `FeatureServices` **con la lista del piloto vacía**: no entra
+   nadie, y el panel de administración ya responde;
+4. publicar las dos condiciones;
+5. crear las categorías (ninguna migración las crea; cuáles, lo decide la
+   empresa) y publicar la actualización de la aplicación, que es la que trae
+   Servicios a los teléfonos;
+6. poner la lista del piloto en el secreto;
+7. encender `FeatureServiceBooking` junto con `PlanificadorDeServicios`.
+
+Entre el paso 3 y el 6 Servicios está «encendido para nadie». Los comandos
+están en `Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`.
+
+## 154. Pruebas, mutaciones y revisión (03/10/2026)
+
+Sobre el código final (`5f953b3`):
+
+| Comprobación | Resultado |
+|---|---|
+| Backend con PostgreSQL 17 | 4553 pasan, 0 fallan, 0 omitidas |
+| Lo que exige el CI (`exigir_bateria_completa.py`: ninguna omitida y un suelo de casos) | cumplido: 4553 pruebas, 0 omitidas, 0 fallidas |
+| Backend sin PostgreSQL | 3239 pasan; 1314 se saltan (las que necesitan PostgreSQL) |
+| Móvil, pruebas | 3712 pasan, 0 fallan (140 ficheros) |
+| Móvil, tipos (`tsc --noEmit`) | sin errores |
+| Exportación web, sin el `.env` local | correcta |
+| `cfn-lint` sobre la plantilla | sin avisos |
+| `git diff --check` | limpio |
+| Secretos en el diff | ninguno (las dos cadenas de 64 hexadecimales son las huellas de los textos) |
+| Expo Doctor | **no ejecutado**: no está instalado en local y descargarlo no estaba autorizado. Este bloque no toca dependencias ni configuración nativa |
+| Plan de CloudFormation contra la cuenta | **no generado** |
+| Teléfono | **no probado** |
+
+**Lo que encontraron las baterías, y no las pruebas dirigidas:**
+
+- Con PostgreSQL, el guion que publica no reconocía lo ya publicado y
+  publicaba otra versión. La causa estaba en el adaptador de la prueba (un
+  filtro que se perdía por el camino), pero el guion dependía de ese filtro:
+  ahora vuelve a filtrar por su cuenta.
+- La batería completa falló en dos pruebas de la puerta del piloto, que
+  enumeran todas las rutas de Servicios: no conocían la ruta interna. Se
+  clasifica aparte, con su prueba.
+
+**Mutaciones**, solo sobre el código nuevo, en un árbol desechable: 96.
+
+| | |
+|---|---|
+| Muertas | 91 |
+| Equivalentes | 4: con la contratación apagada los barridos no corren aunque se quite esa comprobación de la puerta, porque la puerta de esquema la repite (tres variantes); y el segundo `commit` de la ruta, porque el barrido de atenciones ya confirma cada fila |
+| Sustituida | 1, por tres más finas que mueren |
+
+La primera pasada dejó cuatro vivas y por ellas se añadieron pruebas: quien
+llega sin secreto con la contratación apagada, la última puerta del guion (la
+huella), y que reconoce lo publicado con la lista sin filtrar. Tras la
+revisión se volvió a mutar lo que cambió.
+
+**Revisión independiente** (otra lectura, sin escribir): ningún bloqueante.
+
+| Hallazgo | Gravedad | Qué se hizo |
+|---|---|---|
+| La ruta interna delataba, sin secreto, si había un piloto en marcha | media | corregido: a quien no reconoce, lo mismo que apagado (§151) |
+| Rotar el secreto del planificador no llegaba a EventBridge | media | corregido: contador en la conexión y opción del guion |
+| El guion podía publicar los parámetros de un borrador previo | media | corregido: los vacía, o no publica (§148) |
+| El orden del documento de activación no cuadraba con la aplicación instalada | media | corregido: las categorías y la actualización de la aplicación van antes de comprobar |
+| Al volver del pago, un fallo de red tapaba el pedido ya pintado | media | corregido en los dos pedidos |
+| El guion seguía redirecciones (reenviando el token) y daba una traza con un 200 que no es JSON | baja | corregido |
+| La alarma saltaba durante un despliegue | baja | corregido: dos periodos |
+| El cerrojo del botón no tenía prueba | — | corregido: función pura, probada ejecutándola |
+| Solo se probaba que el planificador vence, no que recuerda y cierra | — | corregido, con PostgreSQL |
+| Una pasada tiene 5 segundos | baja | anotado en la plantilla y aquí |
+| Entre CloudFront y el balanceador el secreto va por HTTP | baja | anotado: es anterior a este bloque |
+| Reactivar no vuelve a mirar el precio; publicar no mira la modalidad | baja | anotado (§150): sin servicios en producción no tiene efecto |
+| Tres casos raros de la nota de voz; la ruta de «Verificación de cuenta» sigue viva | baja | anotados en `Z_MATRIZ_DE_VISTAS.md` |
+| Quien despliega necesita poder crear la conexión de EventBridge | sospecha | anotado como condición previa, sin comprobar |
+
+## 155. Qué está hecho y en qué grado
+
+| | Implementado | Probado | Desplegado | Publicado | Activado |
+|---|:--:|:--:|:--:|:--:|:--:|
+| Condiciones del prestador v1 | sí | sí | — | **no** | — |
+| Condiciones de contratación v1 | sí | sí | — | **no** | — |
+| Guion de publicación | sí | sí, contra la API de pruebas | — | — | — |
+| Precio gratis o a consultar | sí | sí | **no** | — | — |
+| Ruta de los procesos | sí | sí | **no** | — | **no** |
+| Planificador y alarma | sí (plantilla) | `cfn-lint` y pruebas de texto; **sin plan real** | **no** | — | **no** |
+| Vistas | sí | pruebas de fuente, tipos y exportación web | **no** | — | — |
+| Piloto cerrado | — | — | — | — | **no** |
+
+«Probado» es lo que se puede probar sin la cuenta de AWS y sin un teléfono.
+Lo que falta por probar está en §156.
+
+## 156. Lo que sigue pendiente
+
+Por ejecutar, en este orden y por una persona (ninguno se ha hecho):
+
+- el **push** de `Edson`, el PR y el CI remoto;
+- la **fusión** a `main`, que despliega el código apagado;
+- la **actualización de la plataforma** con su Change Set, que es la primera
+  vez que la plantilla nueva se contrasta con la cuenta;
+- la **publicación** de las dos condiciones;
+- la **lista del piloto** y el **encendido** de la contratación con el
+  planificador.
+
+Por probar:
+
+- el **QA físico** en teléfonos reales (`Z_QA_FISICO_PENDIENTE.md`);
+- el planificador **contra la cuenta**: que la regla llama, que la API
+  contesta 200 y que la alarma se queda en `OK`.
+
+Por decidir, sin que impida el piloto cerrado:
+
+- la **revisión legal** de las dos condiciones;
+- la **anonimización definitiva** de la historia contractual (F21);
+- quién atiende **soporte** y la segunda persona de las apelaciones;
+- si el **perfil versionado** pasa a encendido cuando el piloto sea estable.
+
+Fuera de este piloto: pagos, domicilio, categorías reguladas, sala propia.

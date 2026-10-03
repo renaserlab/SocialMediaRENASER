@@ -50,6 +50,10 @@ apps/api/app/
     products                           productos físicos: admisión, catálogo,
                                        inventario, bolsa, políticas, pedidos
                                        y entrega
+    services                           servicios: admisión, catálogo, descubrimiento,
+                                       agenda, reserva y atención. Sus barridos
+                                       los lanza un planificador externo por
+                                       `/internal/services/tasks/run`
     commerce                           orden, derecho, saldo, transferencia
     payments                           Stripe, RevenueCat, webhooks
     refunds                            garantía, solicitud, expediente, reembolso
