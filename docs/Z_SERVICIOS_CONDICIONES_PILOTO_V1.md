@@ -1,80 +1,79 @@
 # Z Servicios · Condiciones piloto v1
 
-> **Estado (02/10/2026): PREPARADAS, NO PUBLICADAS.** El texto es un borrador
-> técnico y operativo. **Requiere revisión y aprobación empresarial y legal**
-> antes de publicarse. No es un dictamen legal, y ninguna de sus reglas se
-> presenta como una obligación legal: son las políticas provisionales de la
-> primera versión (`Z_REQUISITOS_Y_DECISIONES.md`).
+> **Estado (03/10/2026): LISTAS PARA PUBLICAR, TODAVÍA NO PUBLICADAS.** El
+> texto ya no lleva marcadores. Es una **versión operativa provisional del
+> piloto**: lo dice en su primer párrafo y no presume de una revisión legal
+> que no ha tenido. La revisión legal queda anotada como posterior y no
+> impide el piloto cerrado y gratuito.
 >
-> En Supabase **no hay ninguna condición de contratación publicada**, y este
-> bloque no publicó nada. Sin una publicada para el país del prestador no se
-> confirma ninguna reserva.
+> No es un dictamen legal, y ninguna de sus reglas se presenta como una
+> obligación legal: son las políticas provisionales de la primera versión
+> (`Z_REQUISITOS_Y_DECISIONES.md`).
+>
+> **Por qué no están publicadas todavía:** se publican con las rutas de
+> administración de la API, y la API de producción aún no tiene este código
+> (`Edson` sin desplegar). Hace falta desplegar, encender `FEATURE_SERVICES`
+> y una sesión de administración (apartado 4).
+
+Este documento es de las condiciones que acepta **quien contrata**. Las que
+acepta **quien presta** están en `Z_SERVICIOS_CONDICIONES_PRESTADOR_V1.md`.
+El procedimiento de publicación del apartado 4 vale para las dos.
 
 ## 1. Qué hay
 
 | Qué | Dónde |
 |---|---|
-| El texto que se publicará, en texto plano | `docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.txt` |
+| El texto que se publica, en texto plano | `docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.txt` |
 | El guion que lo comprueba y dice su huella (no publica) | `apps/api/scripts/condiciones_del_piloto.py` |
+| El guion que lo publica por las rutas de administración | `apps/api/scripts/publicar_condiciones.py` |
 | Las pruebas del texto y de la publicación | `apps/api/tests/test_servicios_condiciones_piloto.py` |
 | El mecanismo (ya existía) | `service_policies`, tipo `booking_terms` (`Z_SERVICIOS_ARQUITECTURA.md` §67) |
 
 - **Título:** `Condiciones del piloto de Z Servicios`.
 - **País:** `PE`. Sin categoría: las condiciones que rigen una reserva son las
   generales del país del prestador.
-- **Tamaño del borrador:** 6859 caracteres (el límite de una política es
-  100 000).
-- **Huella del borrador, con sus dos marcadores:**
-  `d72b7bf1abaf5db751dec64b5ba7d9b593048d8e5e55990722706d3953f11692`.
-  **No será la de lo publicado:** al aprobar el texto se retiran los
-  marcadores y la huella cambia. La definitiva la dice el guion (apartado 4).
+- **Tamaño:** 7112 caracteres (el límite de una política es 100 000).
+- **Huella del texto que se publica:**
+  `a35cd55d8ea58306a876421623b4537aa5fb72f73c3fa6e7500c942b3c7d375e`.
+  Es el SHA-256 del texto exacto. Si alguien cambia una coma, cambia; una
+  prueba compara esta línea con el fichero.
+- **Versión:** la pone el servidor al crear el borrador. Será la **1** si no
+  hay otra de `booking_terms` para `PE`.
 
 No se creó ninguna tabla, ningún sistema de documentos ni ninguna migración.
 
-## 2. Lo que falta antes de publicar
+## 2. Qué se cerró en el texto y qué decide todavía la empresa
 
-El texto lleva **dos marcadores a la vista**, entre corchetes. Mientras quede
-uno, el guion se niega a preparar la publicación.
+Los dos marcadores que llevaba el borrador ya no están:
 
-1. `[BORRADOR PENDIENTE DE REVISIÓN Y APROBACIÓN EMPRESARIAL Y LEGAL…]`, la
-   primera línea. Se retira cuando la empresa y su asesoría legal aprueban el
-   texto.
-2. `[CANAL DE SOPORTE PENDIENTE DE COMPLETAR ANTES DE PUBLICAR]`, en el
-   apartado 16. **No se inventó ningún correo, teléfono ni dirección**: lo
-   tiene que dar la empresa.
+- **La línea de «borrador pendiente de aprobación»** se sustituyó por una
+  declaración que se queda en el texto publicado: es la versión operativa
+  provisional del piloto y todavía no ha tenido una revisión legal.
+- **El canal de soporte** es el que la aplicación ya tiene: el Centro de
+  ayuda (Ajustes → «Soporte y preguntas frecuentes») y su buzón único. **No
+  se inventó ningún contacto**; una prueba lee el correo de la pantalla de
+  soporte de la aplicación y exige que sea el único del texto.
 
-**Este texto lo acepta quien contrata, no quien presta.** Es un
-`booking_terms`: se acepta al confirmar una reserva. Varias de sus reglas
-obligan al prestador (ejecutar el servicio como dice su ficha, dar el motivo
-al cancelar, comunicar el medio de una atención virtual), y el prestador **no
-acepta este texto en ningún momento**. Lo que él acepta al postular son las
-**condiciones del prestador** (`provider_terms`, S1), que **siguen sin
-texto**: sin ellas publicadas nadie puede postular, y tienen que decir lo
-mismo. Redactarlas no era de este bloque.
+**Este texto lo acepta quien contrata, no quien presta.** Varias de sus
+reglas obligan al prestador (ejecutar el servicio como dice su ficha, dar el
+motivo al cancelar, comunicar el medio de una atención virtual). Él las
+acepta en **sus** condiciones, que ya tienen texto y dicen lo mismo donde
+coinciden (una prueba lo compara).
 
-**Un texto con marcadores también se puede publicar.** El freno está en el
-guion, no en el servidor: quien pegue el `.txt` tal cual en el panel, o envíe
-el fichero que genera `--borrador`, publicaría unas condiciones que empiezan
-por «[BORRADOR PENDIENTE…]» y sin canal de soporte. Y publicar no tiene
-vuelta atrás por la API. Por eso el procedimiento del apartado 4 no se
-salta.
+**Un texto con marcadores también se podría publicar** si alguien lo pegara a
+mano en el panel: el freno está en los guiones, no en el servidor. Por eso
+se publica con el guion.
 
-Y cuatro cosas que el texto da por hechas y que decide la empresa:
+Lo que el texto da por hecho y **decide la empresa**, sin que impida empezar:
 
 - **Los plazos de conservación** (apartado 13; F20, IV-19). El texto dice la
   verdad de hoy —la información se conserva mientras exista la cuenta, y los
-  plazos están por definir—, y no promete conservar «el tiempo mínimo»: no
-  hay ningún proceso que borre nada a un plazo. Si la revisión legal exige
-  un plazo, hay que definirlo y construirlo antes de prometerlo.
-
+  plazos están por definir— y no promete un plazo que nada cumple.
 - **El procedimiento para comunicar el medio de una atención virtual**
-  (apartado 14). El texto dice que el prestador lo comunica «de forma segura,
-  siguiendo el procedimiento que el equipo del piloto indique». Ese
-  procedimiento no existe todavía: Z no ofrece sala ni guarda un enlace (G17).
-- **Quién atiende soporte**, incluidas las bajas de cuentas con reservas
-  (F21, apartado 13).
-- **Una segunda persona en administración** si se quieren apelaciones
-  (apartado 11): con una sola, el servidor no las ofrece.
+  (apartado 14): Z no ofrece sala ni guarda un enlace (G17).
+- **Quién atiende soporte**, incluidas las bajas de cuentas con reservas.
+- **Una segunda persona en administración** si se quieren apelaciones: con
+  una sola, el servidor no las ofrece.
 
 ## 3. Qué dice el texto y qué impone el sistema
 
@@ -86,108 +85,84 @@ declaración o una regla de operación está marcado: el sistema no lo impone.
 | 1. Naturaleza del piloto | Acceso limitado a cuentas autorizadas | **Sistema**: `SERVICES_PILOT_PROFILE_IDS` (P101); con la lista vacía no entra nadie |
 | 2. Participantes | Mayores de edad, información verdadera, cuenta personal | **Declaración**. No hay verificación de edad: el piloto es una lista cerrada que elige la empresa, y el prestador presenta su documento de identidad, que revisa una persona |
 | 3. El papel de Z | Z facilita; el prestador ejecuta; Z modera | **Sistema**: nadie publica sin admisión y sin revisión de su ficha; administración suspende y retira |
-| 4. Alcance | Perú; virtual o presencial; sin domicilio; sin categorías reguladas; la lista de lo prohibido (P8) | Modalidades: **sistema** (`SERVICES_CATALOG_MODALITIES=virtual,in_person`). Perú: **operación** (solo se publican condiciones para `PE`, y sin ellas ni se postula ni se confirma). Categorías y actividades prohibidas: **operación** (solo administración crea categorías, no se siembra ninguna y cada servicio se aprueba a mano; no hay filtro automático) |
-| 5. Dinero | Sin pagos en Z Servicios; solo lo gratuito se reserva; «a consultar» es informativo | **Sistema**: solo `free` se confirma; la base no deja guardar un pedido con importe; `FEATURE_SERVICE_PAYMENTS=false`, `SERVICE_PAYMENTS_PROVIDER=none`; de fábrica una ficha con importe no se puede **enviar** a revisión (la regla actúa al enviar: aprobar y publicar no la repiten, y en Supabase no hay ningún servicio) |
+| 4. Alcance | Perú; virtual o presencial; sin domicilio; sin categorías reguladas (médicos, legales, financieros, emergencias, sin autorización comprobada, menores); la lista de lo prohibido (P8) | Modalidades: **sistema** (`SERVICES_CATALOG_MODALITIES=virtual,in_person`). Perú: **operación** (solo se publican condiciones para `PE`, y sin ellas ni se postula ni se confirma). Categorías y actividades prohibidas: **operación** (solo administración crea categorías, no se siembra ninguna y cada servicio se aprueba a mano; no hay filtro automático) |
+| 5. Dinero | Sin pagos en Z Servicios; solo lo gratuito se reserva; «a consultar» es informativo | **Sistema**: solo `free` se confirma; la base no deja guardar un pedido con importe; `FEATURE_SERVICE_PAYMENTS=false`, `SERVICE_PAYMENTS_PROVIDER=none`; una ficha con importe no se puede guardar ni enviar, y la aplicación no lo ofrece |
 | 6. La reserva | Horario apartado unos minutos; se guarda lo aceptado | **Sistema**: retención de 10 minutos; aceptación con versión y huella |
 | 7. Cancelación | Hasta antes del inicio; sin penalidad; el prestador da el motivo | **Sistema** |
 | 8. Cambio de horario | Una vez, con 24 horas, si el servicio sigue publicado y su ficha no cambió | **Sistema**, con los valores congelados en cada reserva (0095) |
-| 9. La atención | Código desde 15 minutos antes; cierre a las 24 horas; inasistencia a los 15 minutos | **Sistema**. El cierre automático lo ejecuta hoy una persona de administración (no hay planificador) |
+| 9. La atención | Código desde 15 minutos antes; cierre a las 24 horas; inasistencia a los 15 minutos | **Sistema**. El cierre automático lo lanza el planificador (`Z_SERVICIOS_ARQUITECTURA.md`, §151); la plantilla de AWS no deja encender la contratación sin él |
 | 10. Incidencias | En una reserva confirmada, desde el inicio y hasta 48 horas después; por seguridad no corre ese plazo; una incidencia a la vez y ninguna tras la decisión; evidencia verdadera y lícita | Plazos y unicidad: **sistema**. La veracidad y la licitud: **declaración**, y moderación del equipo |
 | 11. Apelación | Una, en 5 días, por otra persona; si no la hay, no se ofrece | **Sistema** |
-| 12. Reseñas | Solo quien contrató, una, hasta 30 días, con revisión previa; lo que no se admite | **Sistema** (`SERVICES_REVIEWS_PREMODERATION=true`). Lo que no se admite lo aplica una persona al moderar (datos personales, amenazas, odio, extorsión, fuera de tema) |
+| 12. Reseñas | Solo quien contrató, una, hasta 30 días, con revisión previa; lo que no se admite | **Sistema** (`SERVICES_REVIEWS_PREMODERATION=true`). Lo que no se admite lo aplica una persona al moderar |
 | 13. Datos personales | Documentos y evidencias privados, enlaces temporales; se conserva mientras exista la cuenta; la cuenta con reservas no se elimina sola | **Sistema**: depósitos privados y enlaces firmados; nada se borra a un plazo; F21. El plazo de conservación: **pendiente** (F20, IV-19) |
-| 14. Servicios virtuales | Sin sala propia, sin grabaciones | **Sistema**: no existe sala ni grabación (100ms, posterior). El procedimiento para comunicar el medio: **pendiente** |
+| 14. Servicios virtuales | Sin sala propia, sin grabaciones | **Sistema**: no existe sala ni grabación (100ms, posterior). El procedimiento para comunicar el medio: **operación** |
 | 15. Suspensión | Suspender a un prestador o un servicio y retirar una cuenta del piloto | **Sistema**: administración suspende prestadores y servicios; una cuenta sale del piloto quitándola de la lista (P101) |
-| 16. Soporte | El canal | **Pendiente**: marcador |
+| 16. Soporte | El Centro de ayuda de la aplicación y su buzón | **Sistema**: la pantalla de soporte existe (`/support`) |
 | 17. Vigencia | Versión y huella con cada reserva; una versión nueva no cambia lo aceptado | **Sistema** |
 
 Los plazos del texto son los valores de fábrica de la configuración, y una
 prueba los compara: si alguien cambia un plazo sin publicar unas condiciones
 nuevas, se pone en rojo. **La prueba mira los valores de fábrica, no los de
-cada entorno:** si un servidor sobreescribe un `SERVICES_*` de la tabla III
-de `Z_REQUISITOS_Y_DECISIONES.md`, hará algo distinto de lo publicado sin
-que nada avise. Antes de publicar hay que comprobar que el entorno no los
-cambia.
+cada entorno:** el despliegue no sobreescribe ninguno de esos plazos (no hay
+parámetro para ellos en la plantilla de AWS), y así tiene que seguir.
 
-## 4. Cómo se publican
+## 4. Cómo se publican (las dos)
 
 Con las **rutas de administración que ya existen**. Dejan cada paso en la
 auditoría (`service_policy.draft_created`, `service_policy.published`), cosa
 que una inserción directa en la base no haría: **no se publican con SQL**.
 
-**Antes de empezar:**
+**Lo que hace falta, y en este orden:**
 
-- El texto está aprobado y sus dos marcadores, resueltos. El cambio queda en
-  un commit: lo publicado tiene que poder compararse con el repositorio.
-- En ese servidor `FEATURE_SERVICES` está encendida (con ella apagada, las
-  rutas de administración contestan 503). **No hace falta** encender la
-  contratación (`FEATURE_SERVICE_BOOKING`): las condiciones se publican antes
-  de abrirla.
-- Quien lo hace tiene el rol `admin`. Un moderador puede leer, no publicar.
-- El entorno no sobreescribe ninguno de los plazos (`SERVICES_*`) que el
-  texto dice.
-- Las condiciones del prestador (`provider_terms`) tienen su propio texto
-  aprobado, o se sabe que sin él nadie podrá postular.
+1. **El código desplegado.** La API de producción tiene que tener Servicios.
+2. **`FEATURE_SERVICES` encendida en ese servidor.** Con ella apagada las
+   rutas de administración contestan 503. Encenderla **no abre Servicios a
+   nadie**: con la lista del piloto vacía y la apertura general apagada, solo
+   administración entra, por su rol (P101). Las condiciones se publican
+   así, antes de cargar la lista del piloto y de encender la contratación.
+3. **Una sesión de una cuenta con el rol `admin`.** Un moderador puede leer,
+   no publicar.
 
-**Paso 1. Comprobar el texto y obtener su huella.** Desde `apps/api`:
-
-```bash
-python scripts/condiciones_del_piloto.py --salida ../../../condiciones_piloto_v1.json
-```
-
-Si queda un marcador, se niega. Si no, dice el título, el tamaño y la
-**huella**, y escribe el cuerpo de la petición. El fichero de salida va fuera
-del repositorio.
-
-**Paso 2. Ver qué hay publicado.** `$API` es la dirección de la API y `$TOKEN`
-el de la sesión de administración (no se escribe en ningún fichero del
-repositorio ni se pega en un chat).
+**Con el guion** (lo recomendado). Desde `apps/api`, con el token de la
+sesión de administración en la variable de entorno `Z_ADMIN_TOKEN` (no se
+escribe en ningún fichero ni se pega en un chat; el guion no lo imprime):
 
 ```bash
-curl -sS "$API/api/v1/admin/services/policies?kind=booking_terms&country=PE" -H "Authorization: Bearer $TOKEN"
+python scripts/publicar_condiciones.py --tipo prestador --api "$API"
 ```
-
-La primera vez no hay ninguna: la que se publique será la **versión 1**. Si
-hubiera un borrador, el paso 3 lo devuelve tal como está, sin tocarlo.
-
-**Paso 3. Crear el borrador.**
 
 ```bash
-curl -sS -X POST "$API/api/v1/admin/services/policies/booking-terms/draft" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @../../../condiciones_piloto_v1.json
+python scripts/publicar_condiciones.py --tipo contratacion --api "$API"
 ```
 
-Contesta 201 con el `id` del borrador (200 si ya existía uno: entonces hay
-que corregirlo con `PATCH …/policies/{id}` y los campos `title` y `body`).
-
-**Paso 4. Comprobar la huella ANTES de publicar.**
+Sin `--publicar` crea (o corrige) el borrador, pide su vista previa y
+compara la huella del servidor con la del texto local. **No publica.** Si
+todo coincide, se repite cada orden añadiendo `--publicar`:
 
 ```bash
-curl -sS "$API/api/v1/admin/services/policies/ID_DEL_BORRADOR/preview" -H "Authorization: Bearer $TOKEN"
+python scripts/publicar_condiciones.py --tipo prestador --api "$API" --publicar
 ```
-
-El campo `sha256` tiene que ser **exactamente** la huella del paso 1. Si no
-lo es, el texto cambió por el camino: **no se publica**; se corrige el
-borrador y se vuelve a comprobar.
-
-**Paso 5. Publicar.** No tiene vuelta atrás por la API: una condición
-publicada no se edita ni se retira; solo se sustituye publicando otra versión.
 
 ```bash
-curl -sS -X POST "$API/api/v1/admin/services/policies/ID_DEL_BORRADOR/publish" -H "Authorization: Bearer $TOKEN"
+python scripts/publicar_condiciones.py --tipo contratacion --api "$API" --publicar
 ```
 
-Contesta `status: published`, su `version` y su `body_sha256`.
+- Se niega si el texto lleva un marcador, si la huella del borrador no es la
+  del texto local, o si el servidor contesta algo inesperado.
+- Repetirlo es seguro: si ya están publicadas, lo dice y no toca nada.
+- Imprime el tipo, el tamaño, la huella y la versión. Nada más.
+- **Publicar no tiene vuelta atrás por la API**: una condición publicada no
+  se edita ni se retira; solo se sustituye publicando otra versión.
 
-**Paso 6. Dejar constancia.** En este documento: la versión, la huella, la
-fecha y quién la publicó. Y repetir el paso 2: tiene que haber **una** sola
-publicada.
+**Con la aplicación**, en vez del guion: Panel de administración → Servicios
+→ Condiciones del prestador / Condiciones de contratación. Crea, edita,
+previsualiza y publica con las mismas rutas, y enseña la huella abreviada
+(los ocho primeros caracteres y los cuatro últimos), que se compara con la de
+`condiciones_del_piloto.py`. Pegar un texto largo en el teléfono puede
+cambiarlo; por eso la comprobación de la huella no se salta.
 
-**Con la aplicación**, en vez de `curl`: Panel de administración → Servicios
-→ Condiciones de contratación. Crea, edita, previsualiza y publica con las
-mismas rutas, y enseña la huella abreviada (los ocho primeros caracteres y
-los cuatro últimos), que se compara con la del paso 1. Pegar un texto largo
-en el teléfono puede cambiarlo; por eso la comprobación de la huella no se
-salta.
+**Después de publicar**, dejar constancia aquí y en el documento del
+prestador: la versión, la huella, la fecha y quién publicó.
 
 ## 5. Qué pasa al publicar una versión nueva
 
@@ -202,7 +177,8 @@ salta.
 
 ## 6. Lo comprobado
 
-Con PostgreSQL 17 y por la API real, con el texto que saldría del guion:
+Con PostgreSQL 17 y por la API real, con el texto del fichero y publicándolo
+con el guion:
 
 | Qué | Resultado |
 |---|---|
@@ -217,6 +193,7 @@ Con PostgreSQL 17 y por la API real, con el texto que saldría del guion:
 | Publicar dos veces a la vez | una sola vigente |
 | Publicar mientras alguien confirma | o aceptó la que leyó, o se le pide leer la nueva; nunca una mezcla |
 | La presentación enseña lo que se acepta | el resumen trae el título, el texto entero, la versión y la huella |
+| El guion | no publica sin `--publicar`; corrige un borrador con otro texto; se detiene si quien lo lanza no es administración; repetido, no toca nada |
 
 En la aplicación, la casilla «Leí y acepto las condiciones de contratación de
 Z» nace sin marcar y guarda la versión y la huella que se veían al marcarla;
@@ -225,10 +202,9 @@ del QA físico pendiente.
 
 ## 7. Lo que sigue pendiente
 
-- **La aprobación empresarial y legal del texto.**
-- El canal de soporte y el procedimiento de los servicios virtuales.
-- Publicarlas, cuando se decida abrir el piloto.
-- El QA físico de la lectura y la aceptación en el teléfono.
+- **Publicarlas** en producción (apartado 4).
+- El **QA físico** de la lectura y la aceptación en el teléfono.
+- La **revisión legal posterior** del texto. No impide el piloto cerrado.
 - Los plazos de conservación de los datos (F20) y la anonimización de la
   historia contractual (F21): el texto solo avisa de que «puede conservarse».
 - Las reglas financieras (comisión, comprobantes, devoluciones,

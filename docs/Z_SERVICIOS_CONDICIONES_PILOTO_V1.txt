@@ -1,8 +1,6 @@
-[BORRADOR PENDIENTE DE REVISIÓN Y APROBACIÓN EMPRESARIAL Y LEGAL: ESTA LÍNEA SE RETIRA AL APROBAR EL TEXTO Y, MIENTRAS ESTÉ, NO SE PUBLICA]
-
 CONDICIONES DEL PILOTO DE Z SERVICIOS
 
-Estas condiciones se aplican a las reservas que se hacen en Z Servicios durante su piloto. Léelas antes de confirmar una reserva: al confirmarla, las aceptas tal como están en ese momento.
+Versión operativa provisional del piloto. Estas condiciones se aplican a las reservas que se hacen en Z Servicios durante su piloto cerrado y gratuito. Todavía no han tenido una revisión legal: cuando la tengan, Z publicará una versión nueva. Léelas antes de confirmar una reserva: al confirmarla, las aceptas tal como están en ese momento.
 
 1. NATURALEZA DEL PILOTO
 Z Servicios está en una versión piloto. El acceso es limitado: solo participan las cuentas que Z ha autorizado. Z puede modificar, suspender o dar por terminado el piloto, en todo o en parte.
@@ -14,7 +12,7 @@ Solo pueden participar personas mayores de edad. Al usar Z Servicios declaras qu
 Z facilita que quien ofrece un servicio (el prestador) y quien lo busca (quien contrata) se encuentren y acuerden una reserva. El servicio lo presta el prestador, que es el responsable de ejecutarlo como lo describe su ficha. Z revisa a los prestadores y sus fichas antes de publicarlas, modera el catálogo y puede suspender o retirar una publicación.
 
 4. ALCANCE
-El piloto se desarrolla en el Perú. Los servicios pueden ser virtuales o presenciales, en el lugar que indique el prestador. No hay atención a domicilio. No se admiten servicios de categorías reguladas ni de alto riesgo. Están prohibidos las actividades ilegales, el fraude, la falsificación, las armas, la explotación de personas, el contenido sexual, los servicios financieros no autorizados y todo lo que ponga en riesgo inmediato a una persona.
+El piloto se desarrolla en el Perú. Los servicios pueden ser virtuales o presenciales, en el lugar que indique el prestador. No hay atención a domicilio. No se admiten servicios de categorías reguladas ni de alto riesgo: en este piloto no hay servicios médicos, legales, financieros ni de emergencia, ni otros que exijan una autorización que Z no haya comprobado, ni servicios dirigidos a menores de edad. Están prohibidos las actividades ilegales, el fraude, la falsificación, las armas, la explotación de personas, el contenido sexual, los servicios financieros no autorizados y todo lo que ponga en riesgo inmediato a una persona.
 
 5. DINERO
 Durante el piloto no hay pagos en Z Servicios. Por los servicios de este piloto, Z no cobra, no retiene ni transfiere dinero, no cobra comisión, no emite comprobantes y no gestiona devoluciones económicas. Las reservas que se confirman son de servicios gratuitos. Si una ficha indica un precio a consultar, es solo información: ese servicio no se reserva ni se paga en Z. Nadie debe presentar un pago hecho fuera de Z como si Z lo hubiera procesado, ni pedirlo a nombre de Z.
@@ -50,7 +48,7 @@ Z todavía no ofrece una sala propia para las atenciones virtuales. Z no graba l
 Z puede suspender a un prestador o un servicio, y retirar una cuenta del piloto, por razones de seguridad, fraude, incumplimiento de estas condiciones o riesgo para las personas.
 
 16. SOPORTE
-Para cualquier consulta sobre el piloto, tu cuenta o una reserva: [CANAL DE SOPORTE PENDIENTE DE COMPLETAR ANTES DE PUBLICAR].
+Para cualquier consulta sobre el piloto, tu cuenta o una reserva, usa el Centro de ayuda de la aplicación (Ajustes, «Soporte y preguntas frecuentes») o escribe a renaserlab@gmail.com.
 
 17. VIGENCIA
 Estas condiciones rigen desde que Z las publica en la aplicación. Su versión y su huella (un código que identifica exactamente este texto) se muestran junto a ellas y se guardan con cada reserva, con la fecha en que las aceptaste. Z puede publicar una versión nueva, que valdrá para las reservas que se confirmen después. Lo que aceptaste al confirmar una reserva no cambia.

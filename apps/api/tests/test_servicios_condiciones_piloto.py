@@ -1,8 +1,9 @@
 """Las Condiciones piloto v1 de Z Servicios: el texto y su publicación.
 
-PREPARADAS, NO PUBLICADAS. El texto está en
-`docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.txt`, pendiente de aprobación
-empresarial y legal; se publica con las rutas de administración que ya
+LISTAS PARA PUBLICAR. El texto está en
+`docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.txt`, sin marcadores: es una versión
+operativa provisional del piloto, que lo dice y no presume de una revisión
+legal que no ha tenido. Se publica con las rutas de administración que ya
 existen (`booking_terms`), sin tabla, esquema ni migración nuevos.
 
 LO QUE SE COMPRUEBA:
@@ -26,6 +27,7 @@ import json
 import re
 import unicodedata
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 from pydantic import ValidationError
@@ -54,19 +56,82 @@ pytestmark = pytest.mark.asyncio
 
 RAIZ = Path(__file__).resolve().parents[3]
 DOCUMENTO = RAIZ / "docs" / "Z_SERVICIOS_CONDICIONES_PILOTO_V1.md"
-GUION = RAIZ / "apps" / "api" / "scripts" / "condiciones_del_piloto.py"
+GUIONES = RAIZ / "apps" / "api" / "scripts"
+GUION = GUIONES / "condiciones_del_piloto.py"
 POLITICAS = f"{ADMIN_SERVICIOS}/policies"
+MOVIL = RAIZ / "apps" / "mobile" / "src"
 
 
-def _guion():
-    especificacion = importlib.util.spec_from_file_location("condiciones_del_piloto", GUION)
+def _guion(nombre: str = "condiciones_del_piloto"):
+    import sys
+
+    if str(GUIONES) not in sys.path:
+        sys.path.insert(0, str(GUIONES))
+    especificacion = importlib.util.spec_from_file_location(nombre, GUIONES / f"{nombre}.py")
     modulo = importlib.util.module_from_spec(especificacion)
+    sys.modules[nombre] = modulo
     especificacion.loader.exec_module(modulo)
     return modulo
 
 
 guion = _guion()
+publicador = _guion("publicar_condiciones")
 TEXTO = guion.leer()
+
+
+def canal_de_soporte_de_la_app() -> tuple[str, str]:
+    """`(correo, nombre de la entrada en Ajustes)`, leídos de la aplicación:
+    el buzón único del Centro de ayuda y la fila que lleva a él."""
+    pantalla = (MOVIL / "screens" / "SupportScreen.tsx").read_text(encoding="utf-8")
+    correo = re.search(r"export const SUPPORT_EMAIL = '([^']+)'", pantalla).group(1)
+    textos = (MOVIL / "i18n" / "es.ts").read_text(encoding="utf-8")
+    entrada = re.search(r"'settings\.support': '([^']+)'", textos).group(1)
+    return correo, entrada
+
+
+def sin_nada_escondido(texto: str) -> None:
+    """Texto plano, entero y a la vista: ni caracteres invisibles o de control,
+    ni marcas de formato, ni comentarios, ni restos de plantilla, ni un
+    marcador por completar."""
+    for caracter in texto:
+        if caracter != "\n":
+            assert unicodedata.category(caracter)[0] != "C", repr(caracter)
+            assert unicodedata.category(caracter) not in ("Zl", "Zp"), repr(caracter)
+    assert "\t" not in texto and "  " not in texto
+    for resto in ("<!--", "-->", "<", ">", "{{", "}}", "TODO", "FIXME", "XXX", "lorem", "Lorem", "**", "##", "`",
+                  "[", "]", "PENDIENTE", "pendiente de completar"):
+        assert resto not in texto, resto
+    assert guion.pendientes(texto) == []
+
+
+def solo_el_canal_de_la_app(texto: str, apartado: str) -> None:
+    """El único contacto del texto es el que la aplicación ya tiene: ni un
+    correo distinto, ni un teléfono, ni una dirección, ni un enlace."""
+    correo, entrada = canal_de_soporte_de_la_app()
+    assert re.findall(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", texto) == [correo]
+    assert correo in apartado and f"«{entrada}»" in apartado and "Centro de ayuda" in apartado
+    assert not re.search(r"https?://|www\.|whatsapp|telegram", texto, flags=re.I)
+    assert not re.search(r"\d[\d \-]{6,}", texto), "ningún teléfono ni número largo"
+    assert not re.search(r"\b(Av\.|Avenida|Jr\.|Calle)\b", texto)
+
+
+#: Lo que ninguno de los dos textos puede decir.
+PROMESAS = (
+    "reembols", "garantiz", "garantía", "indemniz", "seguro ", "seguros", "póliza", "entidad financiera", "banco",
+    "pasarela", "saldo", "billetera", "legalmente", "por ley", "la ley exige", "obligación legal", "compensa",
+    "reintegr", "resarc", "cobertura", "aseguramos", "nos hacemos responsables", "se responsabiliza",
+    "aprobado legal", "aprobadas legal", "inmediatamente", "absolutamente", "verificó todo", "tiempo mínimo necesario",
+)
+
+
+def provisional_y_sin_presumir(texto: str) -> None:
+    """Dice que es una versión operativa provisional del piloto y que no ha
+    tenido revisión legal; no dice lo contrario en ningún sitio."""
+    assert "Versión operativa provisional del piloto." in texto
+    assert "Todavía no han tenido una revisión legal" in texto
+    minusculas = texto.lower()
+    for promesa in PROMESAS:
+        assert promesa not in minusculas, promesa
 #: Los diecisiete apartados, en orden.
 APARTADOS = (
     "NATURALEZA DEL PILOTO", "PARTICIPANTES", "EL PAPEL DE Z", "ALCANCE", "DINERO", "LA RESERVA", "CANCELACIÓN",
@@ -111,43 +176,29 @@ async def test_los_diecisiete_apartados_estan_y_en_orden() -> None:
         assert len(_apartado(numero).split()) >= 15, APARTADOS[numero - 1]
 
 
-async def test_no_esconde_nada() -> None:
-    """Texto plano, entero y a la vista: ni caracteres invisibles o de control,
-    ni marcas de formato, ni comentarios, ni restos de plantilla. Los ÚNICOS
-    marcadores son los dos que se ven, entre corchetes."""
-    for caracter in TEXTO:
-        if caracter != "\n":
-            assert unicodedata.category(caracter)[0] != "C", repr(caracter)
-            assert unicodedata.category(caracter) not in ("Zl", "Zp"), repr(caracter)
-    assert "\t" not in TEXTO and "  " not in TEXTO
-    for resto in ("<!--", "-->", "<", ">", "{{", "}}", "TODO", "FIXME", "XXX", "lorem", "Lorem", "**", "##", "`"):
-        assert resto not in TEXTO, resto
-    marcadores = guion.pendientes(TEXTO)
-    assert len(marcadores) == 2 and TEXTO.count("[") == TEXTO.count("]") == 2
-    assert marcadores[0].startswith("[BORRADOR PENDIENTE DE REVISIÓN Y APROBACIÓN EMPRESARIAL Y LEGAL")
-    assert TEXTO.startswith(marcadores[0])
-    assert marcadores[1] == "[CANAL DE SOPORTE PENDIENTE DE COMPLETAR ANTES DE PUBLICAR]"
-    assert marcadores[1] in _apartado(16)
+async def test_no_esconde_nada_ni_le_queda_un_marcador() -> None:
+    sin_nada_escondido(TEXTO)
+    assert TEXTO.startswith("CONDICIONES DEL PILOTO DE Z SERVICIOS\n")
 
 
-async def test_no_inventa_un_canal_de_soporte_ni_un_contacto() -> None:
-    assert "@" not in TEXTO and not re.search(r"https?://|www\.|\.com\b|\.pe\b|whatsapp|telegram", TEXTO, flags=re.I)
-    assert not re.search(r"\d[\d \-]{6,}", TEXTO), "ningún teléfono ni número largo"
-    assert not re.search(r"\b(Av\.|Avenida|Jr\.|Calle)\b", TEXTO)
+async def test_el_canal_de_soporte_es_el_que_ya_tiene_la_app_y_no_inventa_otro() -> None:
+    solo_el_canal_de_la_app(TEXTO, _apartado(16))
+
+
+async def test_dice_que_es_provisional_y_no_presume_de_una_revision_legal() -> None:
+    provisional_y_sin_presumir(TEXTO)
+    assert "piloto cerrado y gratuito" in TEXTO.split("1. NATURALEZA DEL PILOTO")[0]
 
 
 async def test_no_promete_lo_que_no_existe_ni_se_presenta_como_lo_que_no_es() -> None:
     minusculas = TEXTO.lower()
-    for promesa in ("reembols", "garant", "indemniz", "seguro ", "seguros", "póliza", "entidad financiera",
-                    "banco", "pasarela", "saldo", "billetera", "legalmente", "por ley", "la ley exige", "obligación legal",
-                    "compensa", "reintegr", "resarc", "cobertura", "aseguramos", "nos hacemos responsables"):
+    for promesa in PROMESAS:
         assert promesa not in minusculas, promesa
     # «Devoluciones» solo aparece para decir que NO las hay.
     assert minusculas.count("devoluc") == 1 and "no gestiona devoluciones económicas" in minusculas
     # Lo que el sistema no hace no se promete (hallazgos de la revisión del 02/10/2026): conservar «el
     # tiempo mínimo», avisar de seguridad «en cualquier momento», ni suspender una cuenta cualquiera.
-    for de_mas in ("tiempo mínimo necesario", "en cualquier momento", "suspender a un prestador, un servicio o una cuenta",
-                   "contenido falso"):
+    for de_mas in ("en cualquier momento", "suspender a un prestador, un servicio o una cuenta", "contenido falso"):
         assert de_mas not in TEXTO, de_mas
     # No oculta que el piloto no procesa dinero: lo dice con todas las letras.
     dinero = _apartado(5)
@@ -164,6 +215,8 @@ async def test_dice_el_alcance_y_las_reglas_de_la_primera_version() -> None:
     alcance = _apartado(4)
     for frase in ("en el Perú", "virtuales o presenciales", "No hay atención a domicilio",
                   "categorías reguladas ni de alto riesgo",
+                  "no hay servicios médicos, legales, financieros ni de emergencia",
+                  "una autorización que Z no haya comprobado", "dirigidos a menores de edad",
                   # La lista de lo prohibido (P8) tiene que constar en las condiciones.
                   "Están prohibidos", "actividades ilegales", "el fraude", "la falsificación", "las armas",
                   "la explotación de personas", "el contenido sexual", "servicios financieros no autorizados",
@@ -225,21 +278,25 @@ async def test_los_plazos_que_dice_son_los_de_la_configuracion_de_fabrica() -> N
 
 async def test_el_guion_se_niega_mientras_haya_un_marcador_y_no_abre_conexiones(tmp_path, capsys) -> None:
     salida = tmp_path / "peticion.json"
-    assert guion.main(["--salida", str(salida)]) == 1
+    con_marcador = tmp_path / "con_marcador.txt"
+    con_marcador.write_text(TEXTO + "\n\n[CANAL DE SOPORTE PENDIENTE DE COMPLETAR]", encoding="utf-8")
+    assert guion.main(["--texto", str(con_marcador), "--salida", str(salida)]) == 1
     assert not salida.exists()
     assert "no se publican" in capsys.readouterr().err
     # Para ensayar sí, y dice que no se publica.
-    assert guion.main(["--borrador", "--salida", str(salida)]) == 0
+    assert guion.main(["--texto", str(con_marcador), "--borrador", "--salida", str(salida)]) == 0
+    assert "[CANAL DE SOPORTE" in json.loads(salida.read_text(encoding="utf-8"))["body"]
+    assert "SOLO PARA ENSAYAR" in capsys.readouterr().err
+    # El texto de verdad ya no lleva ninguno: se prepara, y dice SU huella. Con
+    # saltos de línea de Windows y un salto al final es el mismo texto.
+    de_windows = tmp_path / "de_windows.txt"
+    de_windows.write_bytes(TEXTO.replace("\n", "\r\n").encode("utf-8") + b"\r\n")
+    assert guion.main(["--texto", str(de_windows), "--salida", str(salida)]) == 0
     assert json.loads(salida.read_text(encoding="utf-8")) == {
         "country_code": "PE", "title": guion.TITULO, "body": TEXTO,
     }
-    assert "SOLO PARA ENSAYAR" in capsys.readouterr().err
-    # Con el texto aprobado (sin marcadores), prepara la petición y dice SU huella.
-    aprobado = tmp_path / "aprobado.txt"
-    aprobado.write_bytes(_aprobado().replace("\n", "\r\n").encode("utf-8") + b"\r\n")
-    assert guion.main(["--texto", str(aprobado), "--salida", str(salida)]) == 0
-    assert json.loads(salida.read_text(encoding="utf-8"))["body"] == _aprobado()
-    assert politicas.huella(_aprobado()) in capsys.readouterr().out
+    assert politicas.huella(TEXTO) in capsys.readouterr().out
+    assert guion.main([]) == 0
     # No toca la red, la base ni la configuración.
     fuente = GUION.read_text(encoding="utf-8")
     for prohibido in ("import httpx", "import requests", "urllib", "sqlalchemy", "psycopg", "asyncpg", "from app",
@@ -248,10 +305,8 @@ async def test_el_guion_se_niega_mientras_haya_un_marcador_y_no_abre_conexiones(
 
 
 def _aprobado() -> str:
-    """Como quedaría el texto al aprobarlo: sin la línea del borrador y con el
-    canal de soporte que diga la empresa (aquí, uno de prueba)."""
-    primera, canal = guion.pendientes(TEXTO)
-    return TEXTO.replace(primera, "").replace(canal, "el canal de soporte de prueba").strip()
+    """El texto que se publica: el del fichero, que ya no lleva marcadores."""
+    return TEXTO
 
 
 async def test_un_borrador_con_parametros_o_sin_cuerpo_no_pasa() -> None:
@@ -503,3 +558,116 @@ async def test_publicar_mientras_alguien_confirma_deja_lo_aceptado_coherente(res
                                  "on p.id = a.policy_id where a.kind = 'booking_terms' "
                                  "and (a.sha256 <> p.body_sha256 or a.policy_version <> p.version)") == 0
     assert primera["version"] >= 1 and vistos <= {201, 409}
+
+
+# =========================================================================== #
+# 3. El guion que publica, contra la API real
+# =========================================================================== #
+def pedir_como(app, quien: str):
+    """El `pedir` del guion, hablando con la aplicación de la prueba."""
+
+    async def pedir(metodo: str, ruta: str, cuerpo: dict | None):
+        # `_pedir` manda sus propios parámetros, y httpx con `params` tira los
+        # que vengan escritos en la ruta: se le pasan aparte.
+        partes = urlsplit(ruta)
+        r = await _pedir(app, metodo, partes.path, quien, cuerpo, **dict(parse_qsl(partes.query)))
+        try:
+            return r.status_code, r.json()
+        except ValueError:
+            return r.status_code, None
+
+    return pedir
+
+
+@SIN_POSTGRES
+async def test_el_guion_publica_solo_si_se_le_dice_y_la_huella_coincide(reservas) -> None:  # noqa: F811
+    app, motor, _ = reservas
+    _perfil, servicio, jefa, moderador = await _servicio(app, motor)
+    await _sin_condiciones(motor)
+    dicho: list[str] = []
+
+    # SIN `--publicar`: deja el borrador comprobado y NO publica.
+    hecho = await publicador.publicar(pedir_como(app, jefa), "contratacion", de_verdad=False, decir=dicho.append)
+    assert hecho["estado"] == "draft_ready" and hecho["huella"] == guion.huella(TEXTO)
+    assert await _vigente(motor) is None
+    # Repetirlo no crea otro borrador.
+    await publicador.publicar(pedir_como(app, jefa), "contratacion", de_verdad=False, decir=dicho.append)
+    assert await _uno(motor, "select count(*) from public.service_policies where kind = 'booking_terms' "
+                             "and country_code = 'PE' and status = 'draft'") == 1
+
+    # Un borrador que alguien dejó con OTRO texto se corrige antes de publicar.
+    await _sembrar(motor, "update public.service_policies set body = body || ' Algo que nadie aprobó.', "
+                          "body_sha256 = repeat('0', 64) where kind = 'booking_terms' and status = 'draft'")
+    # Quien no decide no publica: el guion se detiene y lo dice.
+    with pytest.raises(publicador.NoSePublica):
+        await publicador.publicar(pedir_como(app, moderador), "contratacion", de_verdad=True, decir=dicho.append)
+    assert await _vigente(motor) is None
+
+    hecho = await publicador.publicar(pedir_como(app, jefa), "contratacion", de_verdad=True, decir=dicho.append)
+    assert hecho["estado"] == "published"
+    vigente = await _vigente(motor)
+    assert vigente[1:] == (hecho["version"], guion.huella(TEXTO))
+    assert await _uno(motor, "select body = :t from public.service_policies where id = cast(:p as uuid)",
+                      p=vigente[0], t=TEXTO) is True
+    # Repetirlo ya publicado no toca nada.
+    hecho = await publicador.publicar(pedir_como(app, jefa), "contratacion", de_verdad=True, decir=dicho.append)
+    assert hecho == {"estado": "already_published", "version": vigente[1], "huella": guion.huella(TEXTO)}
+    assert await _vigente(motor) == vigente
+    # Lo que dijo: el tipo, el tamaño, la huella y la versión. Ni el texto ni nada más.
+    salida = "\n".join(dicho)
+    assert guion.huella(TEXTO) in salida and "booking_terms" in salida
+    assert "NATURALEZA DEL PILOTO" not in salida and "Bearer" not in salida
+    # Y con esas condiciones, publicadas por el guion, se reserva.
+    cliente, retencion = await _con_retencion(app, motor, servicio)
+    resumen = await _resumen(app, cliente, retencion)
+    assert resumen["terms"]["sha256"] == guion.huella(TEXTO) and resumen["terms"]["body"] == TEXTO
+    assert (await _confirmar(app, cliente, retencion, _aceptando(resumen))).status_code == 201
+
+
+async def test_el_guion_que_publica_no_imprime_el_token_ni_publica_por_defecto(monkeypatch, capsys) -> None:
+    fuente = (GUIONES / "publicar_condiciones.py").read_text(encoding="utf-8")
+    # El token sale de una variable de entorno y solo va a la cabecera.
+    assert "Bearer {token}" in fuente and not re.search(r"(print|decir)\([^\n]*\{token", fuente)
+    assert 'analizador.add_argument("--token"' not in fuente
+    assert 'add_argument("--publicar", action="store_true"' in fuente
+    # Sin la variable, ni lo intenta.
+    monkeypatch.delenv(publicador.VARIABLE_DEL_TOKEN, raising=False)
+    assert publicador.main(["--tipo", "prestador", "--api", "https://api.invalid"]) == 2
+    assert "Z_ADMIN_TOKEN" in capsys.readouterr().err
+    # EL TOKEN NO VIAJA EN CLARO: sin https (o fuera de este equipo) ni lo lee.
+    secreto = "token-de-una-sesion-de-administracion"
+    monkeypatch.setenv(publicador.VARIABLE_DEL_TOKEN, secreto)
+
+    def _sin_red(*_a, **_k):
+        raise AssertionError("no tenía que salir a la red")
+
+    monkeypatch.setattr(publicador.urllib.request, "urlopen", _sin_red)
+    for mala in ("http://api.ejemplo.test", "ftp://api.ejemplo.test", "api.ejemplo.test",
+                 "https://api.ejemplo.test/api/v1", "https://", "http://localhost.ejemplo.test"):
+        assert publicador.main(["--tipo", "prestador", "--api", mala]) == 2, mala
+        salida = capsys.readouterr()
+        assert "https" in salida.err and secreto not in salida.err + salida.out, mala
+    for buena in ("https://api.ejemplo.test", "https://d111.cloudfront.net/", "http://localhost:8000", "http://127.0.0.1:8000"):
+        assert publicador.DESTINO_ADMITIDO.match(buena), buena
+    # Y si no hay red, lo dice en una línea: sin traza, sin dirección y sin token.
+
+    def _caida(*_a, **_k):
+        raise publicador.urllib.error.URLError("sin red")
+
+    monkeypatch.setattr(publicador.urllib.request, "urlopen", _caida)
+    with pytest.raises(publicador.NoSePublica) as motivo:
+        await publicador._por_http("https://api.ejemplo.test", secreto)("GET", "/x", None)
+    assert secreto not in str(motivo.value) and "ejemplo.test" not in str(motivo.value)
+    assert motivo.value.__cause__ is None and motivo.value.__suppress_context__, "sin la traza de la red detrás"
+    monkeypatch.delenv(publicador.VARIABLE_DEL_TOKEN)
+    # Con un texto con marcador se niega antes de pedir nada.
+    pedidas: list[str] = []
+
+    async def pedir(metodo, ruta, cuerpo):
+        pedidas.append(ruta)
+        return 500, None
+
+    monkeypatch.setattr(guion, "leer", lambda ruta=None: TEXTO + " [DATO PENDIENTE]")
+    with pytest.raises(publicador.NoSePublica):
+        await publicador.publicar(pedir, "contratacion", de_verdad=True, decir=lambda _: None)
+    assert pedidas == []
