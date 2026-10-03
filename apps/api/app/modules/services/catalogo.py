@@ -158,6 +158,15 @@ class MonedaNoPermitida(ValidationAppError):
     message = "Z no admite esa moneda por ahora."
 
 
+class ModeloDePrecioNoPermitido(ValidationAppError):
+    """El modelo existe, pero Z no lo admite ahora
+    (`SERVICES_CATALOG_PRICE_MODELS`): en el piloto gratuito, una ficha es
+    gratuita o dice «a consultar»."""
+
+    code = "service_price_model_not_allowed"
+    message = "Z no admite ese tipo de precio por ahora."
+
+
 class MotivoRequerido(ValidationAppError):
     code = "service_reason_required"
     message = "Este paso lleva un motivo que el prestador pueda leer."
@@ -590,6 +599,10 @@ async def editar_borrador(
         raise ModalidadNoPermitida(details={"field": "modality", "allowed": sorted(reglas.modalidades)})
     if cambios.get("currency") is not None and cambios["currency"] not in reglas.monedas:
         raise MonedaNoPermitida(details={"field": "currency", "allowed": sorted(reglas.monedas)})
+    if cambios.get("price_model") is not None and cambios["price_model"] not in reglas.modelos_de_precio:
+        raise ModeloDePrecioNoPermitido(
+            details={"field": "price_model", "allowed": sorted(reglas.modelos_de_precio)}
+        )
 
     for campo in CAMPOS_DEL_BORRADOR:
         if campo in cambios:
@@ -833,6 +846,15 @@ async def publicar(
     prestador = await db.get(ServiceProvider, servicio.provider_id)
     if prestador is None or prestador.status != PRESTADOR_ACTIVO:
         raise PrestadorNoDisponible()
+    # EL ÚLTIMO PASO TAMBIÉN MIRA EL PRECIO. El borrador y el envío ya lo
+    # rechazan, pero una versión enviada cuando se admitía un importe podía
+    # seguir su camino y acabar en el catálogo: lo que se publica es siempre
+    # lo que Z ofrece HOY, no lo que ofrecía cuando se envió.
+    reglas = requisitos.Reglas.de()
+    if version.price_model not in reglas.modelos_de_precio:
+        raise ModeloDePrecioNoPermitido(
+            details={"field": "price_model", "allowed": sorted(reglas.modelos_de_precio)}
+        )
 
     ahora = _ahora()
     anterior = await publicada(db, servicio.id)
@@ -1079,6 +1101,7 @@ __all__ = [
     "CategoriaNoEncontrada",
     "EsTuPropioServicio",
     "ModalidadNoPermitida",
+    "ModeloDePrecioNoPermitido",
     "MonedaNoPermitida",
     "MotivoRequerido",
     "PrecioInvalido",

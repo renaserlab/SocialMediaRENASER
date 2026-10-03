@@ -27,7 +27,19 @@ from tests.test_servicios_atencion_api import (  # noqa: F401 - montajes compart
     _sucesos,
     atencion,
 )
-from tests.test_servicios_catalogo_api import BANDEJA, CONTENIDO, MIOS, _accion, _categoria, _crear, _editar, _imagen
+from tests.test_servicios_catalogo_api import (
+    BANDEJA,
+    CONTENIDO,
+    MIOS,
+    _accion,
+    _categoria,
+    _crear,
+    _editar,
+    _enviado,
+    _equipo,
+    _imagen,
+    _prestador,
+)
 from tests.test_servicios_descubrimiento_api import base_aplicada, entorno, mundo  # noqa: F401 - montajes compartidos
 from tests.test_servicios_reserva_api import (  # noqa: F401 - montajes compartidos
     ADMIN_SERVICIOS,
@@ -117,11 +129,22 @@ async def test_de_fabrica_una_ficha_con_importe_no_se_envia_y_a_consultar_no_se_
     monkeypatch.setattr(get_settings(), "services_catalog_price_models", DE_FABRICA["services_catalog_price_models"])
     perfil, _servicio_id, jefa, _moderador = await _servicio(app, motor)
     antes = await _dinero(motor)
+    de_fabrica = DE_FABRICA["services_catalog_price_models"]
     for modelo in ("fixed", "from"):
         r = await _crear(app, perfil, (await _categoria(app, jefa))["id"])
         assert r.status_code == 201, r.text
         ficha = r.json()["id"]
+        # NO ENTRA NI EN EL BORRADOR: ni solo, ni con el resto de la ficha.
+        for cambios in ({"price_model": modelo}, {**CONTENIDO, "price_model": modelo}):
+            r = await _editar(app, perfil, ficha, **cambios)
+            assert r.status_code == 422 and _codigo(r) == "service_price_model_not_allowed", (modelo, r.text)
+            assert r.json()["error"]["details"] == {"field": "price_model", "allowed": ["free", "on_request"]}
+        assert await _uno(motor, "select price_model from public.service_versions where service_id = cast(:s as uuid)",
+                          s=ficha) is None
+        # Y UN BORRADOR QUE YA LO TENÍA (de cuando se admitía) no se puede enviar.
+        monkeypatch.setattr(get_settings(), "services_catalog_price_models", "free,fixed,from,on_request")
         assert (await _editar(app, perfil, ficha, **{**CONTENIDO, "price_model": modelo})).status_code == 200
+        monkeypatch.setattr(get_settings(), "services_catalog_price_models", de_fabrica)
         assert (await _imagen(app, perfil, ficha)).status_code == 201
         r = await _accion(app, perfil, f"{MIOS}/{ficha}/draft/submit")
         assert r.status_code == 422 and _codigo(r) == "service_catalog_incomplete", (modelo, r.text)
@@ -134,6 +157,38 @@ async def test_de_fabrica_una_ficha_con_importe_no_se_envia_y_a_consultar_no_se_
     r = await _retener(app, cliente, a_consultar, inicio)
     assert r.status_code == 409 and _codigo(r) == "service_booking_quote_required", r.text
     assert await _dinero(motor) == antes
+
+
+@SIN_POSTGRES
+async def test_una_version_con_importe_aprobada_antes_no_llega_al_catalogo(reservas, monkeypatch) -> None:  # noqa: F811
+    """El borrador y el envío ya rechazan un importe. Lo que quedaba: una versión
+    enviada y aprobada CUANDO SE ADMITÍA. Publicar también lo mira."""
+    app, motor, _ = reservas
+    jefa, moderador = await _equipo(motor)
+    perfil = await _prestador(motor)
+    de_fabrica = DE_FABRICA["services_catalog_price_models"]
+    publicadas = ("select count(*) from public.service_versions "
+                  "where service_id = cast(:s as uuid) and status = 'published'")
+    for modelo in ("fixed", "from"):
+        monkeypatch.setattr(get_settings(), "services_catalog_price_models", "free,fixed,from,on_request")
+        enviado = await _enviado(app, perfil, jefa, price_model=modelo, price_minor=12000, currency="PEN")
+        base = f"{BANDEJA}/{enviado['id']}/versions/{enviado['open_version']['id']}"
+        assert (await _accion(app, moderador, f"{base}/start-review")).status_code == 200
+        assert (await _accion(app, jefa, f"{base}/approve")).status_code == 200
+
+        # El piloto vuelve a lo de fábrica: no se publica, y no queda nada a la vista.
+        monkeypatch.setattr(get_settings(), "services_catalog_price_models", de_fabrica)
+        r = await _accion(app, jefa, f"{base}/publish")
+        assert r.status_code == 422 and _codigo(r) == "service_price_model_not_allowed", (modelo, r.text)
+        assert r.json()["error"]["details"] == {"field": "price_model", "allowed": ["free", "on_request"]}
+        assert await _uno(motor, publicadas, s=enviado["id"]) == 0
+        assert await _uno(motor, "select status from public.service_versions where id = cast(:v as uuid)",
+                          v=enviado["open_version"]["id"]) == "approved"
+
+        # No es que publicar esté roto: admitido otra vez, se publica.
+        monkeypatch.setattr(get_settings(), "services_catalog_price_models", "free,fixed,from,on_request")
+        assert (await _accion(app, jefa, f"{base}/publish")).status_code == 200
+        assert await _uno(motor, publicadas, s=enviado["id"]) == 1
 
 
 # =========================================================================== #

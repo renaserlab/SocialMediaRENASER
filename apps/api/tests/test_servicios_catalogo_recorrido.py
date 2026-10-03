@@ -202,9 +202,16 @@ async def test_recorrido_integral_con_los_cinco_actores(entorno, monkeypatch) ->
     assert "duration_out_of_range" in await editar(duration_minutes=20)
     assert "duration_out_of_range" not in await editar(duration_minutes=50)
     monkeypatch.setattr(ajustes, "services_catalog_min_duration_minutes", 5)
-    # Precio: modelo no permitido, sin importe, sin moneda, moneda no permitida.
+    # Precio: lo que Z no admite no entra en el borrador (el piloto es
+    # gratuito: de fábrica, gratis o a consultar); un borrador que ya lo tenía
+    # lo dice al enviar; sin importe, sin moneda, moneda no permitida.
+    monkeypatch.setattr(ajustes, "services_catalog_price_models", "free,on_request")
+    for con_importe in ("fixed", "from"):
+        await _espera(app, ana, "PATCH", f"{mio}/draft", 422, "service_price_model_not_allowed",
+                      {"price_model": con_importe})
+    await editar(price_model="on_request")
     monkeypatch.setattr(ajustes, "services_catalog_price_models", "fixed")
-    assert "price_model_not_allowed" in await editar(price_model="on_request")
+    assert "price_model_not_allowed" in await que_falta()
     monkeypatch.setattr(ajustes, "services_catalog_price_models", "free,fixed,from,on_request")
     faltan = await editar(price_model="fixed")
     assert "price" in faltan and "currency" in faltan
