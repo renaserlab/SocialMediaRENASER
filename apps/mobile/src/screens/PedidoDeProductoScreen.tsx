@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import { CLAVE_SIN_IMPORTE } from '@/lib/carrito';
 import {
@@ -136,6 +137,8 @@ export function PedidoDeProductoScreen() {
   //: pantalla: aqui no se deduce de que el paquete haya llegado.
   const [valorables, setValorables] = useState<LineaValorable[]>([]);
   const ocupadoRef = useRef(false);
+  /** Si el pedido ya se llegó a pintar: una relectura fallida no lo quita. */
+  const yaPintado = useRef(false);
 
   const cargar = useCallback(async () => {
     if (orderId === '') {
@@ -147,6 +150,7 @@ export function PedidoDeProductoScreen() {
     setFallo(null);
     try {
       setPedido(await ProductOrderRepository.leer(orderId));
+      yaPintado.current = true;
       try {
         setDevueltos(
           await ProductBuyerMoneyRepository.devolucionesDelPedido(orderId),
@@ -171,6 +175,12 @@ export function PedidoDeProductoScreen() {
       if (error instanceof ApiError && esFaltaDeSesion(error.status)) setFallo('sinSesion');
       else if (error instanceof ApiError && esPedidoApagado(error.code)) setFallo('noDisponible');
       else if (error instanceof ApiError && error.status === 404) setFallo('noEncontrado');
+      //: UNA RELECTURA QUE FALLA NO BORRA EL PEDIDO QUE YA SE VE. Desde que la
+      //: pantalla se relee al volver a primer plano, lo normal al reanudar es
+      //: que la primera petición no salga («Network request failed»): cambiar
+      //: el pedido por una pantalla de error justo al volver de pagar sería
+      //: peor que no releer. Se avisa y se deja lo que había.
+      else if (yaPintado.current) toast(t('common.tryAgain'), 'alert-circle');
       else if (error instanceof ApiError && esFalloDeRed(error.code)) setFallo('sinConexion');
       else setFallo('red');
     } finally {

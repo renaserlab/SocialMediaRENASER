@@ -1034,8 +1034,9 @@ async def tareas(db: AsyncSession, *, lote: int | None = None, ahora: datetime |
     tumba el lote, y el barrido no deja un lote entero de reservas
     bloqueadas hasta el final. Lo que otra petición tiene bloqueado se
     salta. LO QUE NO SE PUEDE CERRAR NO OCUPA EL LOTE (no deja atrás a las
-    que sí). NADIE LLAMA A ESTO TODAVÍA: el planificador es una decisión de
-    la empresa. No mueve dinero."""
+    que sí). Lo llaman dos: administración, a mano, y el planificador por
+    `/internal/services/tasks/run` (`procesos_router.py`), cuando está
+    encendido. No mueve dinero."""
     ahora = ahora or _ahora()
     lote = max(1, min(int(lote or limites.LOTE_DE_TAREAS), limites.LOTE_MAXIMO_DE_TAREAS))
     hecho = Tareas()

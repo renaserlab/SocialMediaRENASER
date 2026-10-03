@@ -271,9 +271,10 @@ async def barrer(
     _disponible: None = Depends(reservas_disponibles),
     db: AsyncSession = Depends(get_db),
 ) -> BarridoRead:
-    """EL BARRIDO de las retenciones vencidas, por lotes. Idempotente. Lo
-    llamará un planificador externo que todavía no existe (decisión
-    pendiente); NO es la autoridad del vencimiento: eso lo decide la hora."""
+    """EL BARRIDO de las retenciones vencidas, por lotes. Idempotente. Esta
+    es la entrada A MANO, para administración; el planificador llama al mismo
+    barrido por `/internal/services/tasks/run` (`procesos_router.py`). NO es
+    la autoridad del vencimiento: eso lo decide la hora."""
     vencidas = await dominio.vencer_retenciones(db, lote=batch)
     await db.commit()
     return BarridoRead(expired=vencidas)

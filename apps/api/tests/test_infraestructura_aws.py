@@ -452,8 +452,15 @@ def test_el_planificador_nace_apagado_y_no_crea_nada_sin_pedirlo() -> None:
 def test_el_secreto_del_planificador_no_es_un_parametro_ni_va_en_un_perfil() -> None:
     """Sale del secreto de la API con una referencia dinámica: ni la consola
     de CloudFormation, ni las evidencias, ni el repositorio lo ven."""
-    parametros = "".join(_parametros(PLATAFORMA))
-    assert "Token" not in parametros.replace("SERVICES_TASKS_TOKEN", "")
+    parametros = _parametros(PLATAFORMA)
+    # Ningún parámetro lleva el secreto: ni por su nombre, ni escondido tras un
+    # `NoEcho` (que solo lo tapa en la consola; sigue viajando por la pila).
+    assert not [n for n in parametros if re.search(r"Token|Tasks|Clave|ApiKey", n)], sorted(parametros)
+    assert not [n for n, bloque in parametros.items() if "NoEcho" in bloque]
+    # El único que habla del secreto es un CONTADOR: un número, no el secreto.
+    contador = parametros["VersionDelSecretoDelPlanificador"]
+    assert "Type: Number\n" in contador and "Default: 1\n" in contador
+    assert [n for n in parametros if "Secreto" in n] == ["NombreDelSecreto", "VersionDelSecretoDelPlanificador"]
     assert CLAVE_DEL_PLANIFICADOR not in _entorno_que_escribe_la_plantilla()
     for fichero in PERFILES:
         assert "TOKEN" not in fichero.read_text(encoding="utf-8").upper(), fichero.name
@@ -476,7 +483,7 @@ def test_el_planificador_llama_a_la_ruta_y_con_la_cabecera_que_la_api_espera() -
     destino = _recurso("DestinoDelPlanificadorDeServicios")
     assert "HttpMethod: POST\n" in destino
     assert re.findall(r"!Sub 'https://\$\{(?:NombreDeDominio|FrenteHttps\.DomainName)\}(\S+)'", destino) == [ruta, ruta]
-    assert "http://" not in destino, "el secreto no viaja en claro"
+    assert "http://" not in destino, "de EventBridge a CloudFront, cifrado"
     assert f"ApiKeyName: {procesos.CABECERA}\n" in _recurso("ConexionDelPlanificadorDeServicios")
 
 
@@ -512,6 +519,7 @@ def test_si_los_procesos_fallan_avisa_por_el_tema_de_alertas() -> None:
     assert "{Name: RuleName, Value: !Ref ReglaDelPlanificadorDeServicios}" in alarma
     assert "AlarmActions: [!Ref TemaDeAlertas]\n" in alarma
     assert "TreatMissingData: notBreaching\n" in alarma, "con la regla desactivada no hay datos, y eso no es una avería"
+    assert "Period: 900\n" in alarma and "EvaluationPeriods: 2\n" in alarma, "un despliegue falla un rato y no es una avería"
 
 
 def test_el_guion_genera_el_secreto_del_planificador_y_no_lo_imprime() -> None:
@@ -552,3 +560,20 @@ def test_no_se_puede_encender_la_contratacion_sin_el_planificador() -> None:
     quien = _recurso("ComprobacionDeLosProcesosDeServicios")
     assert "DependsOn: BarreraLaContratacionExigeElPlanificador\n" in quien, "nadie depende de la barrera: no para nada"
     assert "Condition:" not in quien, "tiene que existir siempre, o la barrera no se evalúa"
+
+
+def test_rotar_el_secreto_del_planificador_llega_a_la_conexion() -> None:
+    """CloudFormation solo vuelve a leer un secreto cuando cambia el recurso
+    que lo usa. Sin algo que cambie, rotar el secreto dejaba a EventBridge con
+    el viejo y a la API con el nuevo: todas las pasadas rechazadas, para
+    siempre. El contador va en la descripción de la conexión."""
+    conexion = _recurso("ConexionDelPlanificadorDeServicios")
+    assert re.search(r"Description: !Sub '.*\$\{VersionDelSecretoDelPlanificador\}.*'\n", conexion)
+    for fichero in PERFILES:
+        assert _perfil(fichero)["VersionDelSecretoDelPlanificador"] == "1", fichero.name
+    guion = GUION.read_text(encoding="utf-8")
+    # El guion sabe generar uno nuevo aunque ya haya uno, y dice qué hacer después.
+    assert "[switch] $RotarSecretoDelPlanificador" in guion
+    assert "$actual.Contains($ClaveDelPlanificador) -and -not $RotarSecretoDelPlanificador" in guion
+    aviso = re.search(r'Write-Aviso "Cambia \$\{ClaveDelPlanificador\}[^\n]*', guion).group(0)
+    assert "VersionDelSecretoDelPlanificador" in aviso and "Renovar" in aviso

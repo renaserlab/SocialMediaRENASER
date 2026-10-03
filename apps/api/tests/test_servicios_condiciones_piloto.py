@@ -739,5 +739,112 @@ async def test_si_el_servidor_no_guardo_el_texto_local_no_se_publica(cual: str) 
     buena = guion.huella(texto)
     hecho = await publicador.publicar(servidor(buena), cual, de_verdad=True, decir=lambda _: None)
     assert hecho == {"estado": "published", "version": 1, "huella": buena}
-    with pytest.raises(publicador.NoSePublica):
+    # …y dice que NO SABE si se publicó: la orden ya había salido.
+    with pytest.raises(publicador.EstadoDesconocido):
         await publicador.publicar(servidor(buena, "draft"), cual, de_verdad=True, decir=lambda _: None)
+
+
+@pytest.mark.parametrize("cual", ["contratacion", "prestador"])
+async def test_un_borrador_previo_no_cuela_sus_parametros(cual: str) -> None:
+    """EL SERVIDOR DEVUELVE EL BORRADOR QUE HUBIERA, SIN TOCARLO, con sus
+    parámetros (qué documentos se exigen, si se puede volver a postular). La
+    huella solo cubre el texto: con el mismo texto y otros parámetros, el guion
+    publicaba algo que nadie había mirado. Ahora los vacía antes, y si no puede,
+    no publica."""
+    datos = guion.CONDICIONES[cual]
+    texto = guion.leer(datos.texto)
+    buena = guion.huella(texto)
+    colados = {"reapplication_after_rejection": True, "required_documents": {"person": []}}
+
+    def servidor(*, corrige: bool):
+        pedidas: list[tuple[str, str, dict | None]] = []
+
+        async def pedir(metodo, ruta, cuerpo):
+            pedidas.append((metodo, ruta, cuerpo))
+            if metodo == "GET" and "?" in ruta:
+                return 200, []
+            if metodo == "POST" and ruta.endswith("/draft"):
+                # Mismo título y mismo texto: lo único distinto son los parámetros.
+                return 200, {"id": "p-1", "body": texto, "title": datos.titulo, "parameters": colados}
+            if metodo == "PATCH" and ruta.endswith("/p-1"):
+                return 200, {"id": "p-1", "body": texto, "title": datos.titulo,
+                             "parameters": cuerpo["parameters"] if corrige else colados}
+            if metodo == "GET" and ruta.endswith("/p-1/preview"):
+                return 200, {"sha256": buena, "version": 2}
+            if metodo == "POST" and ruta.endswith("/p-1/publish"):
+                return 200, {"status": "published", "version": 2, "body_sha256": buena, "parameters": {}}
+            raise AssertionError((metodo, ruta))
+
+        return pedir, pedidas
+
+    pedir, pedidas = servidor(corrige=True)
+    hecho = await publicador.publicar(pedir, cual, de_verdad=True, decir=lambda _: None)
+    assert hecho["estado"] == "published"
+    parches = [cuerpo for metodo, _, cuerpo in pedidas if metodo == "PATCH"]
+    assert parches == [{"title": datos.titulo, "body": texto, "parameters": {}}], "los vacía, no los deja"
+
+    # Si el servidor no los vacía, no se publica.
+    pedir, pedidas = servidor(corrige=False)
+    with pytest.raises(publicador.NoSePublica, match="parámetros"):
+        await publicador.publicar(pedir, cual, de_verdad=True, decir=lambda _: None)
+    assert not [ruta for metodo, ruta, _ in pedidas if ruta.endswith("/publish")]
+
+
+async def test_el_guion_no_sigue_redirecciones_ni_se_rompe_con_respuestas_raras() -> None:
+    """`urlopen` sigue un 302 y REENVÍA la cabecera de autorización al destino,
+    aunque sea otro servidor. Con un servidor de verdad en este equipo: el
+    token no llega al segundo. Y un 200 que no es JSON no es una traza."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    visto: dict[str, list] = {"destino": [], "origen": []}
+
+    class Destino(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            visto["destino"].append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"[]")
+
+        def log_message(self, *_a):  # sin ruido en la salida de las pruebas
+            pass
+
+    destino = ThreadingHTTPServer(("127.0.0.1", 0), Destino)
+
+    class Origen(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            visto["origen"].append(self.path)
+            if self.path == "/redirige":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{destino.server_port}/robado")
+                self.end_headers()
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"<html>no soy la API</html>")
+
+        def log_message(self, *_a):
+            pass
+
+    origen = ThreadingHTTPServer(("127.0.0.1", 0), Origen)
+    hilos = [threading.Thread(target=s.serve_forever, daemon=True) for s in (destino, origen)]
+    for hilo in hilos:
+        hilo.start()
+    try:
+        secreto = "token-de-una-sesion-de-administracion"
+        pedir = publicador._por_http(f"http://127.0.0.1:{origen.server_port}", secreto)
+        # La redirección NO se sigue: vuelve su estado, y el destino no ve nada.
+        assert await pedir("GET", "/redirige", None) == (302, None)
+        assert visto["origen"] == ["/redirige"] and visto["destino"] == []
+        # Un 200 que no es JSON: sin contenido, y sin traza.
+        assert await pedir("GET", "/pagina", None) == (200, None)
+        # Y con eso, el recorrido se detiene en el primer paso, sin publicar.
+        with pytest.raises(publicador.NoSePublica):
+            await publicador.publicar(pedir, "prestador", de_verdad=True, decir=lambda _: None)
+        assert visto["destino"] == []
+    finally:
+        for servidor in (origen, destino):
+            servidor.shutdown()
+            servidor.server_close()

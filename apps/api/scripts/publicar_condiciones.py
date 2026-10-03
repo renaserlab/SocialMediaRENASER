@@ -52,6 +52,24 @@ class NoSePublica(Exception):
     """Algo no es lo esperado: se detiene sin publicar."""
 
 
+class EstadoDesconocido(NoSePublica):
+    """La orden de publicar se envió y lo que volvió no es lo esperado: puede
+    estar publicada o no. Repetir el guion lo aclara (si lo está, lo dice)."""
+
+
+def _es_politica(respuesta) -> bool:
+    return isinstance(respuesta, dict) and isinstance(respuesta.get("id"), str)
+
+
+class _SinRedirecciones(urllib.request.HTTPRedirectHandler):
+    """`urlopen` sigue las redirecciones y REENVÍA la cabecera de autorización
+    al destino, también si es otro servidor o va por http. La API no redirige:
+    una redirección es un error, y el token no sale de donde se le mandó."""
+
+    def redirect_request(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN201
+        return None
+
+
 async def publicar(pedir, cual: str, *, de_verdad: bool, decir=print) -> dict:
     """El recorrido: lo vigente, el borrador, la vista previa, la huella y,
     solo si se pide y coincide, publicar. `pedir(metodo, ruta, cuerpo)` hace
@@ -71,7 +89,7 @@ async def publicar(pedir, cual: str, *, de_verdad: bool, decir=print) -> dict:
     decir(f"Huella:  {esperada}")
 
     estado, lista = await pedir("GET", f"{BASE}?kind={datos.tipo}&country={condiciones.PAIS}", None)
-    if estado != 200 or not isinstance(lista, list):
+    if estado != 200 or not isinstance(lista, list) or not all(isinstance(p, dict) for p in lista):
         raise NoSePublica(f"No se pudo leer lo publicado (HTTP {estado}).")
     # Se vuelve a filtrar AQUÍ: lo que decide si se publica otra vez no puede
     # depender de que el servidor (o un intermediario) respetara el filtro.
@@ -85,18 +103,24 @@ async def publicar(pedir, cual: str, *, de_verdad: bool, decir=print) -> dict:
         return {"estado": "already_published", "version": vigente["version"], "huella": esperada}
 
     estado, borrador = await pedir("POST", f"{BASE}/{datos.ruta}/draft", cuerpo)
-    if estado not in (200, 201):
+    if estado not in (200, 201) or not _es_politica(borrador):
         raise NoSePublica(f"No se pudo crear el borrador (HTTP {estado}).")
-    if borrador.get("body") != texto or borrador.get("title") != datos.titulo:
-        # Ya había un borrador con otro texto: se corrige, no se crea otro.
+    if borrador.get("body") != texto or borrador.get("title") != datos.titulo or borrador.get("parameters"):
+        # Ya había un borrador, y el servidor lo devuelve SIN TOCARLO: con su
+        # texto y CON SUS PARÁMETROS. La huella solo cubre el texto, así que
+        # los parámetros de ese borrador (qué documentos se exigen, si se puede
+        # volver a postular) se publicarían sin que nadie los hubiera mirado.
+        # Las condiciones del piloto van sin parámetros: se corrige todo.
         estado, borrador = await pedir(
-            "PATCH", f"{BASE}/{borrador['id']}", {"title": datos.titulo, "body": texto}
+            "PATCH", f"{BASE}/{borrador['id']}", {"title": datos.titulo, "body": texto, "parameters": {}}
         )
-        if estado != 200:
+        if estado != 200 or not _es_politica(borrador):
             raise NoSePublica(f"No se pudo corregir el borrador (HTTP {estado}).")
+    if borrador.get("parameters"):
+        raise NoSePublica("El borrador lleva parámetros que este texto no decide: no se publica.")
 
     estado, vista = await pedir("GET", f"{BASE}/{borrador['id']}/preview", None)
-    if estado != 200:
+    if estado != 200 or not isinstance(vista, dict):
         raise NoSePublica(f"No se pudo leer la vista previa (HTTP {estado}).")
     if vista.get("sha256") != esperada:
         raise NoSePublica("La huella del borrador NO es la del texto local: no se publica.")
@@ -105,15 +129,28 @@ async def publicar(pedir, cual: str, *, de_verdad: bool, decir=print) -> dict:
         decir("No se publicó (falta --publicar).")
         return {"estado": "draft_ready", "version": vista["version"], "huella": esperada}
 
-    estado, publicada = await pedir("POST", f"{BASE}/{borrador['id']}/publish", None)
-    if estado != 200 or publicada.get("status") != "published" or publicada.get("body_sha256") != esperada:
-        raise NoSePublica(f"La publicación no contestó lo esperado (HTTP {estado}).")
+    try:
+        estado, publicada = await pedir("POST", f"{BASE}/{borrador['id']}/publish", None)
+    except NoSePublica as motivo:
+        # La orden de publicar ya salió: que no llegue la respuesta no dice que
+        # no se publicara.
+        raise EstadoDesconocido(str(motivo)) from None
+    if (
+        estado != 200
+        or not isinstance(publicada, dict)
+        or publicada.get("status") != "published"
+        or publicada.get("body_sha256") != esperada
+        or publicada.get("parameters")
+    ):
+        raise EstadoDesconocido(f"La publicación no contestó lo esperado (HTTP {estado}).")
     decir(f"Publicada: versión {publicada['version']}.")
     return {"estado": "published", "version": publicada["version"], "huella": esperada}
 
 
 def _por_http(api: str, token: str):
     """Las peticiones de verdad, con la biblioteca estándar."""
+
+    abridor = urllib.request.build_opener(_SinRedirecciones)
 
     async def pedir(metodo: str, ruta: str, cuerpo: dict | None):
         peticion = urllib.request.Request(
@@ -123,14 +160,21 @@ def _por_http(api: str, token: str):
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(peticion, timeout=30) as respuesta:  # noqa: S310 - la URL la da quien lo ejecuta
-                return respuesta.status, json.loads(respuesta.read().decode("utf-8") or "null")
+            with abridor.open(peticion, timeout=30) as respuesta:  # noqa: S310 - la URL la da quien lo ejecuta
+                crudo = respuesta.read().decode("utf-8", errors="replace")
+                estado = respuesta.status
         except urllib.error.HTTPError as error:
-            # Solo el estado: el cuerpo de un error no se imprime.
+            # Solo el estado (también un 3xx: no se sigue): el cuerpo no se imprime.
             return error.code, None
         except (urllib.error.URLError, TimeoutError, OSError):
             # Sin red no hay nada a medias que explicar: ni traza ni dirección.
             raise NoSePublica("No se pudo conectar con la API.") from None
+        try:
+            return estado, json.loads(crudo or "null")
+        except ValueError:
+            # Un 200 que no es JSON (una página de un intermediario) no es una
+            # respuesta de la API: se trata como si no hubiera contestado.
+            return estado, None
 
     return pedir
 
@@ -150,6 +194,12 @@ def main(argumentos: list[str] | None = None) -> int:
         return 2
     try:
         asyncio.run(publicar(_por_http(opciones.api, token), opciones.tipo, de_verdad=opciones.publicar))
+    except EstadoDesconocido as motivo:
+        print(
+            f"NO SE SABE SI SE PUBLICÓ. {motivo} Repite la misma orden: si ya está publicada lo dice y no toca nada.",
+            file=sys.stderr,
+        )
+        return 3
     except NoSePublica as motivo:
         print(f"NO SE PUBLICÓ. {motivo}", file=sys.stderr)
         return 1

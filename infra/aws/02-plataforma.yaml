@@ -42,7 +42,7 @@ Metadata:
       - Label: {default: Aplicacion}
         Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl, BetaFreeAccessEnabled]
       - Label: {default: Z Servicios (apagado de fabrica)}
-        Parameters: [FeatureServices, FeatureServiceBooking, ServicesPublicAccess, ServicesCatalogModalities, ServicesCatalogCurrencies, PlanificadorDeServicios]
+        Parameters: [FeatureServices, FeatureServiceBooking, ServicesPublicAccess, ServicesCatalogModalities, ServicesCatalogCurrencies, PlanificadorDeServicios, VersionDelSecretoDelPlanificador]
       - Label: {default: Observabilidad y escalado}
         Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, UmbralLatenciaP95Segundos, UmbralErrores5xxDeLaApi, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
     ParameterLabels:
@@ -445,6 +445,17 @@ Parameters:
       (la genera `-Accion Secretos`). La regla solo queda ACTIVA con
       FeatureServices y FeatureServiceBooking encendidos; con cualquiera de los
       dos apagado existe, pero DESACTIVADA.
+
+  VersionDelSecretoDelPlanificador:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: >-
+      UN CONTADOR, NO UN SECRETO. CloudFormation solo vuelve a leer
+      SERVICES_TASKS_TOKEN cuando cambia la conexion que lo usa. Tras rotar ese
+      secreto hay que SUBIR este numero: sin subirlo, un despliegue no cambia
+      nada, la conexion de EventBridge sigue llamando con el secreto viejo y
+      la API lo rechaza para siempre.
 
   RetencionDeLogsEnDias:
     Type: Number
@@ -2033,6 +2044,20 @@ Resources:
   # EL SECRETO NO APARECE EN NINGUN SITIO VISIBLE: sale del secreto de la API
   # con una referencia dinamica (ni parametro, ni perfil, ni evidencias, ni la
   # consola de CloudFormation), y EventBridge lo guarda cifrado en su conexion.
+  # Viaja cifrado hasta CloudFront. Entre CloudFront y el balanceador va por
+  # HTTP, como TODA cabecera de autorizacion de esta pila (las sesiones de las
+  # personas tambien): es la limitacion anterior del origen `http-only`, que
+  # se va cuando el balanceador tenga certificado.
+  #
+  # ROTARLO: `-Accion Secretos -RotarSecretoDelPlanificador`, `-Accion Renovar`
+  # y un despliegue con VersionDelSecretoDelPlanificador subido en uno. Entre
+  # el segundo paso y el tercero las llamadas fallan unos minutos.
+  #
+  # EL LIMITE DE 5 SEGUNDOS. EventBridge corta la llamada a un destino a los 5
+  # segundos. Con el volumen de un piloto los dos barridos caben; con mucho
+  # atraso (el planificador parado unas horas) una pasada puede cortarse: se
+  # reintenta, las pasadas solapadas no se pisan (cada fila se toma con
+  # `skip locked`) y la siguiente sigue donde quedo.
   #
   # LO QUE PUEDE HACER EL ROL: invocar ESTE destino, y nada mas.
   #
@@ -2066,7 +2091,9 @@ Resources:
     Condition: HayPlanificadorDeServicios
     Properties:
       Name: !Sub '${PrefijoDeRecursos}-${Entorno}-servicios-procesos'
-      Description: Credencial con la que el planificador llama a los barridos de Z Servicios.
+      # El contador va en la descripcion a proposito: cambiarlo es lo que hace
+      # que CloudFormation actualice la conexion y vuelva a leer el secreto.
+      Description: !Sub 'Credencial con la que el planificador llama a los barridos de Z Servicios (secreto v${VersionDelSecretoDelPlanificador}).'
       AuthorizationType: API_KEY
       AuthParameters:
         ApiKeyAuthParameters:
@@ -2133,17 +2160,21 @@ Resources:
     Properties:
       AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-procesos-de-servicios'
       AlarmDescription: >-
-        El planificador no consigue lanzar los barridos de Z Servicios: las
-        retenciones vencidas no se limpian, no se recuerda ninguna reserva y las
-        atenciones terminadas no se cierran solas. Mirar el secreto
-        SERVICES_TASKS_TOKEN, las banderas y los logs de la API.
+        El planificador lleva media hora sin conseguir lanzar los barridos de Z
+        Servicios: las retenciones vencidas no se limpian, no se recuerda
+        ninguna reserva y las atenciones terminadas no se cierran solas. Buscar
+        «servicios.procesos» en los logs de la API: dice si falta el secreto o
+        si no coincide (ver VersionDelSecretoDelPlanificador).
       Namespace: AWS/Events
       MetricName: FailedInvocations
       Dimensions:
         - {Name: RuleName, Value: !Ref ReglaDelPlanificadorDeServicios}
       Statistic: Sum
       Period: 900
-      EvaluationPeriods: 1
+      # DOS periodos seguidos: un despliegue (las maquinas viejas contestan 503
+      # mientras se renuevan) o una pasada cortada a los 5 segundos fallan un
+      # rato y se arreglan solos. Media hora fallando ya no es eso.
+      EvaluationPeriods: 2
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching

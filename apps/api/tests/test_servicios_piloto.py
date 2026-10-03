@@ -179,14 +179,13 @@ async def test_la_ruta_interna_no_se_abre_por_estar_en_el_piloto_ni_por_administ
     _poner(monkeypatch, services_pilot_profile_ids=PILOTO)
     for visita in (PILOTO, FUERA, None, JEFA):
         assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == APAGADO, visita
+    # Con todo encendido, sin secreto configurado y con él: LO MISMO. Nadie
+    # averigua por esta ruta que hay un piloto en marcha, ni quien administra.
     _poner(monkeypatch, feature_services=True, feature_service_booking=True, services_public_access=True)
-    for visita in (PILOTO, FUERA, None, JEFA):
-        # Sin secreto configurado: cerrada para todos.
-        assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == (503, "services_tasks_not_configured"), visita
-    _poner(monkeypatch, services_tasks_token="c0ffee" * 8)
-    for visita in (PILOTO, FUERA, None, JEFA):
-        # Con secreto configurado y sin traerlo: 401, también para quien administra.
-        assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == (401, "services_tasks_unauthorized"), visita
+    for secreto in ("", "c0ffee" * 8):
+        _poner(monkeypatch, services_tasks_token=secreto)
+        for visita in (PILOTO, FUERA, None, JEFA):
+            assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == APAGADO, (secreto != "", visita)
     assert not esquema._cache, "nadie llegó a mirar la base"
 
 

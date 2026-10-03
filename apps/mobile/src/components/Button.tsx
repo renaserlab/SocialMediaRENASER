@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View, ViewStyle } from 'react
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
+import { tocarConCerrojo } from '@/lib/toqueConCerrojo';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -54,19 +55,10 @@ export function Button({
   const tinta = primary ? colors.onPrimary : colors.text;
 
   const pulsar = () => {
-    if (enCurso.current) return;
-    const resultado = onPress();
-    if (!resultado || typeof (resultado as { then?: unknown }).then !== 'function') return;
-    enCurso.current = true;
-    setPendiente(true);
-    const soltar = () => {
-      enCurso.current = false;
-      if (montado.current) setPendiente(false);
-    };
-    (resultado as Promise<unknown>).then(soltar, (error: unknown) => {
-      soltar();
-      // El fallo sigue siendo de quien llamó: no se traga.
-      throw error;
+    // El fallo de la acción sigue siendo de quien la escribió: la promesa que
+    // devuelve el cerrojo no se captura aquí, igual que antes de existir.
+    void tocarConCerrojo(enCurso, onPress, (ocupadoAhora) => {
+      if (montado.current) setPendiente(ocupadoAhora);
     });
   };
 

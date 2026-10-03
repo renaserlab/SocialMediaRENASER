@@ -83,7 +83,12 @@ param(
     [switch] $PermitirReemplazos,
 
     # Deja cargar un secreto con una bandera de dinero encendida.
-    [switch] $PermitirBanderasFinancieras
+    [switch] $PermitirBanderasFinancieras,
+
+    # Con -Accion Secretos: genera un secreto NUEVO para el planificador de Z
+    # Servicios aunque ya haya uno. Despues hay que renovar las maquinas y
+    # desplegar con VersionDelSecretoDelPlanificador subido en uno.
+    [switch] $RotarSecretoDelPlanificador
 )
 
 Set-StrictMode -Version Latest
@@ -744,7 +749,7 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
     # El secreto del planificador de Z Servicios, lo mismo: se conserva o se
     # genera. La API no acepta uno de menos de 32 caracteres.
     if (-not $nuevo.Contains($ClaveDelPlanificador)) {
-        if ($actual -and $actual.Contains($ClaveDelPlanificador)) {
+        if ($actual -and $actual.Contains($ClaveDelPlanificador) -and -not $RotarSecretoDelPlanificador) {
             $nuevo[$ClaveDelPlanificador] = $actual[$ClaveDelPlanificador]
         }
         else {
@@ -773,7 +778,7 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
         Write-Aviso "Cambia ${ClaveDeCabecera}: hay que redesplegar la plataforma (ver la rotacion en docs/AWS_MIGRACION_RENASERLAB.md)."
     }
     if ($cambiadas -contains $ClaveDelPlanificador) {
-        Write-Aviso "Cambia ${ClaveDelPlanificador}: hay que redesplegar la plataforma (la conexion de EventBridge guarda el anterior) y renovar las maquinas."
+        Write-Aviso "Cambia ${ClaveDelPlanificador}: (1) -Accion Renovar; (2) sube VersionDelSecretoDelPlanificador en el perfil y -Accion Plataforma. Sin subir ese numero la conexion de EventBridge se queda con el secreto anterior."
     }
 
     $accionDelSecreto = if ($actual) { 'Crear una version nueva' } else { 'Crear el secreto' }

@@ -77,64 +77,92 @@ def test_ni_el_secreto_ni_la_cabecera_se_escriben_en_los_logs() -> None:
     assert "token" not in linea.lower() and "recibido" not in linea and "esperado" not in linea
 
 
-@pytest.mark.asyncio
-async def test_con_servicios_apagado_contesta_lo_mismo_que_todo_servicios(entorno, monkeypatch) -> None:
-    """Las banderas mandan ANTES que el secreto y sin mirar la base: quien
-    llega sin nada no aprende ni siquiera si hay un secreto configurado."""
-    http, _, _, _ = entorno
-    monkeypatch.setattr(get_settings(), "services_tasks_token", SECRETO)
-    assert get_settings().feature_services is False
-    for cabeceras in (_con(None), _con("otro"), _con(SECRETO)):
-        r = await http.post(RUTA, headers=cabeceras)
-        assert (r.status_code, _codigo(r)) == (503, "services_disabled"), r.text
-    monkeypatch.setattr(get_settings(), "feature_services", True)
-    esquema.olvidar()
-    # Con Servicios encendido y la CONTRATACIÓN apagada, lo mismo: y también
-    # para quien llega sin el secreto, que no recibe un 401 del que deducir nada.
-    for cabeceras in (_con(None), _con("otro"), _con(SECRETO)):
-        r = await http.post(RUTA, headers=cabeceras)
-        assert (r.status_code, _codigo(r)) == (503, "service_booking_disabled"), (cabeceras, r.text)
-    assert not esquema._cache, "no se miró la base"
-    esquema.olvidar()
+APAGADO = (503, "services_disabled")
 
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("configurado", ["", "   ", "corto", "x" * 31])
-async def test_sin_secreto_o_con_uno_corto_falla_cerrada(entorno, contratacion, monkeypatch, configurado) -> None:
-    """Sin configurar NO ACEPTA NADA: tampoco la cabecera vacía ni la que
-    coincide con lo (poco) que haya escrito."""
-    http, _, _, _ = entorno
-    monkeypatch.setattr(get_settings(), "services_tasks_token", configurado)
-    for cabeceras in (_con(None), _con(""), _con(configurado), _con(SECRETO)):
-        r = await http.post(RUTA, headers=cabeceras)
-        assert (r.status_code, _codigo(r)) == (503, "services_tasks_not_configured"), (configurado, cabeceras, r.text)
-    assert not esquema._cache, "no se miró la base"
-
-
-@pytest.mark.asyncio
-async def test_sin_la_cabecera_buena_es_401_y_no_se_mira_la_base(entorno, contratacion, monkeypatch) -> None:
-    http, _, _, _ = entorno
-    monkeypatch.setattr(get_settings(), "services_tasks_token", SECRETO)
-    malas = (
+#: Todo lo que NO es el secreto bueno, llegue como llegue.
+def _las_malas(configurado: str) -> list:
+    return [
         _con(None),
         _con(""),
         _con("   "),
+        _con("otro"),
         _con(SECRETO[:-1]),
         _con(SECRETO + "0"),
         _con(SECRETO.upper()),
         _con(f"Bearer {SECRETO}"),
         # Una sesión de persona NO sirve: ni la de administración.
         {"Authorization": f"Bearer {SECRETO}"},
-    )
-    for cabeceras in malas:
+        # Lo (poco) que haya escrito en la API tampoco, si no llega a ser un secreto.
+        *([_con(configurado)] if configurado != SECRETO else []),
+        # Un carácter no ASCII no puede ser un 500 (`compare_digest` con texto
+        # lanzaría `TypeError`). En bytes, como llegaría por la red.
+        [(procesos.CABECERA.encode(), "contraseña".encode("latin-1"))],
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("servicios", [False, True])
+@pytest.mark.parametrize("reservar", [False, True])
+@pytest.mark.parametrize("configurado", ["", "   ", "corto", "x" * 31, SECRETO])
+async def test_a_quien_no_se_reconoce_se_le_contesta_como_apagado_pase_lo_que_pase(
+    entorno, monkeypatch, servicios, reservar, configurado
+) -> None:
+    """LA REGLA DEL PILOTO (P101): nadie averigua desde fuera qué está
+    encendido. Sin el secreto bueno, la respuesta es LA MISMA con Servicios
+    apagado, con un piloto en marcha, con la contratación abierta, con secreto
+    configurado y sin él. Y no se mira la base."""
+    http, _, _, _ = entorno
+    monkeypatch.setattr(get_settings(), "feature_services", servicios)
+    monkeypatch.setattr(get_settings(), "feature_service_booking", reservar)
+    monkeypatch.setattr(get_settings(), "services_tasks_token", configurado)
+    esquema.olvidar()
+    cuerpos = set()
+    for cabeceras in _las_malas(configurado):
         r = await http.post(RUTA, headers=cabeceras)
-        assert (r.status_code, _codigo(r)) == (401, "services_tasks_unauthorized"), (cabeceras, r.text)
+        assert (r.status_code, _codigo(r)) == APAGADO, (servicios, reservar, configurado, cabeceras, r.text)
         assert SECRETO not in r.text
-    # Un carácter no ASCII no puede ser un 500 (`compare_digest` con texto
-    # lanzaría `TypeError`). Se manda en bytes, como llegaría por la red.
-    r = await http.post(RUTA, headers=[(procesos.CABECERA.encode(), "contraseña".encode("latin-1"))])
-    assert r.status_code == 401, r.text
+        cuerpos.add(r.json()["error"]["message"])
+    assert len(cuerpos) == 1, "ni el mensaje distingue un caso de otro"
     assert not esquema._cache, "no se miró la base"
+    esquema.olvidar()
+
+
+@pytest.mark.asyncio
+async def test_reconocido_el_planificador_las_banderas_le_dicen_lo_suyo(entorno, monkeypatch) -> None:
+    """Con el secreto bueno sí se le dice qué pasa: apagado, o la contratación
+    apagada. Sin mirar la base, y sin correr nada."""
+    http, _, _, _ = entorno
+    monkeypatch.setattr(get_settings(), "services_tasks_token", SECRETO)
+    assert get_settings().feature_services is False
+    r = await http.post(RUTA, headers=_con(SECRETO))
+    assert (r.status_code, _codigo(r)) == APAGADO, r.text
+    monkeypatch.setattr(get_settings(), "feature_services", True)
+    esquema.olvidar()
+    r = await http.post(RUTA, headers=_con(SECRETO))
+    assert (r.status_code, _codigo(r)) == (503, "service_booking_disabled"), r.text
+    assert not esquema._cache, "no se miró la base"
+    esquema.olvidar()
+
+
+@pytest.mark.asyncio
+async def test_el_porque_de_un_rechazo_va_al_registro_y_sin_lo_que_llego(entorno, contratacion, monkeypatch, caplog) -> None:
+    """Quien opera tiene que poder distinguir un planificador mal configurado
+    de uno apagado: lo dice el registro, no la respuesta. Y el registro no
+    guarda ni la cabecera que llegó ni el secreto."""
+    http, _, _, _ = entorno
+    intento = "valor-que-no-debe-salir-en-ningun-registro"
+    with caplog.at_level("WARNING", logger="renaser.services"):
+        monkeypatch.setattr(get_settings(), "services_tasks_token", "")
+        await http.post(RUTA, headers=_con(intento))
+        monkeypatch.setattr(get_settings(), "services_tasks_token", SECRETO)
+        await http.post(RUTA, headers=_con(intento))
+        # Sin cabecera no se anota nada: un escáner cualquiera no llena el registro.
+        await http.post(RUTA)
+    avisos = [r.getMessage() for r in caplog.records if "servicios.procesos" in r.getMessage()]
+    assert len(avisos) == 2, avisos
+    assert "sin secreto configurado" in avisos[0] and "no es el secreto" in avisos[1]
+    for aviso in avisos:
+        assert intento not in aviso and SECRETO not in aviso
 
 
 @pytest.mark.asyncio

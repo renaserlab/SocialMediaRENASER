@@ -13,6 +13,15 @@ from app.core.config import get_settings
 from app.modules.services import procesos_router as procesos
 from tests.test_baja_de_cuenta_postgres import API, SIN_POSTGRES, _persona, _uno
 from tests.test_servicios_agenda_api import _dia
+from tests.test_servicios_atencion_api import (  # noqa: F401 - montajes compartidos
+    _atendida,
+    _llevar,
+    _reservado,
+    _retrasar,
+    _sucesos,
+    _ver,
+    atencion,
+)
 from tests.test_servicios_descubrimiento_api import _anonimo
 from tests.test_servicios_reserva_api import (  # noqa: F401 - montajes compartidos
     ADMIN_SERVICIOS,
@@ -51,9 +60,9 @@ async def test_el_planificador_vence_las_retenciones_sin_sesion_de_nadie(reserva
     vivas = "select count(*) from public.service_holds where status = 'active' and service_id = cast(:s as uuid)"
     assert await _uno(motor, vivas, s=servicio) == 3
 
-    # Sin el secreto, nada se mueve.
+    # Sin el secreto, nada se mueve (y se contesta como si estuviera apagado).
     r = await _correr(app, None)
-    assert r.status_code == 401, r.text
+    assert r.status_code == 503 and r.json()["error"]["code"] == "services_disabled", r.text
     for r_id in retenciones[:2]:
         await _vencer_ya(motor, r_id)
     assert await _uno(motor, vivas, s=servicio) == 3
@@ -93,3 +102,32 @@ async def test_con_la_contratacion_apagada_no_corre_aunque_el_secreto_sea_bueno(
     r = await _correr(app)
     assert r.status_code == 200 and r.json()["expired"] == 1, r.text
     assert await _uno(motor, estado, h=retencion) == "expired"
+
+
+async def test_el_planificador_recuerda_y_cierra_lo_mismo_que_la_ruta_de_administracion(atencion, monkeypatch) -> None:
+    """Los recordatorios y el cierre a las 24 horas —lo que prometen las
+    condiciones— salen por la ruta del planificador, sin sesión de nadie."""
+    app, motor, _ = atencion
+    monkeypatch.setattr(get_settings(), "services_tasks_token", SECRETO)
+    terminada = await _atendida(app, motor, hasta="completed")
+    proxima = await _reservado(app, motor)
+    # Los barridos son de TODA la base: primero, lo que dejaron otras pruebas.
+    assert (await _correr(app)).status_code == 200
+    assert "attendance_closed" not in await _sucesos(motor, terminada["reserva"]["id"])
+    assert "booking_reminded" not in await _sucesos(motor, proxima["reserva"]["id"])
+
+    # Pasa el plazo de confirmación de una, y la otra empieza dentro de diez horas.
+    await _retrasar(motor, "service_attendances", "completed_at", "booking_id", terminada["reserva"]["id"], horas=30)
+    await _llevar(motor, proxima["reserva"]["id"], minutos=10 * 60)
+    r = await _correr(app)
+    assert r.status_code == 200, r.text
+    assert (r.json()["closed"], r.json()["reminded"]) == (1, 1), r.text
+    cerrada = (await _ver(app, "client", terminada))["care"]["attendance"]
+    assert (cerrada["status"], cerrada["closed_by"]) == ("closed", "system")
+    assert (await _sucesos(motor, proxima["reserva"]["id"])).count("booking_reminded") == 1
+
+    # IDEMPOTENTE: ni otro cierre ni otro recordatorio.
+    r = await _correr(app)
+    assert (r.json()["closed"], r.json()["reminded"]) == (0, 0), r.text
+    assert (await _sucesos(motor, terminada["reserva"]["id"])).count("attendance_closed") == 1
+    assert (await _sucesos(motor, proxima["reserva"]["id"])).count("booking_reminded") == 1

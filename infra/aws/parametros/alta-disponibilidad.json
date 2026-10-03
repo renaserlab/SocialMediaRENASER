@@ -32,6 +32,7 @@
   { "ParameterKey": "ServicesCatalogModalities", "ParameterValue": "virtual,in_person" },
   { "ParameterKey": "ServicesCatalogCurrencies", "ParameterValue": "PEN" },
   { "ParameterKey": "PlanificadorDeServicios", "ParameterValue": "No" },
+  { "ParameterKey": "VersionDelSecretoDelPlanificador", "ParameterValue": "1" },
 
   { "ParameterKey": "RetencionDeLogsEnDias", "ParameterValue": "30" },
   { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "renaserlab@gmail.com" },

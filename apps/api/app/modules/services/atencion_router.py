@@ -568,8 +568,9 @@ async def tareas(
 ) -> TareasRead:
     """LOS BARRIDOS, por lotes e idempotentes: recordar lo que empieza pronto y
     cerrar las atenciones terminadas cuyo plazo pasó (solo con la señal
-    fuerte y sin un caso). Lo llamará un planificador externo que todavía no
-    existe (decisión de la empresa). NO MUEVE DINERO."""
+    fuerte y sin un caso). Esta es la entrada A MANO, para administración; el
+    planificador llama a lo mismo por `/internal/services/tasks/run`
+    (`procesos_router.py`). NO MUEVE DINERO."""
     hecho = await dominio.tareas(db, lote=batch)
     await db.commit()
     return TareasRead(reminded=hecho.recordadas, closed=hecho.cerradas, unverified=hecho.sin_verificar,

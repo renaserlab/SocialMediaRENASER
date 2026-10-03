@@ -21,11 +21,16 @@ estrecha:
     en el secreto de la API y no en un parámetro de la pila), comparado en
     tiempo constante y EN BYTES —igual que el aviso de 100ms
     (`live/webhooks.py`)—.
-  * FALLA CERRADA: sin secreto configurado, o con uno corto, contesta 503 y no
-    acepta ninguna cabecera, tampoco la vacía.
-  * LAS BANDERAS MANDAN ANTES: con Servicios o la contratación apagados
-    contesta el mismo 503 que cualquier otra ruta, sin mirar la base ni el
-    secreto.
+  * FALLA CERRADA: sin secreto configurado, o con uno corto, no acepta
+    ninguna cabecera, tampoco la vacía.
+  * A QUIEN NO RECONOCE LE CONTESTA COMO SI SERVICIOS ESTUVIERA APAGADO, pase
+    lo que pase: el mismo 503 `services_disabled`, haya o no un piloto en
+    marcha, haya o no un secreto configurado y traiga o no una cabecera. Es
+    la regla del piloto (P101, `acceso.py`): nadie averigua desde fuera qué
+    está encendido. Con las banderas delante del secreto, una petición
+    anónima recibía cuatro respuestas distintas según el estado del servidor.
+  * LAS BANDERAS, DESPUÉS Y SOLO PARA EL PLANIFICADOR: reconocido, con la
+    contratación apagada recibe el 503 que le toca y no corre nada.
   * NO MUEVE DINERO y no escribe nada que los barridos no escribieran ya.
 """
 
@@ -39,7 +44,6 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import ServiceUnavailableError, UnauthorizedError
 from app.modules.services import atencion, esquema, reserva
 from app.shared.database import get_db
 
@@ -49,16 +53,6 @@ CABECERA = "X-Services-Tasks-Token"
 
 #: Un secreto más corto que esto no es un secreto: se trata como si no hubiera.
 LARGO_MINIMO_DEL_SECRETO = 32
-
-
-class ProcesosSinConfigurar(ServiceUnavailableError):
-    code = "services_tasks_not_configured"
-    message = "Los procesos automáticos de Servicios no están configurados."
-
-
-class PlanificadorNoAutorizado(UnauthorizedError):
-    code = "services_tasks_unauthorized"
-    message = "No autorizado."
 
 
 class ProcesosRead(BaseModel):
@@ -71,19 +65,28 @@ class ProcesosRead(BaseModel):
 
 
 def exigir_planificador(recibido: str | None = Header(default=None, alias=CABECERA)) -> None:
-    """Las banderas y el secreto, EN ESE ORDEN y sin tocar la base."""
+    """El secreto y, solo después, las banderas. Sin tocar la base."""
+    esperado = (get_settings().services_tasks_token or "").strip()
+    configurado = len(esperado) >= LARGO_MINIMO_DEL_SECRETO
+    # EN BYTES: `compare_digest` con texto lanza `TypeError` ante un carácter no
+    # ASCII, y eso sería un 500 que cualquiera podría provocar. Se compara
+    # SIEMPRE, también sin secreto configurado: lo que se tarda no dice nada.
+    candidato = (recibido or "").strip().encode("utf-8")
+    coincide = hmac.compare_digest(candidato, esperado.encode("utf-8"))
+    if not (configurado and candidato and coincide):
+        # Lo mismo que a cualquiera con Servicios apagado. El motivo de verdad
+        # va al registro, que solo lee quien opera: sin él, un planificador mal
+        # configurado sería indistinguible de uno bien configurado y apagado.
+        if candidato:
+            logger.warning(
+                "servicios.procesos: llamada rechazada (%s)",
+                "sin secreto configurado en la API" if not configurado else "la cabecera no es el secreto",
+            )
+        raise esquema.ServiciosApagados()
     if not esquema.encendido():
         raise esquema.ServiciosApagados()
     if not esquema.reserva_encendida():
         raise esquema.ReservaApagada()
-    esperado = (get_settings().services_tasks_token or "").strip()
-    if len(esperado) < LARGO_MINIMO_DEL_SECRETO:
-        raise ProcesosSinConfigurar()
-    # EN BYTES: `compare_digest` con texto lanza `TypeError` ante un carácter no
-    # ASCII, y eso sería un 500 que cualquiera podría provocar.
-    candidato = (recibido or "").strip().encode("utf-8")
-    if not candidato or not hmac.compare_digest(candidato, esperado.encode("utf-8")):
-        raise PlanificadorNoAutorizado()
 
 
 async def _preparado(db: AsyncSession = Depends(get_db)) -> None:

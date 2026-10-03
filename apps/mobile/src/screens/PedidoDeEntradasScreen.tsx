@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { importeConMoneda } from '@/lib/dinero';
 import { claveDeErrorDeEntradas, comoReloj, esFalloDeRed } from '@/lib/entradasDeEvento';
 import {
@@ -55,6 +56,8 @@ export function PedidoDeEntradasScreen() {
   >(null);
   const [ocupado, setOcupado] = useState(false);
   const ocupadoRef = useRef(false);
+  /** Si el pedido ya se llegó a pintar: una relectura fallida no lo quita. */
+  const yaPintado = useRef(false);
 
   const cargar = useCallback(async () => {
     if (!id) return;
@@ -63,6 +66,7 @@ export function PedidoDeEntradasScreen() {
     try {
       const datos = await EventOrderRepository.leerPedido(id);
       setPedido(datos);
+      yaPintado.current = true;
       // DEL SERVIDOR, no del reloj local: si el teléfono va adelantado, la
       // cuenta atrás empezaría ya vencida.
       setRestantes(datos.segundos_restantes);
@@ -75,6 +79,12 @@ export function PedidoDeEntradasScreen() {
           error.code === 'event_ticketing_not_available')
       ) {
         setFallo('noDisponible');
+      } else if (yaPintado.current) {
+        // UNA RELECTURA QUE FALLA NO BORRA EL PEDIDO QUE YA SE VE. Desde que
+        // la pantalla se relee al volver a primer plano, lo normal al reanudar
+        // es que la primera petición no salga: cambiar el pedido por una
+        // pantalla de error justo al volver de pagar sería peor que no releer.
+        toast(t('common.tryAgain'), 'alert-circle');
       } else if (error instanceof ApiError && esFalloDeRed(error.code)) {
         setFallo('sinConexion');
       } else {
@@ -83,6 +93,9 @@ export function PedidoDeEntradasScreen() {
     } finally {
       setCargando(false);
     }
+    // `t` no va en las dependencias a propósito: si cambiara de identidad en
+    // cada render, `cargar` cambiaría con ella y el efecto de abajo releería
+    // el pedido sin parar. El aviso usa el idioma con el que se abrió.
   }, [id]);
 
   /*
