@@ -1640,10 +1640,20 @@ Resources:
       # /health devuelve 200". Es la diferencia entre reponer una maquina rota y
       # tener una maquina encendida que no sirve a nadie.
       HealthCheckType: ELB
-      # Margen de arranque: descargar ~1 GB de imagen desde ECR y levantar
-      # uvicorn lleva entre 1 y 3 minutos. Con un margen corto, el grupo mataria
-      # a la maquina justo antes de que terminara de arrancar, en bucle.
-      HealthCheckGracePeriod: 300
+      # Margen de arranque: instalar Docker, descargar ~1 GB de imagen desde
+      # ECR y levantar uvicorn. Con un margen corto, el grupo mataria a la
+      # maquina justo antes de que terminara de arrancar, en bucle.
+      #
+      # 600 Y NO 300. Medido el 03/10/2026: una t3.small nace sin creditos de
+      # CPU y tarda 5 min 2 s en responder, o sea, lo mismo que el margen de
+      # antes. Al cambiar la plantilla de arranque, CloudFormation apaga la
+      # maquina vieja en cuanto la nueva avisa y reanuda la vigilancia del
+      # grupo; el balanceador aun necesita dos comprobaciones (30 s) para dar
+      # a la nueva por sana, el margen ya habia vencido, y el grupo la mato
+      # siendo la UNICA: cinco minutos de 502 hasta que arranco otra. Las
+      # renovaciones (el flujo de GitHub y `-Accion Renovar`) no lo sufren,
+      # porque no apagan la vieja hasta que la nueva esta sana.
+      HealthCheckGracePeriod: 600
       DefaultInstanceWarmup: 300
       MetricsCollection:
         - Granularity: 1Minute
