@@ -671,3 +671,73 @@ async def test_el_guion_que_publica_no_imprime_el_token_ni_publica_por_defecto(m
     with pytest.raises(publicador.NoSePublica):
         await publicador.publicar(pedir, "contratacion", de_verdad=True, decir=lambda _: None)
     assert pedidas == []
+
+
+@pytest.mark.parametrize("cual", ["contratacion", "prestador"])
+async def test_lo_ya_publicado_se_reconoce_aunque_la_lista_venga_sin_filtrar(cual: str) -> None:
+    """Lo que decide si se publica OTRA VEZ no puede depender de que el filtro
+    de la petición llegara al servidor. Pasó al probarlo: un filtro perdido por
+    el camino traía las condiciones del otro tipo, y el guion publicaba de
+    nuevo lo que ya estaba publicado."""
+    datos = guion.CONDICIONES[cual]
+    buena = guion.huella(guion.leer(datos.texto))
+    otro_tipo = "provider_terms" if datos.tipo == "booking_terms" else "booking_terms"
+
+    def fila(**cambios) -> dict:
+        return {"kind": datos.tipo, "country_code": guion.PAIS, "category": None, "status": "published", **cambios}
+
+    lista = [
+        fila(kind=otro_tipo, version=7, body_sha256="1" * 64),
+        fila(country_code="CL", version=3, body_sha256="2" * 64),
+        fila(category="una-categoria", version=2, body_sha256="3" * 64),
+        fila(status="superseded", version=1, body_sha256="4" * 64),
+        fila(version=5, body_sha256=buena),
+    ]
+
+    async def pedir(metodo, ruta, cuerpo):
+        if metodo == "GET" and "?" in ruta:
+            return 200, lista
+        raise AssertionError(f"ya estaba publicada: no tenía que pedir {metodo} {ruta}")
+
+    hecho = await publicador.publicar(pedir, cual, de_verdad=True, decir=lambda _: None)
+    assert hecho == {"estado": "already_published", "version": 5, "huella": buena}
+
+
+@pytest.mark.parametrize("cual", ["contratacion", "prestador"])
+async def test_si_el_servidor_no_guardo_el_texto_local_no_se_publica(cual: str) -> None:
+    """LA HUELLA ES LA ÚLTIMA PUERTA. El borrador puede decir que tiene el
+    texto y haberlo guardado distinto (un intermediario, un cambio de
+    codificación, otro borrador): si la huella de la vista previa no es la del
+    texto local, no se publica, se pida como se pida."""
+    datos = guion.CONDICIONES[cual]
+    texto = guion.leer(datos.texto)
+    pedidas: list[tuple[str, str]] = []
+
+    def servidor(huella_de_la_vista: str, estado_al_publicar: str = "published"):
+        async def pedir(metodo, ruta, cuerpo):
+            pedidas.append((metodo, ruta))
+            if metodo == "GET" and "?" in ruta:
+                return 200, []
+            if metodo == "POST" and ruta.endswith("/draft"):
+                return 201, {"id": "p-1", "body": texto, "title": datos.titulo}
+            if metodo == "GET" and ruta.endswith("/p-1/preview"):
+                return 200, {"sha256": huella_de_la_vista, "version": 1}
+            if metodo == "POST" and ruta.endswith("/p-1/publish"):
+                return 200, {"status": estado_al_publicar, "version": 1, "body_sha256": huella_de_la_vista}
+            raise AssertionError((metodo, ruta))
+
+        return pedir
+
+    for de_verdad in (False, True):
+        pedidas.clear()
+        with pytest.raises(publicador.NoSePublica, match="huella"):
+            await publicador.publicar(servidor("0" * 64), cual, de_verdad=de_verdad, decir=lambda _: None)
+        assert not [ruta for _, ruta in pedidas if ruta.endswith("/publish")], "pidió publicar con otra huella"
+
+    # Con la huella buena sí publica; y si el servidor contesta otra cosa que
+    # «publicada», no lo da por hecho.
+    buena = guion.huella(texto)
+    hecho = await publicador.publicar(servidor(buena), cual, de_verdad=True, decir=lambda _: None)
+    assert hecho == {"estado": "published", "version": 1, "huella": buena}
+    with pytest.raises(publicador.NoSePublica):
+        await publicador.publicar(servidor(buena, "draft"), cual, de_verdad=True, decir=lambda _: None)

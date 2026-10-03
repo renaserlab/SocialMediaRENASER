@@ -89,8 +89,11 @@ async def test_con_servicios_apagado_contesta_lo_mismo_que_todo_servicios(entorn
         assert (r.status_code, _codigo(r)) == (503, "services_disabled"), r.text
     monkeypatch.setattr(get_settings(), "feature_services", True)
     esquema.olvidar()
-    r = await http.post(RUTA, headers=_con(SECRETO))
-    assert (r.status_code, _codigo(r)) == (503, "service_booking_disabled"), r.text
+    # Con Servicios encendido y la CONTRATACIÓN apagada, lo mismo: y también
+    # para quien llega sin el secreto, que no recibe un 401 del que deducir nada.
+    for cabeceras in (_con(None), _con("otro"), _con(SECRETO)):
+        r = await http.post(RUTA, headers=cabeceras)
+        assert (r.status_code, _codigo(r)) == (503, "service_booking_disabled"), (cabeceras, r.text)
     assert not esquema._cache, "no se miró la base"
     esquema.olvidar()
 

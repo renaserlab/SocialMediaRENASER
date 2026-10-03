@@ -57,7 +57,11 @@ MODERADOR = str(uuid.uuid4())
 #: Todas las rutas de Servicios, sacadas de la aplicación y no de una lista
 #: escrita a mano: una ruta nueva entra sola en estas pruebas.
 _TODAS = sorted({(m, p) for m, p in _rutas(create_app()) if "/services" in p})
-RUTAS_DE_SERVICIOS = [(m, p) for m, p in _TODAS if "/admin/" not in p]
+#: LAS INTERNAS NO SON DE NADIE DEL PILOTO: no las pide una persona, las pide
+#: el planificador, y lo que las protege es su secreto
+#: (`services/procesos_router.py`), no la lista. Van aparte, con su prueba.
+RUTAS_INTERNAS = [(m, p) for m, p in _TODAS if "/internal/" in p]
+RUTAS_DE_SERVICIOS = [(m, p) for m, p in _TODAS if "/admin/" not in p and "/internal/" not in p]
 RUTAS_DE_ADMINISTRACION = [(m, p) for m, p in _TODAS if "/admin/" in p]
 
 
@@ -160,6 +164,30 @@ def test_hay_rutas_que_proteger() -> None:
     assert len(RUTAS_DE_SERVICIOS) > 80 and len(RUTAS_DE_ADMINISTRACION) > 30
     assert all(p.startswith(f"{API}/services") for _, p in RUTAS_DE_SERVICIOS)
     assert all(p.startswith(f"{API}/admin/services") for _, p in RUTAS_DE_ADMINISTRACION)
+    # Ninguna ruta de Servicios queda sin clasificar, y la interna es una sola.
+    assert len(RUTAS_DE_SERVICIOS) + len(RUTAS_DE_ADMINISTRACION) + len(RUTAS_INTERNAS) == len(_TODAS)
+    assert RUTAS_INTERNAS == [("POST", f"{API}/internal/services/tasks/run")]
+
+
+@pytest.mark.asyncio
+async def test_la_ruta_interna_no_se_abre_por_estar_en_el_piloto_ni_por_administrar(entorno, monkeypatch) -> None:
+    """Ni la lista del piloto ni el rol de administración abren la ruta del
+    planificador: sin su secreto no corre nada, sea quien sea quien la pida. Y
+    con Servicios apagado contesta lo mismo que todo Servicios."""
+    http, quien = entorno
+    metodo, ruta = RUTAS_INTERNAS[0]
+    _poner(monkeypatch, services_pilot_profile_ids=PILOTO)
+    for visita in (PILOTO, FUERA, None, JEFA):
+        assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == APAGADO, visita
+    _poner(monkeypatch, feature_services=True, feature_service_booking=True, services_public_access=True)
+    for visita in (PILOTO, FUERA, None, JEFA):
+        # Sin secreto configurado: cerrada para todos.
+        assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == (503, "services_tasks_not_configured"), visita
+    _poner(monkeypatch, services_tasks_token="c0ffee" * 8)
+    for visita in (PILOTO, FUERA, None, JEFA):
+        # Con secreto configurado y sin traerlo: 401, también para quien administra.
+        assert _resultado(await _pedir(http, quien, visita, metodo, ruta)) == (401, "services_tasks_unauthorized"), visita
+    assert not esquema._cache, "nadie llegó a mirar la base"
 
 
 # =========================================================================== #
