@@ -224,7 +224,7 @@ def test_la_ultima_migracion_es_la_que_dice_la_documentacion(aplicadas) -> None:
     # cambio ya traia la 0052: en verde aqui, porque el modulo entero se salta
     # sin PostgreSQL, y en rojo la primera vez que CI tuviera uno, que es
     # exactamente cuando se ejercitan por primera vez la 0051 y la 0052.
-    assert aplicadas[-1].startswith("0085_"), (
+    assert aplicadas[-1].startswith("0096_"), (
         f"la ultima migracion es {aplicadas[-1]}: actualiza los modelos, "
         "la documentacion y esta prueba en el mismo cambio"
     )
@@ -439,6 +439,14 @@ NO_PROMETEN_REEJECUCION = {
         "rehace `quiz_options_de_su_pregunta`, y de esa restriccion depende la "
         "clave ajena compuesta de `quiz_answers`: el `drop` no puede caer."
     ),
+    "0093_servicios_reserva_y_contratacion.sql": (
+        "sobre una base que ya tiene la 0094 SE NIEGA, Y ES DELIBERADO: su "
+        "verificacion final cuenta los 15 disparadores de sus tablas y la 0094 "
+        "anade uno. Reejecutarla devolveria a dos funciones el cuerpo anterior "
+        "y dejaria sin efecto cancelar y reprogramar; al negarse, no cambia "
+        "nada. Sobre una base 0001-0093 si es reejecutable "
+        "(`test_servicios_migracion_0093.py`)."
+    ),
 }
 
 
@@ -467,7 +475,7 @@ def test_las_que_prometen_reejecucion_la_cumplen(conexion, aplicadas) -> None:
     """GARANTIA 2. Volver a pegar una migracion moderna es inofensivo.
 
     Es el caso real: se pega en el editor de Supabase, se corta a la mitad y se
-    vuelve a pegar entera. Se ejecutan TODAS menos las tres que estan excluidas
+    vuelve a pegar entera. Se ejecutan TODAS menos las que estan excluidas
     con su motivo en `NO_PROMETEN_REEJECUCION`.
 
     Una migracion nueva entra aqui por defecto. Si no es reejecutable, esta
@@ -499,7 +507,7 @@ def test_las_que_prometen_reejecucion_la_cumplen(conexion, aplicadas) -> None:
 
 @SIN_POSTGRES
 def test_la_lista_de_exclusiones_no_crece_sola(conexion, aplicadas) -> None:
-    """GARANTIA 3. Las tres excluidas son las tres que fallan, ni una mas.
+    """GARANTIA 3. Las excluidas son las que fallan, ni una mas.
 
     Sin esto, la lista es una alfombra: se anade un nombre y la garantia 2 pasa
     sin comprobar nada. Aqui se ejercitan LAS EXCLUIDAS y se exige que sigan
@@ -515,6 +523,9 @@ def test_la_lista_de_exclusiones_no_crece_sola(conexion, aplicadas) -> None:
         assert motivo.strip(), f"{nombre} esta excluida sin motivo"
         with pytest.raises(psycopg.Error), conexion.cursor() as cur:
             cur.execute((MIGRACIONES / nombre).read_text(encoding="utf-8"))
+        # Las que abren su propia transaccion (`begin;`) la dejan abortada.
+        with conexion.cursor() as cur:
+            cur.execute("rollback")
 
 
 @SIN_POSTGRES

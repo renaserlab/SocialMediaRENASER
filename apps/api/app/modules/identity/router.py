@@ -6,15 +6,13 @@ del token, util para que la app confirme su sesion contra el API, y permite
 que una persona borre su propia cuenta.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel
-from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import AuthUser, get_current_user
-from app.modules.profiles.models import Profile
+from app.modules.identity import baja
 from app.shared.database import get_db
-from app.shared.storage import delete_user_files
 
 router = APIRouter(prefix="/auth", tags=["identity"])
 
@@ -36,40 +34,29 @@ async def me(current_user: AuthUser = Depends(get_current_user)) -> SessionInfo:
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_my_account(
+    segundo_plano: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Borra de forma permanente la cuenta de quien hace la peticion.
 
-    Se hace en dos pasos, dentro de una sola transaccion para que sea todo o
-    nada:
+    Todo o nada, y los archivos antes de confirmar: ver `baja.py`.
 
-    1. Borrar la fila de `profiles`. De ella cuelgan en cascada TODOS sus datos
-       (publicaciones, comentarios, audios, cursos, eventos, seguidores,
-       mensajes, ...), asi que esta linea se lleva por delante el contenido.
-    2. Borrar la fila de `auth.users`. `profiles` no tiene clave foranea hacia
-       `auth.users`, de modo que el paso 1 no la arrastra; hay que quitarla
-       aparte o la persona podria volver a entrar con una cuenta sin perfil.
-
-    El orden da igual (no hay dependencia entre ambas), pero conviene el mismo
-    commit: si fallara a mitad, quedaria un perfil sin usuario o al reves.
+    - 204: borrada (tambien si ya lo estaba: repetir es seguro).
+    - 409 `account_deletion_blocked`: tiene ventas, saldos, pedidos o
+      reclamos que la plataforma conserva; no se ha tocado nada.
+    - 409 `service_history_requires_support`: es parte de una reserva de
+      Servicios, pasada o por venir (F21); no se ha tocado nada y la cuenta
+      la cierra soporte. Repetir la petición no cambia la respuesta.
+    - 503 `account_deletion_storage_failed`: sus archivos no se pudieron
+      borrar; la cuenta sigue activa y se puede reintentar.
+    - 503 `account_deletion_unavailable`: la base no tiene la 0089 completa,
+      o no se pudo comprobar, o no se pudo mirar su historia de Servicios; no
+      se ha tocado nada y la cuenta sigue activa.
 
     La identidad sale del token ya validado, nunca de un id recibido: solo se
     puede borrar la cuenta propia.
-
-    Los archivos de Storage se borran ANTES que las filas: van bajo el prefijo
-    del id de usuario, y aunque ese id se conoce por el token, hacerlo primero
-    deja el sistema en un estado comprensible si algo falla a mitad (quedaria la
-    cuenta viva sin sus archivos, en vez de archivos sin dueno que nadie sabria
-    localizar). Si Storage falla no se aborta el borrado: la cuenta se elimina
-    igual y el incidente queda registrado.
     """
-    await delete_user_files(current_user.id)
-    await db.execute(delete(Profile).where(Profile.id == current_user.id))
-    # Cross-schema y sin modelo ORM: se hace con SQL parametrizado. El backend
-    # conecta como `postgres`, que si tiene permiso para tocar el esquema auth.
-    await db.execute(
-        text("DELETE FROM auth.users WHERE id = :uid"),
-        {"uid": current_user.id},
-    )
-    await db.commit()
+    enteras = await baja.borrar_cuenta(db, current_user.id)
+    # Lo ajeno de las conversaciones que se fueron enteras, tras contestar.
+    segundo_plano.add_task(baja.retirar_conversaciones, current_user.id, enteras)

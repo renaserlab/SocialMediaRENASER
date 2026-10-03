@@ -389,6 +389,13 @@ export function ProductosScreen() {
       title={f('productos.titulo')}
       onBack={volver}
       rightIcon="shopping-bag"
+      // El punto del icono solo se VE: lo que cuenta se dice en la etiqueta,
+      // con las mismas palabras que la píldora de la bolsa de aquí abajo.
+      rightLabel={
+        enLaBolsa !== null
+          ? f('carrito.contador', { n: enLaBolsa })
+          : f('carrito.acceso.bolsa')
+      }
       onRightPress={irALaBolsa}
       rightBadge={enLaBolsa !== null}
     />
@@ -687,7 +694,14 @@ const styles = StyleSheet.create({
   },
   verTodo: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 44, paddingLeft: spacing.sm },
   manifiesto: { textAlign: 'center' },
-  accesos: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  // `flexWrap`: son tres píldoras con contador, y en un teléfono estrecho o
+  // con la letra grande la tercera se salía de la pantalla.
+  accesos: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
   acceso: {
     flexDirection: 'row',
     alignItems: 'center',

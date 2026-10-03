@@ -321,3 +321,96 @@ def test_una_rotacion_ilegible_no_rompe_el_procesado() -> None:
     assert mp.rotacion_del_stream({"side_data_list": [{"rotation": "no-es-un-numero"}]}) == 0
     assert mp.rotacion_del_stream({"tags": {"rotate": None}}) == 0
     assert mp.dimensiones_visibles(None, None, 90) == (None, None)
+
+
+# --------------------------------------------------------------------------- #
+# Derivados sin dueño (revisión del 29/09/2026)
+#
+# Transcodificar tarda minutos. Si mientras tanto se borra la cuenta (o la
+# publicación), la baja barre Storage ANTES de que se suban los derivados, y
+# estos se quedaban para siempre: el paso final veía la fila borrada y volvía
+# sin limpiar.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_si_la_fila_desaparece_mientras_se_procesa_se_retiran_los_derivados(monkeypatch):
+    import uuid
+
+    from sqlalchemy import delete
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.modules.content.models import PostMedia
+    from app.shared import storage
+
+    motor = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with motor.begin() as conexion:
+        await conexion.run_sync(PostMedia.__table__.create)
+    sesiones = async_sessionmaker(motor, expire_on_commit=False)
+    medio = str(uuid.uuid4())
+    async with sesiones() as db:
+        db.add(PostMedia(id=medio, post_id=str(uuid.uuid4()), storage_path="u-1/video.mp4", media_type="video"))
+        await db.commit()
+
+    async def procesar(client, media):
+        media.feed_path = f"u-1/derived/{media.id}/feed.mp4"
+        # La baja de la cuenta llega mientras tanto.
+        async with sesiones() as db:
+            await db.execute(delete(PostMedia).where(PostMedia.id == media.id))
+            await db.commit()
+
+    retiradas: list[tuple[str, str]] = []
+
+    async def borrar_carpeta(bucket, prefijo):
+        retiradas.append((bucket, prefijo))
+        return 1
+
+    monkeypatch.setattr(mp, "SessionLocal", sesiones)
+    monkeypatch.setattr(mp, "processing_configured", lambda: True)
+    monkeypatch.setattr(mp, "_process_video", procesar)
+    monkeypatch.setattr(storage, "borrar_carpeta", borrar_carpeta)
+    try:
+        await mp.process_media(medio)
+    finally:
+        await motor.dispose()
+
+    assert retiradas == [("post-media", f"u-1/derived/{medio}")]
+
+
+@pytest.mark.asyncio
+async def test_si_la_fila_sigue_no_se_retira_nada(monkeypatch):
+    import uuid
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.modules.content.models import PostMedia
+    from app.shared import storage
+
+    motor = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with motor.begin() as conexion:
+        await conexion.run_sync(PostMedia.__table__.create)
+    sesiones = async_sessionmaker(motor, expire_on_commit=False)
+    medio = str(uuid.uuid4())
+    async with sesiones() as db:
+        db.add(PostMedia(id=medio, post_id=str(uuid.uuid4()), storage_path="u-1/video.mp4", media_type="video"))
+        await db.commit()
+
+    async def procesar(client, media):
+        media.feed_path = f"u-1/derived/{media.id}/feed.mp4"
+
+    retiradas: list = []
+
+    async def borrar_carpeta(bucket, prefijo):
+        retiradas.append((bucket, prefijo))
+        return 0
+
+    monkeypatch.setattr(mp, "SessionLocal", sesiones)
+    monkeypatch.setattr(mp, "processing_configured", lambda: True)
+    monkeypatch.setattr(mp, "_process_video", procesar)
+    monkeypatch.setattr(storage, "borrar_carpeta", borrar_carpeta)
+    try:
+        await mp.process_media(medio)
+        async with sesiones() as db:
+            fila = await db.get(PostMedia, medio)
+            assert fila.feed_path == f"u-1/derived/{medio}/feed.mp4"
+    finally:
+        await motor.dispose()
+    assert retiradas == []

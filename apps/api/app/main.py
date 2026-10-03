@@ -8,7 +8,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -41,6 +41,18 @@ from app.modules.events.ticket_router import router as tickets_router
 from app.modules.events.router import router as events_router
 from app.modules.products.router import admin_router as products_admin_router
 from app.modules.products.router import router as products_router
+from app.modules.services import acceso as services_acceso
+from app.modules.services.agenda_router import router as services_schedule_router
+from app.modules.services.atencion_router import admin_router as services_attention_admin_router
+from app.modules.services.atencion_router import router as services_attention_router
+from app.modules.services.catalogo_router import admin_router as services_catalog_admin_router
+from app.modules.services.catalogo_router import router as services_catalog_router
+from app.modules.services.descubrimiento_router import router as services_discovery_router
+from app.modules.services.procesos_router import router as services_tasks_router
+from app.modules.services.reserva_router import admin_router as services_booking_admin_router
+from app.modules.services.reserva_router import router as services_booking_router
+from app.modules.services.router import admin_router as services_admin_router
+from app.modules.services.router import router as services_router
 from app.modules.learning.router import router as learning_router
 from app.modules.live.router import router as live_router
 from app.modules.messaging.router import router as messaging_router
@@ -203,6 +215,45 @@ def create_app() -> FastAPI:
     # resto del fichero y no hay que pensarlo dos veces.
     app.include_router(products_admin_router, prefix=prefix)
     app.include_router(products_router, prefix=prefix)
+    # SERVICIOS. Se monta siempre, pero con `FEATURE_SERVICES` apagada (lo de
+    # fabrica) cada ruta contesta 503 `services_disabled` sin tocar la base.
+    #
+    # EL PILOTO (P101). Los seis routers de `/services` llevan la MISMA puerta
+    # de quien entra (`services/acceso.py`): con la bandera encendida, solo los
+    # perfiles del piloto, y a los demas se les contesta como si estuviera
+    # apagado. Va aqui, una vez, y no en cada ruta. Los de `/admin/services` no
+    # la llevan: ahi manda el rol de cada persona.
+    del_piloto = [Depends(services_acceso.exigir_participante)]
+    app.include_router(services_admin_router, prefix=prefix)
+    app.include_router(services_router, prefix=prefix, dependencies=del_piloto)
+    # El catálogo (Incremento 2). Sus rutas no chocan con las de la admisión:
+    # `/services/provider/services`, `/services/categories`,
+    # `/services/catalog/{id}` y `/admin/services/{catalog,categories}`.
+    app.include_router(services_catalog_admin_router, prefix=prefix)
+    app.include_router(services_catalog_router, prefix=prefix, dependencies=del_piloto)
+    # El descubrimiento (Incremento 3): `/services/catalog` (sin id), las
+    # categorías públicas, las sugerencias, `/services/providers/{id}` y los
+    # guardados. No choca con nada de lo anterior.
+    app.include_router(services_discovery_router, prefix=prefix, dependencies=del_piloto)
+    # La agenda (Incremento 4): `/services/provider/services/{id}/schedule…`
+    # y `/services/catalog/{id}/availability…`. Tampoco choca.
+    app.include_router(services_schedule_router, prefix=prefix, dependencies=del_piloto)
+    # La reserva (Incremento 5): `/services/catalog/{id}/holds`,
+    # `/services/holds/…`, `/services/me/bookings…`, `/services/provider/bookings…`
+    # y `/admin/services/{holds,bookings}`. Tampoco choca. Además de
+    # `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` (apagada).
+    app.include_router(services_booking_router, prefix=prefix, dependencies=del_piloto)
+    app.include_router(services_booking_admin_router, prefix=prefix)
+    # La atención y la posventa (Incremento 6): lo que cuelga de una reserva
+    # (`/services/{me,provider}/bookings/{b}/…`), `/services/catalog/{id}/reviews`
+    # y `/admin/services/{incidents,reviews,tasks}`. Tampoco choca. Además de
+    # las puertas de la reserva exige la 0094.
+    app.include_router(services_attention_router, prefix=prefix, dependencies=del_piloto)
+    app.include_router(services_attention_admin_router, prefix=prefix)
+    # Los procesos automáticos: `/internal/services/tasks/run`. La ÚNICA ruta
+    # de Servicios sin sesión de persona; la llama el planificador con un
+    # secreto, y sin secreto configurado contesta 503.
+    app.include_router(services_tasks_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

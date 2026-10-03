@@ -117,6 +117,10 @@ def _decode_token(token: str, settings: Settings) -> dict[str, Any]:
         raise UnauthorizedError("Token invalido.", code="invalid_token") from exc
 
     alg = header.get("alg", "")
+    # PyJWT no comprueba el tipo de `alg` en la cabecera: un token fabricado
+    # con `"alg": 123` (o `null`) llegaba hasta `alg.startswith` y era un 500.
+    if not isinstance(alg, str):
+        raise UnauthorizedError("Token invalido.", code="invalid_token")
     key = _resolve_key(token, alg, settings)
 
     # Tolerancia de reloj. Sin ella (PyJWT usa 0 por defecto) un token recien
@@ -187,3 +191,21 @@ async def get_optional_user(
     except UnauthorizedError:
         return None
     return _user_from_claims(claims)
+
+
+async def get_user_if_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    settings: Settings = Depends(get_settings),
+) -> AuthUser | None:
+    """Identidad si viene un token; None si NO viene ninguno. Un token que
+    viene y no vale es un 401, como en `get_current_user`.
+
+    La diferencia con `get_optional_user` es esa: aqui un token caducado no se
+    trata como una visita anonima. Es para las puertas que deciden por QUIEN
+    pregunta (el piloto de Servicios): quien manda un token cree tener sesion,
+    y contestarle «esto no es para ti» en vez de «renueva tu sesion» le
+    dejaria fuera sin saber por que hasta que la app refrescase el token.
+    """
+    if credentials is None or not credentials.credentials:
+        return None
+    return _user_from_claims(_decode_token(credentials.credentials, settings))

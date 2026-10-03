@@ -77,7 +77,9 @@ export function RegisterScreen() {
       const result = await signUpEmail({ fullName: cleanName, email: cleanEmail, password });
       if (result.needsEmailConfirmation) {
         notify(t('auth.confirmEmail'), t('auth.confirmEmailBody'));
-        router.replace('/verification');
+        // Al acceso, que es donde se entra tras pulsar el enlace del correo.
+        // `/verification` es la insignia de membresia, no un «revisa tu correo».
+        router.replace('/login');
       } else {
         // Cuenta recien creada: le toca el cuestionario, salvo que la
         // personalizacion este apagada en el servidor.
@@ -87,7 +89,9 @@ export function RegisterScreen() {
       // Igual que en el acceso: el texto tecnico de Supabase no llega a la
       // pantalla, solo a la consola.
       const message = mensajeDeAuth(error, 'registro', t);
-      if (/ya tiene una cuenta/i.test(message)) {
+      // Se compara con la CLAVE, no con palabras del texto: una expresion en
+      // español no casaba en ingles ni en portugues y el aviso salia en dialogo.
+      if (message === t('authError.emailTaken')) {
         setErrors({ email: t('auth.errorEmailTaken') });
       } else {
         notify(t('auth.signUpFailed'), message);

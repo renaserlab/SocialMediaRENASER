@@ -20,6 +20,7 @@ import { Text } from '@/components/Text';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { haptics } from '@/lib/haptics';
 import { frasePrincipal, frasesDeMotivos } from '@/lib/motivoDeRecomendacion';
+import { toast } from '@/lib/toast';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import {
@@ -150,6 +151,8 @@ export function PersonasParaTi() {
             }
           : previo,
       );
+      // El boton volvia solo a su sitio y nadie decia que habia fallado.
+      toast(t('common.tryAgain'), 'alert-circle');
     } finally {
       setOcupado(null);
     }
@@ -352,7 +355,7 @@ export function PersonasParaTi() {
                   <Pressable
                     onPress={() => verPerfil(persona)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Ver perfil de ${persona.fullName}`}
+                    accessibilityLabel={t('post.viewProfileOf', { nombre: persona.fullName })}
                   >
                     <Avatar
                       size={64}

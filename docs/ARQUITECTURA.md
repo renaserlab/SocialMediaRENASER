@@ -50,6 +50,10 @@ apps/api/app/
     products                           productos físicos: admisión, catálogo,
                                        inventario, bolsa, políticas, pedidos
                                        y entrega
+    services                           servicios: admisión, catálogo, descubrimiento,
+                                       agenda, reserva y atención. Sus barridos
+                                       los lanza un planificador externo por
+                                       `/internal/services/tasks/run`
     commerce                           orden, derecho, saldo, transferencia
     payments                           Stripe, RevenueCat, webhooks
     refunds                            garantía, solicitud, expediente, reembolso
@@ -92,8 +96,49 @@ forma de saber si algo se devolvió, y quien reinstale se quedaría sin nada.
 Las migraciones son ficheros SQL numerados en `supabase/migrations/`, aditivos y
 aplicados **a mano**, pegándolas en el editor de Supabase: no hay herramienta de
 migración. Por eso el código siempre pregunta si su migración está aplicada
-antes de usarla, y sigue funcionando cuando no lo está. La última
-escrita y la última aplicada son la misma: la **0082** (finanzas de Productos).
+antes de usarla, y sigue funcionando cuando no lo está. El cierre de salida
+del piloto de Servicios (02/10/2026: la baja de cuentas con historia, las
+condiciones del piloto y sus políticas;
+[`Z_SERVICIOS_ARQUITECTURA.md` §135](Z_SERVICIOS_ARQUITECTURA.md)) **no
+necesitó ninguna migración**. Al 02/10/2026 la
+última **escrita y aplicada** es la **0096** (las rutas opacas de las imágenes
+de Servicios): ejecutada a mano en Supabase y verificada en solo lectura ese
+día (19:51 UTC) **sin divergencias**, también con las seis puertas de esquema
+y la conexión y el rol reales de la API; ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §131](Z_SERVICIOS_ARQUITECTURA.md). Solo
+sustituye el cuerpo de una función de la 0090. La anterior es la **0095** (la
+política operativa de cada reserva de Servicios, congelada al confirmarla):
+ejecutada a mano en Supabase
+y verificada en solo lectura el 01/10/2026 (18:05 UTC) **sin divergencias**,
+también con las seis puertas de esquema y la conexión y el rol reales de la
+API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §118](Z_SERVICIOS_ARQUITECTURA.md).
+Con la 0095 quedan técnicamente cerrados los seis incrementos de Servicios
+(§119). La anterior es la **0094** (atención, posventa y cierre,
+Incremento 6 de Servicios): ejecutada a mano en Supabase y verificada en solo
+lectura el 01/10/2026 (14:28 UTC) **sin divergencias**, también con las seis
+puertas de esquema y la conexión y el rol reales de la API; ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §102](Z_SERVICIOS_ARQUITECTURA.md). Una
+migración aplicada **no se deshace**: se corrige hacia delante, con otra
+(§104). La anterior es la **0093** (reserva y contratación,
+Incremento 5 de Servicios): ejecutada a mano en Supabase y verificada en solo
+lectura **sin divergencias**, también con las puertas de esquema y la conexión
+y el rol reales de la API; ver [`Z_SERVICIOS_ARQUITECTURA.md` §80](Z_SERVICIOS_ARQUITECTURA.md).
+El código que la usa está en `Edson`, **sin desplegar**: producción todavía no
+la conoce, y al desplegarlo la API arranca de nuevo (la puerta recuerda lo que
+vio al mirar). La anterior, la **0092** (disponibilidad y agenda, Incremento 4
+de Servicios), se aplicó y verificó igual el 30/09/2026; ver
+[`Z_SERVICIOS_ARQUITECTURA.md` §61](Z_SERVICIOS_ARQUITECTURA.md).
+La API de producción todavía corre el backend anterior, que no la usa:
+**cuando se despliegue `Edson`, reiniciarla** (el despliegue lo hace), porque
+la puerta recuerda el «no». La **0091** (servicios guardados, Incremento 3 de
+Servicios) se ejecutó a mano y se verificó el 29/09/2026 en solo lectura **sin
+divergencias**; ver [`Z_SERVICIOS_ARQUITECTURA.md` §49](Z_SERVICIOS_ARQUITECTURA.md).
+La **0090** (catálogo y publicación de servicios) también está aplicada y
+verificada (§32 del mismo documento). La anterior,
+la **0089** (borrar una cuenta sin borrar la historia), también está aplicada y
+verificada; ver [`Z_BAJA_DE_CUENTA.md` §15](Z_BAJA_DE_CUENTA.md). Las
+aplicadas no se editan: las pruebas vigilan su huella git.
+Hasta el 22/09/2026 la última escrita y aplicada era la **0082** (finanzas de Productos).
 De la 0070 en adelante son la vertical de Productos, y las cuatro que quedaban
 —0079 envíos, 0080 reclamaciones, 0081 valoraciones y 0082 finanzas— se
 aplicaron a mano y se verificaron después contra la base gestionada en una
@@ -147,6 +192,27 @@ Todas nacen apagadas y se encienden por entorno.
 | `feature_product_sales` | Comprar un producto físico. **Encenderla sola no basta**: ver `pedidos.por_que_no_se_puede_vender`. |
 | `product_reservation_minutes` | Cuánto aparta un pedido su inventario. **`0` significa sin configurar**, y bloquea. |
 | `feature_live` | Vídeo en los directos. |
+| `feature_services` | Z Servicios: la admisión de prestadores, el catálogo, el descubrimiento, la agenda y la reserva (Incrementos 1–5). **Apagada por defecto** (`False`). Apagada, sus rutas contestan 503 `services_disabled` y el acceso de Explorar solo avisa de que aún no está. **No enciende pagos ni la contratación**: esta necesita además `feature_service_booking`. Ver [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md). |
+| `feature_service_booking` | Contratar Servicios: apartar un horario, confirmar lo **gratuito** y consultar reservas (Incremento 5), y **atenderlas**: cancelar, reprogramar, asistencia, casos y reseñas (Incremento 6, con la **0094**, ya aplicada). **Apagada por defecto.** Necesita `feature_services` y la 0093 tal como la dejan la 0094 y la **0095** (la política congelada, **ya aplicada**; en una base sin ella, 503 `services_not_ready` en toda la reserva, y los horarios no se ofrecen); apagada, sus rutas contestan 503 `service_booking_disabled` sin mirar la base y los horarios no ofrecen «Continuar». **No cobra nada.** |
+| `feature_service_payments` | Cobrar un servicio. **Apagada.** Encenderla no basta: no hay adaptador (`ADAPTADORES_DE_COBRO` vacío) y la 0093 solo admite pedidos gratuitos. Lo que tiene precio contesta 503 `service_booking_payments_not_configured`. |
+| `service_payments_provider` | La pasarela de Servicios. **`none`**. |
+| `services_booking_hold_minutes` | Cuánto dura un horario apartado. **10** (provisional; decisión F1). |
+| `services_booking_max_active_holds` | Cuántos horarios apartados a la vez por persona. **3** (provisional; decisión F2). |
+| `services_booking_instant_modalities` | Modalidades que se confirman sin el prestador. **`virtual,in_person`**: a domicilio necesita su aprobación, que no existe (decisión F3). |
+| `services_attention_checkin_minutes` · `services_attention_tolerance_minutes` | Cuándo se abre la llegada de una atención y la tolerancia antes de poder declarar una ausencia. **15** y **15** (provisionales; decisión G3). |
+| `services_attention_confirmation_hours` | Plazo de quien contrata para confirmar; pasado, un barrido cierra la atención **solo** si empezó con el código y no tiene un caso vivo. **24** (provisional; G4). |
+| `services_booking_reschedule_max` · `services_booking_reschedule_min_hours` | Cuántas veces reprograma quien contrata y con qué antelación. **1** y **24** (provisionales; G2). |
+| `services_booking_reminder_hours` | Con cuánta antelación se recuerda una reserva, **si alguien lanza el barrido** (nadie lo llama). **24** (provisional; G12). |
+| `services_incident_window_hours` · `services_incident_appeal_days` · `services_incident_appeals_max` | Plazo para abrir un caso, plazo para apelar y cuántas apelaciones (0 o 1; con una sola persona en administración no se ofrece). **48**, **5** y **1** (provisionales; G7, G8). |
+| `services_review_window_days` · `services_reviews_premoderation` | Plazo para reseñar una atención cerrada y si la reseña espera a moderación. **30** y **`True`** (provisionales; G11). |
+| *Los nueve anteriores de la atención, salvo el aviso y la moderación* | **Se congelan en cada reserva al confirmarla** (0095, G18): cambiarlos solo vale para las reservas que se confirmen después. `services_booking_reminder_hours` y `services_reviews_premoderation` no se congelan. |
+| `services_agenda_notice_minutes` | Antelación mínima de un horario de Servicios. **120** (provisional del documento de reglas; decisión E1). |
+| `services_agenda_horizon_days` | Hasta cuántos días por delante se ofrecen horarios. **60** (provisional; decisión E2). |
+| `services_catalog_modalities` | Modalidades que un prestador puede publicar. **`virtual,in_person`** de fábrica desde el 02/10/2026 (política de la primera versión; decisión C4). `at_home` sigue en el modelo y en la 0090: lo que no está aquí no entra en un borrador (422 `service_modality_not_allowed`) ni se filtra. |
+| `services_pilot_profile_ids` | **El piloto de Servicios** (P101): con `feature_services` encendida solo entran estos perfiles (UUID separados por comas). **Vacía = nadie**; mal escrita, tampoco. Administración entra por su rol. Ver `services/acceso.py`. |
+| `services_public_access` | La apertura general de Servicios. **`False`**. Solo con `True` deja de mirarse la lista del piloto: no se deduce de una lista vacía. |
+| `services_catalog_currencies` | Monedas en las que se admite un precio. **`PEN`** (política de la primera versión; decisión C5). Otra moneda no entra en un borrador (422 `service_currency_not_allowed`) ni se filtra. |
+| *Cuáles de los anteriores son política decidida, cuáles provisionales y cuáles esperan a la empresa* | `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo (apartados II, III y IV). |
 | `ip_hash_salt` | Sal de la huella de IP. **Vacía apaga la huella**: sin sal es reversible. |
 | `trust_proxy_headers` | Creerse `X-Forwarded-For`. Apagada: esa cabecera la manda cualquiera. |
 

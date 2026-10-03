@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
@@ -85,6 +86,25 @@ export function CheckoutDeProductosScreen() {
     'red' | 'sinConexion' | 'noDisponible' | 'sinSesion' | null
   >(null);
   const ocupadoRef = useRef(false);
+  /**
+   * Si ya se intentó reservar con algo sin terminar.
+   *
+   * EL FORMULARIO NO NACE EN ROJO. Los campos obligatorios se marcaban como
+   * error desde el primer render, antes de escribir una letra: nadie se había
+   * equivocado todavía. Ahora se marcan después del primer intento, que es
+   * cuando decir «esto falta» responde a algo.
+   */
+  const [intentado, setIntentado] = useState(false);
+  /*
+    LAS CONDICIONES PUEDEN NO ESTAR POR TRES MOTIVOS DISTINTOS, y los tres se
+    leían como «todavía no hay condiciones publicadas para ese país»: mientras
+    se pedían, cuando la petición fallaba y cuando de verdad no las hay. Solo
+    lo último lo dice el servidor (`product_policy_not_configured`).
+  */
+  const [cargandoCondiciones, setCargandoCondiciones] = useState(false);
+  const [falloDeCondiciones, setFalloDeCondiciones] = useState<string | null>(null);
+  /** Sube al reintentar: es lo que vuelve a pedir las condiciones. */
+  const [intentoDeCondiciones, setIntentoDeCondiciones] = useState(0);
 
   const [direccion, setDireccion] = useState<Partial<Direccion>>({
     country_code: '',
@@ -130,10 +150,14 @@ export function CheckoutDeProductosScreen() {
     let vivo = true;
     if (pais.length !== 2) {
       setCondiciones(null);
+      setCargandoCondiciones(false);
+      setFalloDeCondiciones(null);
       return () => {
         vivo = false;
       };
     }
+    setCargandoCondiciones(true);
+    setFalloDeCondiciones(null);
     void (async () => {
       try {
         const c = await ProductOrderRepository.condiciones(pais);
@@ -143,17 +167,24 @@ export function CheckoutDeProductosScreen() {
           //: concreto, y el de otro país es otro texto.
           setAcepta(false);
         }
-      } catch {
+      } catch (error) {
         if (vivo) {
           setCondiciones(null);
           setAcepta(false);
+          //: «NO HAY» SOLO SI LO DICE EL SERVIDOR. Cualquier otra cosa —sin
+          //: red, un 500— es un fallo de la petición: se dice y se reintenta.
+          const noHay =
+            error instanceof ApiError && error.code === 'product_policy_not_configured';
+          setFalloDeCondiciones(noHay ? null : textoDelError(error));
         }
+      } finally {
+        if (vivo) setCargandoCondiciones(false);
       }
     })();
     return () => {
       vivo = false;
     };
-  }, [pais]);
+  }, [pais, intentoDeCondiciones]);
 
   const textoDelError = (error: unknown) => {
     if (error instanceof ApiError) {
@@ -181,6 +212,12 @@ export function CheckoutDeProductosScreen() {
 
   const crear = () => {
     if (ocupadoRef.current || grupo === null || condiciones === null) return;
+    //: SIN TERMINAR NO SE MANDA NADA: el toque enseña qué falta, campo por
+    //: campo, y el pie ya dice si lo que falta es aceptar las condiciones.
+    if (!listo) {
+      setIntentado(true);
+      return;
+    }
     ocupadoRef.current = true;
     setCreando(true);
     void (async () => {
@@ -317,7 +354,11 @@ export function CheckoutDeProductosScreen() {
       keyboardType={opciones?.teclado ?? 'default'}
       autoCapitalize={clave === 'country_code' ? 'characters' : 'sentences'}
       maxLength={clave === 'country_code' ? 2 : undefined}
-      error={faltanCampos.includes(clave as never) ? f(claveDelCampo(clave)) : undefined}
+      error={
+        intentado && faltanCampos.includes(clave as never)
+          ? f(claveDelCampo(clave))
+          : undefined
+      }
     />
   );
 
@@ -403,9 +444,28 @@ export function CheckoutDeProductosScreen() {
         <View style={[styles.bloque, { borderColor: colors.border }]}>
           <Text variant="titleMedium">{f('pedidoDeProducto.condiciones.titulo')}</Text>
           {condiciones === null ? (
-            <Text variant="caption" color={colors.textMuted}>
-              {f('pedidoDeProducto.error.sinPolitica')}
-            </Text>
+            cargandoCondiciones ? (
+              <Text variant="caption" color={colors.textMuted}>
+                {t('common.loading')}
+              </Text>
+            ) : falloDeCondiciones !== null ? (
+              <>
+                <InlineError message={falloDeCondiciones} />
+                <Button
+                  label={t('common.retry')}
+                  variant="secondary"
+                  onPress={() => setIntentoDeCondiciones((n) => n + 1)}
+                />
+              </>
+            ) : (
+              <Text variant="caption" color={colors.textMuted}>
+                {f(
+                  pais.length === 2
+                    ? 'pedidoDeProducto.error.sinPolitica'
+                    : 'pedidoDeProducto.condiciones.faltaElPais',
+                )}
+              </Text>
+            )
           ) : (
             <>
               <View style={styles.dato}>
@@ -533,10 +593,16 @@ export function CheckoutDeProductosScreen() {
             })}
           </Text>
         ) : null}
+        {/*
+          APAGADO SOLO POR LO QUE UN TOQUE NO PUEDE EXPLICAR: que no haya
+          proveedor elegido o que no haya condiciones que aceptar. Con la
+          dirección a medias o sin aceptar, el toque no manda nada (`crear` lo
+          comprueba) y marca lo que falta.
+        */}
         <Button
           label={creando ? f('pedidoDeProducto.checkout.creando') : f('pedidoDeProducto.checkout.crear')}
           onPress={crear}
-          disabled={!listo || creando}
+          disabled={creando || grupo === null || condiciones === null}
           loading={creando}
           icon="lock"
         />

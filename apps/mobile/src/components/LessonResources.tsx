@@ -171,9 +171,13 @@ export function LessonResources({ lessonId, courseId, canEdit }: Props) {
     }
   };
 
-  // Sin documentos y sin permiso para subirlos, la seccion sobra.
-  if (items.length === 0 && !canEdit) return null;
-
+  /*
+    SIN DOCUMENTOS TAMBIEN SE PINTA. Aqui habia un `return null` para el alumno
+    («sin documentos, la seccion sobra»), de cuando esto iba apilado debajo de
+    la leccion. Ahora es la pestaña «Recursos» entera: devolver nada la dejaba
+    en blanco, y una pestaña en blanco no se distingue de una que no ha
+    cargado. El texto de «todavia no hay material» ya existia mas abajo.
+  */
   return (
     <View>
       <View style={styles.header}>

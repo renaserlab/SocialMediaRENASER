@@ -3,6 +3,7 @@ import { ScrollView, ScrollViewProps, StyleProp, View, ViewStyle } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ReservaDeZonaSegura, useDentroDeLasPestanas } from '@/components/espacioInferior';
+import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type Borde = 'top' | 'right' | 'bottom' | 'left';
@@ -12,6 +13,12 @@ type AppScreenProps = PropsWithChildren<{
   contentStyle?: StyleProp<ViewStyle>;
   edges?: Borde[];
   scrollProps?: ScrollViewProps;
+  /**
+   * La pantalla tiene campos donde se escribe: que el teclado no los tape.
+   * Se pide, no viene de fabrica, porque una pantalla que ya lleva su propio
+   * `SinTecladoDelante` se encogeria dos veces.
+   */
+  teclado?: boolean;
 }>;
 
 /**
@@ -42,12 +49,13 @@ export function AppScreen({
   contentStyle,
   edges,
   scrollProps,
+  teclado = false,
 }: AppScreenProps) {
   const { colors } = useAppTheme();
   const dentroDeLasPestanas = useDentroDeLasPestanas();
   const bordes = edges ?? bordesPorOmision(dentroDeLasPestanas);
 
-  const contenido = (
+  const pantalla = (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={bordes}>
       {scroll ? (
         <ScrollView
@@ -63,6 +71,7 @@ export function AppScreen({
       )}
     </SafeAreaView>
   );
+  const contenido = teclado ? <SinTecladoDelante>{pantalla}</SinTecladoDelante> : pantalla;
 
   // Lo de dentro ya no empieza en el canto: que `useEspacioInferior()` no
   // vuelva a sumar la zona segura.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { Text } from '@/components/Text';
@@ -61,8 +61,17 @@ export function StateView({
     if (loadingComponent) {
       return <React.Fragment>{loadingComponent}</React.Fragment>;
     }
+    // El indicador y su texto. Antes era solo el texto: en una pantalla
+    // quieta no se distinguía de una que se había quedado parada.
     return (
-      <View style={[styles.centerContainer, style]}>
+      <View
+        style={[styles.centerContainer, style]}
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={t('common.loading')}
+        accessibilityLiveRegion="polite"
+      >
+        <ActivityIndicator color={colors.textMuted} style={styles.loadingIndicator} />
         <Text style={[styles.loadingText, { color: colors.textMuted }]}>
           {t('common.loading')}
         </Text>
@@ -146,6 +155,9 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     minWidth: 120,
+  },
+  loadingIndicator: {
+    marginBottom: spacing.sm,
   },
   loadingText: {
     fontSize: 14,

@@ -597,3 +597,430 @@ Lo que sostiene, y por qué:
 - **Despublicar al guardar se dice.** Si lo guardado ya no se puede aprobar, el
   servidor la devuelve a borrador: eso deja a los alumnos sin poder hacerla y no
   puede pasar bajo un toast verde.
+
+---
+
+## Servicios · Incremento 1: admisión de prestadores (29/09/2026)
+
+Lo que la sección 7 marcaba como «no existe» para el alta profesional y las
+credenciales **ya existe**, con backend real y detrás de `FEATURE_SERVICES`
+(apagada). Las filas de arriba se dejan como estaban: son la foto del
+8/09/2026.
+
+### Quien postula
+
+Pantallas en `app/servicios/prestador/*`; la entrada es «Ofrecer un servicio»
+en el menú del perfil.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Entrada «Ofrecer un servicio» | menú del perfil (solo con la bandera) | `GET /platform/config` |
+| 2 | Explicación inicial | `ServiciosPrestadorScreen` (sin postulación) | `GET /services/provider/application` (404 = aún no) |
+| 3 | Persona o empresa | `ServiciosInicioScreen` | `POST /services/provider/application` |
+| 4 | Información básica | `ServiciosDatosScreen` | `PATCH /services/provider/application` |
+| 5 | Condiciones del prestador | `ServiciosCondicionesScreen` | `GET /services/provider/terms`, `POST …/application/terms` |
+| 6 | Documentos | `ServiciosDocumentosScreen` | `POST …/documents`, `…/{id}/replace`, `DELETE …/{id}`, `…/{id}/view` |
+| 7 | Credenciales | `ServiciosCredencialesScreen` + `ServiciosCredencialScreen` | `POST/PATCH/DELETE …/credentials` |
+| 8 | Resumen | `ServiciosResumenScreen` | `GET …/application` (`missing`) |
+| 9 | Confirmación y envío | `ServiciosResumenScreen` | `POST …/submit` |
+| 10 | Estado de la postulación | `ServiciosPrestadorScreen` | `GET …/application` |
+| 11 | Observaciones y correcciones | `ServiciosPrestadorScreen` (mensaje y campos) | `applicant_message`, `observed_fields` |
+| 12 | Reenvío | `ServiciosResumenScreen` | `POST …/resubmit` |
+| 13 | Historial visible | `ServiciosHistorialScreen` | `GET …/application/history` |
+| 14 | Retirada con confirmación | `ServiciosRetirarScreen` | `POST …/withdraw` |
+
+### Administración
+
+Pantallas en `app/admin/servicios/*`; se entra por Panel de administración ›
+Servicios, solo con la bandera.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1–3 | Bandeja, filtros y paginación | `AdminServiciosScreen` | `GET /admin/services/applications` (cursor, `status`, `provider_type`) |
+| 4–6 | Detalle, documentos y credenciales, visualización temporal | `AdminServicioScreen` | `GET …/{id}`, `POST …/documents/{doc}/view` (120 s, auditado) |
+| 7 | Historial completo | `AdminServicioHistorialScreen` | `GET …/{id}/history` |
+| 8 | Inicio de revisión | `AdminServicioScreen` | `POST …/start-review` |
+| 9 | Solicitud de correcciones | `AdminServicioScreen` | `POST …/request-changes` |
+| 10–12 | Aprobación, rechazo, suspensión | `AdminServicioScreen` | `POST …/approve`, `…/reject`, `…/suspend` |
+| 13 | Retorno a revisión | `AdminServicioScreen` («Devolver a revisión») | `POST …/start-review` desde `suspended` |
+| 14 | Condiciones del prestador | `AdminServiciosCondicionesScreen` | `GET/POST/PATCH /admin/services/policies…`, `…/preview`, `…/publish` |
+
+### Lo que sigue sin existir, a propósito
+
+Todo lo demás de la sección 4 y de la 7: catálogo de servicios, búsqueda,
+perfil profesional público, disponibilidad, reservas, pagos, incidencias y
+rendimiento. Ninguna pantalla de este incremento enseña precios, catálogo ni
+reservas.
+
+`VerificationScreen.tsx` sigue siendo estado local del teléfono y no se tocó:
+la verificación real de credenciales es la de Servicios.
+
+## Servicios · Incremento 2: catálogo y publicación (29/09/2026)
+
+Backend real y detrás de `FEATURE_SERVICES` (apagada). La 0090 está
+**aplicada en Supabase y verificada sin divergencias** (29/09/2026); sin ella,
+cada vista diría que Servicios aún no está disponible. Ninguna se alcanza solo
+escribiendo la URL: lo vigila `serviciosCatalogoVistas.test.mts`. **Técnicamente
+cerrado; únicamente queda el QA físico.** El código está en `Edson`, sin
+desplegar.
+
+### El prestador
+
+Perfil › «Ofrecer un servicio» › en la postulación, «Mis servicios» (solo con
+el prestador activo). Pantallas en `app/servicios/prestador/catalogo/*`.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Mis servicios | `MisServiciosScreen` | `GET /services/provider/services` (cursor) |
+| 2 | Crear servicio | `NuevoServicioScreen` | `GET /services/categories`, `POST /services/provider/services` |
+| 3 | Estado, observaciones y acciones | `ServicioDelPrestadorScreen` | `GET …/{id}`, `POST …/{id}/draft`, `POST …/draft/withdraw` |
+| 4 | Completar información | `EditarServicioScreen` | `PATCH …/{id}/draft` |
+| 5 | Agregar imágenes | `ImagenesDelServicioScreen` | `POST …/draft/images`, `PUT …/images/order`, `DELETE …/images/{img}` |
+| 6 | Revisar requisitos y enviar (o reenviar) | `EnviarServicioScreen` | `GET …/draft/requirements`, `POST …/draft/submit` |
+| 7 | Historial visible | `HistorialDelServicioScreen` | `GET …/{id}/history` |
+| 8 | Ficha pública | `FichaDeServicioScreen` (`app/servicios/ficha/[serviceId]`) | `GET /services/catalog/{id}` |
+
+### Administración
+
+Panel de administración › Servicios › «Catálogo de servicios» y «Categorías de
+servicios». Pantallas en `app/admin/servicios/catalogo/*` y
+`app/admin/servicios/categorias`.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Bandeja, colas, filtros y cursor | `AdminCatalogoScreen` | `GET /admin/services/catalog` |
+| 2 | Propuesta frente a lo publicado y decisiones | `AdminServicioDelCatalogoScreen` | `GET …/{id}`, las siete decisiones (`start-review`, `request-changes`, `approve`, `publish`, `suspend`, `reinstate`, `retire`) |
+| 3 | Una versión | `AdminVersionDelServicioScreen` | `GET …/{id}/versions/{version}` |
+| 4 | Historial completo | `AdminHistorialDelCatalogoScreen` | `GET …/{id}/history` |
+| 5 | Categorías | `AdminCategoriasDeServiciosScreen` | `GET/POST/PATCH /admin/services/categories…`, `…/activate`, `…/deactivate` |
+
+### A dónde llevan los avisos
+
+| Avisos | En la bandeja, lleva a | Tocar el push |
+|---|---|---|
+| Revisión iniciada, cambios pedidos, aprobado, suspendido, reactivado, retirado, publicado en un servicio suspendido (al prestador) | Estado, observaciones y acciones (`ServicioDelPrestadorScreen`) | abre la app |
+| Publicado (al prestador) | Ficha pública (`FichaDeServicioScreen`) | abre la app |
+| Enviado, reenviado, retirado de la revisión (al equipo) | Propuesta y decisiones (`AdminServicioDelCatalogoScreen`) | abre la app |
+
+Si el destino ya no existe o no hay permiso, la vista lo dice
+(`EstadoDelCatalogo`: no encontrado, sin permiso, no disponible). Que el push
+no lleve al destino es una limitación de la cola de entregas y de
+`rutaDelPush`, común a los avisos al creador: `Z_SERVICIOS_ARQUITECTURA.md`
+§32.
+
+### Lo que sigue sin existir, a propósito
+
+Búsqueda, recomendaciones, filtros públicos, guardados, perfil profesional
+público, disponibilidad, reservas, pagos, atención, mensajes, incidencias y
+reseñas. La ficha pública no tiene botón de contratar.
+
+## Servicios · Incremento 3: descubrimiento y confianza (29/09/2026)
+
+Backend real y detrás de `FEATURE_SERVICES` (apagada). Guardar usa la 0091,
+**aplicada y verificada** en Supabase el 29/09/2026; en una base sin ella, lo
+demás funciona y guardar dice que aún no está disponible. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
+`serviciosDescubrimientoVistas.test.mts`.
+
+Explorar › «Servicios» (solo con la bandera) › catálogo › ficha › perfil del
+prestador; y catálogo › Guardados.
+
+De lo que la sección del Incremento 2 deja «sin existir», este incremento hace
+la búsqueda, las recomendaciones (con su razón), los filtros públicos, los
+guardados y el perfil público del prestador. El resto sigue sin existir.
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Entrada, búsqueda, categorías, filtros, orden, sugerencias y resultados | `ServiciosScreen` (`app/servicios/index.tsx`) | `GET /services/catalog`, `GET /services/public-categories`, `GET /services/suggestions`, guardar y quitar |
+| 2 | Ficha completa (ampliada) | `FichaDeServicioScreen` (`app/servicios/ficha/[serviceId]`) | `GET /services/catalog/{id}`, guardar y quitar |
+| 3 | Perfil público del prestador | `PrestadorPublicoScreen` (`app/servicios/prestadores/[providerId]`) | `GET /services/providers/{id}`, `GET …/{id}/services` |
+| 4 | Servicios guardados | `ServiciosGuardadosScreen` (`app/servicios/guardados.tsx`) | `GET /services/saved`, `DELETE …/{id}/save` |
+
+Los filtros son una hoja inferior dentro del catálogo, y viven en la ruta.
+Las sugerencias son una sección del catálogo, que solo aparece si hay una
+razón.
+
+### Lo que sigue sin existir, a propósito
+
+Disponibilidad, agenda, reservas, contratación, pagos, mensajes por reserva,
+check-in, sesiones, incidencias, devoluciones, crear o responder reseñas y
+finanzas. La ficha no tiene botón de contratar.
+
+## Servicios · Incremento 4: disponibilidad y agenda (30/09/2026)
+
+Backend real y detrás de `FEATURE_SERVICES` (apagada). Usa la 0092,
+**aplicada en Supabase y verificada el 30/09/2026 sin divergencias**
+(`Z_SERVICIOS_ARQUITECTURA.md` §61); el código sigue sin desplegar y ninguna
+de estas vistas se probó todavía en un teléfono (QA físico pendiente). En una
+base sin la 0092, la entrada a la agenda no aparece
+(`can_manage_schedule` es falso), la ficha no enseña la sección de
+disponibilidad y las rutas contestan 503 `services_not_ready`. Ninguna vista se
+alcanza solo escribiendo la URL: lo vigila `serviciosAgendaVistas.test.mts`.
+
+Mis servicios › un servicio › «Disponibilidad y agenda» (solo si el servidor
+dice que puede) › ajustes, horario semanal, excepciones, bloqueos o vista
+previa. Y Servicios › ficha › «Ver horarios».
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Resumen de la agenda: zona, duración, separación, modalidad, estado, próximo horario y por qué el público aún no ve horarios | `AgendaDelServicioScreen` (`app/servicios/prestador/catalogo/[serviceId]/agenda/index.tsx`) | `GET /services/provider/services/{id}/schedule` |
+| 2 | Ajustes: zona, activa o en pausa, preparación, descanso e intervalo | `AjustesDeAgendaScreen` (`…/agenda/ajustes`) | `PUT …/schedule` |
+| 3 | Horario semanal | `HorarioSemanalScreen` (`…/agenda/semanal`) | `POST …/rules`, `PATCH`/`DELETE …/rules/{id}` |
+| 4 | Excepciones y días no disponibles | `ExcepcionesDeAgendaScreen` (`…/agenda/excepciones`) | `POST …/exceptions`, `PATCH`/`DELETE …/exceptions/{id}` |
+| 5 | Bloqueos (motivo privado) | `BloqueosDeAgendaScreen` (`…/agenda/bloqueos`) | `POST …/blocks`, `DELETE …/blocks/{id}` |
+| 6 | Vista previa de los horarios | `VistaPreviaDeAgendaScreen` (`…/agenda/vista-previa`) | `GET …/schedule/preview`, `GET …/preview/{fecha}` |
+| 7 | Disponibilidad dentro de la ficha | `DisponibilidadEnLaFicha` (en `FichaDeServicioScreen`) | `GET /services/catalog/{id}/availability` |
+| 8–9 | Selector de fecha y horarios de una fecha | `HorariosDelServicioScreen` (`app/servicios/horarios/[serviceId].tsx`) con `SelectorDeHorarios` | `GET …/availability`, `GET …/availability/{fecha}` |
+| 10 | Estados vacíos: sin agenda, sin horarios ese día o en esas fechas, en pausa, no disponible y fuera de lo consultable | En `SelectorDeHorarios` y la sección de la ficha | Los mismos |
+
+Elegir un horario solo lo guarda en la ruta (`fecha`, `inicio`, `hora`,
+`modalidad`) para el Incremento 5: no hay botón de reservar, confirmar ni pagar,
+y se dice que el horario no queda apartado.
+
+### Lo que sigue sin existir, a propósito
+
+Reservas, retenciones, contratación, pagos, mensajes por reserva, check-in,
+sesiones, incidencias, devoluciones, reseñas que crear, finanzas y calendarios
+externos. La ficha sigue sin botón de contratar.
+
+## Servicios · Incremento 5: reserva y contratación (30/09/2026)
+
+Backend real detrás de `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` (las dos
+apagadas). Usa la **0093, APLICADA** en Supabase y verificada el 01/10/2026
+(`Z_SERVICIOS_ARQUITECTURA.md` §80: técnicamente cerrado); el código sigue sin
+desplegar y ninguna de estas vistas se probó todavía en un teléfono (QA físico
+pendiente). Sin la 0093 o con la contratación apagada, los
+horarios no ofrecen «Continuar» (`booking_available` es falso) y las rutas
+contestan 503. Ninguna vista se alcanza solo escribiendo la URL: lo vigila
+`serviciosReservaVistas.test.mts`.
+
+Servicios › ficha › «Ver horarios» › elegir › «Apartar este horario y
+continuar» › tus datos › resumen (⇄ condiciones) › reserva confirmada. Y
+Servicios › «Mis reservas»; área del prestador › «Reservas de mis servicios»;
+administración de Servicios › «Reservas y retenciones» y «Condiciones de
+contratación».
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | Selección del horario, con «Continuar» solo si el servidor deja | `HorariosDelServicioScreen` (`app/servicios/horarios/[serviceId].tsx`) | `GET …/availability` (`booking_available`), `POST /services/catalog/{id}/holds` |
+| 2 | Tus datos: nota y, a domicilio, la dirección; cuenta atrás | `DatosDeLaContratacionScreen` (`app/servicios/contratar/[holdId]/index.tsx`) | `GET /services/holds/{id}/checkout`, `POST …/release` |
+| 3 | Resumen: servicio, horario, modalidad, precio, condiciones, por qué no | `ResumenDeLaContratacionScreen` (`…/[holdId]/resumen`) | `GET …/checkout`, `POST …/confirm`, `POST …/release` |
+| 4 | Condiciones completas (de Z y del servicio), con versión y huella | `CondicionesDeLaContratacionScreen` (`…/[holdId]/condiciones`) | `GET …/checkout` |
+| 5 | Confirmada / con precio, detenida | `ReservaScreen` con `?confirmada=1` / el estado «Todavía no se puede pagar en Z» del resumen | `POST …/confirm` (201 / 503) |
+| 6 | Mis reservas (por venir, pasadas) | `MisReservasScreen` (`app/servicios/reservas/index.tsx`) | `GET /services/me/bookings` |
+| 7–8 | Detalle, lo aceptado e historial | `ReservaScreen` (`app/servicios/reservas/[bookingId]/index.tsx`) | `GET /services/me/bookings/{id}` |
+| 9 | Reservas de mis servicios (prestador activo o suspendido) | `ReservasDelPrestadorScreen` (`app/servicios/prestador/reservas/index.tsx`) | `GET /services/provider/bookings` |
+| 10 | Detalle limitado del prestador | `ReservaDelPrestadorScreen` (`…/prestador/reservas/[bookingId]/index.tsx`) | `GET /services/provider/bookings/{id}` |
+| 11 | Supervisión de reservas y retenciones (A04) y el barrido | `AdminReservasDeServiciosScreen` (`app/admin/servicios/reservas.tsx`) | `GET /admin/services/bookings`, `GET /admin/services/holds`, `POST /admin/services/holds/expire` |
+| + | Condiciones de contratación | `AdminServiciosCondicionesScreen tipo="booking_terms"` (`app/admin/servicios/condiciones-de-contratacion.tsx`) | `GET /admin/services/policies?kind=booking_terms`, `POST …/booking-terms/draft`, editar, previsualizar y publicar |
+
+### A dónde llevan los avisos
+
+| Aviso | A quién | Destino |
+|---|---|---|
+| `service_booking_confirmed` | Quien contrata | `/servicios/reservas/{id}` |
+| `service_booking_received` | El prestador | `/servicios/prestador/reservas/{id}` |
+
+### Lo que sigue sin existir, a propósito
+
+Cobro, pasarela, «pendiente de pago», cancelar, reprogramar, la aceptación del
+prestador (a domicilio), recordatorios, aviso de vencimiento, mensajes por
+reserva, asistencia, reseñas de lo contratado, comprobantes, devoluciones y
+finanzas del prestador. El push abre la aplicación, no la reserva.
+
+> *Al 01/10/2026:* cancelar, reprogramar, los recordatorios, la asistencia y
+> las reseñas de lo contratado llegaron con el Incremento 6 (sección
+> siguiente).
+
+## Servicios · Incremento 6: atención, posventa y cierre (01/10/2026)
+
+Backend real detrás de `FEATURE_SERVICES` y `FEATURE_SERVICE_BOOKING` (las dos
+apagadas). Usa la **0094, APLICADA** en Supabase y verificada el 01/10/2026
+(`Z_SERVICIOS_ARQUITECTURA.md` §102: técnicamente cerrado). Sin ella (en otra
+base), el detalle de una reserva trae `care: null`, ninguna de estas vistas
+ofrece nada y sus rutas contestan 503. El código está sin desplegar y ninguna
+vista se probó en un teléfono (QA físico pendiente). Ninguna se alcanza solo
+escribiendo la URL, y ninguna decide por el estado ni por la hora del
+teléfono: lo vigila `serviciosAtencionVistas.test.mts`.
+
+> *Corrección G18 (01/10/2026):* **ninguna vista, ruta ni campo nuevo.** Los
+> plazos que enseña el panel de la atención (`care.deadlines`) y las acciones
+> que ofrece son los de **cada reserva**, congelados al confirmarla, y no los
+> de la configuración del momento. Necesita la **0095, APLICADA** en Supabase
+> y verificada el 01/10/2026 (`Z_SERVICIOS_ARQUITECTURA.md` §118): en una base
+> sin ella, con las banderas encendidas, las vistas de reservas contestan 503
+> y los horarios no se ofrecen. Con ella quedan técnicamente cerrados los seis
+> incrementos (§119); **ninguna vista se probó en un teléfono**.
+
+Servicios › «Mis reservas» › la reserva › cancelar / cambiar el horario /
+mostrar mi código / confirmar / reportar un problema / reseña. Área del
+prestador › «Reservas de mis servicios» › la reserva › empezar / terminar /
+cancelar / el caso / responder. Administración de Servicios › «Casos» y
+«Reseñas».
+
+| # | Vista | Pantalla | Backend |
+|---|---|---|---|
+| 1 | La reserva, con el panel de la atención (código, plazos, acciones, caso, reseña) | `ReservaScreen` + `AtencionDeLaReserva` (`app/servicios/reservas/[bookingId]/index.tsx`) | `GET /services/me/bookings/{id}` (`care`), `POST …/check-in-code`, `POST …/confirm`, `POST …/no-show` |
+| 2 | Cancelar | `CancelarReservaScreen` (`…/[bookingId]/cancelar` y `…/prestador/reservas/[bookingId]/cancelar`) | `POST …/cancel` |
+| 3 | Cambiar el horario | `HorariosDelServicioScreen` en modo `?reprogramar=` y `ReprogramarReservaScreen` (`…/[bookingId]/reprogramar`) | `POST /services/catalog/{id}/holds`, `POST /services/me/bookings/{id}/reschedule` |
+| 4 | El caso: abrirlo, el expediente, evidencias, retirar, apelar | `CasoDeLaReservaScreen` + `ExpedienteDelCaso` (`…/[bookingId]/caso`, para las dos partes) | `POST`/`GET …/incident`, `POST …/incident/entries`, `…/evidence`, `GET …/entries/{id}/file`, `POST …/withdraw`, `…/appeal` |
+| 5 | La reseña | `ResenaDeLaReservaScreen` (`…/[bookingId]/resena`) | `POST /services/me/bookings/{id}/review` |
+| 6 | La reserva del prestador: empezar, terminar, ausencia, responder | `ReservaDelPrestadorScreen` + `AtencionDeLaReserva` (`app/servicios/prestador/reservas/[bookingId]/index.tsx`) | `GET /services/provider/bookings/{id}`, `POST …/start`, `…/complete`, `…/no-show`, `…/review/reply` |
+| 7 | Las reseñas en la ficha pública | `FichaDeServicioScreen` + `ListaDeResenasDelServicio` | `GET /services/catalog/{id}/reviews` |
+| 8 | La bandeja de casos, los efectos solicitados y los barridos | `AdminCasosDeServiciosScreen` (`app/admin/servicios/casos/index.tsx`) | `GET /admin/services/incidents`, `POST /admin/services/tasks/run` |
+| 9 | El expediente entero y la resolución | `AdminCasoDeServiciosScreen` (`app/admin/servicios/casos/[incidentId].tsx`) | `GET /admin/services/incidents/{id}`, `POST …/entries`, `GET …/entries/{id}/file`, `POST …/resolve` |
+| 10 | La moderación de reseñas | `AdminResenasDeServiciosScreen` (`app/admin/servicios/resenas.tsx`) | `GET /admin/services/reviews`, `POST …/{id}/moderate` |
+
+### A dónde llevan los avisos
+
+| Aviso | A quién | Destino |
+|---|---|---|
+| `service_booking_cancelled_*`, `service_booking_rescheduled_provider`, `service_booking_reminder_*`, `service_attention_*`, `service_review_*` | Quien contrata (`_client`) o el prestador (`_provider`) | `/servicios/reservas/{id}` o `/servicios/prestador/reservas/{id}` |
+| `service_incident_opened_*`, `_updated_*`, `_resolved_*` (a las partes) | Quien contrata o el prestador | `…/reservas/{id}/caso` |
+| `service_incident_opened_team`, `service_incident_appealed_team` | Administración | `/admin/servicios/casos/{id}` |
+
+### Lo que sigue sin existir, a propósito
+
+La aceptación del prestador (a domicilio), la reprogramación pedida por el
+prestador, la cancelación por administración, QR, señales de la sala virtual y
+ubicación, cambios de alcance, cobro, comisión, saldos, devoluciones
+ejecutadas, comprobantes, finanzas del prestador, fotos en una reseña, una
+pantalla para configurar la política, mensajes por reserva y «añadir al
+calendario». El push abre la aplicación, no la reserva.
+
+## Z Servicios · las políticas de la primera versión, en las vistas (02/10/2026)
+
+Ninguna pantalla ni ruta nueva. Cambia lo que cinco vistas ya existentes
+ofrecen o enseñan (`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII):
+
+| Vista | Qué cambia | Política |
+|---|---|---|
+| `EditarServicioScreen` | ofrece dos modalidades (sin «a domicilio») y una moneda (PEN) | P5, P2 |
+| `ServiciosScreen` (filtros) | el filtro de modalidad ofrece dos; el de moneda, PEN | P5, P2 |
+| `AdminCatalogoScreen` (filtros) | el filtro de modalidad ofrece dos | P5 |
+| `FichaDeServicioScreen` y `DisponibilidadEnLaFicha` | no enseñan la capacidad: el servidor ya no la manda en la ficha pública ni en un horario | P51 |
+| `AccesosAVerticales`, `ProfileScreen` | las entradas de Servicios aparecen solo a quien el servidor dice que entra (`useServiciosEncendido`, ahora por persona) | P101 |
+| `PanelDeAdministracionScreen` | la sección de Servicios aparece a quien administra, por su rol, esté o no en el piloto (`useServiciosDeAdministracion`) | P101 |
+
+Quien gestiona un servicio sigue viendo su capacidad (`EditarServicioScreen`,
+la agenda, la revisión de administración). Un servicio que ya tuviera «a
+domicilio» se seguiría nombrando bien: la etiqueta sigue en los tres idiomas.
+
+**El piloto no añade pantallas.** A quien no entra, las rutas de Servicios le
+contestan lo mismo que con Servicios apagado, y las pantallas ya sabían
+pintarlo («no disponible»). La protección es del servidor; esconder la
+entrada es comodidad.
+
+## Cierre de vistas para la presentación (03/10/2026)
+
+Ninguna pantalla ni ruta nueva, ninguna biblioteca nueva y ningún rediseño. Se
+arregló lo que hacía que una vista **mintiera, se quedara colgada o dejara
+hacer dos veces lo mismo**. Todo está comprobado con tipos (`tsc`), con las
+pruebas que leen el código fuente y con la exportación web; **nada se ha
+probado en un teléfono** (`Z_QA_FISICO_PENDIENTE.md`).
+
+### Componentes comunes
+
+| Componente | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `Button` | un segundo toque mientras la acción seguía en curso la lanzaba otra vez; al esperar, el botón cambiaba de tamaño | si `onPress` devuelve una promesa, queda ocupado hasta que termina y no admite otro toque (`lib/toqueConCerrojo.ts`, con pruebas que lo ejecutan); el indicador va encima del texto, sin cambiar de ancho ni de alto; se hunde un poco al tocarlo; el lector de pantalla lo anuncia como ocupado |
+| `StateView` (cargando) | solo un texto | indicador y texto, anunciado como progreso |
+| `Skeleton` | latía aunque el teléfono pidiera reducir el movimiento | sin bucle con «reducir movimiento» |
+| `Input` | el error no se anunciaba | el error se anuncia al aparecer |
+| `Toast` | no se anunciaba, salía a una altura fija (debajo de la cámara en algunos teléfonos) | se anuncia, respeta la zona segura, vibra en un éxito y no rebota con «reducir movimiento» |
+| `AppScreen` | no apartaba el teclado | `teclado` lo aparta, a petición (ver «Servicios») |
+
+### Servicios
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `EditarServicioScreen` | ofrecía «precio fijo» y «desde», que el servidor rechaza | solo «Gratis» y «A consultar»; un borrador antiguo con importe lo dice y no marca ninguna opción |
+| `EditarServicioScreen` | sin categorías, decía «la categoría ya no se cambia» | dice que todavía no hay categorías |
+| `ServiciosScreen` (filtros) | ofrecía «con precio», moneda y rango | solo «Gratis» y «A consultar»; un enlace antiguo con esos filtros se abre sin ellos |
+| 19 formularios de Servicios | el teclado tapaba el campo de abajo | `AppScreen teclado` (`tecladoEnFormularios.test.mts`) |
+| `SelectorDeHorarios` | tras un fallo, «Reintentar» dejaba el día cargando para siempre | reintentar vuelve a pedir el calendario y el día |
+| `AdminServiciosCondicionesScreen` | si ya había un borrador, decía «guardado» y tiraba lo escrito | lo escrito sigue en el formulario; guardar otra vez reemplaza el borrador que había |
+| `ReservaScreen`, `ReservaDelPrestadorScreen` | para ver un cambio de la otra parte había que salir y volver a entrar | tirar hacia abajo la vuelve a pedir |
+| `AdminCatalogoScreen`, `AdminServiciosScreen` | el icono de la cabecera no decía qué abría | tiene nombre para el lector de pantalla |
+| `ListaDeReservas` | las pestañas se anunciaban como casillas | se anuncian como botones |
+| Seis textos | hablaban de «todavía no se puede reservar» o de precios con importe | dicen lo que el piloto hace: se reserva lo gratuito, «a consultar» es informativo |
+
+### Cursos, Eventos y Productos
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `EventoScreen`, `ConfigurarEntradasScreen`, `PedidoDeEntradasScreen`, `CourseScreen`, `LessonScreen`, `EditarProductoScreen`, `MisProductosScreen`, `InventarioDeProductoScreen`, `FotosDeProductoScreen` | al recargar, la pantalla entera volvía a «cargando» y lo que se estaba leyendo desaparecía | «cargando» solo la primera vez |
+| `PedidoDeEntradasScreen`, `PedidoDeProductoScreen` | al volver del pago en el navegador no se enteraban | se recargan al volver a primer plano; si esa recarga falla, el pedido sigue a la vista y se avisa (`pedidoNoSeBorraAlReleer.test.mts`) |
+| `CheckoutDeProductosScreen` | el formulario nacía en rojo; «no hay condiciones» salía también mientras se pedían, cuando fallaba y sin haber escrito el país | los campos se marcan tras el primer intento; cargando, fallo con reintento, falta el país y «no hay» se distinguen |
+| `PedidoDeProductoScreen` | cualquier acción apagaba todos los botones sin decir cuál estaba en curso | el botón pulsado enseña la espera |
+| `ProductoScreen` | añadir a la bolsa dos veces seguidas; la galería paraba entre dos fotos | cerrojo al añadir; la galería encaja foto a foto |
+| `CourseContentEditor`, `EvaluacionScreen`, `CursosScreen` | se podía guardar un módulo, empezar una evaluación o publicar dos veces | cerrojo mientras dura |
+| `LibraryScreen` | un fallo se leía como «no tienes cursos» | error con reintento |
+| `EventsScreen` | la tarjeta destacada no abría la ficha; no había entrada a «Mis entradas» | abre la ficha; hay una fila a «Mis entradas» |
+| `VueltaDelPagoScreen` | mientras verificaba no decía qué | dice que está verificando el pago |
+
+### Cuenta, perfil y publicaciones
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `RegisterScreen` | tras pedir confirmar el correo llevaba a la pantalla de la insignia | lleva al acceso |
+| `LoginScreen`, `RegisterScreen` | reconocían el error por una palabra en español: en inglés y portugués iba a un diálogo | lo reconocen por su clave |
+| `ResetPasswordScreen` | no tenía salida | flecha de vuelta al acceso |
+| `SettingsScreen` | durante la baja la fila seguía igual y se podía volver a pulsar; un fallo al cerrar sesión se perdía | cerrojo e indicador durante la baja; el fallo se dice |
+| `SettingsScreen` | «Verificación de cuenta» llevaba a un botón que no envía nada | la fila solo aparece en desarrollo (**decisión reversible**: es una línea) |
+| `EditPostScreen` | el botón y la acción no usaban la misma regla; un fallo al cargar parecía «no encontrada» | una sola regla; error con reintento |
+| `ProfileScreen`, `ProfileGallery` | un fallo de la galería no ofrecía reintentar | reintento |
+| `services/storage.ts` | un archivo rechazado enseñaba instrucciones para quien administra Supabase | tres mensajes para quien sube el archivo; el detalle va a la consola |
+
+### Notas de voz y chat
+
+| Vista | Qué pasaba | Qué hace ahora |
+|---|---|---|
+| `useGrabadoraDeVoz`, `AudioDePresentacion` | **en Android la duración se leía de `currentTime`, que en `expo-audio` 1.1.1 devuelve ahí la hora de inicio**: por el código nativo, el tope de duración saltaba en el primer tic y la grabación se paraba sola | leen `getStatus().durationMillis`, igual en Android, iOS y web |
+| `useGrabadoraDeVoz` | conceder el permiso por primera vez abortaba la grabación sin decir nada | tras conceder, empieza a grabar |
+| `useGrabadoraDeVoz` | un fallo al pedir el permiso o al arrancar dejaba el micrófono colgado | vuelve a reposo, cierra el grabador y avisa |
+| `BotonDeNotaDeVoz` | nada indicaba que se estaba grabando salvo el reloj | un punto que late (fijo con «reducir movimiento») |
+| `ChatScreen` | salir con una nota grabada la perdía sin preguntar; abrir un perfil dejaba el micrófono abierto | pregunta antes de salir (botón y Atrás de Android); al perder el foco se detiene y la nota queda en la previa |
+| `ChatScreen` | al abrir, pantalla en blanco: no se distinguía cargar, vacío y fallo | los tres estados, con reintento |
+| `ChatScreen` | con dos envíos fallidos, reintentar el primero mandaba el segundo | cada burbuja reintenta lo suyo |
+| `ChatScreen` | un vídeo se abría en el visor de imágenes (pantalla negra); un documento no se abría | se abren fuera de la aplicación |
+| `ChatScreen` | la conversación se abría por el mensaje más antiguo | anclada abajo (modo de chat de FlashList 2) |
+
+No hay gesto de mantener pulsado ni de deslizar para grabar: no existía, y las
+pruebas (`chatSinMantenerPulsado.test.mts`) prohíben añadirlo.
+
+### Visto y no arreglado
+
+No impiden presentar. Quedan anotados porque se vieron:
+
+- **Textos en duro en español** (se ven bien en español; no se traducen): en
+  Historias, en la captura de historias, en el cuestionario de entrada, en la
+  hoja de sesiones, en los recursos de una lección y cuatro en el chat.
+- `ChatScreen`: el gesto de deslizar-atrás de iOS no pregunta por la nota; la
+  franja de error con burbujas ya pintadas no ofrece reintentar; el audio que
+  suena no se para al perder el foco; la miniatura de un vídeo adjunto es un
+  hueco gris; el enlace firmado de un adjunto dura una hora.
+- Notas de voz, tres casos raros (ninguno deja el micrófono abierto): salir
+  del chat mientras la nota se está **enviando** no pregunta, y si la subida
+  falla después, la nota se pierde; si la pantalla se cierra justo mientras
+  se prepara la grabación, el aviso de «no se pudo grabar» sale en otra
+  pantalla; cancelar y detener a la vez puede dejar una previa sin audio.
+- `SettingsScreen`: la fila de «Verificación de cuenta» está escondida, pero
+  la ruta `/verification` sigue abriéndose por enlace directo, con el mismo
+  botón que no envía nada. Quitar la ruta o devolver la fila es una decisión.
+- `EventsScreen`: el «+» de una fila reserva y cancela sin confirmar; la lista
+  parpadea al volver de la ficha.
+- `CursosScreen`: el marcador de guardado solo se distingue por el color.
+- `EditPostScreen`: no se puede dejar sin texto una publicación con adjunto
+  (la API exige texto al editar).
+- `ProductoScreen` en web: el contador de la galería no se actualiza.
+- `PostCard`: el nombre del autor no se recorta a una línea.
+
+### Cómo se comprobó
+
+| Comprobación | Resultado |
+|---|---|
+| `tsc --noEmit` | sin errores |
+| Pruebas del móvil (`scripts/pruebas.mjs`) | 3712 pasan, 0 fallan (140 ficheros) |
+| Exportación web (`expo export --platform web`, sin el `.env` local) | correcta |
+| Expo Doctor | **no ejecutado**: no está instalado en local y descargarlo no estaba autorizado. Este bloque no toca dependencias ni configuración nativa |
+| Teléfono | **no probado** |

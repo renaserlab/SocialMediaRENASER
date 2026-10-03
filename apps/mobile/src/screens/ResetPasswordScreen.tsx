@@ -112,7 +112,9 @@ export function ResetPasswordScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader title="" />
+      {/* Con salida: sin `onBack` la cabecera no pintaba la flecha y de esta
+          pantalla solo se salia guardando una contraseña. */}
+      <AppHeader title="" onBack={() => router.replace('/login')} />
       <SinTecladoDelante>
         <AppScreen contentStyle={styles.screen}>
           <Text variant="title" weight="900" style={styles.title}>

@@ -230,6 +230,238 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
         "en": ("There is a decision on your case", "Open it to read it."),
         "pt": ("Há uma decisão sobre seu caso", "Abra-o para lê-la."),
     },
+    # ------------------------------------------------------------------ #
+    # Admisión de prestadores de Servicios
+    #
+    # NINGUNO LLEVA DATOS: ni documentos, ni motivos, ni notas. Dicen qué
+    # pasó; el detalle se lee en la postulación, con sesión.
+    # ------------------------------------------------------------------ #
+    "service_application_review_started": {
+        "es": ("Tu postulación está en revisión", "El equipo de Z la está revisando."),
+        "en": ("Your application is under review", "The Z team is reviewing it."),
+        "pt": ("Sua candidatura está em análise", "A equipe da Z está analisando."),
+    },
+    "service_application_changes_requested": {
+        "es": ("Hay que corregir tu postulación", "Ábrela para ver qué falta."),
+        "en": ("Your application needs changes", "Open it to see what is missing."),
+        "pt": ("Sua candidatura precisa de ajustes", "Abra-a para ver o que falta."),
+    },
+    "service_application_approved": {
+        "es": ("Tu postulación fue aprobada", "Ya eres prestador de Servicios en Z."),
+        "en": ("Your application was approved", "You are now a service provider on Z."),
+        "pt": ("Sua candidatura foi aprovada", "Agora você é prestador de serviços na Z."),
+    },
+    "service_application_rejected": {
+        "es": ("Hay una decisión sobre tu postulación", "Ábrela para leer el motivo."),
+        "en": ("There is a decision on your application", "Open it to read the reason."),
+        "pt": ("Há uma decisão sobre sua candidatura", "Abra-a para ler o motivo."),
+    },
+    "service_application_suspended": {
+        "es": ("Tu cuenta de prestador está suspendida", "Ábrela para leer el motivo."),
+        "en": ("Your provider account is suspended", "Open it to read the reason."),
+        "pt": ("Sua conta de prestador está suspensa", "Abra-a para ler o motivo."),
+    },
+    "service_application_withdrawn": {
+        "es": ("Retiraste tu postulación", "Puedes empezar otra cuando quieras."),
+        "en": ("You withdrew your application", "You can start a new one anytime."),
+        "pt": ("Você retirou sua candidatura", "Você pode começar outra quando quiser."),
+    },
+    "service_document_observed": {
+        "es": ("Un documento necesita cambios", "Ábrelo para ver qué corregir."),
+        "en": ("A document needs changes", "Open it to see what to fix."),
+        "pt": ("Um documento precisa de ajustes", "Abra-o para ver o que corrigir."),
+    },
+    "service_credential_observed": {
+        "es": ("Una credencial necesita cambios", "Ábrela para ver qué corregir."),
+        "en": ("A credential needs changes", "Open it to see what to fix."),
+        "pt": ("Uma credencial precisa de ajustes", "Abra-a para ver o que corrigir."),
+    },
+    "service_credential_rejected": {
+        "es": ("Una credencial no fue aceptada", "Ábrela para leer el motivo."),
+        "en": ("A credential was not accepted", "Open it to read the reason."),
+        "pt": ("Uma credencial não foi aceita", "Abra-a para ler o motivo."),
+    },
+    "service_application_submitted": {
+        "es": ("Nueva postulación de prestador", "Hay una postulación esperando revisión."),
+        "en": ("New provider application", "An application is waiting for review."),
+        "pt": ("Nova candidatura de prestador", "Há uma candidatura aguardando análise."),
+    },
+    "service_application_resubmitted": {
+        "es": ("Una postulación se reenvió", "Trae las correcciones que pediste."),
+        "en": ("An application was resubmitted", "It includes the changes you asked for."),
+        "pt": ("Uma candidatura foi reenviada", "Ela traz os ajustes que você pediu."),
+    },
+    "service_application_withdrawn_review": {
+        "es": ("Una postulación se retiró", "Quien postuló la retiró antes de la decisión."),
+        "en": ("An application was withdrawn", "The applicant withdrew it before a decision."),
+        "pt": ("Uma candidatura foi retirada", "Quem se candidatou a retirou antes da decisão."),
+    },
+    # Z Servicios · catálogo (Incremento 2). Sin títulos ni motivos: quien lo
+    # abre lee el detalle en el servicio.
+    "service_catalog_review_started": {
+        "es": ("Revisamos tu servicio", "El equipo de Z empezó a revisar lo que enviaste."),
+        "en": ("We're reviewing your service", "The Z team started reviewing what you submitted."),
+        "pt": ("Estamos revisando seu serviço", "A equipe da Z começou a revisar o que você enviou."),
+    },
+    "service_catalog_changes_requested": {
+        "es": ("Tu servicio necesita cambios", "Ábrelo para leer qué corregir."),
+        "en": ("Your service needs changes", "Open it to read what to fix."),
+        "pt": ("Seu serviço precisa de ajustes", "Abra-o para ler o que corrigir."),
+    },
+    "service_catalog_approved": {
+        "es": ("Tu servicio fue aprobado", "Falta que el equipo de Z lo publique."),
+        "en": ("Your service was approved", "The Z team still has to publish it."),
+        "pt": ("Seu serviço foi aprovado", "Falta a equipe da Z publicá-lo."),
+    },
+    "service_catalog_published": {
+        "es": ("Tu servicio está publicado", "Ya se puede ver en Z."),
+        "en": ("Your service is published", "It can now be seen on Z."),
+        "pt": ("Seu serviço está publicado", "Já pode ser visto na Z."),
+    },
+    "service_catalog_suspended": {
+        "es": ("Tu servicio fue suspendido", "Ábrelo para leer el motivo."),
+        "en": ("Your service was suspended", "Open it to read the reason."),
+        "pt": ("Seu serviço foi suspenso", "Abra-o para ler o motivo."),
+    },
+    "service_catalog_reinstated": {
+        "es": ("Tu servicio vuelve a estar visible", "El equipo de Z levantó la suspensión."),
+        "en": ("Your service is visible again", "The Z team lifted the suspension."),
+        "pt": ("Seu serviço está visível de novo", "A equipe da Z retirou a suspensão."),
+    },
+    "service_catalog_retired": {
+        "es": ("Tu servicio salió del catálogo", "Ábrelo para leer el motivo."),
+        "en": ("Your service left the catalog", "Open it to read the reason."),
+        "pt": ("Seu serviço saiu do catálogo", "Abra-o para ler o motivo."),
+    },
+    "service_catalog_published_suspended": {
+        "es": ("Tu versión nueva está lista", "El servicio sigue suspendido: se verá cuando Z levante la suspensión."),
+        "en": ("Your new version is ready", "The service is still suspended: it will be visible when Z lifts the suspension."),
+        "pt": ("Sua nova versão está pronta", "O serviço continua suspenso: ficará visível quando a Z retirar a suspensão."),
+    },
+    "service_catalog_submitted": {
+        "es": ("Nuevo servicio para revisar", "Un prestador envió un servicio."),
+        "en": ("New service to review", "A provider submitted a service."),
+        "pt": ("Novo serviço para revisar", "Um prestador enviou um serviço."),
+    },
+    "service_catalog_resubmitted": {
+        "es": ("Un servicio volvió corregido", "Trae los cambios que pediste."),
+        "en": ("A service came back corrected", "It includes the changes you requested."),
+        "pt": ("Um serviço voltou corrigido", "Traz os ajustes que você pediu."),
+    },
+    "service_catalog_withdrawn_review": {
+        "es": ("Un servicio se retiró de la revisión", "El prestador lo retiró antes de publicarse."),
+        "en": ("A service was withdrawn from review", "The provider withdrew it before publication."),
+        "pt": ("Um serviço foi retirado da revisão", "O prestador o retirou antes da publicação."),
+    },
+    # Z Servicios, Incremento 5: la reserva. Sin fecha, hora, importe ni
+    # dirección: quien lo abre lee el detalle en la reserva.
+    "service_booking_confirmed": {
+        "es": ("Tu reserva está confirmada", "Ábrela para ver el detalle."),
+        "en": ("Your booking is confirmed", "Open it to see the details."),
+        "pt": ("Sua reserva está confirmada", "Abra-a para ver os detalhes."),
+    },
+    "service_booking_received": {
+        "es": ("Tienes una reserva nueva", "Ábrela para ver el detalle."),
+        "en": ("You have a new booking", "Open it to see the details."),
+        "pt": ("Você tem uma nova reserva", "Abra-a para ver os detalhes."),
+    },
+    # Z Servicios, Incremento 6: la atención y la posventa. Sin fecha, hora,
+    # motivo, dirección ni evidencia: el detalle se lee en la reserva.
+    "service_booking_cancelled_provider": {
+        "es": ("Se canceló una reserva", "Quien la contrató la canceló. Ábrela para ver el detalle."),
+        "en": ("A booking was cancelled", "The client cancelled it. Open it to see the details."),
+        "pt": ("Uma reserva foi cancelada", "Quem contratou a cancelou. Abra-a para ver os detalhes."),
+    },
+    "service_booking_cancelled_client": {
+        "es": ("Tu reserva se canceló", "El prestador la canceló. Ábrela para ver el detalle."),
+        "en": ("Your booking was cancelled", "The provider cancelled it. Open it to see the details."),
+        "pt": ("Sua reserva foi cancelada", "O prestador a cancelou. Abra-a para ver os detalhes."),
+    },
+    "service_booking_rescheduled_provider": {
+        "es": ("Una reserva cambió de horario", "Ábrela para ver el horario nuevo."),
+        "en": ("A booking was rescheduled", "Open it to see the new time."),
+        "pt": ("Uma reserva mudou de horário", "Abra-a para ver o novo horário."),
+    },
+    "service_booking_reminder_client": {
+        "es": ("Tienes una reserva pronto", "Ábrela para ver el detalle."),
+        "en": ("You have a booking coming up", "Open it to see the details."),
+        "pt": ("Você tem uma reserva em breve", "Abra-a para ver os detalhes."),
+    },
+    "service_booking_reminder_provider": {
+        "es": ("Tienes una atención pronto", "Ábrela para ver el detalle."),
+        "en": ("You have an appointment coming up", "Open it to see the details."),
+        "pt": ("Você tem um atendimento em breve", "Abra-o para ver os detalhes."),
+    },
+    "service_attention_completed_client": {
+        "es": ("¿Se realizó tu atención?", "Confírmalo o cuéntanos si hubo un problema."),
+        "en": ("Did your appointment take place?", "Confirm it or tell us if something went wrong."),
+        "pt": ("Seu atendimento foi realizado?", "Confirme ou conte se houve um problema."),
+    },
+    "service_attention_absent_client": {
+        "es": ("Se registró que no asististe", "Si no fue así, ábrela y cuéntanos lo que pasó."),
+        "en": ("You were reported as absent", "If that is not right, open it and tell us what happened."),
+        "pt": ("Registraram que você não compareceu", "Se não foi assim, abra-a e conte o que aconteceu."),
+    },
+    "service_attention_absent_provider": {
+        "es": ("Se registró que no atendiste", "Si no fue así, ábrela y cuéntanos lo que pasó."),
+        "en": ("You were reported as absent", "If that is not right, open it and tell us what happened."),
+        "pt": ("Registraram que você não atendeu", "Se não foi assim, abra-a e conte o que aconteceu."),
+    },
+    "service_incident_opened_client": {
+        "es": ("Se abrió un caso sobre tu reserva", "Ábrelo para responder."),
+        "en": ("A case was opened about your booking", "Open it to respond."),
+        "pt": ("Foi aberto um caso sobre sua reserva", "Abra-o para responder."),
+    },
+    "service_incident_opened_provider": {
+        "es": ("Se abrió un caso sobre una atención", "Ábrelo para responder."),
+        "en": ("A case was opened about an appointment", "Open it to respond."),
+        "pt": ("Foi aberto um caso sobre um atendimento", "Abra-o para responder."),
+    },
+    "service_incident_opened_team": {
+        "es": ("Hay un caso nuevo de Servicios", "Ábrelo para revisarlo."),
+        "en": ("There is a new Services case", "Open it to review it."),
+        "pt": ("Há um novo caso de Serviços", "Abra-o para revisá-lo."),
+    },
+    "service_incident_updated_client": {
+        "es": ("Hay novedades en tu caso", "Ábrelo para verlas."),
+        "en": ("There is news on your case", "Open it to see it."),
+        "pt": ("Há novidades no seu caso", "Abra-o para vê-las."),
+    },
+    "service_incident_updated_provider": {
+        "es": ("Hay novedades en un caso", "Ábrelo para verlas."),
+        "en": ("There is news on a case", "Open it to see it."),
+        "pt": ("Há novidades em um caso", "Abra-o para vê-las."),
+    },
+    "service_incident_resolved_client": {
+        "es": ("Tu caso tiene una resolución", "Ábrelo para leerla."),
+        "en": ("Your case has a decision", "Open it to read it."),
+        "pt": ("Seu caso tem uma resolução", "Abra-o para lê-la."),
+    },
+    "service_incident_resolved_provider": {
+        "es": ("Un caso tiene una resolución", "Ábrelo para leerla."),
+        "en": ("A case has a decision", "Open it to read it."),
+        "pt": ("Um caso tem uma resolução", "Abra-o para lê-la."),
+    },
+    "service_incident_appealed_team": {
+        "es": ("Se apeló un caso de Servicios", "Ábrelo para revisarlo."),
+        "en": ("A Services case was appealed", "Open it to review it."),
+        "pt": ("Um caso de Serviços foi apelado", "Abra-o para revisá-lo."),
+    },
+    "service_review_available_client": {
+        "es": ("Ya puedes reseñar tu atención", "Cuenta cómo te fue."),
+        "en": ("You can now review your appointment", "Tell others how it went."),
+        "pt": ("Você já pode avaliar seu atendimento", "Conte como foi."),
+    },
+    "service_review_received_provider": {
+        "es": ("Recibiste una reseña", "Ábrela para leerla y responder."),
+        "en": ("You received a review", "Open it to read it and reply."),
+        "pt": ("Você recebeu uma avaliação", "Abra-a para ler e responder."),
+    },
+    "service_review_replied_client": {
+        "es": ("Respondieron a tu reseña", "Ábrela para leer la respuesta."),
+        "en": ("Your review got a reply", "Open it to read the reply."),
+        "pt": ("Responderam à sua avaliação", "Abra-a para ler a resposta."),
+    },
 }
 
 #: Canal de Android. Todo lo de posventa va a «contenido»: no es una

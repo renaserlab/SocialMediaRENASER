@@ -1,3 +1,675 @@
+# Z Servicios: políticas de la primera versión y decisiones pendientes
+
+**Consolidado al 02/10/2026 · «Políticas iniciales v1».** Puesto al día ese
+mismo día, al cerrarse en el código cinco de las políticas que el sistema
+todavía no imponía, y otra vez al cerrar la **salida del piloto gratuito**
+(la baja de cuentas con historia, las condiciones del piloto y sus políticas
+operativas). Este apartado es la
+referencia vigente de las decisiones de Z Servicios. Todo lo que sigue debajo
+de él es el registro histórico, que se conserva tal como se escribió: Cursos,
+Eventos y Productos y, desde «Z Servicios, Incremento 1», las tablas
+originales de las series **S, C, D, E, F y G**. Sus identificadores **no se
+renumeran**.
+
+> Las **D1–D5** de «1. Decisiones pendientes», más abajo, son de **Cursos**.
+> Las **D1–D15** de este apartado son del Incremento 3 de Servicios.
+
+## I. Resumen ejecutivo
+
+**Qué es esto.** Z Servicios es la parte de Z donde una persona o una empresa
+ofrece un servicio (una clase, una asesoría, una consulta) y otra lo reserva.
+Está construido, probado y **apagado**: nadie lo ve todavía y **no mueve
+dinero**.
+
+Mientras se construía se fueron anotando **96 preguntas** («decisiones»), cada
+una con una letra y un número (S1, C4, G12…). Este apartado las ordena en seis
+estados:
+
+| Estado | Cuántas | Qué quiere decir |
+|---|---|---|
+| **Decidida para la primera versión** | 45 | Ya hay una regla y el sistema trabaja con ella. Es una regla inicial, no un contrato ni una aprobación legal |
+| **Valor provisional configurable** | 14 | Hay un número de partida (por ejemplo, 24 horas) que se cambia sin programar |
+| **Requiere a la empresa** | 19 | Nadie del equipo técnico puede decidirla: es estratégica, legal, financiera u operativa |
+| **Requiere integración externa** | 3 | Depende de contratar o conectar un servicio de fuera |
+| **Mejora futura** | 5 | No hace falta para empezar; se anota para después |
+| **No aplica a la primera versión** | 10 | Queda fuera de la primera versión a propósito, no es de Servicios, o es de una versión con pagos |
+| **Total** | 96 | S1–S14, C1–C16, D1–D15, E1–E12, F1–F21 y G1–G18 |
+
+**Qué significa «decidida para la primera versión».** Es una regla inicial,
+adoptada el 02/10/2026 por indicación de Edson para la primera versión técnica.
+**No es una aprobación legal ni una resolución formal de la empresa**, y no se
+publica como condiciones: los textos legales siguen pendientes (IV-16). Rige
+desde esa fecha para lo que se haga con la primera versión, y se revisa antes
+del piloto; lo que toca dinero, antes de encender los pagos.
+
+**En qué se apoyan.** En prácticas comunes de plataformas conocidas, tomadas
+como referencia y no como contrato: de **Alibaba**, conservar las condiciones
+de cada operación, las evidencias, el historial y la mediación; de
+**Hotmart**, una garantía visible con plazo definido, la respuesta del
+proveedor y recuperar un reembolso desde su saldo; de **Airbnb**, la
+disponibilidad, la reserva, la cancelación, la inasistencia, la devolución y la
+reseña verificada. **Z no tiene las mismas políticas que ellas** y nada de esto
+supone una aprobación legal.
+
+**Lo que tiene que decidir la empresa** son 48 asuntos en cinco grupos
+(apartado IV), más seis integraciones externas (apartado V):
+
+| Grupo | Cuántos | Ejemplos |
+|---|---|---|
+| A. Estrategia y alcance | 7 | Ciudades, categorías iniciales, categorías reguladas, menores de edad |
+| B. Responsables operativos | 8 | Quién revisa, quién aprueba, la segunda persona de las apelaciones, soporte |
+| C. Asuntos legales | 9 | Términos y condiciones, privacidad, **F21**, plazos de conservación |
+| D. Dinero, impuestos y pagos | 15 | Quién cobra, comisión, comprobantes, IGV, devoluciones, proveedor |
+| E. Operación y riesgo | 9 | Reincidencias, barridos, valores definitivos, fecha del piloto |
+
+**Lo primero, por orden:**
+
+1. **Los textos legales** (IV-16): sin condiciones publicadas nadie postula
+   ni confirma una reserva. Las **Condiciones piloto v1** de la contratación
+   están preparadas y **sin publicar**
+   (`Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`): falta su aprobación empresarial
+   y legal y el canal de soporte. **Las del prestador siguen sin texto**, y
+   hacen falta: el texto preparado lo acepta quien contrata, no quien presta.
+2. **F21** (IV-18): qué se conserva de la historia de una reserva cuando
+   alguien borra su cuenta. Desde el 02/10/2026 hay una **decisión
+   provisional impuesta por el sistema** (en la rama `Edson`, todavía sin
+   desplegar): esa cuenta no se borra sola y la aplicación remite a soporte
+   (P106). Falta la decisión definitiva, con validación legal: cómo se
+   anonimiza y cómo cierra soporte esa cuenta, que hoy no puede cerrarla.
+3. **Las categorías y las ciudades** (IV-1, IV-2): sin categorías no hay
+   catálogo.
+4. **Dos personas en administración** (IV-10, IV-11): con una sola no hay
+   apelaciones.
+5. **Quién pone en marcha las tareas automáticas** (IV-44, V-53): sin ellas
+   no hay recordatorios ni cierre automático.
+
+**Cinco políticas se cerraron en el código el 02/10/2026** (apartado II, al
+final): las rutas opacas de los archivos (P29), sin «a domicilio» (P5), solo
+en soles (P2), la capacidad fuera de lo público (P51) y el piloto por perfiles
+(P101). La **migración 0096** que necesitaban se aplicó en Supabase y se
+verificó ese mismo día, sin divergencias. Otras
+cinco políticas siguen dependiendo de la operación o de trabajo futuro, y
+ninguna impide empezar un piloto.
+
+**La salida del piloto gratuito se cerró el 02/10/2026** (apartado II, al
+final; `Z_SERVICIOS_ARQUITECTURA.md`, Parte IX): la historia contractual
+impide la baja automática (P106, decisión provisional sobre F21), el piloto
+es gratuito y solo admite fichas gratuitas o «a consultar» (P107), las
+condiciones del piloto están preparadas sin publicar (P108), solo participan
+personas adultas (P109) y Z no ofrece sala ni graba (P110). **Sin migración
+nueva.** Son políticas técnicas y operativas provisionales: **ninguna es un
+dictamen legal**, y el texto de las condiciones necesita aprobación
+empresarial y legal antes de publicarse.
+
+**Estado.** `FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y
+`FEATURE_SERVICE_PAYMENTS` están **apagadas**; la pasarela es `none`; no hay
+Stripe conectado, ni transferencias, ni devoluciones automáticas. Las
+migraciones 0086–0096 están aplicadas, verificadas y registradas, y no se
+tocan. El QA físico sigue pendiente
+(`Z_QA_FISICO_PENDIENTE.md`).
+
+## II. Políticas decididas para la primera versión
+
+**«Políticas iniciales v1»**, vigentes desde el 02/10/2026. Alcance: la
+primera versión técnica, en Perú y sin pagos. Son 113, numeradas P1–P113 (las
+cinco últimas, del cierre de salida del piloto). La
+columna «Cómo se sostiene hoy» dice qué lo respalda en el código, en la base o
+en la operación; la última, qué identificadores históricos cierra o toca.
+
+### A. Alcance inicial
+
+*Motivo:* Empezar por un solo mercado y con las modalidades que no exigen ir a un domicilio.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P1 | Z Servicios opera inicialmente en Perú | Se abre publicando condiciones solo para Perú (las condiciones son por país del prestador). El código no bloquea otros países | C5, F15 |
+| P2 | La moneda inicial es PEN | `SERVICES_CATALOG_CURRENCIES=PEN`: el borrador y el filtro rechazan otra moneda, y la app solo ofrece soles | C5, C16, F15 |
+| P3 | Postulan personas naturales y empresas | Los dos tipos de prestador de la 0086 | — |
+| P4 | Modalidades: virtual y presencial en el establecimiento del prestador | Las dos se publican y se confirman al momento | C4, F3 |
+| P5 | La atención a domicilio permanece desactivada | `SERVICES_CATALOG_MODALITIES=virtual,in_person` de fábrica: no se publica, no se filtra y no se contrata. Escrita a mano contesta `service_modality_not_allowed` | C4, F3, G14 |
+| P6 | Las solicitudes abiertas de propuesta quedan fuera | No existen; «a consultar» y «desde» no se contratan | F14 |
+| P7 | Las categorías reguladas permanecen deshabilitadas mientras no haya matriz documental aprobada | No hay categorías sembradas y solo las crea administración. Sin bloqueo automático | C2, C3, S3 |
+| P8 | Se prohíben actividades ilegales, fraude, falsificación, armas, explotación, contenido sexual, servicios financieros no autorizados y lo que ponga en riesgo inmediato a una persona | Se aplica en la revisión de cada servicio, que se aprueba a mano. Sin filtro automático; debe constar en las condiciones cuando se redacten | C2 |
+
+### B. Admisión del prestador
+
+*Motivo:* Práctica común de las plataformas con proveedores verificados: comprobar antes de publicar y conservar el historial.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P9 | Nadie publica servicios sin admisión previa | `service_provider_not_active`, y además la base (0090) | — |
+| P10 | La postulación admite persona natural o empresa | 0086 | — |
+| P11 | Los documentos y las credenciales permanecen privados | Depósito privado sin políticas; enlaces firmados de 120 s | S6 |
+| P12 | El público solo ve señales verificadas, nunca números ni archivos | Tres señales, solo si son verdad | C13, D4, D8 |
+| P13 | Nadie puede aprobar su propia postulación | Permisos del servidor: nadie decide lo propio | — |
+| P14 | Las credenciales profesionales se exigen únicamente en las categorías que las necesiten | Es el principio; la matriz por categoría sigue pendiente (IV-4) | S3, C3, D15 |
+| P15 | Una credencial vencida pierde su señal pública e impide nuevas publicaciones reguladas | La señal exige credencial verificada, activa y vigente. **La segunda parte todavía no existe**: no hay relación entre credenciales y categorías; se construye al abrir la primera categoría regulada | D4, D15 |
+| P16 | Documentos falsos, fraude, actividad ilegal o riesgo grave permiten la suspensión inmediata | Suspender es una decisión de administración, con motivo y auditoría | C10 |
+| P17 | El prestador puede retirar una postulación no aprobada | Retirarse es antes de la decisión (0088) | — |
+| P18 | Retirarse conserva el historial | El historial solo se añade | — |
+| P19 | Una postulación nueva no hereda documentos, credenciales ni condiciones aceptadas | `Z_SERVICIOS_ARQUITECTURA.md`, Parte I, «Tomadas en cerrado» | S2 |
+| P20 | Las decisiones de aprobación, rechazo y suspensión quedan auditadas | `audit_events` y el historial de la postulación | S11 |
+
+### C. Catálogo y publicación
+
+*Motivo:* Lo publicado no cambia sin revisión y nada se destruye al suspender.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P21 | Un servicio necesita información completa antes de enviarse: título, descripción, categoría, modalidad, duración, precio (o gratuidad, o «a consultar»), moneda si hay precio, zona si no es virtual, portada y condiciones vigentes | `catalogo_requisitos.py` exige además resumen, alcance, qué incluye, qué no y requisitos. «Condiciones vigentes»: el prestador tiene que estar activo, y lo está con las que aceptó al postular; no se vuelven a aceptar por servicio, y el texto de condiciones propio del servicio es opcional | C6, C7 |
+| P22 | Editar un servicio publicado crea una versión nueva | 0090 | — |
+| P23 | Lo publicado sigue visible hasta que se publique la versión nueva | 0090: una sola publicada por servicio | — |
+| P24 | Desactivar una categoría oculta sus servicios | Inc. 3, decisión 1 | D13 |
+| P25 | Suspender un servicio lo saca del catálogo sin destruir su historia | 404 en la ficha; el historial queda | C10, C11 |
+| P26 | Retirar un servicio es definitivo | Lo impone la 0090 | C11 |
+| P27 | Las imágenes y las evidencias se guardan en depósitos privados | Depósitos privados, verificados en Supabase | C15 |
+| P28 | Los archivos se entregan con enlaces firmados temporales | 3600 s las imágenes del catálogo; 120 s los documentos y las evidencias | C15, G10 |
+| P29 | Ruta opaca para los archivos nuevos: no exponer sin necesidad el identificador del prestador | `<servicio>/<32 hexadecimales al azar>.<ext>`: la arma el servidor y no lleva el perfil. La migración 0096 está aplicada y verificada (02/10/2026) | C15, D6 |
+| P30 | Las reseñas de Cursos, Eventos o Productos no se reutilizan en Servicios | Las reseñas de servicio son una tabla propia (0094) | D11 |
+
+### D. Descubrimiento y recomendaciones
+
+*Motivo:* Enseñar solo lo que se puede contratar y explicar por qué se sugiere algo.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P31 | Solo aparecen servicios publicados, con prestador activo, categoría activa, portada y sin bloqueos | `descubrimiento.py` | D13 |
+| P32 | La búsqueda ignora mayúsculas y tildes | Búsqueda en PostgreSQL con las palabras de la búsqueda global | D3 |
+| P33 | Los filtros usan categoría, modalidad, precio, moneda, zona y credencial vigente | `descubrimiento.py` | D3 |
+| P34 | No se convierten monedas | Ordenar por precio y el rango exigen elegir una moneda | C5, D14 |
+| P35 | Las recomendaciones incluyen una razón comprensible | Un código de razón en cada sugerencia | D9 |
+| P36 | Razones admitidas: misma categoría, mismo prestador, parecido a un servicio guardado y publicación reciente | `MOTIVOS` (`descubrimiento.py`); «reciente» son 30 días | D9 |
+| P37 | No se usan datos sensibles, documentos ni incidencias privadas para recomendar | Solo se usan el catálogo público y los guardados de la propia persona | D9 |
+| P38 | Un servicio no disponible conserva en guardados el título que tenía al guardarse | Inc. 3, decisión 7 | D7 |
+| P39 | Los guardados son privados y no son una métrica pública de popularidad | Sin aviso al prestador y sin contador público | — |
+
+### E. Agenda
+
+*Motivo:* Práctica común de las plataformas de reservas: disponibilidad calculada por el servidor y en la hora del lugar.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P40 | Cada agenda usa una zona horaria IANA | Se elige; no se toma la del teléfono (0092) | E6 |
+| P41 | La hora principal es la del lugar del servicio | Las horas se enseñan en la zona de la agenda | E6 |
+| P42 | Si el cliente está en otra zona, puede mostrarse su equivalencia local | Hoy se avisa de que el teléfono está en otra zona; la equivalencia no se calcula (mejora opcional) | E6 |
+| P43 | Antelación provisional: 2 horas | `SERVICES_AGENDA_NOTICE_MINUTES=120` | E1, F7 |
+| P44 | Horizonte provisional: 60 días | `SERVICES_AGENDA_HORIZON_DAYS=60` | E2, F7 |
+| P45 | Los intervalos técnicos son de 5 minutos | `REJILLA_MINUTOS = 5` (`agenda_politica.py`) | E7 |
+| P46 | La preparación y el descanso forman parte del tiempo ocupado | Cada horario ocupa preparación + duración + descanso | — |
+| P47 | Tolerancia provisional: 15 minutos | `SERVICES_ATTENTION_TOLERANCE_MINUTES=15` | G3 |
+| P48 | Los feriados se gestionan con excepciones del prestador | «Cerrar todo el día» | E4, F11 |
+| P49 | No se integran calendarios externos | No construido | E9 |
+| P50 | No hay lista de espera | No construido | E10 |
+| P51 | No se muestra la capacidad interna exacta; basta con la disponibilidad | Ni la ficha pública ni los horarios traen el número; solo lo ven el prestador y administración | E5, F8 |
+| P52 | Un cierre, una excepción o un bloqueo siempre prevalecen sobre la semana | Precedencia de la agenda (Inc. 4, decisión 2) | E12 |
+
+### F. Reserva y contratación
+
+*Motivo:* Práctica común: lo que se acepta al reservar queda guardado con la reserva y no cambia después.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P53 | Una retención temporal dura 10 minutos | `SERVICES_BOOKING_HOLD_MINUTES=10` | F1 |
+| P54 | La reserva es idempotente | `Idempotency-Key` obligatoria | — |
+| P55 | Reintentar una confirmación no crea una segunda reserva | La misma clave devuelve la misma reserva; probado con peticiones a la vez | — |
+| P56 | Virtual y en el local se confirman al momento | `SERVICES_BOOKING_INSTANT_MODALITIES=virtual,in_person` | F3 |
+| P57 | A domicilio sigue desactivada | No se aparta ni se confirma | F3, G14 |
+| P58 | El cliente dispone provisionalmente de una reprogramación | `SERVICES_BOOKING_RESCHEDULE_MAX=1` | G2 |
+| P59 | Antelación provisional para reprogramar: 24 horas | `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS=24` | G2 |
+| P60 | Cada reserva conserva la versión del servicio y las condiciones aceptadas | Fotografía de la reserva y lo aceptado, por su huella (0093) | E11, F10 |
+| P61 | Cada reserva conserva su política operativa | La fotografía de la 0095: nueve valores, con su huella | G18 |
+| P62 | Cambiar la configuración no altera las reservas anteriores | La reserva solo se decide con su fotografía; es inmutable | E11, F10, G18 |
+| P63 | Ningún valor enviado por el cliente sustituye la política que calcula el servidor | Enviar la política en la petición da 422 | G18 |
+| P64 | Con los pagos apagados, cancelar antes del inicio no tiene efecto económico | Se cancela hasta la hora de inicio, sin coste | F6, G1 |
+
+### G. Atención
+
+*Motivo:* Práctica común: una prueba sencilla de que la atención empezó, y un plazo para confirmar.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P65 | La comprobación principal es un PIN de seis cifras | `CODIGO_DE_ASISTENCIA_CIFRAS = 6` | G5 |
+| P66 | El cliente pide el PIN y el prestador no lo recibe por adelantado | Lo pide quien contrata y lo enseña o lo dicta al empezar | G5 |
+| P67 | Se permiten cinco intentos | `INTENTOS_DEL_CODIGO = 5` | G5 |
+| P68 | Ventana provisional para pedir el PIN o empezar: 15 minutos | `SERVICES_ATTENTION_CHECKIN_MINUTES=15` | G3 |
+| P69 | Empezar sin PIN se registra como señal débil | La atención no se cierra sola | G5 |
+| P70 | Empezar con PIN se registra como señal fuerte | `started_with_code` | G5 |
+| P71 | Plazo provisional de confirmación: 24 horas | `SERVICES_ATTENTION_CONFIRMATION_HOURS=24` | G4 |
+| P72 | El cierre automático solo procede si la atención empezó con PIN, terminó, venció el plazo y no hay una incidencia viva | El barrido de `atencion.py` | G4 |
+| P73 | La inasistencia puede declararse después de 15 minutos | La tolerancia de P47 | G3, G6 |
+| P74 | Una inasistencia discutida puede abrir una incidencia | La otra parte abre un caso | G6 |
+| P75 | Una atención cerrada no se desmiente retroactivamente | Tampoco al resolver una apelación (0094) | G9 |
+
+### H. Incidencias y apelaciones
+
+*Motivo:* Práctica común de la mediación entre partes: evidencias, historial, una resolución y una segunda revisión.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P76 | Plazo ordinario provisional para abrir una incidencia: 48 horas | `SERVICES_INCIDENT_WINDOW_HOURS=48`; las de seguridad no tienen plazo | G7 |
+| P77 | Hasta 10 evidencias por cada parte | `EVIDENCIAS_POR_PARTE = 10` | G10 |
+| P78 | Las evidencias permanecen privadas | Depósito privado; solo las ven las partes y administración | G10 |
+| P79 | Las evidencias se validan por sus bytes reales | Se comprueba la firma del archivo, no su extensión | G10, S5 |
+| P80 | Solo puede existir un caso activo por reserva | Índice único de la 0094, sin contar los retirados. Es más estricto: un caso ya decidido también impide abrir otro | — |
+| P81 | Retirar un caso conserva el historial | El expediente es inmutable y nada se borra suelto | — |
+| P82 | Una resolución separa el efecto operativo, el efecto económico solicitado y el estado de ejecución | Columnas separadas en el caso (0094) | G13 |
+| P83 | Ningún efecto económico se declara ejecutado sin confirmación del proveedor de pago | El estado «ejecutado» no existe en la base | G13 |
+| P84 | Se permite una apelación | `SERVICES_INCIDENT_APPEALS_MAX=1` | G8 |
+| P85 | Plazo provisional de apelación: 5 días | `SERVICES_INCIDENT_APPEAL_DAYS=5` | G8 |
+| P86 | La apelación la resuelve una persona distinta | Con una sola persona en administración no se ofrece apelar | G8, G15 |
+| P87 | Un caso abierto impide el cierre automático | El barrido salta las atenciones con un caso vivo | G4 |
+| P88 | Los enlaces a las evidencias son firmados y de corta duración | 120 s | G10 |
+
+### I. Reseñas
+
+*Motivo:* Práctica común: solo reseña quien recibió la atención.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P89 | Solo se reseña después de una atención cerrada | Lo impone la 0094 | D11, G11 |
+| P90 | Solo existe una reseña por atención | Una por reserva (0094) | G11 |
+| P91 | Ventana provisional de reseña: 30 días | `SERVICES_REVIEW_WINDOW_DAYS=30` | G11 |
+| P92 | Sin reseñas, el promedio es `null`; no se inventan estrellas | Nunca «0.0» | D11 |
+| P93 | La moderación previa permanece activada | `SERVICES_REVIEWS_PREMODERATION=true` | G11 |
+| P94 | El prestador puede responder | El prestador responde a la reseña publicada | G11 |
+| P95 | La reseña pública no expone datos personales innecesarios | No dice quién la escribió | G11 |
+| P96 | Se ocultan las reseñas con amenazas, discriminación, datos personales, extorsión o contenido ajeno a la atención | Seis motivos de moderación, esos cinco y «otro» | G11 |
+| P97 | Ocultar una reseña no elimina su historial | Pasa a escondida; la fila y su historial quedan | G11 |
+
+### J. Operación técnica
+
+*Motivo:* Encender poco a poco y fallar en cerrado.
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P98 | Los procesos automáticos son idempotentes y por lotes | `POST /admin/services/tasks/run` y `POST /admin/services/holds/expire`: a mano, o cada 5 minutos con el planificador (P113; preparado, sin activar) | F13, G12 |
+| P99 | Una fila fallida no derriba todo el lote | Cada fila se confirma antes de pasar a la siguiente. En el barrido de retenciones cada fila va en su punto de guardado (corregido el 02/10/2026: antes un fallo deshacía el lote) | — |
+| P100 | Los pagos, Stripe, las devoluciones automáticas y las transferencias siguen apagados | `FEATURE_SERVICE_PAYMENTS=false`, pasarela `none`, sin adaptador | F16–F18, G13 |
+| P101 | Servicios se habilita progresivamente: equipo interno, prestadores piloto, clientes piloto y público | `SERVICES_PILOT_PROFILE_IDS` y `SERVICES_PUBLIC_ACCESS` (`services/acceso.py`): con la bandera encendida solo entran los perfiles del piloto; la lista vacía no deja entrar a nadie y la apertura general se escribe | — |
+| P102 | El primer despliegue mantiene las banderas apagadas | Las tres son `False` de fábrica | — |
+| P103 | Un error de esquema cierra la funcionalidad con 503; nunca se continúa a medias | Las puertas de esquema: 503 `services_not_ready` | — |
+| P104 | No se crean datos ficticios ni se asume que un pago se ejecutó | No se siembra nada; el efecto económico es una solicitud | G13 |
+| P105 | Las notificaciones no contienen textos libres sensibles | 19 tipos de aviso con texto fijo, en tres idiomas | S11 |
+
+### Cerradas en el código el 02/10/2026
+
+Estas cinco estaban decididas y el sistema no las imponía. Ya las impone: el
+detalle técnico está en `Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII (§122 en
+adelante).
+
+| Política | Qué se hizo | Qué falta fuera del código |
+|---|---|---|
+| P29 · Ruta opaca | La ruta de una imagen es `<servicio>/<32 hexadecimales al azar>.<ext>`: sin el perfil, puesta por el servidor y con la extensión que dicen los bytes. La baja de la cuenta barre la carpeta de cada servicio | Nada: la migración 0096 está aplicada y verificada sin divergencias (02/10/2026) |
+| P5 · A domicilio | De fábrica solo `virtual,in_person`. El borrador y el filtro público rechazan otra modalidad, y la app no la ofrece | Nada |
+| P2 · PEN | El formulario y el filtro de la app ofrecen solo soles; otra moneda escrita a mano contesta un error del dominio | Nada |
+| P51 · Capacidad | La ficha pública y los horarios ya no traen el número. El prestador y administración lo conservan | Nada |
+| P101 · Piloto por etapas | Con Servicios encendido solo entran los perfiles de `SERVICES_PILOT_PROFILE_IDS`; a los demás, también sin sesión, se les contesta como si estuviera apagado. La lista vacía no deja entrar a nadie. Administración entra por su rol | Poner los perfiles del piloto en el secreto de AWS antes de encender |
+
+### Cierre de salida del piloto gratuito (02/10/2026)
+
+*Motivo:* Empezar con un piloto cerrado, de adultos y sin dinero, sin que una
+baja destruya lo que se acordó. Son políticas técnicas y operativas
+provisionales, no un dictamen legal. El detalle está en
+`Z_SERVICIOS_ARQUITECTURA.md`, Parte IX (§135 en adelante).
+
+| P | Política | Cómo se sostiene hoy | Ids |
+|---|---|---|---|
+| P106 | La historia contractual de Servicios impide la baja automática: la cuenta la cierra soporte. **Provisional**, hasta que exista la anonimización definitiva | `DELETE /auth/me` contesta 409 `service_history_requires_support` si la persona es parte de un pedido o de una reserva —como quien contrató o como quien prestó, viva o cerrada—, antes de borrar o de tocar un archivo. Si no se puede mirar, 503. `services/conservacion.py`. **En la rama `Edson`, sin desplegar** | F21, G16, S8 |
+| P107 | El piloto es gratuito: una ficha es gratuita o dice «a consultar», y solo lo gratuito se reserva. Z no cobra, no transfiere, no devuelve y no emite comprobantes | `SERVICES_CATALOG_PRICE_MODELS=free,on_request` de fábrica: una ficha con importe no se puede enviar a revisión. Solo `free` se confirma; «a consultar» no se reserva. Pagos apagados y pasarela `none` | C6, F16–F18, G13 |
+| P108 | Las condiciones de contratación del piloto son un texto versionado con huella, y sin una publicada no se reserva | Mecanismo `booking_terms` (0093). El texto (**Condiciones piloto v1**) está preparado y **sin publicar**: pendiente de aprobación empresarial y legal | F9 |
+| P109 | Solo participan personas adultas | Lo declaran las condiciones, y el piloto es una lista cerrada que elige la empresa (P101). **Sin verificación de edad** | F19 |
+| P110 | Z no proporciona sala propia para los servicios virtuales, no graba y no almacena grabaciones | No existe sala ni grabación en Servicios. 100ms es una integración posterior | G17 |
+| P111 | Las condiciones del prestador del piloto son un texto versionado con huella, operativo y provisional, y sin unas publicadas nadie postula | Mecanismo `provider_terms` (0086). El texto (**Condiciones del prestador v1**, 19 apartados) está preparado y **sin publicar**. Sin parámetros: documentación mínima, y volver a postular sigue sin decidirse. La revisión legal es posterior | S1, S2 |
+| P112 | Un precio con importe no se ofrece, no se guarda, no se envía, no se publica y no se configura | La aplicación solo ofrece «Gratis» y «A consultar»; el borrador y publicar contestan 422 `service_price_model_not_allowed`; `SERVICES_CATALOG_PRICE_MODELS=free,on_request` va fijo en la plantilla de AWS | C6 |
+| P113 | Los procesos automáticos los lanza un planificador cada 5 minutos, con alarma, y la contratación no se enciende sin él | `POST /internal/services/tasks/run` con un secreto que vive en el secreto de la API; regla de EventBridge **preparada y sin activar**; la plantilla rechaza encender la contratación sin planificador | F13, G12 |
+
+Lo que se comprobó que ya funcionaba y no se cambió: los plazos de la tabla
+III (todos coincidían con lo acordado), que nadie resuelve su propia
+actuación (P84–P86) y que sin otra persona habilitada no se ofrece la
+apelación.
+
+### Decidido, pero el sistema todavía no lo impone
+
+Estas cinco están adoptadas y siguen dependiendo de la operación o de
+trabajo futuro. Ninguna impide empezar un piloto.
+
+| Política | Qué pasa hoy | Qué falta | Cuándo |
+|---|---|---|---|
+| P1 · Perú | El código no bloquea países: una categoría puede limitarse a un país, y las condiciones son por país | Publicar condiciones solo para Perú. Es operación, no código | Al publicar las condiciones |
+| P7 y P8 · Reguladas y prohibidas | No hay bloqueo automático de categorías ni de actividades | Se cumple en la creación de categorías y en la aprobación manual de cada servicio; la lista debe ir en las condiciones | Al redactar las condiciones |
+| P15 · Credencial vencida | La señal pública ya se retira. No existe la relación entre credenciales y categorías que impediría publicar en una regulada | Se construye al abrir la primera categoría regulada | Antes de abrir una regulada |
+| P42 · Otra zona horaria | Se avisa de que el teléfono está en otra zona; no se calcula la equivalencia | Mejora opcional de la app | Al ampliar países |
+| P109 · Solo adultos | Es una declaración de las condiciones y una lista cerrada. No hay fecha de nacimiento ni verificación documental de la edad | Decidir si se verifica, antes de abrir a cualquiera | Antes de abrir al público |
+
+## III. Valores provisionales configurables
+
+Son números de partida. Se cambian con una variable de entorno y reiniciando
+la API, **sin programar y sin migración**. Los marcados «sí» en la última
+columna se copian en cada reserva al confirmarla (la fotografía de la 0095):
+cambiarlos solo vale para las reservas que se confirmen después. Los valores
+definitivos son de la empresa (IV-47).
+
+| Variable | Valor | Rango | Qué decide | Política | Ids | Se congela en la reserva |
+|---|---|---|---|---|---|---|
+| `SERVICES_AGENDA_NOTICE_MINUTES` | **120** | 0–10080 | Antelación mínima de un horario (2 horas) | P43 | E1, F7 | no |
+| `SERVICES_AGENDA_HORIZON_DAYS` | **60** | 1–365 | Hasta cuántos días por delante se ofrecen horarios | P44 | E2, F7 | no |
+| `SERVICES_BOOKING_HOLD_MINUTES` | **10** | 1–60 | Cuánto dura un horario apartado | P53 | F1 | no |
+| `SERVICES_BOOKING_MAX_ACTIVE_HOLDS` | **3** | 1–20 | Horarios apartados a la vez por persona | — | F2 | no |
+| `SERVICES_BOOKING_RESCHEDULE_MAX` | **1** | 0–10 | Cuántas veces reprograma quien contrata | P58 | G2 | **sí** |
+| `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS` | **24** | 0–720 | Antelación para reprogramar | P59 | G2 | **sí** |
+| `SERVICES_ATTENTION_CHECKIN_MINUTES` | **15** | 0–240 | Desde cuándo se puede pedir el PIN o empezar | P68 | G3 | **sí** |
+| `SERVICES_ATTENTION_TOLERANCE_MINUTES` | **15** | 0–240 | Tolerancia antes de declarar una inasistencia | P47, P73 | G3 | **sí** |
+| `SERVICES_ATTENTION_CONFIRMATION_HOURS` | **24** | 1–720 | Plazo para confirmar; después, cierre automático | P71 | G4 | **sí** |
+| `SERVICES_INCIDENT_WINDOW_HOURS` | **48** | 1–720 | Plazo para abrir una incidencia | P76 | G7 | **sí** |
+| `SERVICES_INCIDENT_APPEAL_DAYS` | **5** | 1–60 | Plazo para apelar | P85 | G8 | **sí** |
+| `SERVICES_INCIDENT_APPEALS_MAX` | **1** | 0–1 | Cuántas apelaciones | P84 | G8 | **sí** |
+| `SERVICES_REVIEW_WINDOW_DAYS` | **30** | 1–365 | Plazo para reseñar | P91 | G11 | **sí** |
+| `SERVICES_REVIEWS_PREMODERATION` | **true** | true / false | Si una reseña espera a moderación | P93 | G11 | no |
+| `SERVICES_BOOKING_REMINDER_HOURS` | **24** | 1–168 | Con cuánta antelación se recuerda una reserva | — | G12 | no |
+| `SERVICES_CATALOG_PRICE_MODELS` | **free,on_request** | lista | Modelos de precio que se pueden enviar a revisión. `fixed` y `from` siguen en el código: son de una versión con pagos | P21, P107 | C6 | no |
+| `SERVICES_CATALOG_MIN_DURATION_MINUTES` | **5** | límite técnico | Duración mínima de un servicio | P21 | C7 | no |
+| `SERVICES_CATALOG_MAX_DURATION_MINUTES` | **1440** | límite técnico | Duración máxima de un servicio | P21 | C7 | no |
+| `SERVICES_CATALOG_MAX_IMAGES` | **8** | — | Imágenes por servicio | — | C8 | no |
+
+**Configuración que no es provisional**, porque es política decidida:
+
+| Variable | Valor de fábrica | Valor de la primera versión | Política | Estado |
+|---|---|---|---|---|
+| `SERVICES_CATALOG_CURRENCIES` | `PEN` | **`PEN`** | P2 | ya es el valor de fábrica |
+| `SERVICES_BOOKING_INSTANT_MODALITIES` | `virtual,in_person` | **`virtual,in_person`** | P56, P57 | ya es el valor de fábrica |
+| `SERVICES_CATALOG_MODALITIES` | `virtual,in_person` | **`virtual,in_person`** | P4, P5 | ya es el valor de fábrica (02/10/2026) |
+| `SERVICES_CATALOG_PRICE_MODELS` | `free,on_request` | **`free,on_request`** | P107 | ya es el valor de fábrica (02/10/2026); antes, los cuatro modelos |
+| `SERVICES_PILOT_PROFILE_IDS` | `` | **`los perfiles del piloto`** | P101 | vacía: no entra nadie |
+| `SERVICES_PUBLIC_ACCESS` | `false` | **`false`** | P101 | el piloto; `true` es la apertura general |
+| `FEATURE_SERVICES` | `false` | **`false`** | P102 | apagada |
+| `FEATURE_SERVICE_BOOKING` | `false` | **`false`** | P102 | apagada |
+| `FEATURE_SERVICE_PAYMENTS` | `false` | **`false`** | P100 | apagada |
+| `SERVICE_PAYMENTS_PROVIDER` | `none` | **`none`** | P100 | sin pasarela |
+
+**Constantes del código** (no se configuran; cambiarlas es programar):
+
+| Qué | Valor | Dónde | Política |
+|---|---|---|---|
+| Rejilla de la agenda | 5 minutos | `agenda_politica.py` | P45 |
+| Cifras del PIN de asistencia | 6 | `reserva_politica.py` | P65 |
+| Intentos del PIN | 5 | `reserva_politica.py` | P67 |
+| Evidencias por cada parte | 10 | `reserva_politica.py` | P77 |
+| Peso de una evidencia o de un documento | 10 MB | `atencion_models.py`, `models.py` | P77 |
+| Enlace firmado de documentos y evidencias | 120 s | `documentos.py`, `posventa.py` | P28, P88 |
+| Enlace firmado de imágenes del catálogo | 3600 s | `catalogo_imagenes.py` | P28 |
+| Servicio «reciente» en las sugerencias | 30 días | `descubrimiento.py` | P36 |
+
+## IV. Decisiones que realmente necesita la empresa
+
+Nada de esto lo puede decidir quien programa, y **ninguna está aprobada**. La
+columna «Mientras tanto» dice cómo se comporta hoy el sistema; «Ids», de qué
+identificadores históricos viene («nueva» es una que no estaba anotada).
+
+### A. Estrategia y alcance
+
+| # | Decisión | Mientras tanto | Ids | Cuándo |
+|---|---|---|---|---|
+| IV-1 | Ciudades exactas del lanzamiento | El sistema no limita ciudades: cada servicio declara su zona | nueva | Antes del piloto |
+| IV-2 | Categorías iniciales | No hay ninguna: sin categorías no se crea ningún servicio | C1, D1 | Antes del piloto |
+| IV-3 | Categorías reguladas que la empresa está dispuesta a operar | Deshabilitadas (P7) | C2 | Antes de abrir una |
+| IV-4 | Documentos concretos exigidos en cada categoría | Solo el mínimo: identidad y, en una empresa, representación legal | S3, C3 | Antes de abrir una regulada |
+| IV-5 | Servicios con riesgo especial o completamente prohibidos | Vale la lista general de P8, aplicada al aprobar cada servicio | C2 | Antes del piloto |
+| IV-6 | Atención a menores de edad | **Política de la primera versión (P109): solo personas adultas.** Es una declaración de las condiciones y una lista cerrada; no hay verificación de edad. Atender a menores sería otra decisión | nueva | Antes de abrir al público |
+| IV-7 | Uso futuro de la atención a domicilio | Desactivada (P5, P57). Abrirla exige construir la aceptación del prestador | C4, F3, G14 | Después del piloto |
+
+### B. Responsables operativos
+
+| # | Decisión | Mientras tanto | Ids | Cuándo |
+|---|---|---|---|---|
+| IV-8 | Persona o equipo que revisará las postulaciones | Hay roles (moderación revisa, administración decide), no personas nombradas | Inc. 1, decisión 6 | Antes del piloto |
+| IV-9 | Persona o equipo que aprobará los servicios | Solo administración aprueba y publica | C9 | Antes del piloto |
+| IV-10 | Responsable de las incidencias y de moderar reseñas | Solo administración resuelve casos y publica reseñas | G15, G11 | Antes del piloto |
+| IV-11 | Segunda persona autorizada para las apelaciones | Política (P84–P86): una segunda persona distinta revisa las apelaciones y nadie resuelve lo suyo. Con una sola persona en administración el servidor no las ofrece. Falta nombrarla | G15, G8 | Antes del piloto |
+| IV-12 | Responsable de las suspensiones, y la pauta para redactar motivos | Solo administración suspende, con motivo escrito que el prestador lee | C10, S11, C14 | Antes del piloto |
+| IV-13 | Responsable de supervisar los procesos automáticos | Los lanza a mano una persona de administración; nadie los vigila. Falta nombrar al responsable técnico. **03/10:** con el planificador, un fallo avisa al correo de alertas de la pila; sigue sin nombrarse a una persona | F13, G12 | Antes del piloto |
+| IV-14 | Canal y horario oficial de soporte | Sin canal ni horario documentados. La app remite a soporte cuando una cuenta no se puede borrar, también por su historia de Servicios (P106), y las Condiciones piloto v1 llevan un marcador en su lugar | S8 | Antes del piloto |
+| IV-15 | Protocolo de emergencia | Un caso por seguridad se puede abrir sin plazo; no hay protocolo de respuesta | G7 | Antes del piloto |
+
+### C. Asuntos legales
+
+| # | Decisión | Mientras tanto | Ids | Cuándo |
+|---|---|---|---|---|
+| IV-16 | Términos y condiciones definitivos (del prestador y de la contratación) | No hay ninguno publicado: nadie puede postular ni confirmar una reserva. Las dos tienen texto operativo provisional preparado (**Condiciones piloto v1** y, desde el 03/10, **Condiciones del prestador v1**), sin publicar; la revisión legal es posterior y no impide el piloto cerrado | S1, S2, F9, D12 | Antes del piloto |
+| IV-17 | Política de privacidad definitiva | Se conserva lo descrito en cada identificador | S9, S10, S12 | Antes del piloto |
+| IV-18 | **F21**: la anonimización definitiva. Qué se conserva, se anonimiza o se elimina de la historia de una reserva cuando alguien borra su cuenta, y cómo cierra soporte esa cuenta | **Bloqueo provisional (P106)**: una cuenta con historia de Servicios no se borra sola. Todavía no hay forma de cerrarla sin destruir esa historia | F21, G16 | **Con validación legal; antes de abrir al público** |
+| IV-19 | Tiempo legal de conservación de reservas, aceptaciones, pagos, incidencias, resoluciones, documentos, evidencias y grabaciones | Todo se guarda sin plazo, hasta la baja de la cuenta | S6, S8, S13, C12, F20, G10 | Antes del piloto |
+| IV-20 | Responsabilidad legal de Z frente al prestador y al cliente | La app dice que las comprobaciones no garantizan el resultado | D5, D12 | Antes del piloto |
+| IV-21 | Libro de Reclamaciones y responsable de su atención | No existe en Servicios | nueva | Antes del piloto |
+| IV-22 | Tratamiento de los servicios virtuales grabados | Z no ofrece sala ni graba | G17 | Con la sala virtual |
+| IV-23 | Consentimiento para las grabaciones | No aplica mientras no haya sala | G17 | Con la sala virtual |
+| IV-24 | Seguro o cobertura para las categorías de riesgo | No hay categorías de riesgo abiertas | C2 | Antes de abrir una |
+
+### D. Dinero, impuestos y pagos
+
+**No aplican al piloto gratuito** (P107, P100): ninguna se da por resuelta y
+todas quedan pendientes para una versión con pagos.
+
+| # | Decisión | Mientras tanto | Ids | Cuándo |
+|---|---|---|---|---|
+| IV-25 | Entidad jurídica que cobrará | Pagos apagados: solo se contrata lo gratuito | nueva | Antes de pagos |
+| IV-26 | Comisión de Z | Sin definir; no hay cobro | F17 | Antes de pagos |
+| IV-27 | Quién paga el costo de la pasarela | Sin definir | F17 | Antes de pagos |
+| IV-28 | Emisión de comprobantes | No se emiten | F16 | Antes de pagos |
+| IV-29 | Tratamiento del IGV | Sin definir | F16 | Antes de pagos |
+| IV-30 | Momento de liberación del saldo | No hay saldos de Servicios | nueva | Antes de pagos |
+| IV-31 | Reserva financiera del prestador | No existe | nueva | Antes de pagos |
+| IV-32 | Responsable de una devolución cuando el saldo no alcanza | Sin definir | G13 | Antes de pagos |
+| IV-33 | Política de contracargos | Sin definir | nueva | Antes de pagos |
+| IV-34 | Política financiera de cancelación | Cancelar es gratis hasta la hora de inicio (P64) | G1, F6 | Antes de pagos |
+| IV-35 | Política financiera de inasistencia | Una inasistencia no tiene consecuencias | G6 | Antes de pagos |
+| IV-36 | Devolución total o parcial según el incumplimiento | El efecto económico de un caso es una solicitud que hoy siempre «no aplica» | F18, G13 | Antes de pagos |
+| IV-37 | Proveedor definitivo de pagos | Pasarela `none`; no hay adaptador | F17 | Antes de pagos |
+| IV-38 | Confirmación de que Stripe Connect permite el modelo requerido para Perú | Sin confirmar | nueva | Antes de pagos |
+| IV-39 | Cuenta y credenciales reales del proveedor | No hay | nueva | Antes de pagos |
+
+### E. Operación y riesgo
+
+| # | Decisión | Mientras tanto | Ids | Cuándo |
+|---|---|---|---|---|
+| IV-40 | Consecuencias por cancelaciones reiteradas del prestador | Ninguna; quedan en el historial | G1 | Antes de abrir al público |
+| IV-41 | Consecuencias por inasistencias reiteradas | Ninguna: la inasistencia es una declaración | G6 | Antes de abrir al público |
+| IV-42 | Umbrales de advertencia, suspensión y expulsión | No hay | G6 | Antes de abrir al público |
+| IV-43 | Qué pasa con las reservas futuras al suspender a un prestador | Suspenderlo no cancela sus reservas ni avisa a nadie | nueva | Antes del piloto |
+| IV-44 | Quién ejecutará y vigilará los barridos | Una persona de administración, a mano, mientras no haya planificador. Sin nombrar. **03/10:** los ejecuta la regla de EventBridge (preparada, sin activar); los vigila quien lea el correo de alertas | F13, G12 | Antes del piloto |
+| IV-45 | Frecuencia definitiva de recordatorios y cierres | Un recordatorio 24 horas antes (provisional). **03/10:** se ejecutan cada 5 minutos (P113) | G12 | Antes del piloto |
+| IV-46 | Política definitiva de cancelación antes de activar pagos | Hasta la hora de inicio, sin coste y sin plazo configurable | G1, F6 | Antes de pagos |
+| IV-47 | Valores definitivos de los nueve campos de la política operativa | Los provisionales de la tabla III, congelados en cada reserva | G2, G3, G4, G7, G8, G11, G18 | Tras el piloto |
+| IV-48 | Activación pública, perfiles y fecha del piloto | Las tres banderas, apagadas. El piloto ya se puede limitar a los perfiles que se elijan (P101) | nueva | — |
+
+## V. Integraciones externas
+
+Cada una necesita contratar o conectar algo de fuera. No se conectó ninguna:
+ni 100ms, ni un planificador, ni una pasarela.
+
+| # | Integración | Estado hoy | Qué tiene que decidir la empresa | Ids |
+|---|---|---|---|---|
+| V-49 | Uso definitivo de 100ms | La integración de 100ms de los directos no tiene cuenta conectada; Servicios no ofrece sala | Si la sala virtual de un servicio será de Z | G17 |
+| V-50 | Qué servicios tendrán sala virtual | Ninguno | Qué categorías o modalidades la llevan | G17 |
+| V-51 | Acceso, duración y grabación de las salas | No aplica | Quién entra, cuánto dura y si se graba (con IV-22 y IV-23) | G17 |
+| V-52 | Destino profundo de las notificaciones push | Tocar un aviso abre la app, sin llevar a la reserva ni al caso. La bandeja de avisos sí lleva | Nada: es una tarea técnica de la plataforma, pendiente desde el Incremento 1 | tarea de plataforma |
+| V-53 | Proveedor y configuración del planificador externo | La ruta de las tareas existe y está protegida; nadie la llama. **03/10:** EventBridge, por la ruta interna con secreto; preparado en la plantilla y sin activar (P113) | Qué servicio la llama y cada cuánto (con IV-44 y IV-45) | F13, G12 |
+| V-54 | Proveedor definitivo de pagos | Pasarela `none`; no hay adaptador para Servicios | Qué proveedor, y todo el grupo IV-D | F17 |
+
+La puesta en marcha (desplegar `Edson`, el CI remoto, la revisión del PR y la
+integración a `main`) no es una decisión de producto: está en
+`Z_SERVICIOS_ARQUITECTURA.md` §120, apartado D.
+
+## VI. Mejoras futuras
+
+No hacen falta para la primera versión. Ninguna está empezada.
+
+| Mejora | Por qué se deja para después | Ids |
+|---|---|---|
+| Varias personas por empresa y teléfono verificado | No hace falta para un piloto | S4 |
+| Análisis antivirus de los archivos | Hoy se valida el tipo real del archivo y su peso | S5 |
+| Orden editorial («seleccionados por Z») | No hay datos ni criterio todavía | D2 |
+| Recursos y varios profesionales en una agenda | La agenda es del servicio | E8 |
+| Avisar cuando vence un horario apartado | La app ya lo dice en pantalla | F12 |
+| Mostrar la hora local equivalente a quien está en otra zona | En Perú hay una sola zona | E6 (P42) |
+| Reprogramación pedida por el prestador y cancelación directa por administración | No son necesarias para una atención gratuita | G2, G1 |
+| QR como prueba de asistencia, fotos en una reseña e índice de desempeño del prestador | El PIN basta; lo demás necesita volumen | G5, G11 |
+| Pantalla de configuración de la política | Los valores son variables de entorno | — |
+| Calendarios externos y lista de espera | Fuera de la primera versión (P49, P50) | E9, E10 |
+
+## VII. Registro completo de las decisiones
+
+Las 96, con su identificador original. El texto de cuando se anotó cada una
+sigue más abajo, en la sección de su incremento.
+
+| Serie | Total | Decidida para la primera versión | Valor provisional configurable | Requiere a la empresa | Requiere integración externa | Mejora futura | No aplica a la primera versión |
+|---|---|---|---|---|---|---|---|
+| **S** · Incremento 1 · admisión | 14 | 1 | — | 9 | — | 2 | 2 |
+| **C** · Incremento 2 · catálogo | 16 | 9 | 3 | 4 | — | — | — |
+| **D** · Incremento 3 · descubrimiento | 15 | 12 | — | 2 | — | 1 | — |
+| **E** · Incremento 4 · agenda | 12 | 7 | 2 | — | — | 1 | 2 |
+| **F** · Incremento 5 · reserva | 21 | 10 | 3 | 2 | 1 | 1 | 4 |
+| **G** · Incremento 6 · atención y posventa | 18 | 6 | 6 | 2 | 2 | — | 2 |
+| **Total** | 96 | **45** | **14** | **19** | **3** | **5** | **10** |
+
+**Qué identificadores hay en cada estado:**
+
+| Estado | Identificadores |
+|---|---|
+| `DECIDIDA_PRIMERA_VERSION` | S7, C2, C4, C5, C9, C10, C11, C13, C15, C16, D1, D3, D4, D6, D7, D8, D9, D10, D11, D13, D14, D15, E3, E4, E5, E6, E7, E11, E12, F3, F4, F5, F6, F8, F10, F11, F15, F19, F21, G1, G5, G9, G10, G16, G18 |
+| `PROVISIONAL_CONFIGURABLE` | C6, C7, C8, E1, E2, F1, F2, F7, G2, G3, G4, G7, G8, G11 |
+| `REQUIERE_EMPRESA` | S1, S2, S3, S6, S8, S9, S10, S11, S13, C1, C3, C12, C14, D5, D12, F9, F20, G6, G15 |
+| `INTEGRACION_EXTERNA` | F13, G12, G17 |
+| `MEJORA_FUTURA` | S4, S5, D2, E8, F12 |
+| `NO_APLICA_PRIMERA_VERSION` | S12, S14, E9, E10, F14, F16, F17, F18, G13, G14 |
+
+### Serie S — Incremento 1 · admisión
+
+| Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
+|---|---|---|---|---|---|---|---|
+| **S1** | Texto de las condiciones del prestador, por país | `REQUIERE_EMPRESA` | Texto operativo provisional preparado y sin publicar (P111, 03/10). La revisión legal es posterior (IV-16) | Nadie puede enviar su postulación hasta que la empresa publique sus condiciones | No hay ninguna política publicada; Inc. 1, decisión 3 | Bloquea la admisión | Antes del piloto |
+| **S2** | Volver a postular tras un rechazo | `REQUIERE_EMPRESA` | Sin decidir: es un parámetro de las condiciones del prestador (va con S1) | Hoy el sistema contesta que todavía no está decidido: ni sí ni no | `service_reapplication_not_configured` (`admision.py`) | Quien fue rechazado no puede volver a postular | Al publicar S1 |
+| **S3** | Documentos y credenciales adicionales por país o categoría | `REQUIERE_EMPRESA` | Principio decidido (P14): solo en las categorías que lo necesiten. Falta la matriz documental (IV-4) | Hoy solo se pide el mínimo: identidad y, en una empresa, representación legal | Inc. 1, decisión 5 | Sin matriz no se habilita ninguna categoría regulada (P7) | Antes de abrir una categoría regulada |
+| **S4** | Varias personas de una empresa y teléfono verificado | `MEJORA_FUTURA` | No existe en la primera versión | Una empresa postula con una sola cuenta | Inc. 1, límites | Ninguno para el piloto | Después del piloto |
+| **S5** | Análisis antivirus de los documentos | `MEJORA_FUTURA` | Sin antivirus. Los archivos se validan por sus bytes reales y su tamaño (P79) | Se comprueba que el archivo es del tipo que dice ser, no que esté libre de virus | `documentos.py`, `posventa.py` | Bajo: los archivos solo los abre el equipo, por enlace firmado | Antes de abrir al público |
+| **S6** | Conservación de documentos tras un rechazo o una retirada | `REQUIERE_EMPRESA` | Requiere revisión legal: plazos de conservación (IV-19) | Hoy se guardan como evidencia hasta que la persona borra su cuenta | 0086–0089; `Z_BAJA_DE_CUENTA.md` | Privacidad | Con la política de privacidad |
+| **S7** | Borrado de cuenta frente a la auditoría inmutable | `DECIDIDA_PRIMERA_VERSION` | Decidida el 29/09/2026: se borra lo personal y los archivos privados; lo histórico se conserva sin nombrar a la persona | Borrar la cuenta no borra la historia, pero la historia deja de decir quién fue | 0089 aplicada; `DELETE /auth/me`; `Z_BAJA_DE_CUENTA.md` §1 | Ya implementada, sin desplegar | Con F21 |
+| **S8** | Cuentas con ventas, saldos, disputas u órdenes pagadas: conservación y anonimización | `REQUIERE_EMPRESA` | Requiere aprobación empresarial antes de pagos y revisión legal (IV-19) | Hoy esas cuentas no se pueden borrar desde la app: se pide escribir a soporte | 409 `account_deletion_blocked` | Google Play exige poder borrar la cuenta desde la app | Antes de pagos |
+| **S9** | Conservación de la huella de IP y de navegador en auditoría y consentimientos | `REQUIERE_EMPRESA` | Requiere revisión legal (IV-17) | Se conservan con el registro, sin la persona | `audit_events`, `consent_records` | Privacidad | Con la política de privacidad |
+| **S10** | Anular los identificadores del personal en el historial de Servicios | `REQUIERE_EMPRESA` | Requiere revisión legal (IV-17) | Quedan como identificadores sin perfil detrás | 0086: sin clave ajena, por diseño | Privacidad del personal | Con la política de privacidad |
+| **S11** | Pauta para que los motivos escritos por el personal no nombren a nadie | `REQUIERE_EMPRESA` | La escribe quien dirija la operación (IV-12) | Los motivos se guardan tal como se escriben | `audit_events.reason` | Privacidad | Antes del piloto |
+| **S12** | Nota y tema de una sesión reservada, que quedan en la bandeja de la otra persona | `NO_APLICA_PRIMERA_VERSION` | No es de Servicios: es de la plataforma y anterior. Pasa a la revisión general de privacidad (IV-17) | Se quedan en la bandeja de quien las recibió, sin el nombre de quien las escribió | Sesiones de la plataforma | Ninguno en Servicios | Con la política de privacidad |
+| **S13** | Puentes identificador↔correo que sobreviven a la baja (avisos de la pasarela, registro de acceso) | `REQUIERE_EMPRESA` | Requiere aprobación empresarial antes de pagos (IV-19) | Hoy están vacíos; se llenarán al encender pagos | `payment_events.payload` y `auth.audit_log_entries`: 0 filas el 29/09/2026 | Privacidad | Antes de pagos |
+| **S14** | Motivos libres del organizador en la auditoría de Eventos | `NO_APLICA_PRIMERA_VERSION` | No es de Servicios: en Servicios no se copian textos libres a la auditoría. Tarea aparte de Eventos | Es un asunto de Eventos que se anotó aquí | Auditoría de Eventos | Ninguno en Servicios | En la tarea de Eventos |
+
+### Serie C — Incremento 2 · catálogo
+
+| Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
+|---|---|---|---|---|---|---|---|
+| **C1** | Categorías iniciales | `REQUIERE_EMPRESA` | Sin decidir; no se inventa ninguna (IV-2) | Sin categorías nadie puede crear un servicio. Las crea administración desde la app | No hay ninguna sembrada | Bloquea el catálogo | Antes del piloto |
+| **C2** | Categorías prohibidas o reguladas | `DECIDIDA_PRIMERA_VERSION` | P7 y P8: las reguladas quedan deshabilitadas mientras no haya matriz documental, y hay una lista de actividades prohibidas. Cuáles operar y qué exigen sigue siendo de la empresa (IV-3, IV-5) | Z no abre categorías como salud, legal o finanzas hasta que la empresa diga qué papeles pide | Sin bloqueo automático: se cumple porque las categorías las crea administración y cada servicio se aprueba a mano | Operativo | Al definir las categorías (C1) |
+| **C3** | Documentos adicionales por categoría para publicar | `REQUIERE_EMPRESA` | Falta la matriz documental (IV-4, con S3) | No se piden | Inc. 2, tabla C | Sin matriz no hay categorías reguladas | Antes de abrir una categoría regulada |
+| **C4** | Modalidades permitidas | `DECIDIDA_PRIMERA_VERSION` | Virtual y presencial en el establecimiento del prestador; a domicilio, desactivada (P4, P5) | Se puede atender en línea o en el local del prestador. Nadie va a la casa de nadie | `SERVICES_CATALOG_MODALITIES=virtual,in_person` de fábrica (02/10/2026): el borrador rechaza otra (`service_modality_not_allowed`), el filtro público también, y la app no la ofrece. Tampoco se contrata | Ninguno | Si se decide abrir domicilio (IV-7) |
+| **C5** | Monedas y países | `DECIDIDA_PRIMERA_VERSION` | Perú y PEN (P1, P2); no se convierte ninguna moneda (P34) | Se empieza en Perú y en soles | `SERVICES_CATALOG_CURRENCIES=PEN`. El país no está bloqueado en el código: lo limita que solo se publiquen condiciones para Perú | Publicar condiciones de otro país lo abriría | Al ampliar países |
+| **C6** | Precio «desde» y precio a consultar | `PROVISIONAL_CONFIGURABLE` | De fábrica, dos: gratis y a consultar (P107, 02/10/2026). «Fijo» y «desde» siguen en el código, para una versión con pagos. Solo lo gratuito se contrata | Una ficha con importe no se puede enviar a revisión; «a consultar» se ve y no se reserva | `SERVICES_CATALOG_PRICE_MODELS=free,on_request` | Ninguno sin pagos | Antes de pagos |
+| **C7** | Duración mínima y máxima de un servicio | `PROVISIONAL_CONFIGURABLE` | De 5 a 1440 minutos (los límites técnicos) | Un servicio dura entre cinco minutos y un día | `SERVICES_CATALOG_MIN_DURATION_MINUTES`, `SERVICES_CATALOG_MAX_DURATION_MINUTES` | Ninguno | Con las categorías |
+| **C8** | Límite de imágenes | `PROVISIONAL_CONFIGURABLE` | 8 imágenes por servicio, de 5 MB como mucho | Cada servicio enseña hasta ocho fotos | `SERVICES_CATALOG_MAX_IMAGES=8`; 5 MB es el límite del depósito | Ninguno | Tras el piloto |
+| **C9** | Quién publica tras aprobar | `DECIDIDA_PRIMERA_VERSION` | Administración, a mano: aprobar y publicar son dos pasos. Qué persona lo hace es de la empresa (IV-9) | Nada se publica solo | Inc. 2, decisión 1; 0090 | Operativo | Al nombrar responsables |
+| **C10** | Motivos de suspensión de un servicio | `DECIDIDA_PRIMERA_VERSION` | Texto libre obligatorio, que el prestador lee (P25) | Quien suspende tiene que explicar por qué, y el prestador lo ve | `CON_MOTIVO` (`catalogo_models.py`) | Depende de la pauta de redacción (C14) | Tras el piloto |
+| **C11** | Volver a publicar tras una suspensión o una retirada | `DECIDIDA_PRIMERA_VERSION` | P25 y P26: una suspensión la levanta administración con motivo y no destruye nada; una retirada es definitiva | Suspender es una pausa; retirar es para siempre | Lo impone la 0090 | Ninguno | Tras el piloto |
+| **C12** | Conservación de versiones e imágenes superadas o retiradas | `REQUIERE_EMPRESA` | Requiere revisión legal: plazos de conservación (IV-19) | Se guardan mientras exista la cuenta del prestador y se borran con ella | 0090 | Privacidad y evidencia | Con la política de privacidad |
+| **C13** | Información pública del prestador en la ficha | `DECIDIDA_PRIMERA_VERSION` | Solo el nombre público (P12) | La ficha no enseña datos privados del prestador | Inc. 2, decisión 6 | Ninguno | Tras el piloto |
+| **C14** | Pauta de redacción de los motivos del personal en el catálogo | `REQUIERE_EMPRESA` | Igual que S11 (IV-12) | Los motivos se guardan tal cual; la auditoría no los copia | Inc. 2, tabla C | Privacidad | Antes del piloto |
+| **C15** | El identificador del prestador en la ruta de las imágenes | `DECIDIDA_PRIMERA_VERSION` | Ruta opaca para los archivos nuevos (P29): `<servicio>/<32 hexadecimales al azar>.<ext>`, sin el perfil. **Implementada en el código y con la migración 0096 aplicada y verificada (02/10/2026)** | La dirección de una imagen no debe delatar de qué prestador es | `catalogo_imagenes.py`; migración 0096; la puerta del catálogo exige su cuerpo | Ninguno pendiente: la 0096 está aplicada y verificada sin divergencias | Cerrada el 02/10/2026 |
+| **C16** | Monedas que ofrece el formulario del servicio | `DECIDIDA_PRIMERA_VERSION` | Solo PEN (P2), en el formulario y en el filtro. Corregido el 02/10/2026 | La app ya no ofrece dólares ni euros | `MONEDAS` (`serviciosCatalogo.ts`); otra moneda escrita a mano contesta `service_currency_not_allowed` | Ninguno | Al ampliar países |
+
+### Serie D — Incremento 3 · descubrimiento
+
+| Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
+|---|---|---|---|---|---|---|---|
+| **D1** | Categorías destacadas en la entrada de Servicios | `DECIDIDA_PRIMERA_VERSION` | Las de primer nivel, en su orden: cuatro y «Ver todas» | Se enseñan las categorías principales, en el orden que les dé administración | `sort_order`; Inc. 3, decisión 2 | Ninguno | Con las categorías (C1) |
+| **D2** | Orden editorial («seleccionados por Z») | `MEJORA_FUTURA` | No existe; sin búsqueda, lo más reciente primero | Z no destaca servicios a mano | Inc. 3, decisión 3 | Ninguno | Tras el piloto |
+| **D3** | Filtros visibles | `DECIDIDA_PRIMERA_VERSION` | P33: categoría, modalidad, precio, moneda, zona y credencial vigente | Solo hay filtros para los que existen datos | `descubrimiento.py` | Ninguno | Tras el piloto |
+| **D4** | Qué se enseña de una credencial | `DECIDIDA_PRIMERA_VERSION` | P12: solo «credencial profesional verificada por Z y vigente»; nunca el número ni el archivo | El público sabe que Z la comprobó, no cuál es | `_credencial_vigente` (`descubrimiento.py`) | Ninguno | Con la matriz documental |
+| **D5** | Qué significa comercialmente «verificado por Z» | `REQUIERE_EMPRESA` | Requiere revisión legal: la responsabilidad de Z (IV-20) | Hoy se nombra exactamente lo que se comprobó y se dice que no garantiza el resultado | Inc. 3, requisitos | Legal | Antes del piloto |
+| **D6** | La ruta de las imágenes con el catálogo público (amplía C15) | `DECIDIDA_PRIMERA_VERSION` | La misma decisión que C15: ruta opaca, implementada, con la 0096 aplicada y verificada | Cada tarjeta del catálogo lleva esa dirección, también sin sesión | Ver C15 | Ver C15 | Cerrada el 02/10/2026 |
+| **D7** | Guardados que dejan de estar disponibles | `DECIDIDA_PRIMERA_VERSION` | P38: se quedan con el título que tenían al guardarse y «ya no está disponible» | Lo guardado no desaparece sin explicación, y se puede quitar | Inc. 3, decisión 7 | Ninguno | Tras el piloto |
+| **D8** | Información pública de una persona frente a una empresa | `DECIDIDA_PRIMERA_VERSION` | Nombre público y tipo (profesional o empresa); sin foto ni ciudad (P12) | Se enseña lo mínimo | Inc. 3, decisión 6 | Ninguno | Tras el piloto |
+| **D9** | Criterio de las recomendaciones | `DECIDIDA_PRIMERA_VERSION` | P35–P37: cada sugerencia lleva su razón; sin datos sensibles | Si Z sugiere algo, dice por qué | `MOTIVOS` (`descubrimiento.py`) | Ninguno | Tras el piloto |
+| **D10** | Mostrar la fecha de incorporación del prestador | `DECIDIDA_PRIMERA_VERSION` | Se muestra el mes y el año de la admisión | «Prestador admitido por Z desde mm/aaaa» | Inc. 3, requisitos | Ninguno | Tras el piloto |
+| **D11** | Origen de las calificaciones | `DECIDIDA_PRIMERA_VERSION` | P30 y P89: solo reseñas verificadas de atenciones cerradas; no se reutilizan las de Cursos, Eventos, Productos ni las de perfil | Las estrellas de un servicio salen solo de quien lo recibió | 0094; `posventa.py` | Ninguno | Tras el piloto |
+| **D12** | Texto legal de las señales de confianza | `REQUIERE_EMPRESA` | Requiere revisión legal (IV-16, IV-20) | Hoy dice «Estas comprobaciones no garantizan el resultado del servicio» | Inc. 3, tabla D | Legal | Antes del piloto |
+| **D13** | Qué pasa al desactivar una categoría con servicios publicados | `DECIDIDA_PRIMERA_VERSION` | P24: sus servicios dejan de verse; no se borran y vuelven al reactivarla | Apagar una categoría esconde lo que hay dentro | Inc. 3, decisión 1 | Ninguno | Tras el piloto |
+| **D14** | Si un rango de precio incluye los precios «desde» | `DECIDIDA_PRIMERA_VERSION` | Sí, por su importe mínimo, y el filtro lo dice | Un «desde 50» aparece al buscar entre 40 y 60 | `descubrimiento.py` | Ninguno | Antes de pagos |
+| **D15** | La insignia de credencial en las tarjetas | `DECIDIDA_PRIMERA_VERSION` | Es del prestador, no del servicio: «Prestador con credencial verificada» | No dice que la credencial sea de ese servicio en concreto | Inc. 3, tabla D | Cambiará si se relacionan credenciales y categorías (P14) | Con la matriz documental |
+
+### Serie E — Incremento 4 · agenda
+
+| Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
+|---|---|---|---|---|---|---|---|
+| **E1** | Antelación mínima para mostrar un horario | `PROVISIONAL_CONFIGURABLE` | 2 horas (P43) | No se puede reservar algo que empieza en menos de dos horas | `SERVICES_AGENDA_NOTICE_MINUTES=120` | Ninguno | Tras el piloto |
+| **E2** | Horizonte: hasta cuántos días por delante | `PROVISIONAL_CONFIGURABLE` | 60 días (P44) | Se ofrecen horarios hasta dos meses vista | `SERVICES_AGENDA_HORIZON_DAYS=60` | Ninguno | Tras el piloto |
+| **E3** | Si el prestador elige su antelación y su horizonte | `DECIDIDA_PRIMERA_VERSION` | No: son de la plataforma | Todos los prestadores juegan con las mismas reglas | `agenda_politica.py` | Ninguno | Tras el piloto |
+| **E4** | Feriados | `DECIDIDA_PRIMERA_VERSION` | P48: los marca cada prestador como «Cerrar todo el día» | Z no carga un calendario de feriados | Excepciones de la agenda (0092) | Ninguno | Tras el piloto |
+| **E5** | Enseñar la capacidad al público | `DECIDIDA_PRIMERA_VERSION` | P51: no se enseña; basta con que haya o no horario | La app nunca dice «quedan N» | Ni la ficha pública ni los horarios traen el número (retirado de los contratos públicos el 02/10/2026). El prestador y administración lo conservan | Ninguno | Tras el piloto |
+| **E6** | Cómo se enseña la hora a quien está en otra zona | `DECIDIDA_PRIMERA_VERSION` | P41 y P42: manda la hora del lugar del servicio; la equivalencia local es opcional | Se ve la hora del sitio donde se presta, con su zona | Hoy: horas de la agenda con su zona y un aviso si el teléfono está en otra. La equivalencia no se calcula | Ninguno en Perú (una sola zona) | Al ampliar países |
+| **E7** | Límites de uso de la agenda | `DECIDIDA_PRIMERA_VERSION` | Los técnicos: 50 reglas, 200 excepciones, 200 bloqueos, un bloqueo de 31 días como mucho | Topes para que una agenda no crezca sin control | `agenda_politica.py` | Ninguno | Tras el piloto |
+| **E8** | Recursos y varios profesionales de una empresa | `MEJORA_FUTURA` | No existen: la agenda es del servicio | Una empresa con varios profesionales usa una agenda por servicio | Inc. 4, tabla E | Ninguno para el piloto | Tras el piloto |
+| **E9** | Calendarios externos (Google, Outlook) | `NO_APLICA_PRIMERA_VERSION` | P49: fuera de la primera versión | La agenda vive solo en Z | No construido | Ninguno | Tras el piloto |
+| **E10** | «Avísame cuando haya horarios» (lista de espera) | `NO_APLICA_PRIMERA_VERSION` | P50: fuera de la primera versión | Si no hay horarios, se dice que no hay | No construido | Ninguno | Tras el piloto |
+| **E11** | Qué pasa con las reservas al cambiar la agenda | `DECIDIDA_PRIMERA_VERSION` | P62: nada; una reserva hecha no se toca | Cambiar el horario de atención no anula lo ya reservado | Fotografía de la reserva (0093) | Ninguno | Tras el piloto |
+| **E12** | Si cerrar una franja la parte o solo quita los horarios que toca | `DECIDIDA_PRIMERA_VERSION` | Solo los quita (P52: lo que cierra siempre gana) | Cerrar de 12 a 13 quita los horarios que caen ahí; no recalcula los demás | `agenda.py`; Inc. 4, tabla E | Ninguno | Tras el piloto |
+
+### Serie F — Incremento 5 · reserva
+
+| Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
+|---|---|---|---|---|---|---|---|
+| **F1** | Cuánto dura una retención | `PROVISIONAL_CONFIGURABLE` | 10 minutos (P53) | Un horario se aparta diez minutos mientras se completa la reserva | `SERVICES_BOOKING_HOLD_MINUTES=10` (1–60) | Ninguno | Tras el piloto |
+| **F2** | Cuántos horarios puede tener apartados una persona | `PROVISIONAL_CONFIGURABLE` | 3 a la vez, uno por servicio | Nadie acapara horarios | `SERVICES_BOOKING_MAX_ACTIVE_HOLDS=3` (1–20) | Ninguno | Tras el piloto |
+| **F3** | Confirmación automática o aprobación del prestador | `DECIDIDA_PRIMERA_VERSION` | P56 y P57: inmediata en virtual y en el local; a domicilio, desactivada | Reservar confirma en el momento | `SERVICES_BOOKING_INSTANT_MODALITIES=virtual,in_person` | Ninguno | Si se decide abrir domicilio (IV-7) |
+| **F4** | Qué datos se piden al reservar | `DECIDIDA_PRIMERA_VERSION` | Una nota opcional. Ni teléfono, ni correo, ni documento | Se pide lo mínimo | `reserva_politica.py` | Ninguno | Tras el piloto |
+| **F5** | Qué ve el prestador de quien contrata | `DECIDIDA_PRIMERA_VERSION` | Usuario y nombre públicos y lo que escribió; nunca correo ni teléfono | El prestador no recibe datos de contacto privados | Inc. 5, decisión 12 | Ninguno | Tras el piloto |
+| **F6** | Cancelación y reprogramación (planteamiento del Incremento 5) | `DECIDIDA_PRIMERA_VERSION` | Sustituida por G1 (cancelar) y G2 (reprogramar), ya implementadas | Se resolvió en el Incremento 6 | Ver G1 y G2 | Ver G1 | Ver G1 y G2 |
+| **F7** | Antelación y horizonte de la contratación | `PROVISIONAL_CONFIGURABLE` | Los de la agenda (E1 y E2), medidos desde que se retuvo el horario | Un horario apartado a tiempo no caduca mientras se lee el resumen | Inc. 5, decisión 7 | Ninguno | Tras el piloto |
+| **F8** | Capacidad visible («quedan N plazas») | `DECIDIDA_PRIMERA_VERSION` | P51: no se enseña (igual que E5) | La app no dice cuántas plazas quedan | Ver E5 | Ninguno | Tras el piloto |
+| **F9** | Texto de las condiciones de contratación, por país | `REQUIERE_EMPRESA` | **Texto preparado el 02/10/2026 (Condiciones piloto v1, P108), sin publicar.** Requiere aprobación empresarial y legal (IV-16) | Sin condiciones publicadas no se confirma ninguna reserva | `Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`; no hay ninguna `booking_terms` publicada | Bloquea la contratación | Antes del piloto |
+| **F10** | Qué pasa con una reserva si cambia la agenda | `DECIDIDA_PRIMERA_VERSION` | P62: nada (igual que E11) | La reserva sigue | Ver E11 | Ninguno | Tras el piloto |
+| **F11** | Feriados y reservas ya hechas | `DECIDIDA_PRIMERA_VERSION` | P48: los marca el prestador; una reserva ya hecha no se toca | Marcar un feriado no cancela lo reservado | Ver E4 | Ninguno | Tras el piloto |
+| **F12** | Avisar cuando vence lo apartado | `MEJORA_FUTURA` | No se avisa: la app lo dice en pantalla | Si se pasa el tiempo, hay que volver a elegir horario | Inc. 5, decisión 11 | Ninguno | Tras el piloto |
+| **F13** | Quién llama al barrido y cada cuánto | `INTEGRACION_EXTERNA` | Planificador preparado y sin activar (P113, 03/10). Falta nombrar a quien lo vigila (IV-44) | Las tareas existen y hoy las lanza a mano una persona de administración; nada las llama solas | `POST /admin/services/tasks/run` y `…/holds/expire`: sin planificador | Sin él no hay recordatorios ni cierre automático | Antes del piloto |
+| **F14** | «A consultar» y «desde»: cómo se cotizan | `NO_APLICA_PRIMERA_VERSION` | P6: las solicitudes de propuesta quedan fuera; no se contratan desde Z | Esos servicios se anuncian, pero no se reservan | Inc. 5, decisión 3 | Ninguno | Antes de pagos |
+| **F15** | Monedas y países de la contratación | `DECIDIDA_PRIMERA_VERSION` | Perú y PEN (P1, P2); las condiciones son por país del prestador | Igual que C5 | Ver C5 | Ver C5 | Al ampliar países |
+| **F16** | Comprobantes | `NO_APLICA_PRIMERA_VERSION` | **No aplica al piloto gratuito (P107).** Pendiente para una versión con pagos: requiere aprobación empresarial antes de pagos (IV-28, IV-29) | No se emiten: lo gratuito no tiene importe | Sin cobro | Bloquea los pagos | En una versión con pagos |
+| **F17** | Comisión de Z y costo de la pasarela | `NO_APLICA_PRIMERA_VERSION` | **No aplica al piloto gratuito (P107).** Pendiente para una versión con pagos: requiere aprobación empresarial antes de pagos (IV-26, IV-27, IV-37) | No hay cobro | Sin adaptador de pago | Bloquea los pagos | En una versión con pagos |
+| **F18** | Devoluciones | `NO_APLICA_PRIMERA_VERSION` | **No aplica al piloto gratuito (P107).** Pendiente para una versión con pagos: requiere aprobación empresarial antes de pagos (IV-36) | No aplican: nada se cobra | Sin cobro | Bloquea los pagos | En una versión con pagos |
+| **F19** | Identidad de quien contrata | `DECIDIDA_PRIMERA_VERSION` | Una cuenta de Z con sesión, en la lista del piloto; sin verificación adicional. Solo personas adultas (P109), por declaración | Para reservar basta con tener cuenta | Inc. 5, tabla F | No se verifica la edad (IV-6) | Antes del piloto |
+| **F20** | Conservación de la evidencia (lo aceptado, el pedido, el historial) | `REQUIERE_EMPRESA` | Requiere revisión legal: plazos de conservación (IV-19) | Se guarda sin plazo. Desde el 02/10/2026 una cuenta con reservas no se borra sola (P106), así que nada deja de nombrar a nadie por una baja | 0093; 0089 | Legal | Con la política de privacidad |
+| **F21** | La baja de una cuenta con historia de Servicios (la de quien presta se llevaba sus reservas pasadas) | `DECIDIDA_PRIMERA_VERSION` | **Decisión provisional (P106, 02/10/2026): la baja automática se bloquea** y la cuenta la cierra soporte. La anonimización definitiva sigue pendiente de validación legal (IV-18) | Si la persona es parte de un pedido o de una reserva, `DELETE /auth/me` contesta 409 y no toca nada. Borrar la fila a mano en Supabase sigue disparando las cascadas | `service_history_requires_support`; `services/conservacion.py`; `Z_SERVICIOS_ARQUITECTURA.md` §136 | Una cuenta con historia no se puede cerrar todavía sin destruirla: falta la anonimización | **Decisión definitiva: con validación legal, antes de abrir al público** |
+
+### Serie G — Incremento 6 · atención y posventa
+
+| Id | Asunto | Estado | Decisión o valor | En sencillo | Evidencia técnica | Impacto | Revisar |
+|---|---|---|---|---|---|---|---|
+| **G1** | Cancelación: quién, hasta cuándo y con qué consecuencias | `DECIDIDA_PRIMERA_VERSION` | P64: quien contrata o el prestador (que explica por qué), hasta la hora de inicio y sin efecto económico mientras los pagos estén apagados. La política financiera requiere aprobación empresarial antes de pagos (IV-34, IV-46) | Hoy cancelar es libre y gratis hasta que empieza la atención | `atencion.py`; no hay plazo configurable | Cuando haya pagos, entra en la fotografía de la reserva con otra versión | Antes de pagos |
+| **G2** | Reprogramación: cuántas veces y con cuánta antelación | `PROVISIONAL_CONFIGURABLE` | Una vez y con 24 horas (P58, P59). Solo quien contrata; que la pida el prestador es una mejora futura | Se puede cambiar el horario una vez, avisando un día antes | `SERVICES_BOOKING_RESCHEDULE_MAX=1`, `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS=24`; congelados en cada reserva | Ninguno | Tras el piloto (IV-47) |
+| **G3** | Ventana de llegada y tolerancia | `PROVISIONAL_CONFIGURABLE` | 15 minutos antes y 15 de tolerancia (P47, P68, P73) | El código se pide desde un cuarto de hora antes; la ausencia se declara un cuarto de hora después | `SERVICES_ATTENTION_CHECKIN_MINUTES=15`, `SERVICES_ATTENTION_TOLERANCE_MINUTES=15`; congelados | Ninguno | Tras el piloto (IV-47) |
+| **G4** | Plazo de confirmación y cierre automático | `PROVISIONAL_CONFIGURABLE` | 24 horas (P71). Cuándo se cierra sola está decidido (P72) | Quien contrata tiene un día para confirmar; después se cierra sola si empezó con PIN y no hay un caso | `SERVICES_ATTENTION_CONFIRMATION_HOURS=24`; congelado | Sin planificador no se cierra sola (F13) | Tras el piloto (IV-47) |
+| **G5** | Qué cuenta como prueba de asistencia | `DECIDIDA_PRIMERA_VERSION` | P65–P70: un PIN de seis cifras que pide quien contrata, con cinco intentos. Sin QR, sala ni ubicación | El cliente dicta un código al prestador al empezar | `CODIGO_DE_ASISTENCIA_CIFRAS=6`, `INTENTOS_DEL_CODIGO=5` (`reserva_politica.py`) | Ninguno | Tras el piloto |
+| **G6** | Consecuencias de una inasistencia | `REQUIERE_EMPRESA` | Requiere a la empresa (IV-35, IV-41, IV-42) | Hoy ninguna: queda declarada y se puede discutir | Inc. 6, decisión 4 | Sin consecuencias, la inasistencia no disuade | Antes de pagos |
+| **G7** | Plazo y motivos de un caso | `PROVISIONAL_CONFIGURABLE` | 48 horas desde que terminó (P76); los de seguridad, sin plazo; ocho motivos | Hay dos días para reclamar | `SERVICES_INCIDENT_WINDOW_HOURS=48`; congelado | Ninguno | Tras el piloto (IV-47) |
+| **G8** | Apelaciones: cuántas, en qué plazo y quién las resuelve | `PROVISIONAL_CONFIGURABLE` | Una, en 5 días (P84, P85), y la resuelve otra persona (P86) | Se puede pedir una segunda opinión, una sola vez | `SERVICES_INCIDENT_APPEALS_MAX=1`, `SERVICES_INCIDENT_APPEAL_DAYS=5`; congelados | Hacen falta dos personas en administración (G15) | Tras el piloto (IV-47) |
+| **G9** | Si una apelación puede deshacer una atención dada por realizada | `DECIDIDA_PRIMERA_VERSION` | P75: no; una atención cerrada es final | La apelación puede cambiar lo decidido, no borrar que la atención ocurrió | Inc. 6, decisión 7; 0094 | Ninguno | Tras el piloto |
+| **G10** | Evidencias: formatos, peso, cuántas y cuánto se conservan | `DECIDIDA_PRIMERA_VERSION` | P77–P79 y P88: PDF, JPEG, PNG y WebP, 10 MB, 10 por parte, privadas y con enlace firmado de 120 s. El plazo de conservación requiere revisión legal (IV-19) | Cada parte puede subir hasta diez pruebas, que solo ve quien debe | `EVIDENCIAS_POR_PARTE=10`; `posventa.py` | Ninguno | Con la política de privacidad |
+| **G11** | Reseñas: plazo, moderación, motivos para esconder e identidad | `PROVISIONAL_CONFIGURABLE` | 30 días y moderación previa encendida (P91, P93). Lo demás está decidido (P89–P97): una por atención, sin nombre de quien la escribe, respuesta del prestador | Hay un mes para reseñar y Z revisa la reseña antes de publicarla | `SERVICES_REVIEW_WINDOW_DAYS=30` (congelado), `SERVICES_REVIEWS_PREMODERATION=true` | Alguien tiene que moderar (IV-10) | Tras el piloto (IV-47) |
+| **G12** | Recordatorios y quién llama a los barridos | `INTEGRACION_EXTERNA` | Planificador preparado y sin activar (P113, 03/10). El recordatorio es 24 horas antes, valor provisional | Sin planificador, los recordatorios solo salen cuando alguien lanza la tarea a mano | `SERVICES_BOOKING_REMINDER_HOURS=24`; ningún planificador llama a la ruta | Sin recordatorios ni cierre automático | Antes del piloto |
+| **G13** | Qué pasa con un efecto económico solicitado cuando haya pagos | `NO_APLICA_PRIMERA_VERSION` | **No aplica al piloto gratuito (P107).** Pendiente para una versión con pagos: requiere aprobación empresarial antes de pagos (IV-32, IV-36) | Hoy siempre «no aplica»: nada se cobra y nada se devuelve | No existe el estado «ejecutado» (P83) | Bloquea los pagos | En una versión con pagos |
+| **G14** | La aceptación del prestador (a domicilio) | `NO_APLICA_PRIMERA_VERSION` | P57: a domicilio sigue desactivada; su uso futuro es de la empresa (IV-7) | No se construye mientras no haya domicilio | No construido | Ninguno | Si se decide abrir domicilio |
+| **G15** | Quién decide en administración y cuántas personas hacen falta | `REQUIERE_EMPRESA` | Política (P84–P86): administración resuelve, una segunda persona distinta revisa las apelaciones y nadie resuelve lo suyo. Falta nombrar a las personas (IV-10, IV-11, IV-12) | Hoy decide solo quien tiene el rol de administración; con una sola persona no hay apelaciones | `ROLES_QUE_DECIDEN` (`permissions.py`) | Sin dos personas no se cumple P84–P86 | Antes del piloto |
+| **G16** | La baja de una cuenta con un caso vivo o con evidencias | `DECIDIDA_PRIMERA_VERSION` | **Decisión provisional (P106, 02/10/2026):** un caso o una evidencia son historia contractual y frenan la baja automática. La decisión definitiva va con F21 (IV-18, IV-19) | La baja de quien contrata ya no se lleva sus evidencias ni deja el caso sin su nombre: contesta 409 | `service_history_requires_support`; 0089 y 0094 siguen igual | Evidencia | Con F21 |
+| **G17** | Cómo se encuentran las partes en un servicio virtual | `INTEGRACION_EXTERNA` | Política (P110): en el piloto Z no proporciona sala, no graba y no almacena grabaciones. La sala propia requiere integración externa: 100ms (V-49 a V-51) | Z no ofrece sala: las partes se ponen de acuerdo por fuera | La integración de 100ms no tiene cuenta conectada | Un servicio virtual depende de un enlace ajeno | Antes del piloto |
+| **G18** | Qué política operativa queda congelada en cada reserva | `DECIDIDA_PRIMERA_VERSION` | P61–P63: los nueve plazos y topes se guardan con la reserva, inmutables. Resuelta el 01/10/2026 | Cambiar una regla no cambia las reservas ya hechas | 0095 aplicada y verificada; `reserva_politica.py` | Sus valores siguen siendo provisionales | Con IV-47 |
+
+---
+
 # Cursos: qué está hecho, qué falta y qué espera una decisión
 
 Este documento existe para que nadie tenga que adivinar en qué punto está el
@@ -2356,3 +3028,844 @@ todas las claves literales y encontró esa y ninguna otra.
   lleva el `author_id` de quien opinó junto al sello de compra verificada. El
   último puede ser una decisión de producto y la justificación escrita no la
   cubre: queda para quien decida qué se enseña de quien opina.
+
+---
+
+> **Registro histórico de Z Servicios.** Desde aquí hasta el final se conserva
+> lo que se escribió al cerrar cada incremento, sin renumerar ni borrar nada.
+> Donde dice «pendiente de la empresa», «siguen pendientes» o «son de la
+> empresa», léase con la fecha de ese cierre. **El estado vigente de cada
+> identificador, al 02/10/2026, está en el consolidado del comienzo de este
+> documento**, que es el que manda si hay diferencia.
+
+## Z Servicios, Incremento 1 — admisión de prestadores (29/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md).
+Aquí va lo que es decisión: la tomada, la derivada de reglas ya dadas y la que
+sigue esperando a la empresa.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Una persona o empresa postula, acepta las condiciones vigentes y entrega datos, documentos y credenciales | Rutas `/services/provider/*` y diez pantallas del prestador |
+| Envía, recibe observaciones, corrige, reenvía, se retira y conoce el resultado | Saltos explícitos con historial visible y avisos |
+| Z revisa, verifica evidencia, pide correcciones, aprueba, rechaza o suspende | Rutas `/admin/services/*` y cuatro pantallas de administración |
+| Historial, permisos y auditoría | Historial que solo se añade (lo impone la base), auditoría en `audit_events` y permisos en el servidor |
+| Documentos privados | Depósito sin políticas; ruta puesta por el servidor; enlaces de 120 s |
+| `FEATURE_SERVICES` apagada no cambia nada | 503 sin tocar la base; ninguna entrada en la app |
+
+### Decisiones derivadas (no se inventó ninguna regla)
+
+1. **Retirarse es antes de la decisión, también después de una suspensión.**
+   Una aprobada que se suspende vuelve a `under_review`, pero ya se decidió.
+   Deriva de «solo antes de la decisión» y de «no desde suspended». Lo imponen
+   el código (`service_application_already_decided`) y la 0088
+   (`retirada_antes_de_decidir`).
+2. **Suspender se levanta pasando por revisión**, nunca de golpe.
+3. **Sin condiciones publicadas no se envía**, y la pantalla lo dice. No se
+   siembra ningún texto.
+4. **Volver a postular tras un rechazo lo decide la política.** Sin el
+   parámetro, el servidor contesta `409 service_reapplication_not_configured`:
+   la ausencia no es ni un sí ni un no. La empresa lo decide al publicar sus
+   condiciones, desde Administración.
+5. **Documentos y credenciales exigidos por país**: mínimo fijo (identidad; en
+   empresa, además, representación legal) más lo que exija la política.
+6. **Roles**: se reutilizan `moderator` (revisa) y `admin` (decide). No se
+   crearon Operaciones ni Cumplimiento.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| S1 | Texto de las condiciones del prestador por país | Nadie puede enviar su postulación |
+| S2 | ¿Se puede volver a postular tras un rechazo? | `service_reapplication_not_configured` |
+| S3 | Documentos y credenciales adicionales por país o categoría | Solo se pide el mínimo |
+| S4 | Personas de una empresa (más de un representante) y teléfono verificado | No existen |
+| S5 | Análisis antivirus de los documentos | Solo se valida el formato por firma y el tamaño |
+| S6 | Retención de documentos tras un rechazo o una retirada | Se conservan (evidencia) hasta que se borra la cuenta |
+| S7 | ~~Borrado de cuenta frente a la auditoría inmutable~~ **Decidida el 29/09/2026** (regla en `Z_BAJA_DE_CUENTA.md` §1): se borran los datos personales y los archivos privados; lo histórico se conserva y deja de nombrar a la persona | **Implementada** en la 0089 y en `DELETE /auth/me`. La 0089 está **aplicada y verificada** en Supabase (29/09/2026, sin divergencias). El código de `DELETE /auth/me` está en `Edson`, **sin desplegar** |
+| S8 | Cuentas con ventas, saldos, transferencias, pedidos, incidencias, disputas, decisiones de personal con `restrict` **u órdenes pagadas con dinero de verdad** (0089): plazo de conservación, si se anonimizan (conservar la orden y dejar a quien compró en `NULL`) y el proceso de soporte. **Prioritaria antes de encender los pagos: Google Play exige poder borrar la cuenta desde la app** (se pueden conservar los registros de las transacciones) | `DELETE /me` responde 409 `account_deletion_blocked` sin tocar nada, y el móvil pide escribir a soporte |
+| S9 | Cuánto se conservan la huella y el prefijo de IP y la familia de navegador de `audit_events` y `consent_records` | Se conservan con el registro, sin la persona |
+| S10 | ¿Se anulan también los identificadores del personal en el historial, los envíos y las condiciones de Servicios? (sin clave ajena por diseño de la 0086) | Quedan como identificadores sin perfil detrás. Anularlos es el mismo mecanismo de la 0089 con una clave ajena nueva |
+| S11 | Pauta para que los motivos escritos por el personal al decidir no nombren a nadie (quedan en `audit_events.reason`) | Se conservan tal cual |
+| S12 | ¿Se borran con la cuenta la nota y el tema que alguien escribió al reservar una sesión, que están en la notificación de la otra persona? (plataforma, anterior a Servicios) | Se quedan en la bandeja de quien la recibió; el actor pasa a `NULL` |
+| S13 | Puentes identificador↔correo que sobreviven a la baja: el cuerpo crudo de los avisos de Stripe (`payment_events.payload`) y el registro de Supabase Auth (`auth.audit_log_entries`). ¿Se depuran, y cuándo? | Hoy los dos tienen 0 filas (29/09/2026). Se llenarán al encender los pagos |
+| S14 | Motivos libres del organizador en la auditoría de Eventos (enviar, cambiar, cancelar), que sobreviven a su cuenta | Se conservan; propuesto como tarea aparte. En Servicios ya no se copian textos libres a la auditoría |
+
+### Límites del Incremento 1 y lo reservado para después
+
+Límites:
+- no hay catálogo de servicios, precio, agenda, reserva, pago, incidencia ni
+  reseña;
+- la vista pública del prestador existe en el contrato, pero ninguna ruta la
+  sirve;
+- tocar el push de un aviso abre la app, sin llevar a la postulación, igual
+  que los demás avisos al creador.
+
+Reservado para después: servicios y variantes; disponibilidad calculada en el
+servidor; reservas con retención de hueco; pagos y transferencias; incidencias;
+valoraciones verificadas.
+
+## Z Servicios, Incremento 2 — catálogo y publicación de servicios (29/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte II. **Técnicamente cerrado el 29/09/2026: la 0090 está aplicada y
+verificada sin divergencias (§32); únicamente queda pendiente el QA físico.**
+`FEATURE_SERVICES` sigue apagada y el código, sin desplegar. Nada de lo que
+sigue se presenta como política definitiva si la empresa no lo confirmó.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Un prestador aprobado y activo crea servicios; nadie más | `service_provider_not_active` en la API y, además, la base (un servicio nace de un prestador activo) |
+| Borradores que se completan a medias | `PATCH …/draft` con solo lo que cambia; `missing` dice qué falta |
+| Enviar congela la versión | La base impide editar el contenido fuera del borrador |
+| Revisión, observaciones, corrección y reenvío | Pedir cambios con motivo visible y campos; el prestador corrige en una versión nueva (`resubmitted`) |
+| Aprobación y publicación | Dos pasos, de administración; una sola publicada por servicio |
+| Editar lo publicado no cambia lo visible | Borrador nuevo; lo publicado sigue hasta que Z publique la nueva |
+| Suspender saca del público | 404 en la ficha; reactivar y retirar, con motivo |
+| Permisos | Prestador, moderación y administración; nadie decide lo propio; lo ajeno es 404 |
+| Imágenes protegidas | Depósito privado, ruta del servidor, URL firmada que caduca |
+| Vistas conectadas | 13 pantallas, todas alcanzables desde otra vista, detrás de `FEATURE_SERVICES` |
+
+### Decisiones tomadas en el código (provisionales)
+
+Se derivan del pedido o de patrones ya aprobados en Cursos, Eventos y
+Productos, y **se pueden cambiar sin migración** salvo donde se indica:
+
+1. **Aprobar y publicar son dos pasos**, ambos de administración.
+   Moderación inicia la revisión y pide cambios. No hay publicación
+   automática.
+2. **Pedir cambios cierra la versión**; corregir es abrir otra que sale de
+   ella. El historial conserva las dos (lo impone la 0090).
+3. **Publicar no reactiva** un servicio suspendido; levantar la suspensión es
+   otra decisión, con motivo.
+4. **Retirar es definitivo** (lo impone la 0090).
+5. **Una categoría inactiva** no admite servicios nuevos ni envíos; no se
+   borra y los servicios que la usan la siguen nombrando (lo impone la 0090).
+6. **La ficha pública** enseña del prestador solo su nombre público.
+7. **No se exige volver a aceptar condiciones** para publicar servicios: las
+   del Incremento 1 son para ser prestador.
+8. **Borrar la cuenta del prestador** se lleva sus servicios y sus imágenes.
+   Hoy no hay reservas ni pagos que lo impidan; cuando existan, habrá que
+   revisarlo (S8).
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| C1 | **Categorías iniciales** | No se siembra ninguna. Sin categorías nadie puede crear un servicio, y la app lo dice. Las crea administración desde la app |
+| C2 | Categorías **prohibidas o reguladas** (salud, legal, financiera…) y qué exigen | No hay lista ni bloqueo automático; administración puede desactivar una categoría |
+| C3 | **Documentos adicionales por categoría** para publicar | No se piden. La admisión exige los del país (S3) |
+| C4 | **Modalidades permitidas** | `SERVICES_CATALOG_MODALITIES`: las tres (virtual, presencial, a domicilio) |
+| C5 | **Monedas y países** | `SERVICES_CATALOG_CURRENCIES=PEN`. Una categoría puede limitarse a un país; sin país, vale para todos |
+| C6 | **Precio «desde»** y precio a consultar | `SERVICES_CATALOG_PRICE_MODELS`: los cuatro (gratis, fijo, desde, a consultar) |
+| C7 | **Duración mínima y máxima** | `SERVICES_CATALOG_MIN/MAX_DURATION_MINUTES`: 5 y 1440 (los límites técnicos) |
+| C8 | **Límite de imágenes** | `SERVICES_CATALOG_MAX_IMAGES=8`; 5 MB por imagen (límite técnico del depósito) |
+| C9 | **Quién publica tras aprobar** | Administración, a mano (decisión 1) |
+| C10 | **Motivos de suspensión** (lista cerrada o texto libre) | Texto libre obligatorio que el prestador lee |
+| C11 | **Política para volver a publicar** tras una suspensión o una retirada | Tras suspender: administración la levanta con motivo. Tras retirar: no se puede |
+| C12 | **Conservación de versiones e imágenes** superadas o retiradas | Se conservan mientras exista la cuenta del prestador; se borran con ella |
+| C13 | **Información pública del prestador** en la ficha | Solo el nombre público |
+| C14 | Pauta para que los **motivos** escritos por el personal no nombren a nadie | Se guardan tal cual; la auditoría no los copia |
+| C15 | ¿Acepta la empresa que la URL firmada de una imagen lleve el **UUID del perfil** del prestador en su ruta, o exige una **ruta opaca**? (igual que Productos, que además publica `seller_profile_id`) | Se acepta provisionalmente. El depósito `service-media` es **privado** (verificado en Supabase el 29/09/2026) y ninguna política de `storage.objects` lo alcanza. Las imágenes solo salen como **URL firmada que caduca en 3600 s**: no hay ruta pública permanente, y ninguna respuesta lleva la ruta como campo. Pero la URL contiene `<perfil>/<servicio>/<versión>/<id>.<ext>`, y así la barre la baja de cuenta. **Hoy no hay ningún archivo** (0 objetos): si se decide una ruta opaca, se cambia **antes de encender Servicios** sin migrar contenido (la ruta en `catalogo_imagenes.py`, el prefijo que la 0090 exige a las filas, con otra migración, y el barrido de la baja). Detalle: `Z_SERVICIOS_ARQUITECTURA.md` §32 |
+| C16 | Monedas que ofrece el formulario | Ofrece PEN, USD y EUR (las de Productos); si se elige una no configurada, al guardar aparece «Z no admite esa moneda por ahora» y no se puede enviar |
+
+### Límites del Incremento 2 y lo reservado para después
+
+Límites: no hay búsqueda, recomendaciones, filtros públicos, guardados,
+disponibilidad, horarios, reservas, pagos, atención, mensajes,
+reprogramaciones, cancelaciones, incidencias, reseñas, saldos ni
+transferencias; ninguna tabla los anticipa. La ficha pública no tiene botón de
+contratar. Tocar el push de un aviso abre la app sin llevar al servicio, como
+los demás avisos al creador (la bandeja sí lleva al servicio o a la revisión,
+y si ya no existe o no hay permiso lo dice sin romperse). Revisado el
+29/09/2026 (`Z_SERVICIOS_ARQUITECTURA.md` §32): **no bloquea el Incremento 2**.
+El blueprint (§23) pide `deepLink` en cada notificación, y hay que resolverlo
+**antes de los avisos de reservas**. La tarea es que la cola de entregas mande
+el tipo y la entidad y que `rutaDelPush` reutilice `rutaDelAviso`.
+
+Reservado para después: disponibilidad calculada en el servidor; reservas con
+retención de hueco; pagos y transferencias; atención e incidencias;
+valoraciones verificadas.
+
+## Z Servicios, Incremento 3 — descubrimiento y confianza (29/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte III (§33 en adelante). **Técnicamente cerrado el 29/09/2026: la 0091
+aplicada y verificada sin divergencias; únicamente queda pendiente el QA
+físico** (§49). Nada de lo que sigue se presenta
+como política definitiva si la empresa no lo confirmó.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Descubrir Servicios desde Explorar | El acceso «Servicios» lleva a `/servicios` con `FEATURE_SERVICES` encendida; apagada, avisa como antes |
+| Buscar por lo que se necesita | PostgreSQL con las palabras de la búsqueda global: mayúsculas, tildes (también en palabras cortas: «cafe» encuentra «Café»), espacios, plurales, varias palabras; título primero |
+| Filtros comprensibles | Categoría (con hijas), modalidad, gratis, con precio en una moneda (y rango), a consultar, zona y credencial verificada |
+| Entender una oferta | La ficha en el orden del blueprint, con lo que declara el prestador separado de lo que comprobó Z |
+| Saber que el prestador fue admitido por Z | «Prestador admitido por Z desde mm/aaaa», «Identidad verificada por Z» y «Credencial profesional verificada por Z y vigente», solo si son verdad |
+| Credenciales públicas | Solo que existe una verificada y vigente; ni su nombre ni su número (decisión pendiente, D4) |
+| Otros servicios del prestador | En la ficha y en su perfil público |
+| Guardar sin contratar | Idempotente, privado, sin aviso al prestador y sin contador público |
+| Explicar por qué se muestra algo | Un código de razón en cada sugerencia y en cada resultado de búsqueda (dónde coincidió) |
+| Sin resultados, datos ni reseñas | Estados vacíos honestos; media de reseñas `null`, nunca «0.0» |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **Una categoría desactivada saca del público** los servicios que la usan
+   (cambia la decisión 5 del Incremento 2, por el requisito de este). No se
+   borran, y al reactivarla vuelven.
+2. **Las categorías se muestran en su orden**, no como «frecuentes»: no hay
+   datos de uso que lo sostengan.
+3. **Sin búsqueda, lo más reciente primero.** Con búsqueda, relevancia (título
+   > categoría y resumen > descripción, prestador, zona y modalidad), con
+   pesos que dominan: cada nivel pesa más que todo el de abajo junto.
+4. **Ordenar por precio y el rango exigen una moneda**; no se convierte nada.
+5. **Quien está bloqueado** con el prestador, en cualquier sentido, no ve sus
+   servicios ni su perfil (la regla de la búsqueda global).
+6. **El perfil público** muestra el nombre público, el tipo (profesional o
+   empresa) y la fecha de admisión (mes y año). No hay foto ni presentación
+   propias: el avatar social no se enlaza sin decisión (D8) y el resumen de la
+   postulación es de la admisión.
+7. **Un servicio guardado que deja de estar disponible** queda en la lista con
+   el título que tenía AL GUARDARSE, sin contenido ni enlace, y se puede
+   quitar (D7). Nunca el título vivo de algo que no es público.
+8. **Sugerencias**: parecido a lo guardado, y publicado en los últimos 30 días.
+   No se usa «prestador seguido» (revelaría su perfil social).
+9. **Sin reseñas de servicio** hasta el Incremento 6. Las reseñas de perfil
+   (`profile_reviews`) no se mezclan ni se enseñan como del servicio.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| D1 | **Categorías destacadas** en la entrada de Servicios | Las de primer nivel, en su orden (`sort_order`), cuatro y «Ver todas» |
+| D2 | **Orden editorial** («seleccionados por Z») | No existe; sin búsqueda, recientes |
+| D3 | **Filtros visibles** | Modalidad, precio (gratis / con precio en una moneda y rango / a consultar), zona y credencial verificada. Ninguno sin datos (fecha, calificación, idioma, urgencia) |
+| D4 | **Credenciales públicas**: nombre, emisor, número parcial, país, vigencia | Solo «credencial profesional verificada por Z y vigente», sin detalle |
+| D5 | **Qué significa comercialmente «verificado por Z»** | Se nombra exactamente lo comprobado (admisión, identidad, credencial vigente, servicio aprobado) y se dice que no garantiza el resultado |
+| D6 | **C15**: el UUID del perfil en la ruta firmada de las imágenes | Sigue igual (§32). **Con el catálogo público el riesgo crece**: cada tarjeta, también sin sesión, lo lleva en su URL firmada. Sin archivos todavía, se puede cambiar antes de encender sin migrar nada; es lo recomendable |
+| D7 | **Guardados que dejan de estar disponibles** | Se quedan con el título que tenían al guardarse y «ya no está disponible», sin contenido; se pueden quitar |
+| D8 | **Información pública de persona frente a empresa** (foto, nombre legal o comercial, ciudad) | Solo el nombre público y el tipo; sin foto ni ciudad |
+| D9 | **Criterio de las recomendaciones** | Parecido a lo guardado y publicado en 30 días; cada una con su razón. Sin señal, nada |
+| D10 | **Mostrar la fecha de incorporación** | Se muestra el mes y el año de la admisión |
+| D11 | **Origen futuro de las calificaciones** | Reseñas verificadas de atenciones (Incremento 6), separadas de las reseñas de perfil |
+| D12 | **Texto legal de las señales de confianza** | «Estas comprobaciones no garantizan el resultado del servicio», bajo cada bloque |
+| D13 | **Qué pasa al desactivar una categoría con servicios publicados** | Dejan de verse en el catálogo (el requisito del Incremento 3); quien los ofrece los ve «no visibles» y la confirmación de administración lo avisa. Sin aviso a la prestadora ni recuento previo |
+| D14 | **Si un rango de precio incluye los precios «desde»** | Sí, por su importe mínimo, y la hoja de filtros lo dice |
+| D15 | **La insignia de credencial en las tarjetas** | Es del prestador, no del servicio: «Prestador con credencial verificada». Si la empresa decide relacionar credenciales con categorías, podrá ser del servicio |
+
+### Límites del Incremento 3
+
+No hay disponibilidad, agenda, reservas, contratación, pagos, mensajes por
+reserva, cancelaciones, check-in, sesiones, incidencias, devoluciones, reseñas
+que crear, finanzas ni transferencias. Ni IA, ni motores externos de
+búsqueda, ni un segundo recomendador. La ficha no tiene botón de contratar.
+El push de un aviso sigue abriendo solo la aplicación (tarea abierta).
+
+## Z Servicios, Incremento 4 — disponibilidad y agenda del prestador (30/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte IV (§50 en adelante). **Técnicamente cerrado el 30/09/2026 en `Edson`;
+únicamente queda pendiente el QA físico** (§61). La 0092 se ejecutó a mano en
+Supabase y se verificó ese día en solo lectura, **sin divergencias**, también
+con la puerta de esquema y el rol real de la API. El código sigue **sin
+desplegar** y `FEATURE_SERVICES`, **apagada**. Nada de lo que sigue se
+presenta como política definitiva si la empresa no lo confirmó: E1–E12 siguen
+siendo suyas.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Configurar cuándo se ofrece cada servicio | Una agenda por servicio: zona IANA, activa o en pausa, preparación, descanso e intervalo entre inicios |
+| Reglas semanales | Día, franja de 5 en 5 minutos (hasta las 24:00), modalidad, capacidad y activa o no. Dos activas del mismo día no se cruzan: lo impide la base |
+| Duración real y separación | La duración es la de la versión publicada (o, sin ella, la que se prepara); cada horario ocupa preparación + duración + descanso, y ese bloque entero cabe en la franja |
+| Excepciones por fecha | Cerrar el día, cerrar una franja, añadir una franja o sustituir la semana ese día. Dos excepciones de la misma fecha no se pisan |
+| Bloqueos manuales | Un intervalo real con motivo privado (hasta 200 caracteres) que solo ve el prestador |
+| Capacidad | Individual: uno. Grupal: hasta la capacidad de la versión. Solo teórica: nada se descuenta |
+| Zona horaria | IANA con lugar, elegida (no se toma la del teléfono); instantes en UTC; conversión en un solo sitio del servidor; horario de verano probado |
+| Consulta pública | Fechas con horarios (de 31 días en 31) y horarios de una fecha, solo de lo público y dentro de la antelación y el horizonte |
+| Historial mínimo | Cada cambio de la agenda deja su línea (sin el motivo de los bloqueos) |
+| Terminar al enseñar un horario | Elegir un horario solo lo guarda en la ruta de la app. Ninguna reserva, retención, pedido ni cobro |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **La agenda es del servicio**, no de una versión ni del prestador: editar la
+   descripción no la toca. La duración, la modalidad y la capacidad se leen de
+   la versión publicada cada vez.
+2. **Precedencia**: lo que cierra (bloqueo, día cerrado, franja cerrada) gana
+   siempre; después, las excepciones de la fecha (`replace` sustituye la
+   semana; `extra` solo suma lo que el día no tenía); después, la semana; y la
+   configuración general (duración, separación, intervalo, antelación y
+   horizonte).
+3. **Una franja no cruza la medianoche**: termina como tarde a las 24:00. Una
+   atención de 23:00 a 01:00 son dos franjas y no genera un horario que las
+   junte.
+4. **Horario de verano**: una hora local que no existe se lleva al salto; una
+   que se repite, a la primera vez. Los horarios se cuentan en tiempo real.
+5. **Un borrador puede preparar su agenda**; el público solo la ve cuando el
+   servicio es público.
+6. **Cambiar la zona se confirma**: la semana y las excepciones pasan a leerse
+   en la nueva; los bloqueos no se mueven.
+7. **Un prestador suspendido** ve su agenda pero no la cambia; un servicio
+   **retirado**, tampoco.
+8. **Modalidad**: la de la versión publicada y la de la que se prepara; el
+   público solo ve la publicada.
+9. **Con un intervalo menor que la duración**, los horarios son inicios
+   alternativos que se solapan: elegir uno excluirá a los que se le cruzan
+   cuando existan las reservas (Incremento 5).
+10. **Sin panel de administración de agendas**: el blueprint lo pide para las
+    reservas (A04), que no existen. Moderación y administración reciben el
+    mismo 404 que cualquiera que no sea el dueño.
+11. **Sin avisos ni auditoría general**: cambiar la agenda propia deja su
+    historial, no un aviso ni una línea de `audit_events`.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| E1 | **Antelación mínima** para mostrar un horario | 2 horas (el provisional del documento de reglas, 4.5), configurable con `SERVICES_AGENDA_NOTICE_MINUTES` |
+| E2 | **Horizonte**: hasta cuántos días por delante | 60 días (provisional de 4.6), configurable con `SERVICES_AGENDA_HORIZON_DAYS` |
+| E3 | **Si el prestador elige su antelación y su horizonte** (el blueprint P03 lo sugiere) | No: son de la plataforma |
+| E4 | **Feriados**: si Z carga los del país o los marca cada prestador | Cada prestador los marca como «Cerrar todo el día» |
+| E5 | **Enseñar la capacidad al público** («hasta N personas») | La API la devuelve; la app no la enseña. Nunca un «quedan» |
+| E6 | **Cómo se enseña la hora a quien está en otra zona** | Horas de la agenda, con su zona, y un aviso si el teléfono está en otra |
+| E7 | **Límites de uso** (50 reglas, 200 excepciones y 200 bloqueos por venir, un bloqueo de 31 días como mucho, 366 días de adelanto, 31 días por consulta, 96 horarios por página) | Los técnicos de `agenda_politica.py` |
+| E8 | **Recursos y varios profesionales** de una empresa (sala, equipo, `providerMember`) | No existen: la agenda es del servicio |
+| E9 | **Calendarios externos** (Google, Outlook) | Fuera de este incremento |
+| E10 | **«Avísame cuando haya horarios»** | No existe; se dice que no hay horarios |
+| E11 | **Qué pasa con las reservas al cambiar la agenda** | No hay reservas. El Incremento 5 tendrá que decidir (el blueprint pide no alterar las existentes) |
+| E12 | **Si cerrar una franja parte la franja o solo quita los horarios que toca** | Solo los quita: la rejilla sigue la del inicio de la franja (09–17 con 45 min y cerrado 12–13 da 11:15 y después 13:30, no 13:00). Con dos reglas (09–12 y 13–17), sí sale 13:00. Cambiarlo es restar lo cerrado de las franjas antes de generar |
+
+### Límites del Incremento 4
+
+No hay reservas, retenciones, contratación, pedidos, aceptación de
+condiciones, direcciones, cobros, Stripe, saldos, devoluciones, disputas,
+recordatorios, asistencia, reseñas, posventa ni calendarios externos. El
+Incremento 5 **no se empezó**. El push de un aviso sigue abriendo solo la
+aplicación (tarea abierta).
+
+### Cierre técnico (30/09/2026)
+
+- **0092 aplicada y verificada** en Supabase, en solo lectura y sin
+  divergencias: las cinco tablas definición por definición, el ORM, §57 y el
+  esquema público entero frente a una referencia 0001–0092. La transacción de
+  la 0092 no escribió ninguna fila de datos. Su huella está en `APLICADAS`:
+  ya no se edita.
+- **La puerta**, con el rol real de la API y en un proceso nuevo, dice «sí» a
+  la admisión, el catálogo, los guardados y la agenda.
+- **Una corrección técnica, no de negocio**: la puerta no exigía que los
+  índices de las claves primarias y de las exclusiones estuvieran válidos y
+  listos (una exclusión con su índice a medias no impide los cruces). Ahora
+  lo exige, con su prueba y su mutación.
+- **Sigue siendo de la empresa**: E1–E12 (arriba), **C15** antes de encender
+  Servicios (D6) y el **destino del push** de un aviso.
+- **Producción**: cuando se despliegue `Edson`, reiniciar la API (el
+  despliegue lo hace): la puerta recuerda el «no».
+- **Pendiente**: el QA físico (`Z_QA_FISICO_PENDIENTE.md`, «Incremento 4»).
+
+## Z Servicios, Incremento 5 — reserva y contratación protegida (30/09/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte V (§62 en adelante). Implementado y probado el 30/09/2026 en `Edson`;
+la 0093 se ejecutó después a mano en Supabase y se verificó en solo lectura
+el 01/10/2026 (02:13 UTC) **sin divergencias** (§80). **Técnicamente cerrado;
+únicamente queda pendiente el QA físico.** El código sigue **sin desplegar**
+(producción todavía no conoce la 0093); `FEATURE_SERVICES`,
+`FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la
+pasarela, `none`. No hay ninguna condición de contratación publicada. Nada de
+lo que sigue se presenta como política definitiva si la empresa no lo
+confirmó: F1–F21 son suyas.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Elegir un horario disponible | El de siempre (Incremento 4): calculado por el servidor, ahora descontando lo ocupado |
+| Obtener una retención temporal | 10 minutos (provisional, F1), con la hora del servidor; la misma clave no la alarga |
+| Completar solo lo necesario | Nota opcional; a domicilio, distrito y dirección (referencia opcional). Nada más |
+| Revisar servicio, horario, modalidad, precio y condiciones | El resumen del servidor, con la fotografía de la retención y lo que impide confirmar |
+| Aceptar una versión concreta de las condiciones | Por su id y su huella; si cambian mientras se leen, 409 y se vuelven a enseñar |
+| Confirmar | Nacen juntos pedido, reserva, datos de la atención, lo aceptado, el historial y los avisos |
+| Reserva y pedido consistentes | Disparadores diferidos: ninguno sin el otro ni sin lo aceptado; una interrupción no deja nada |
+| Consultar estado y detalle | Mis reservas (por venir y pasadas, por cursor), detalle con lo aceptado y el historial |
+| Impedir la doble reserva, también a la vez | La base: exclusión con separación congelada, plaza única, una por persona, capacidad. Probado con 10 a la vez |
+| Sin dinero real | Solo gratis; con precio se detiene sin fingir un cobro; «a consultar» y «desde» no se contratan; la base no admite un pedido con precio |
+| Privacidad | Solo lo necesario; la dirección solo a domicilio y solo para su prestador; lo ajeno es 404 |
+| Supervisión (A04) | Reservas y retenciones operativas, sin datos privados, y el barrido |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **La retención es la que ocupa**: al confirmar pasa a `consumed` y sigue
+   ocupando por su reserva. Así una sola restricción de la base cubre lo
+   apartado y lo reservado.
+2. **Solo lo gratuito se confirma.** Lo que tiene precio fijo se aparta (para
+   enseñar el resumen) y se detiene con un 503 claro; sin pedido ni reserva.
+3. **«A consultar» y «desde» no se apartan**: no hay precio que aceptar.
+4. **A domicilio no se confirma sola** (necesita al prestador, F3): no se
+   aparta y la app no ofrece continuar.
+5. **Una retención activa por servicio y persona**: elegir otro horario suelta
+   el anterior en la misma transacción; el mismo horario no se renueva.
+6. **El vencimiento lo decide la hora**; el barrido solo ordena la base.
+7. **La antelación y el horizonte se miden desde que se retuvo**: un horario
+   apartado a tiempo no caduca por los minutos que se tarda en leer.
+8. **Cambiar la agenda o el servicio no toca las reservas**: la reserva
+   guarda su fotografía y su separación congelada.
+9. **Las condiciones de contratación son un tipo más de `service_policies`**,
+   por país del prestador, con las mismas rutas y la misma pantalla, sin
+   parámetros.
+10. **Sin cancelación ni reprogramación**: no hay política (F6).
+11. **Sin aviso de vencimiento** (F12); sí de reserva confirmada y recibida.
+12. **El prestador ve la identidad pública** de quien contrata, lo que
+    escribió y, a domicilio, la dirección; nunca correo ni teléfono.
+
+### Pendiente de la empresa
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| F1 | **Cuánto dura una retención** | 10 minutos, `SERVICES_BOOKING_HOLD_MINUTES` (1–60) |
+| F2 | **Cuántos horarios puede tener apartados una persona** | 3 a la vez (uno por servicio), `SERVICES_BOOKING_MAX_ACTIVE_HOLDS` (1–20) |
+| F3 | **Confirmación automática o aprobación del prestador**, por modalidad | Automática en línea y presencial; **a domicilio necesita aprobación, que no existe**: no se contrata. `SERVICES_BOOKING_INSTANT_MODALITIES=virtual,in_person` |
+| F4 | **Qué datos se piden** | Nota opcional (500); a domicilio, distrito (100) y dirección (200), referencia opcional (200). Ni teléfono, ni correo, ni documento |
+| F5 | **Qué ve el prestador de quien contrata** (teléfono, dirección, correo) | Usuario y nombre públicos, lo que escribió y, a domicilio, la dirección. Nunca correo ni teléfono |
+| F6 | **Cancelación y reprogramación**: quién, hasta cuándo, con qué consecuencias | No existen: ni la persona ni el prestador cancelan desde la app |
+| F7 | **Antelación y horizonte de la contratación** | Los de la agenda (E1: 2 horas; E2: 60 días), medidos desde que se retuvo |
+| F8 | **Capacidad visible** («quedan N plazas») | La API la devuelve; la app no la enseña (E5) |
+| F9 | **El texto de las condiciones de contratación**, por país | **No hay ninguno publicado.** Sin él, ninguna reserva se confirma. Lo escribe y publica la empresa desde administración |
+| F10 | **Qué pasa con una reserva si cambia la agenda** (E11) | Nada: la reserva sigue, sin cancelarse ni avisar. Un bloqueo nuevo encima no la toca |
+| F11 | **Feriados** (E4) | Los marca el prestador; una reserva ya hecha no se toca |
+| F12 | **Avisar cuando vence lo apartado** | No se avisa: la app lo dice en pantalla |
+| F13 | **Quién llama al barrido y cada cuánto** (cron, Lambda, EventBridge) | Nadie: la ruta existe y está protegida; el vencimiento no depende de ella |
+| F14 | **«A consultar» y «desde»**: cómo se cotizan | No se contratan desde Z |
+| F15 | **Monedas y países** | Las condiciones son por país del prestador; el precio es el de la versión, solo informativo |
+| F16 | **Comprobantes** | No se emiten: lo gratuito no tiene importe |
+| F17 | **Comisión de Z y costo de la pasarela** | Sin definir; no hay cobro |
+| F18 | **Devoluciones** | No aplican: nada se cobra |
+| F19 | **Identidad de quien contrata** | Una cuenta de Z con sesión; sin verificación adicional |
+| F20 | **Conservación de la evidencia** (lo aceptado, el pedido, el historial) | Se guarda sin plazo; con la baja, la persona queda en `NULL` y su nota y su dirección se borran. Plazo legal por decidir |
+| F21 | **La baja de QUIEN PRESTA con reservas pasadas** | Hoy se lleva sus servicios y con ellos sus reservas pasadas, pedidos, historial y lo que aceptó quien contrató (el camino de borrado de la 0090, por un solo camino desde la revisión del 30/09). Conservarlo (dejar al prestador en `NULL`, como a quien contrata) exige alterar la clave de la 0090 y una decisión legal |
+
+> **F21, antes de encender la contratación.** Hoy, borrar la cuenta de un
+> prestador se lleva sus servicios y, con ellos, sus reservas **pasadas**, sus
+> pedidos, su historial y **lo que aceptó quien contrató**. La empresa tiene
+> que decidir qué se conserva, cuánto tiempo y con qué base legal. En el
+> cierre del incremento no se modificó la 0090 ni se diseñó una solución: es
+> una decisión, no un arreglo técnico.
+
+Siguen siendo de la empresa, además: **E1–E12** (agenda), **C15** antes de
+encender Servicios (D6), el **destino del push** de un aviso, **publicar las
+condiciones de contratación** (F9) y el **planificador del barrido** (F13).
+
+### Límites del Incremento 5 y lo que queda para el 6
+
+No hay cobro, pasarela, estados de pago, comisión, comprobantes,
+devoluciones, cancelación, reprogramación, aceptación del prestador,
+recordatorios, aviso de vencimiento, planificador del barrido, asistencia,
+reseñas de lo contratado ni posventa. **El Incremento 6 no se empezó.**
+
+> *Al 01/10/2026:* el Incremento 6 se implementó después (sección
+> siguiente). F1–F21 siguen pendientes tal como están; F6, F3, F13 y F18
+> se amplían en G1, G2, G14, G12 y G13 sin darse por resueltas.
+
+## Z Servicios, Incremento 6 — atención, cancelación, reprogramación, posventa y cierre (01/10/2026)
+
+El detalle técnico está en [`Z_SERVICIOS_ARQUITECTURA.md`](Z_SERVICIOS_ARQUITECTURA.md),
+Parte VI (§82 en adelante). Implementado y probado el 01/10/2026 en `Edson`;
+la 0094 se ejecutó después a mano en Supabase y se verificó en solo lectura
+ese mismo día (14:28 UTC) **sin divergencias** (§102). **Técnicamente
+cerrado; únicamente queda pendiente el QA físico.** El código sigue **sin
+desplegar** y Servicios **sin activar**; `FEATURE_SERVICES`,
+`FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`, **apagadas**, y la
+pasarela, `none`. **No se movió dinero** y no se activó ningún pago.
+
+Se hizo con **YAGNI estricto** (instrucción expresa): lo necesario para
+recorrer de principio a fin una atención **gratuita**, segura y verificable.
+Lo demás está listado abajo como **no implementado**. Nada de lo que sigue es
+política definitiva: **G1–G18 son de la empresa**, y todas las anteriores
+(C1–C15, D1–D15, E1–E12, F1–F21) **siguen pendientes tal como estaban**.
+
+### Requisitos cumplidos
+
+| Requisito | Cómo |
+|---|---|
+| Estados pequeños y explícitos, con una sola autoridad | Tres mapas (atención, caso, reseña) en `atencion_models.py`; `atencion.acciones_disponibles` decide qué se puede hacer y las transiciones comprueban lo mismo |
+| La base impone lo crítico | Saltos de la atención y del caso por disparador; reseña solo con atención cerrada; un caso por reserva sin contar los retirados; expediente inmutable; nada se borra suelto; el efecto económico no admite «ejecutado» |
+| Transiciones idempotentes y auditables | `Idempotency-Key` obligatoria; la misma clave con lo mismo es la misma petición; cada transición deja su línea en `service_booking_events`, que solo se añade |
+| `available_actions` calculadas por el dominio | En el detalle de la reserva (`care`) y en el expediente; la app no ofrece nada que no venga ahí |
+| Cancelar | Quien contrata o el prestador (que explica por qué), antes de la hora; el horario se libera en la misma transacción |
+| Reprogramar | Quien contrata, a un horario que ya apartó; mismo contrato; si falla, la reserva original sigue |
+| Asistencia | Código de seis cifras (señal fuerte), empezar con o sin él, terminar, confirmar, cierre automático solo con la señal fuerte |
+| Inasistencia | Declaración de una parte, pasada la tolerancia; se puede discutir con un caso |
+| Incidencias y evidencia privada | Un caso con su expediente; evidencia validada por bytes, en depósito privado, con ruta del servidor y enlace firmado de 120 s |
+| Resolución (sin confundir «resuelto» con «dinero devuelto») | Qué se decidió, por qué, quién, cuándo, efecto en la atención y efecto económico **solicitado** con su estado, por separado |
+| Apelación limitada y configurable | 0 o 1 (`SERVICES_INCIDENT_APPEALS_MAX`), dentro de su plazo; la resuelve otra persona |
+| Reseñas verificadas | Solo de una atención cerrada, una por reserva; promedio `null` sin reseñas; respuesta del prestador; moderación |
+| Avisos | 19 tipos, en es/en/pt, sin datos sensibles e idempotentes |
+| Tareas por lotes | `POST /admin/services/tasks/run`, idempotente; nadie lo llama todavía |
+| Puerta de esquema | Sin la 0094, 503 `services_not_ready`; nunca un 500 |
+| Preparación financiera sin mover dinero | Dos columnas en el caso y una función; ningún estado «ejecutado»; ninguna pasarela |
+
+### Decisiones tomadas en el código (provisionales)
+
+1. **Cuatro tablas, y ninguna de cancelaciones, reprogramaciones ni efectos
+   financieros.** Cancelar y reprogramar son un cambio controlado de la
+   reserva más su línea en el historial.
+2. **Reprogramar reutiliza la retención** del Incremento 5: quien contrata
+   aparta el horario nuevo y la reserva se mueve a esa retención.
+3. **El código de asistencia es la señal fuerte.** Sin él, la atención no se
+   cierra sola: hace falta quien contrata, o un caso.
+4. **Una inasistencia es una declaración**, no un fallo: no tiene
+   consecuencias y la otra parte puede discutirla.
+5. **Un caso por reserva, sin contar los retirados.** Quien retira el suyo no
+   le quita el suyo a la otra parte, pero ya no abre otro.
+6. **El tope de evidencias es de cada parte** (10), no del caso.
+7. **Una atención cerrada no se desmiente**, tampoco al resolver una
+   apelación. La apelación puede cambiar lo decidido y el efecto económico
+   solicitado; no el cierre de la atención.
+8. **Apelar solo se ofrece si hay otra persona en administración** que pueda
+   resolverlo. Con una sola, la primera resolución es definitiva.
+9. **Quien es parte de una reserva no lee ni decide** nada de ella desde
+   administración.
+10. **La reseña pública no dice quién la escribió**: no se inventó una
+    identidad pública para quien reseña.
+11. **Moderación previa encendida de fábrica**: una reseña no se ve hasta que
+    administración la publica.
+12. **El efecto económico es una solicitud.** Con todo gratuito, siempre «no
+    aplica». Las ramas «pendiente» y «bloqueado» existen para cuando haya
+    pagos y hoy no se alcanzan.
+13. **El depósito de evidencias entra en la baja de una cuenta**, como los de
+    documentos y de imágenes del catálogo. Por eso la 0094 se aplica **antes**
+    de desplegar el código.
+14. **De una reserva cancelada, el prestador deja de ver** la nota y la
+    dirección de quien contrató.
+
+### Pendiente de la empresa (nuevas)
+
+| # | Decisión | Qué pasa mientras tanto |
+|---|---|---|
+| G1 | **Cancelación**: quién, hasta cuándo y con qué consecuencias (amplía F6) | Quien contrata o el prestador (explicando por qué), hasta la hora de inicio, sin consecuencias. Administración no cancela desde la app |
+| G2 | **Reprogramación**: cuántas veces, con cuánta antelación y si el prestador puede pedirla (amplía F6) | Una vez y con 24 h (`SERVICES_BOOKING_RESCHEDULE_MAX`, 0–10; `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS`, 0–720). Solo quien contrata |
+| G3 | **Ventana de llegada y tolerancia** | 15 minutos antes y 15 de tolerancia (`SERVICES_ATTENTION_CHECKIN_MINUTES`, `SERVICES_ATTENTION_TOLERANCE_MINUTES`, 0–240) |
+| G4 | **Plazo de confirmación y cierre automático** | 24 h (`SERVICES_ATTENTION_CONFIRMATION_HOURS`, 1–720); solo se cierra sola con la señal fuerte y sin un caso vivo |
+| G5 | **Qué cuenta como prueba de asistencia** (código, QR, sala, ubicación) | Un código de seis cifras con cinco intentos. Ni QR, ni señales de la sala virtual, ni ubicación |
+| G6 | **Consecuencias de una inasistencia** (para quien contrata y para el prestador) | Ninguna: queda declarada y se puede discutir |
+| G7 | **Plazo y motivos de un caso** | 48 h desde que terminó (`SERVICES_INCIDENT_WINDOW_HOURS`, 1–720); los de seguridad, sin plazo; ocho motivos estables |
+| G8 | **Apelaciones**: cuántas, en qué plazo y quién las resuelve | Una (`SERVICES_INCIDENT_APPEALS_MAX`, 0–1), en 5 días (`SERVICES_INCIDENT_APPEAL_DAYS`, 1–60), y la resuelve **otra** persona |
+| G9 | **Si una apelación puede deshacer una atención dada por realizada** | No: cerrada es final. La apelación cambia la decisión y el efecto económico solicitado |
+| G10 | **Evidencias**: formatos, peso, cuántas y cuánto se conservan | PDF, JPEG, PNG y WebP, 10 MB, 10 por parte; sin plazo de conservación (ver F20 y F21) |
+| G11 | **Reseñas**: plazo, moderación previa, motivos para esconder, **identidad pública de quien reseña**, ejes | 30 días (`SERVICES_REVIEW_WINDOW_DAYS`, 1–365); moderación previa encendida (`SERVICES_REVIEWS_PREMODERATION`); seis motivos; **sin nombre**; cuatro ejes opcionales |
+| G12 | **Recordatorios y quién llama a los barridos** (amplía F13) | Un recordatorio 24 h antes (`SERVICES_BOOKING_REMINDER_HOURS`, 1–168), **solo si alguien lanza el barrido**: nadie lo llama |
+| G13 | **Qué pasa con un efecto económico solicitado cuando haya pagos** (amplía F18) | Nada: hoy siempre «no aplica». El punto de conexión con el adaptador de devoluciones está descrito, no construido |
+| G14 | **La aceptación del prestador** (a domicilio; amplía F3) | Sigue sin existir: a domicilio no se contrata |
+| G15 | **Quién decide en administración y cuántas personas hacen falta** | Solo `admin`. Con una sola persona **no hay apelaciones**: hacen falta dos antes de encender la contratación si se quieren |
+| G16 | **La baja de una cuenta con un caso vivo o con evidencias** (junto a F20 y F21) | La de quien contrata se lleva sus evidencias (el expediente conserva la fila, sin su archivo) y deja el caso y la reseña sin su nombre |
+| G17 | **Cómo se encuentran las partes en un servicio virtual** (una sala de Z con 100ms, un enlace del prestador, mensajes) | Z no ofrece sala ni guarda un enlace: se ponen de acuerdo por fuera. La integración de 100ms no tiene cuenta conectada. Surgida del cruce con el blueprint en el cierre |
+| G18 | **Qué política operativa queda congelada en cada reserva** (el blueprint pide copiarla, inmutable, al confirmar) | **Resuelto en lo técnico el 01/10/2026** (la 0095, aplicada y verificada sin divergencias ese día: `Z_SERVICIOS_ARQUITECTURA.md` §106 y §118). Al confirmar se guardan con la reserva, inmutables y con su huella, los nueve plazos y topes con los que después se decide: reprogramar (cuántas veces y con cuánta antelación), la llegada, la tolerancia, la confirmación y el cierre automático, el caso, la apelación (plazo y si la hay) y la reseña. **Sus valores siguen siendo los provisionales**: decidirlos es G2, G3, G4, G7, G8 y G11, y un cambio valdrá para las reservas que se confirmen después. **No se congelan** el aviso previo (G12) ni la moderación previa de una reseña (G11). **Cancelar no tiene ningún plazo configurable** (G1): cuando se decida uno, entrará en la fotografía |
+
+> **F21 sigue pendiente, y ahora pesa más.** La baja de quien presta se sigue
+> llevando sus servicios y, con ellos, sus reservas pasadas, sus pedidos, lo
+> que aceptó quien contrató y, desde este incremento, **sus atenciones, sus
+> casos con sus resoluciones y sus reseñas**. No se modificó la 0090 ni se
+> diseñó una solución: es una decisión legal de la empresa.
+>
+> **Recomendación técnica** (no es una decisión): conservar las reservas, lo
+> aceptado y las resoluciones **anonimizados** (el prestador en `NULL`, como
+> ya se hace con quien contrata), y borrar solo lo personal (la nota, la
+> dirección, las evidencias). Exige alterar la clave de la 0090 y decidir el
+> plazo de conservación.
+
+Siguen siendo de la empresa, además: **C1–C15, D1–D15, E1–E12 y F1–F21**,
+ninguna resuelta en este incremento; **C15** antes de encender Servicios (D6);
+el **destino del push**; **publicar las condiciones de contratación** (F9); y
+el **planificador** (F13, G12).
+
+### No implementado, a propósito (YAGNI)
+
+Mencionado en el alcance y **no necesario** para una atención gratuita
+verificable:
+
+- la **aceptación manual del prestador** (a domicilio sigue sin contratarse);
+- la **reprogramación pedida por el prestador** y la **cancelación directa
+  por administración**;
+- **QR**, señales de entrada a la sala de **100ms** y **geolocalización**
+  como prueba de asistencia;
+- **cambios de alcance** de una atención ya contratada;
+- **pedidos con precio**, cobro, comisión, saldos, el adaptador de
+  devoluciones, webhooks, transferencias y conciliación;
+- un **índice de desempeño** del prestador, **alertas de riesgo** y la nota
+  ajustada;
+- **fotos o archivos en una reseña** y la edición de la respuesta;
+- el **planificador** de los barridos y el **push con destino**;
+- una **pantalla de configuración** de la política (son variables de
+  entorno), el enlace a **mensajes** por reserva y «añadir al calendario».
+
+### Límites del Incremento 6
+
+- **La 0094 está aplicada y verificada** (§102); el código, sin desplegar.
+- **No hay QA físico.**
+- **Nada mueve dinero** y ningún estado dice que se movió.
+- Lo conocido y no corregido (bajo, ver `Z_SERVICIOS_ARQUITECTURA.md` §99): una
+  atención terminada sin código que nadie confirma se queda `completed`; un
+  caso decidido impide abrir otro, también por seguridad; el prestador ve en
+  el historial que hay una reseña antes de que se publique (no su contenido).
+
+### Cierre técnico (01/10/2026, Incremento 6)
+
+**Incremento 6 de Z Servicios técnicamente cerrado; únicamente queda pendiente
+el QA físico.** El detalle, en `Z_SERVICIOS_ARQUITECTURA.md` §102–§105.
+
+- **La 0094 está en Supabase y coincide** con la referencia 0001–0094:
+  verificada en solo lectura el 01/10/2026 a las 14:28 UTC, sin divergencias,
+  y con las seis puertas de esquema diciendo «sí» con la conexión y el rol
+  reales de la API. Las cuatro tablas están vacías y el depósito de evidencias
+  es privado. Su huella consta en `APLICADAS`.
+- **Una corrección de código**: el recordatorio es de un horario, no de la
+  reserva (una reserva recordada y después reprogramada se vuelve a recordar).
+- **Lo omitido, clasificado** contra el blueprint y sus capturas (§103):
+  ninguna de las trece funciones era necesaria para el recorrido gratuito.
+  La aceptación del prestador, la reprogramación pedida por el prestador, la
+  cancelación por administración y la pantalla de configuración son
+  **decisiones de la empresa**; los pagos, la conciliación y la sala de 100ms,
+  **integraciones externas** sin confirmar; el planificador, una **decisión
+  operativa**; el QR, las fotos en la reseña y el índice de desempeño,
+  **mejoras futuras**; la geolocalización, **fuera de alcance**; y el push con
+  destino, una tarea de plataforma pendiente desde el Incremento 1.
+- **Dos decisiones nuevas**, del cruce con el blueprint: **G17** (cómo se
+  encuentran las partes en un servicio virtual) y **G18** (congelar la política
+  operativa en la reserva antes de que cancelar cueste dinero).
+- **Una migración aplicada no se deshace**: se apagan las banderas y se
+  corrige hacia delante (§104).
+
+> **F21 sigue pendiente y es lo más importante antes de encender la
+> contratación.** La baja de quien presta se lleva sus reservas pasadas, sus
+> pedidos, lo que aceptó quien contrató, las atenciones, los casos con su
+> expediente y sus resoluciones, las reseñas y el historial. Las evidencias
+> que subió quien contrató se quedan en el depósito, sin nada que las nombre.
+> **Recomendación técnica (no es una decisión):** conservar la historia
+> contractual, las resoluciones y los movimientos económicos; anonimizar la
+> identidad; definir un plazo legal; e impedir que una baja destruya evidencia
+> necesaria. No se modificó la 0090 ni se creó una 0095.
+
+Siguen pendientes, **todas**: C1–C15, D1–D15, E1–E12, F1–F21 y G1–G18. Ninguna
+se dio por resuelta.
+
+> *Al 02/10/2026:* ya no es así. El estado vigente de cada una está en el
+> consolidado del comienzo del documento (apartado VII).
+
+### Corrección G18: la política operativa, congelada en cada reserva (01/10/2026)
+
+**Corrección G18 de Z Servicios implementada y probada; pendiente de aplicar y
+verificar la migración 0095 y de realizar el QA físico.** El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md` §106–§117.
+
+- **Qué se corrigió.** Los plazos con los que se decide qué se puede hacer
+  con una reserva se leían de la configuración del momento: cambiarla cambiaba
+  hacia atrás las reservas ya hechas. Ahora cada reserva guarda los suyos al
+  confirmarse (la migración **0095, escrita y sin aplicar**) y solo se decide
+  con esos.
+- **Qué NO se decidió.** Ningún valor. Los nueve son los provisionales del
+  alcance («política operativa v1»): G2, G3, G4, G7, G8 y G11 siguen siendo de
+  la empresa. Congelar un valor provisional no lo convierte en política.
+- **Qué no se congela, y por qué**: el aviso previo (es un aviso, no un plazo
+  de nadie) y la moderación previa de una reseña (es de la moderación de Z: si
+  se enciende tiene que valer para toda reseña que se escribe).
+- **Cancelar**: sigue sin plazo ni coste, hasta la hora de inicio (G1). No se
+  inventó un plazo. Cuando la empresa lo decida entrará en la fotografía, con
+  otra versión de su estructura.
+- **Las reservas anteriores a la 0095** no tienen fotografía ni pueden
+  ganarla: se rigen por la política vigente, como hasta ahora. En Supabase no
+  hay ninguna.
+- **Sin rutas, pantallas ni campos nuevos.** No se movió dinero, no se activó
+  ninguna bandera, no se publicó ninguna política y no se escribió en Supabase.
+
+Siguen pendientes, **todas las demás**: C1–C15, D1–D15, E1–E12, F1–F21 (F21,
+la primera) y G1–G17.
+
+> *Al 02/10/2026:* ver el consolidado del comienzo del documento. Las que
+> siguen siendo de la empresa están en su apartado IV.
+
+### Cierre técnico de G18 y cierre consolidado de los seis incrementos (01/10/2026)
+
+**Los Incrementos 1–6 de Z Servicios están técnicamente cerrados; únicamente
+quedan pendientes el QA físico, las decisiones empresariales y las
+integraciones externas documentadas.** El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md` §118–§120.
+
+- **La 0095 está en Supabase y coincide** con la referencia 0001–0095:
+  verificada en solo lectura el 01/10/2026 a las 18:05 UTC, sin divergencias,
+  con las seis puertas de esquema diciendo «sí» con la conexión y el rol
+  reales de la API. Una sola transacción dejó sus tres columnas, sus cuatro
+  CHECK, su función y su disparador, y ninguna fila. Su huella consta en
+  `APLICADAS`.
+- **No hay ninguna reserva anterior** a la 0095 (ni ninguna otra): las tablas
+  de la reserva y de la atención están vacías, y no hay condiciones de
+  contratación publicadas.
+- **G18 queda resuelta en lo técnico.** Sus nueve valores **siguen siendo
+  provisionales**: son los del alcance, no una decisión.
+- **No se corrigió código** en el cierre: no hubo divergencias ni defectos.
+
+**Lo que sigue pendiente, y de quién es:**
+
+| | |
+|---|---|
+| **De la empresa** | S1–S14 (S7, decidida), C1–C16, D1–D15, E1–E12, F1–F21 y G1–G17: **ninguna se dio por resuelta**. Entre ellas: **F21** (qué se conserva cuando quien presta borra su cuenta: la primera antes de encender la contratación), publicar las condiciones de contratación (F9), los valores definitivos de la política operativa (G2–G4, G7, G8, G11), quién ejecuta los barridos (F13, G12), cómo se encuentran las partes en un servicio virtual (G17) y el proveedor de pagos |
+| **QA físico** | los seis incrementos, en teléfonos, con archivos reales, notificaciones y personas distintas (`Z_QA_FISICO_PENDIENTE.md`) |
+| **Integración y operación** | el push con destino, la conexión de 100ms, la de la pasarela de pago, la programación de los barridos, el despliegue de `Edson`, el CI remoto, la revisión del PR y la integración a `main` |
+
+Los resúmenes anteriores decían «C1–C15»: la tabla del Incremento 2 tiene
+**C16** (las monedas del formulario), y el Incremento 1 tiene su propia serie
+**S**. Se corrige aquí; ninguna cambió de estado.
+
+`FEATURE_SERVICES`, `FEATURE_SERVICE_BOOKING` y `FEATURE_SERVICE_PAYMENTS`
+siguen **apagadas**, la pasarela es `none`, **no se movió dinero** y el código
+sigue **sin desplegar**.
+
+> *Al 02/10/2026:* la fila «De la empresa» de la tabla de este cierre se depuró. De las
+> 96 decisiones anotadas, 25 siguen necesitando a la empresa; las demás
+> quedaron decididas para la primera versión, como valor provisional, como
+> integración externa, como mejora futura o fuera de alcance. El detalle está
+> al comienzo de este documento.
+
+### Cinco políticas cerradas en el código (02/10/2026)
+
+**Las cinco brechas entre las políticas de la primera versión y el
+comportamiento real están cerradas en el código y probadas; queda aplicar y
+verificar la migración 0096, y el QA físico.** El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII (§122–§130).
+
+- **P29, rutas opacas.** La ruta de una imagen ya no lleva el perfil del
+  prestador: es `<servicio>/<al azar>.<ext>` y la pone el servidor. La
+  migración **0096, escrita y sin aplicar**, sustituye el cuerpo del
+  disparador de la 0090 (que no se edita). C15 y D6 quedan decididas e
+  implementadas, a falta de aplicarla.
+- **P5 y P2.** De fábrica, dos modalidades y soles. Lo que Z no ofrece no
+  entra en un borrador ni se filtra, y la app no lo enseña. C4 y C16.
+- **P51.** La capacidad salió de la ficha pública y de los horarios. E5 y F8.
+- **P101.** El piloto: con Servicios encendido solo entran los perfiles
+  autorizados; la lista vacía no deja entrar a nadie y la apertura general se
+  escribe. Administración entra por su rol, y la app le enseña su sección
+  por ese mismo rol, esté o no en la lista.
+- **AWS**, preparado y sin desplegar: los parámetros, los dos perfiles y la
+  validación del secreto.
+
+**Qué NO se decidió.** Nada que fuera de la empresa: ni las ciudades, ni las
+categorías, ni quién participa en el piloto, ni su fecha (IV-48). **F21 sigue
+siendo la primera** y no se tocó. Los nueve valores de la política operativa
+siguen siendo provisionales.
+
+**Una reclasificación:** C16 (las monedas del formulario) pasa de «mejora
+futura» a «decidida para la primera versión», porque ya está hecha. Quedan 43
+decididas, 14 provisionales, 25 de la empresa, 3 integraciones, 5 mejoras y 6
+que no aplican.
+
+No se escribió en Supabase, no se ejecutó nada en AWS, no se activó ninguna
+bandera y no se movió dinero. El código sigue **sin desplegar**.
+
+### La 0096, aplicada y verificada (02/10/2026)
+
+**La migración 0096 se ejecutó a mano en Supabase y se verificó el 02/10/2026
+(19:51 UTC) en solo lectura: sin divergencias.** Su huella consta en
+`APLICADAS`. El detalle, en `Z_SERVICIOS_ARQUITECTURA.md`, §131–§134.
+
+- **C15 y D6 (P29) quedan cerradas**: ruta opaca en el código y en la base.
+- Las cinco políticas que el sistema no imponía —P29, P5, P2, P51 y P101—
+  funcionan juntas: un recorrido con la API real, 92 de 92 comprobaciones.
+- De paso se corrigió la primera puerta de esquema: un error al mirarla era un
+  500 y ahora es el 503 controlado de las demás.
+
+**Qué NO se decidió.** Nada de la empresa. **F21 sigue siendo la primera.** Ni
+quién participa en el piloto ni su fecha (IV-48). Los recuentos no cambian: 43
+decididas, 14 provisionales, 25 de la empresa, 3 integraciones, 5 mejoras y 6
+que no aplican.
+
+No se desplegó nada, no se ejecutó nada en AWS, no se activó ninguna bandera y
+no se movió dinero. El código sigue en `Edson`, **sin push**.
+
+### Cierre de salida del piloto gratuito (02/10/2026)
+
+Último bloque antes de la mejora de las vistas. **Sin migración nueva**; las
+0086–0096 siguen intactas. El detalle, en `Z_SERVICIOS_ARQUITECTURA.md`,
+Parte IX (§135–§146).
+
+**Qué se decidió**, por indicación de Edson y como política técnica y
+operativa inicial (no como dictamen legal):
+
+- **F21, provisional (P106).** Una cuenta que es parte de un pedido o de una
+  reserva de Servicios no se borra sola: `DELETE /auth/me` contesta 409
+  `service_history_requires_support`, sin borrar nada ni tocar un archivo, y
+  la aplicación remite a soporte. Una postulación, un servicio que nadie
+  contrató, una retención o algo guardado no frenan. **La anonimización
+  definitiva sigue pendiente de validación legal** (IV-18).
+- **El piloto es gratuito (P107).** Solo fichas gratuitas o «a consultar»;
+  solo lo gratuito se reserva; ningún camino de dinero.
+- **Condiciones piloto v1 (P108): preparadas, no publicadas.** Requieren
+  aprobación empresarial y legal, y el canal de soporte.
+- **Solo adultos (P109)**, Perú, soles, virtual y presencial, sin domicilio,
+  sin categorías reguladas, **sin sala propia ni grabaciones (P110)**.
+- **Los plazos** de la tabla III no cambiaron: todos coincidían.
+- **Responsables:** administración revisa prestadores, servicios e
+  incidencias; una segunda persona distinta, las apelaciones; nadie resuelve
+  lo suyo; sin otra persona habilitada no se ofrece la apelación; soporte
+  atiende las bajas bloqueadas; el responsable técnico vigila las tareas. Ya
+  funcionaba: **no se nombró a nadie**.
+- **Procesos automáticos:** se ejecutan a mano hasta que haya un
+  planificador, que se resuelve al desplegar. De paso se corrigió el barrido
+  de retenciones: una fila con error ya no deshace el lote.
+
+**Reclasificaciones.** F21 y G16 pasan a «decidida para la primera versión»
+(provisional). F16, F17, F18 y G13 —comprobantes, comisión, devoluciones y
+efectos económicos— pasan a «no aplica a la primera versión»: **no se dan por
+resueltas**, quedan pendientes para una versión con pagos. Quedan 45
+decididas, 14 provisionales, 19 de la empresa, 3 integraciones, 5 mejoras y
+10 que no aplican.
+
+**Qué NO se decidió.** La anonimización definitiva y los plazos de
+conservación; el texto legal aprobado; el canal de soporte; quiénes son las
+personas responsables; las ciudades y las categorías; quién participa en el
+piloto y cuándo; nada de pagos.
+
+No se publicó ninguna condición, no se escribió en Supabase, no se ejecutó
+nada en AWS, no se activó ninguna bandera y no se movió dinero. El código
+sigue en `Edson`, **sin push**.
+
+### Cierre operativo del piloto gratuito (03/10/2026)
+
+Lo que faltaba para poder encender el piloto. **Sin migración nueva** (no hay
+0097), sin pagos y sin ningún servicio nuevo en AWS. El detalle, en
+`Z_SERVICIOS_ARQUITECTURA.md`, Parte X (§147–§156); el orden y los comandos,
+en `Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`.
+
+**Qué se preparó:**
+
+- **Condiciones del prestador v1 (P111).** Texto operativo y provisional de 19
+  apartados, con su huella. **Sin publicar.** El canal de soporte es el que ya
+  existía en la aplicación: no se inventó ninguno.
+- **Condiciones de contratación v1**, sin marcadores pendientes y con el mismo
+  canal. **Sin publicar.**
+- **El precio, cerrado en todos los pasos (P112).** Era de fábrica; ahora
+  tampoco se ofrece, ni se guarda en un borrador, ni se publica, ni se puede
+  configurar en un despliegue.
+- **El planificador (P113).** Una ruta interna con secreto y una regla de
+  EventBridge cada 5 minutos, con alarma. **Sin activar.** La contratación no
+  se puede encender sin él.
+- **Las vistas**, para poder presentar la aplicación: `Z_MATRIZ_DE_VISTAS.md`.
+
+**Qué cambia de estado.** Ninguna decisión cambia de clasificación y los
+recuentos son los mismos: 45 decididas, 14 provisionales, 19 de la empresa, 3
+integraciones, 5 mejoras y 10 que no aplican. Cambia lo que dicen S1, F13,
+G12, V-53, IV-13, IV-16, IV-44 e IV-45: lo que era «falta» es «preparado, sin
+publicar» o «preparado, sin activar».
+
+**Qué NO se decidió.** La revisión legal de las dos condiciones; si quien fue
+rechazado puede volver a postular (S2); la anonimización definitiva (F21); a
+qué persona le toca vigilar los procesos (hoy avisa al correo de alertas de la
+pila); quién participa en el piloto y cuándo; nada de pagos.
+
+No se hizo push, no se abrió ningún PR, no se publicó ninguna condición, no se
+escribió en Supabase, no se ejecutó nada en AWS y no se activó ninguna
+bandera. El código sigue en `Edson`.

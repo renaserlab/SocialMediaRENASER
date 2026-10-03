@@ -26,7 +26,9 @@ import {
 } from './eventoDelOrganizador.ts';
 
 const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const fuente = (rel: string) => readFileSync(join(SRC, rel), 'utf8');
+// Sin `\r`: con `core.autocrlf` en Windows el fuente llega con CRLF y las
+// búsquedas de varias líneas de abajo no casarían.
+const fuente = (rel: string) => readFileSync(join(SRC, rel), 'utf8').replace(/\r\n/g, '\n');
 
 const completo = (extra: Partial<CamposDelBorrador> = {}): CamposDelBorrador => ({
   title: 'Cena de autor',

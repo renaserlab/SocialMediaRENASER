@@ -11,6 +11,7 @@ import { Text } from '@/components/Text';
 import { claveDelEstado } from '@/lib/admisionDeEvento';
 import { estaEnRevision, estaPublicado } from '@/lib/eventoDelOrganizador';
 import { notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import {
   EventOrganizerRepository,
   type EventoDelOrganizador,
@@ -103,8 +104,10 @@ export function MisEventosScreen() {
       setEventos((previos) => [...previos, ...items]);
       setHayMas(mas);
     } catch {
-      // Se deja la lista como está: lo ya traído sigue siendo válido.
-      setHayMas(false);
+      // Se deja la lista como está: lo ya traído sigue siendo válido. Y EL
+      // BOTÓN SE QUEDA: quitarlo tras un fallo de red hacía creer que no había
+      // más eventos, sin decir nada y sin dejar reintentar.
+      toast(t('common.tryAgain'), 'alert-circle');
     } finally {
       setTrayendoMas(false);
     }

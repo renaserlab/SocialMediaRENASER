@@ -171,7 +171,14 @@ export function HashtagScreen() {
               </Text>
             </View>
           }
-          renderItem={({ item }) => <PostCard post={item} />}
+          // Con margen lateral, como en el muro o en Guardados: sin el, las
+          // tarjetas iban de borde a borde. Va en cada tarjeta y no en la lista
+          // porque la cabecera ya trae el suyo.
+          renderItem={({ item }) => (
+            <View style={styles.tarjeta}>
+              <PostCard post={item} />
+            </View>
+          )}
           onEndReached={cargarMas}
           onEndReachedThreshold={0.6}
           refreshControl={
@@ -185,6 +192,7 @@ export function HashtagScreen() {
 
 const styles = StyleSheet.create({
   lista: { paddingBottom: 120 },
+  tarjeta: { paddingHorizontal: spacing.lg },
   cabecera: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, ViewStyle } from 'react-native';
 
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { radius } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -14,8 +15,15 @@ type SkeletonProps = {
 export function Skeleton({ width = '100%', height = 20, circle = false, style }: SkeletonProps) {
   const { colors } = useAppTheme();
   const opacity = useRef(new Animated.Value(0.3)).current;
+  const reducirMovimiento = useReduceMotion();
 
   useEffect(() => {
+    // Con «reducir movimiento», un bloque quieto a media opacidad: sigue
+    // diciendo «aquí va algo» sin parpadear en bucle.
+    if (reducirMovimiento) {
+      opacity.setValue(0.5);
+      return undefined;
+    }
     const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(opacity, {
@@ -33,7 +41,7 @@ export function Skeleton({ width = '100%', height = 20, circle = false, style }:
     animation.start();
 
     return () => animation.stop();
-  }, [opacity]);
+  }, [opacity, reducirMovimiento]);
 
   return (
     <Animated.View

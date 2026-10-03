@@ -204,6 +204,111 @@ class Settings(BaseSettings):
     #: que se pudiera comprar; solo dejaria de ser verdad que no se puede.
     feature_product_sales: bool = False
 
+    #: Z SERVICIOS. APAGADA de fabrica, y apagada no se ve nada: las rutas de
+    #: `/services` y `/admin/services` contestan 503 `services_disabled` sin
+    #: tocar la base, y la app no muestra ninguna entrada. Hoy solo gobierna la
+    #: admision del prestador (Incremento 1).
+    #:
+    #: NO ESTA ATADA A NADA MAS. Ni a pagos, ni a Stripe, ni a reservas: cada
+    #: una de esas cosas tendra su propia bandera cuando exista, igual que
+    #: `feature_products` y `feature_product_sales`.
+    feature_services: bool = False
+
+    #: EL PILOTO DE SERVICIOS (politica P101). Con `feature_services` encendida,
+    #: Servicios NO se abre a todo el mundo: solo a los perfiles de esta lista
+    #: (UUID separados por comas). VACIA = NADIE: desplegar con la bandera
+    #: encendida y la lista vacia no abre nada por descuido. Una lista mal
+    #: escrita tampoco abre nada (`services/acceso.py`). Las rutas de
+    #: administracion no pasan por aqui: siguen dependiendo del rol de cada
+    #: persona, y estar en la lista no da ninguno.
+    services_pilot_profile_ids: str = ""
+    #: LA APERTURA GENERAL, y es EXPLICITA: solo con esto en `True` Servicios
+    #: deja de mirar la lista del piloto. No se deduce de una lista vacia.
+    services_public_access: bool = False
+
+    #: EL CATALOGO DE SERVICIOS (Incremento 2). Listas separadas por comas.
+    #: Las modalidades y la moneda son POLITICA DE LA PRIMERA VERSION
+    #: (02/10/2026, P2, P4 y P5; `docs/Z_REQUISITOS_Y_DECISIONES.md`): virtual y
+    #: presencial en el local del prestador, en soles. `at_home` sigue en el
+    #: modelo y en la base (0090): volver a ofrecerla es anadirla aqui, y
+    #: construir antes la aceptacion del prestador.
+    services_catalog_modalities: str = "virtual,in_person"
+    #: EL PILOTO ES GRATUITO (politica de la primera version, 02/10/2026): una
+    #: ficha es gratuita o dice «a consultar», que es solo informacion (no se
+    #: reserva ni se paga en Z). `fixed` y `from` («desde») siguen en el modelo
+    #: y en la base: una ficha con importe no se puede ENVIAR a revision
+    #: (`price_model_not_allowed`) hasta que se anadan aqui, y eso es de una
+    #: version con pagos.
+    services_catalog_price_models: str = "free,on_request"
+    #: SIN MONEDA CONFIGURADA NO SE ENVIA un precio con importe. Solo PEN.
+    services_catalog_currencies: str = "PEN"
+    services_catalog_min_duration_minutes: int = 5
+    services_catalog_max_duration_minutes: int = 1440
+    services_catalog_max_images: int = 8
+
+    #: LA AGENDA DE SERVICIOS (Incremento 4). Los dos valores son los
+    #: PROVISIONALES del documento de reglas de la reserva (4.5 y 4.6), no una
+    #: decision tomada aqui: cuanta antelacion minima pide un horario y hasta
+    #: cuantos dias por delante se ofrece. Configurables y documentados
+    #: (`docs/Z_SERVICIOS_ARQUITECTURA.md`); los demas limites de la agenda son
+    #: tecnicos y viven en `services/agenda_politica.py`.
+    services_agenda_notice_minutes: int = 120
+    services_agenda_horizon_days: int = 60
+
+    #: LA CONTRATACIÓN DE SERVICIOS (Incremento 5). SU PROPIA BANDERA, como
+    #: pide la arquitectura de Servicios (§17, `feature_service_booking`): con
+    #: `feature_services` encendida y esta apagada se ven horarios, pero no se
+    #: retiene ni se reserva nada (503 `service_booking_disabled`).
+    feature_service_booking: bool = False
+    #: EL COBRO DE UN SERVICIO (reglas §22). NO EXISTE adaptador de pago para
+    #: Servicios: aunque se encendieran las dos, un servicio con precio sigue
+    #: contestando `service_booking_payments_not_configured`. Están aquí para
+    #: que nadie tenga que inventarlas el día que exista el cobro.
+    feature_service_payments: bool = False
+    service_payments_provider: str = "none"
+    #: PROVISIONALES del documento de reglas de la reserva (§6.1 y §6.5), no
+    #: una decisión tomada aquí: cuántos minutos aparta una retención y cuántas
+    #: activas puede tener una persona a la vez.
+    services_booking_hold_minutes: int = 10
+    services_booking_max_active_holds: int = 3
+    #: Qué modalidades se CONFIRMAN SOLAS. A domicilio no: según las reglas
+    #: (§3.2) y la política provisional del alcance (§3) la acepta el
+    #: prestador, y esa aceptación todavía no existe (se contesta 409
+    #: `service_booking_provider_confirmation_required`). Lista separada por comas.
+    services_booking_instant_modalities: str = "virtual,in_person"
+
+    #: LA ATENCIÓN Y LA POSVENTA DE SERVICIOS (Incremento 6). TODOS
+    #: PROVISIONALES: son los de la «política operativa v1» del alcance, no
+    #: decisiones tomadas aquí (`docs/Z_REQUISITOS_Y_DECISIONES.md`, G1–G18).
+    #: Se leen y se acotan en `services/reserva_politica.py`.
+    #: LOS QUE DECIDEN SOBRE UNA RESERVA YA HECHA SE CONGELAN CON ELLA al
+    #: confirmarla (0095, G18): cambiarlos aquí solo vale para las que se
+    #: confirmen después. No se congelan el aviso previo (`reminder`) ni la
+    #: moderación previa de una reseña (`premoderation`).
+    #: Minutos antes de la hora en que se abre la llegada, y la tolerancia.
+    services_attention_checkin_minutes: int = 15
+    services_attention_tolerance_minutes: int = 15
+    #: Horas que tiene quien contrata para confirmar que la atención se hizo.
+    services_attention_confirmation_hours: int = 24
+    #: Cuántas veces reprograma quien contrata, y con cuántas horas de antelación.
+    services_booking_reschedule_max: int = 1
+    services_booking_reschedule_min_hours: int = 24
+    services_booking_reminder_hours: int = 24
+    #: Horas para abrir un caso tras la atención, y días para apelar.
+    services_incident_window_hours: int = 48
+    services_incident_appeal_days: int = 5
+    #: Cuántas veces se apela un caso: 0 (ninguna) o 1. La base no admite más.
+    services_incident_appeals_max: int = 1
+    #: Días para reseñar, y si una reseña espera a moderación antes de verse.
+    services_review_window_days: int = 30
+    services_reviews_premoderation: bool = True
+    #: EL SECRETO DEL PLANIFICADOR (`services/procesos_router.py`). Lo manda en
+    #: una cabecera la regla que lanza los barridos de Servicios cada pocos
+    #: minutos. VACÍO (o con menos de 32 caracteres) = SIN CONFIGURAR: la ruta
+    #: contesta 503 y no acepta nada. Va en el secreto de la API, nunca en un
+    #: parámetro ni en el repositorio; lo genera el guion de despliegue.
+    services_tasks_token: str = ""
+
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:
     #: CERO SIGNIFICA «SIN CONFIGURAR», Y SIN CONFIGURAR NO SE VENDE. No hay

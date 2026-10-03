@@ -1179,3 +1179,990 @@ Se deja escrito para que nadie lo marque por error:
 - [ ] ~~El impuesto y el comprobante~~ — no hay entidad legal decidida.
 - [ ] ~~La transferencia a quien vende~~ — no existe el alta de cuenta conectada.
 - [ ] ~~Quien absorbe un contracargo perdido~~ — sin decidir.
+
+---
+
+## Z Servicios · Incremento 1 — admisión de prestadores (29/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** Las pruebas
+automáticas cubren la API, PostgreSQL y el código de las pantallas, pero no un
+aparato, ni el selector de archivos, ni el lector de pantalla.
+
+Antes de empezar:
+
+- La **0088** y la **0089** ya están aplicadas en Supabase (29/09/2026; la
+  0089, verificada sin divergencias). Si se usa otra base de pruebas,
+  aplicarle la **0089 completa** (`Z_BAJA_DE_CUENTA.md` §10) antes de probar
+  la eliminación de cuenta.
+- La API de ese entorno tiene que correr el código de `Edson` (todavía sin
+  desplegar). Reiniciarla después de cualquier migración: la puerta de la
+  baja recuerda lo que vio al arrancar.
+- Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
+- Publicar unas condiciones del prestador para el país de prueba, desde
+  Administración › Servicios › Condiciones del prestador.
+
+Hacen falta **dos cuentas en dos teléfonos**: quien postula (`user`) y una de
+administración (`admin`). Si se puede, una tercera de moderación
+(`moderator`), para ver que no aprueba.
+
+### Con la bandera apagada, que es como se entrega
+
+- [ ] El menú del perfil es **exactamente** el de antes: no aparece «Ofrecer un servicio».
+- [ ] El panel de administración es exactamente el de antes: no aparece la sección Servicios.
+- [ ] Cursos, Eventos y Productos se comportan igual que antes.
+
+### Quien postula
+
+- [ ] Perfil › «Ofrecer un servicio» abre la explicación. No aparece ningún
+      precio, catálogo ni reserva.
+- [ ] Persona o empresa, más el nombre. Tocar «Continuar» dos veces seguidas
+      crea UNA sola postulación.
+- [ ] Información básica: se guarda y, al volver atrás, sigue ahí. Con
+      «Empresa» aparecen el registro tributario y el representante.
+- [ ] Condiciones:
+  - sin país, lo pide;
+  - sin condiciones publicadas, lo dice con palabras;
+  - con ellas, enseña la versión y la huella;
+  - aceptar exige marcar «He leído».
+- [ ] Documentos:
+  - subir una **foto hecha con la cámara**;
+  - subir un **PDF**;
+  - un archivo de más de 10 MB lo rechaza **antes** de subirlo;
+  - «Ver» abre el documento, y el enlace deja de servir **a los 2 minutos**.
+- [ ] Documentos: reemplazar uno; quitar uno que no se ha enviado.
+- [ ] Credenciales:
+  - declarar una con número: después solo se ve `••••` y los 4 últimos;
+  - elegir la evidencia;
+  - editarla;
+  - quitarla.
+- [ ] Resumen:
+  - enseña lo que falta en palabras, nunca un código;
+  - «Enviar» no se activa sin la declaración de veracidad.
+- [ ] Enviar con **conexión cortada** a mitad: dice que no hay conexión y, al
+      reintentar, **no** envía dos veces.
+- [ ] Tras enviar ya no se puede editar nada. El estado dice «Enviada».
+
+### Administración (segundo teléfono)
+
+- [ ] Panel › Servicios › Postulaciones: la bandeja enseña la enviada. Los
+      filtros de estado y tipo funcionan. «Ver más» pagina sin repetir filas.
+- [ ] Tomar para revisión. Abrir cada documento («Ver», 2 minutos) y la
+      evidencia de la credencial.
+- [ ] Observar un documento con motivo. Sin motivo, no deja.
+- [ ] Pedir correcciones:
+  - marcar un dato;
+  - pide confirmación;
+  - un doble toque decide una sola vez.
+- [ ] Con moderación: puede tomar y pedir correcciones, pero **no** aprobar,
+      rechazar ni suspender. Esos botones no aparecen.
+
+### Correcciones y reenvío (primer teléfono)
+
+- [ ] Llega el aviso «Z te pidió correcciones». Al tocarlo, abre la postulación.
+- [ ] Se ven el mensaje de Z y el dato por corregir. Reemplazar el documento
+      observado y corregir el dato.
+- [ ] Reenviar sin corregir lo pedido: dice qué falta. Corregido, se reenvía.
+
+### Decisiones
+
+- [ ] Aprobar sin aceptar todos los documentos: dice qué lo impide.
+- [ ] Aprobar con todo aceptado: quien postula recibe el aviso y ve «Aprobada».
+- [ ] Suspender (con motivo): el estado del prestador pasa a suspendido. Llega
+      el aviso.
+- [ ] Devolver a revisión la suspendida: el botón dice «Devolver a revisión».
+- [ ] En ese momento quien postula **no** puede retirarse: no aparece la opción.
+- [ ] Rechazar (con motivo): quien postula ve el motivo.
+- [ ] Postular de nuevo tras un rechazo:
+  - si las condiciones no lo deciden, lo dice;
+  - si lo permiten, empieza una nueva.
+- [ ] Dos personas de administración deciden **a la vez** sobre la misma
+      postulación: una gana y la otra ve «esto cambió mientras tanto», con el
+      estado real.
+
+### Retirada
+
+- [ ] Retirar desde el borrador, desde enviada y desde «correcciones pedidas»:
+      pide confirmación y explica que es definitivo.
+- [ ] Tras retirarse, la nueva postulación empieza vacía: sin documentos ni
+      condiciones aceptadas.
+
+### Idiomas, accesibilidad y web
+
+- [ ] Todo el recorrido, en español, en inglés y en portugués. Ningún texto sale
+      en otro idioma ni como código.
+- [ ] Con el lector de pantalla (TalkBack/VoiceOver):
+  - los grupos de opciones se anuncian como botones de opción;
+  - los botones desactivados se anuncian desactivados.
+- [ ] Modo oscuro: se lee todo.
+- [ ] Web: el mismo recorrido en el navegador. Subir un archivo abre el
+      selector del sistema.
+- [ ] Atrás de Android en cada paso: no pierde lo escrito ni reenvía nada.
+
+### Eliminación de cuenta
+
+**Con la 0089 completa** (en Supabase lo está desde el 29/09/2026) **y la API
+con el código de `Edson`**. Corregido en el código y probado contra
+PostgreSQL y con la API local de verdad (`Z_BAJA_DE_CUENTA.md` §15), pero
+**no en un teléfono**. Usar cuentas de prueba desechables, nunca una real.
+
+- [ ] En un entorno con la 0089 a medias (sin los frenos de las órdenes con
+      dinero) y la API reiniciada: la baja **no se hace** (503
+      `account_deletion_unavailable`), el teléfono dice «No se pudo eliminar
+      la cuenta · Inténtalo de nuevo en unos momentos. Tu cuenta sigue
+      activa.», y no se pierde ningún archivo. Solo en una base de pruebas.
+
+- [ ] Borrar la cuenta de quien postuló, desde Ajustes › Eliminar cuenta:
+  - la app vuelve a la portada y la sesión se cierra;
+  - su postulación, sus documentos y sus archivos desaparecen: el enlace de un
+    documento abierto antes deja de funcionar;
+  - volver a entrar con esa cuenta no es posible.
+- [ ] Desde administración, lo que se decidió sobre esa postulación sigue en
+      la auditoría, sin nombrar a quien postuló.
+- [ ] Borrar la cuenta de alguien de moderación o administración que decidió
+      algo: se borra; sus decisiones siguen, sin su nombre.
+- [ ] Una cuenta que haya enviado adjuntos por chat: tras borrarla, la otra
+      persona ya no ve esos adjuntos, y los suyos propios siguen.
+- [ ] Una cuenta con un producto creado (vendedor): **no se borra**, y el
+      teléfono dice que tiene ventas, pedidos o reclamos y que escriba a
+      soporte, **no** «inténtalo de nuevo». Revisar el texto en los tres
+      idiomas.
+- [ ] Sin conexión a mitad del borrado: el aviso dice que **no se pudo
+      confirmar** (no que la cuenta sigue activa), y al reintentar con
+      conexión se borra o se cierra la sesión si ya estaba borrada.
+- [ ] Una cuenta con muchos vídeos: la baja termina sin cortarse (espera de
+      hasta 90 s). Un vídeo recién subido que se está procesando: tras la
+      baja no queda su miniatura ni su versión reducida.
+- [ ] Una cuenta que compró una entrada **pagada** (cuando se enciendan los
+      pagos): no se borra, y dice que escriba a soporte.
+- [ ] Doble toque en «Sí, eliminar»: una sola baja, sin errores.
+
+## Z Servicios · Incremento 2 — catálogo y publicación de servicios (29/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** Las pruebas
+automáticas cubren la API, PostgreSQL y el código de las pantallas, no un
+aparato, ni el selector de imágenes, ni el lector de pantalla. **Es lo único
+que queda del Incremento 2**: la 0090 está aplicada en Supabase y verificada
+sin divergencias (29/09/2026), y la puerta de esquema la reconoce con el rol
+real de la API (`Z_SERVICIOS_ARQUITECTURA.md` §32).
+
+Antes de empezar:
+
+- La 0090 ya está aplicada y verificada en Supabase. En otra base de pruebas,
+  aplicarla y verificarla (`Z_SERVICIOS_ARQUITECTURA.md` §26–§27) y
+  **reiniciar la API** después.
+- La API de ese entorno tiene que correr el código de `Edson` (sin desplegar).
+- Encender `FEATURE_SERVICES=true` **solo en ese entorno**.
+- Tener un prestador **aprobado** por la admisión del Incremento 1.
+
+Hacen falta **tres cuentas**: el prestador (`user` con su postulación
+aprobada), una de administración (`admin`) y una de moderación (`moderator`).
+Si se puede, en dos teléfonos distintos (Android e iPhone) y una prueba en el
+navegador.
+
+### Con la bandera apagada, que es como se entrega
+
+- [ ] El perfil, la postulación y el panel de administración son exactamente
+      los de antes: no aparecen «Mis servicios», «Catálogo de servicios» ni
+      «Categorías de servicios».
+- [ ] Cursos, Eventos y Productos se comportan igual que antes.
+
+### Sin la 0090 (solo en una base de pruebas que no la tenga)
+
+- [ ] Con la bandera encendida, «Mis servicios» dice que Servicios aún no está
+      disponible, sin error rojo ni reintento. Tras aplicar la 0090 **y
+      reiniciar la API**, funciona.
+
+### Administración: categorías
+
+- [ ] Panel › Servicios › Categorías de servicios: vacía, con el texto de que
+      sin categorías nadie puede crear servicios.
+- [ ] Crear una categoría de primer nivel y otra dentro de ella; el
+      identificador mal escrito (mayúsculas, espacios) se señala antes de
+      enviar; uno repetido lo rechaza el servidor con palabras.
+- [ ] Editar el nombre en inglés y en portugués; el identificador no se puede
+      cambiar.
+- [ ] Moderación ve las categorías pero **no** puede crearlas ni cambiarlas.
+- [ ] Desactivar pide confirmación; la categoría deja de ofrecerse al crear un
+      servicio.
+
+### El prestador
+
+- [ ] Quien **no** es prestador activo no ve «Mis servicios» en su
+      postulación.
+- [ ] Mis servicios vacío → Crear servicio → elegir categoría → nace el
+      borrador y se abre «Completar información».
+- [ ] Solo se ofrecen las categorías del país del prestador (o de todos), y no
+      las que están dentro de una categoría desactivada.
+- [ ] Completar a medias y guardar: no pide nada; debajo aparece lo que falta.
+- [ ] Salir con cambios sin guardar pregunta antes; «Descartar» vuelve sin
+      guardar.
+- [ ] Precio: «Gratis» no pide importe; «Precio fijo» pide importe y moneda;
+      «120,50» se guarda como 120.50; un importe de cero o con letras se
+      señala antes de enviar.
+- [ ] Presencial o a domicilio piden la zona; virtual no.
+- [ ] Imágenes: sin descripción no deja elegir; con ella, abre la galería. Una
+      imagen de más de 5 MB o un GIF se rechazan con palabras. Permiso de
+      fotos denegado: el aviso lo dice.
+- [ ] La primera imagen es la portada; «Usar como portada», subir y bajar
+      funcionan; quitar pregunta antes.
+- [ ] Revisar y enviar: cada cosa que falta lleva a donde se arregla; el botón
+      solo se activa sin faltantes; «Así se verá» coincide con lo escrito.
+- [ ] Enviar pide confirmación; después ya no se puede editar (la pantalla lo
+      dice) y se puede retirar la versión (pide confirmación).
+- [ ] Doble toque en enviar, crear y subir: una sola vez.
+
+### La revisión
+
+- [ ] A moderación y administración les llega «Nuevo servicio para revisar»;
+      tocarlo **en la bandeja** abre la revisión.
+- [ ] Bandeja: por revisar, filtros por estado de la versión, modalidad y
+      categoría; «Ver más».
+- [ ] Moderación inicia la revisión y pide cambios con motivo y campos; **no**
+      ve «Aprobar» ni «Publicar».
+- [ ] Al prestador le llega «Tu servicio necesita cambios»; tocarlo abre su
+      servicio con el motivo y los campos. No ve la nota interna.
+- [ ] En «Mis servicios», ese servicio conserva su título y dice «Con cambios
+      pedidos», con otro icono.
+- [ ] «Corregir y reenviar» abre la versión 2 con el contenido y las imágenes
+      de la 1, y los campos señalados marcados; reenviar.
+- [ ] Administración aprueba (el público todavía no lo ve) y publica; al
+      prestador le llega «Tu servicio está publicado», que abre la ficha.
+- [ ] Una administradora que también es prestadora abre su propio servicio en
+      la bandeja: «es tuyo», sin decisiones.
+
+### La ficha y lo publicado
+
+- [ ] La ficha enseña portada, imágenes, precio con el código de la moneda,
+      duración, modalidad, qué incluye y qué no, y el nombre público del
+      prestador. No hay botón de contratar.
+- [ ] Editar lo publicado abre la versión 2; la ficha sigue enseñando la 1
+      hasta que Z publique la 2. En la revisión se marca lo que cambia.
+- [ ] Suspender (con motivo, confirmación destructiva): la ficha dice que no
+      lo encontramos; el prestador lee el motivo. Levantar la suspensión la
+      devuelve.
+- [ ] Retirar del catálogo: definitivo; el prestador ya no puede editarlo.
+- [ ] Con el servicio suspendido, publicar una versión corregida: la
+      confirmación avisa de que **no** se verá todavía; al prestador le llega
+      «Tu versión nueva está lista», que abre su servicio (no la ficha).
+      Levantar la suspensión la hace visible.
+
+### Los avisos: bandeja y push
+
+- [ ] En la bandeja, cada aviso del catálogo lleva a su sitio: los del
+      prestador, a su servicio; «publicado», a la ficha; los del equipo, a
+      la revisión.
+- [ ] Un aviso de un servicio que ya no se ve (suspendido o retirado después)
+      o abierto con otra cuenta: la pantalla dice «No encontramos ese
+      servicio» o que no hay permiso, sin error rojo ni pantalla en blanco.
+- [ ] **Tocar el push** (con la app cerrada y en segundo plano) abre la
+      aplicación **sin llevar al servicio**. Es la limitación conocida
+      (`Z_SERVICIOS_ARQUITECTURA.md` §32), la misma que en los demás avisos
+      al creador: anotar si alguien lo espera distinto, no como fallo.
+- [ ] El push llega en el idioma del teléfono (es, en, pt) y sin códigos.
+
+### Accesibilidad, idiomas y cuenta
+
+- [ ] Con TalkBack y VoiceOver, cada imagen se lee por su descripción, y las
+      opciones de categoría, modalidad, precio y moneda se anuncian como
+      botones de opción.
+- [ ] En inglés y en portugués no queda ningún texto en español ni ningún
+      código interno.
+- [ ] Borrar la cuenta del prestador (Ajustes › Eliminar cuenta): sus
+      servicios desaparecen de la bandeja y la ficha deja de existir; el
+      enlace de una imagen abierta antes deja de funcionar.
+
+## Z Servicios · Incremento 3 — descubrimiento y confianza (29/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** Las pruebas
+automáticas cubren la API contra PostgreSQL y el código de las pantallas, y el
+cierre técnico (§49 de la arquitectura) recorrió además la API real, reiniciada,
+en local. Falta el teléfono.
+
+Antes de empezar:
+
+- La 0091 ya está **aplicada y verificada** en Supabase (29/09/2026,
+  `Z_SERVICIOS_ARQUITECTURA.md` §49). Si el QA usa otra base, aplicarla allí,
+  verificarla (§44–§45) y **reiniciar la API**.
+- La API de ese entorno corre el código de `Edson` y tiene
+  `FEATURE_SERVICES=true` **solo allí**.
+- Tener al menos dos prestadores aprobados con servicios publicados en dos
+  categorías, uno con una credencial verificada y otro sin ella; un servicio
+  gratis, uno a consultar y uno con precio.
+
+### Con la bandera apagada
+
+- [ ] Explorar › «Servicios» sigue avisando de que aún no está, sin abrir
+      nada. Cursos, Eventos y Productos, igual que antes.
+
+### Entrar y buscar
+
+- [ ] Explorar › «Servicios» abre el catálogo; «Atrás» vuelve a Explorar.
+- [ ] Sin buscar: las categorías (cuatro y «Ver todas») y, si hay, las
+      sugerencias con su razón; si no hay ninguna razón, no sale la sección.
+- [ ] Buscar con mayúsculas, sin tildes y con espacios de más da lo mismo,
+      también en palabras cortas («cafe» encuentra «Café», «peru» a
+      «Perú»); varias palabras acotan; una sola letra o solo guiones bajos
+      avisan sin buscar.
+- [ ] Un servicio con la palabra en el título sale antes que otro que la
+      tiene en la categoría, el resumen y la descripción.
+- [ ] Abrir un enlace con una búsqueda que el servidor no acepta: se explica
+      y ofrece «Limpiar filtros», nunca «Reintentar».
+- [ ] Cada resultado dice dónde coincidió (título, categoría…).
+- [ ] Sin resultados: el texto lo dice y «Limpiar filtros» devuelve todo.
+
+### Filtros y orden
+
+- [ ] Abrir filtros, elegir modalidad, «Con precio», una moneda y un rango;
+      aplicar: el botón dice cuántos hay y los resultados cambian.
+- [ ] Un rango sin moneda o «desde» mayor que «hasta» se avisan antes.
+- [ ] La hoja de filtros avisa de que el rango incluye los precios «desde»
+      por su importe mínimo.
+- [ ] Gratis y a consultar no piden moneda ni rango.
+- [ ] Ordenar por precio solo aparece con una moneda.
+- [ ] Abrir una ficha y volver: la búsqueda y los filtros siguen ahí.
+- [ ] «Ver más» trae la página siguiente sin repetir tarjetas.
+
+### Ficha, prestador y confianza
+
+- [ ] La ficha: contenido, quien lo ofrece (lleva a su perfil), «Lo que Z
+      comprobó» solo con lo verdadero, «servicio revisado y aprobado por Z»
+      con fecha, qué declara el prestador, y «Todavía no hay reseñas
+      verificadas» sin estrellas. Sin botón de contratar.
+- [ ] Más servicios del prestador y de la misma categoría, con su razón.
+      Quien ofrece el servicio no ve lo suyo como «más de este prestador».
+- [ ] La insignia de la tarjeta dice «Prestador con credencial verificada».
+- [ ] Administración desactiva una categoría con servicios publicados: la
+      confirmación avisa de que dejan de verse; el catálogo ya no los
+      muestra; la prestadora los ve como «no visibles»; al reactivarla
+      vuelven.
+- [ ] El perfil del prestador: nombre, tipo, lo que Z comprobó, categorías,
+      modalidades, zonas y servicios. Nunca documentos, números ni contacto.
+- [ ] Un prestador con todo suspendido: «No encontramos a ese prestador».
+
+### Guardados
+
+- [ ] Guardar desde la tarjeta y desde la ficha; el marcador cambia. Doble
+      toque: una sola vez.
+- [ ] Cabecera › Guardados: la lista, lo más reciente primero, «Solo tú ves
+      esta lista».
+- [ ] Suspender un servicio guardado: en la lista sale «Ya no está
+      disponible», sin imagen ni enlace, y se puede quitar.
+- [ ] Mientras sigue suspendido, publicar una versión con otro título: la
+      lista sigue enseñando el título que tenía al guardarse.
+- [ ] Guardar no avisa al prestador (ningún aviso nuevo en su bandeja).
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: cada tarjeta se anuncia con título,
+      prestador y precio; el marcador dice «Guardar» o «Quitar de
+      guardados»; las opciones de filtro se anuncian como opciones; el
+      icono de la cabecera se anuncia como «Guardados» y los chips que
+      navegan (categorías, «Ver todas»), como botones.
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos.
+- [ ] En web y móvil, la hoja de filtros se desplaza y se cierra.
+
+## Z Servicios · Incremento 4 — disponibilidad y agenda (30/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono.** La 0092 **ya está
+aplicada en Supabase** y se verificó el 30/09/2026 en solo lectura, sin
+divergencias y con la puerta de esquema diciendo «sí» con el rol real de la
+API (`Z_SERVICIOS_ARQUITECTURA.md` §61). Las pruebas automáticas cubren el
+cálculo, la API contra PostgreSQL (con carreras reales), el recorrido
+integral con la API real reiniciada (103 de 103) y el código de las
+pantallas. **Falta el teléfono**: es lo único pendiente del Incremento 4.
+
+Antes de empezar:
+
+- Si la base del QA no es Supabase, **aplicar la 0092** en ella y
+  verificarla (§56–§57). En cualquier caso, la API del QA tiene que correr el
+  código de `Edson` y haberse **reiniciado después** de que la 0092 existiera
+  en su base: la puerta recuerda el «no». Lo mismo vale para producción el
+  día que se despliegue `Edson`.
+- La API de ese entorno corre el código de `Edson` y tiene
+  `FEATURE_SERVICES=true` **solo allí**.
+- Un prestador aprobado con un servicio publicado (virtual, 60 min) y otro en
+  borrador; un segundo prestador; una persona sin prestador; y el teléfono en
+  otra zona horaria para una de las pruebas.
+
+### Con la bandera apagada o sin la 0092
+
+- [ ] Con la bandera apagada, nada cambia: ni la entrada a la agenda ni la
+      sección de disponibilidad en la ficha. Cursos, Eventos y Productos,
+      igual que antes.
+- [ ] Con la bandera encendida y SIN la 0092: el servicio propio no enseña
+      «Disponibilidad y agenda» y la ficha no enseña la sección; nada se rompe.
+
+### El prestador
+
+- [ ] Mis servicios › un servicio › «Disponibilidad y agenda»: «Tu agenda
+      todavía no está configurada» y «Configurar agenda».
+- [ ] Ajustes: la zona NO viene elegida sola; elegir «America/Lima»,
+      descanso 15; guardar. El resumen enseña zona, duración, separación,
+      modalidad y estado.
+- [ ] Horario semanal: añadir lunes 09:00–12:00. Añadir otra de 11:00 a
+      13:00 el lunes: «Se cruza con otra franja de ese día». 12:00–14:00 sí.
+- [ ] Una hora como 09:07, o un fin antes del inicio, se avisa antes de
+      enviar. Un servicio individual no pide capacidad.
+- [ ] Desactivar una franja y volver a activarla; quitar una (pide
+      confirmación).
+- [ ] Excepciones: cerrar un día entero; en otra fecha, sustituir el horario
+      por 15:00–18:00; en otra, añadir una franja. Otra excepción en el día
+      cerrado se rechaza. La explicación de la precedencia se entiende.
+- [ ] Bloqueos: bloquear 10:30–10:35 con un motivo; la lista lo enseña con
+      «Motivo privado». Quitarlo pide confirmación.
+- [ ] Vista previa: lo que vería una persona, y arriba por qué el público aún
+      no lo ve (en el borrador: «El servicio todavía no es público»).
+- [ ] Cambiar la zona con franjas: pide confirmación y lo explica; los
+      bloqueos conservan su hora exacta (cambia la hora local que se lee).
+- [ ] Doble toque en «Guardar» o en «Añadir»: una sola vez.
+- [ ] Un prestador suspendido abre la agenda pero no la cambia; un servicio
+      retirado ya no ofrece la entrada.
+
+### Quien busca un servicio
+
+- [ ] La ficha enseña «Disponibilidad» con el próximo horario y la zona;
+      «Ver horarios» abre el selector. Sin agenda: «Este servicio todavía no
+      tiene horarios publicados». En pausa: «no está ofreciendo horarios».
+- [ ] El selector: los días sin horarios, apagados; elegir un día enseña sus
+      horarios (09:00 y 10:15 con 60 min y 15 de descanso). «Fechas
+      siguientes» avanza sin pasar del horizonte.
+- [ ] Un horario bloqueado o en un día cerrado no aparece; un horario a menos
+      de dos horas, tampoco.
+- [ ] Elegir un horario lo marca y enseña «Horario elegido … Todavía no se
+      puede contratar desde Z: este horario no queda apartado». No hay botón
+      de reservar ni de pagar. «Atrás» vuelve a la ficha.
+- [ ] Con el teléfono en otra zona: las horas son las de la agenda y se avisa
+      de la del teléfono.
+- [ ] Suspender el servicio con la pantalla abierta: al recargar, «Este
+      servicio no está disponible ahora».
+- [ ] Alguien bloqueado con el prestador no ve la ficha ni los horarios.
+- [ ] El motivo de un bloqueo no aparece en ninguna parte fuera de la agenda
+      del prestador.
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: cada fecha se anuncia con su día y cuántos
+      horarios tiene (o «sin horarios», apagada); cada horario, «De 09:00 a
+      10:00», y el elegido como seleccionado; las opciones de día, tipo,
+      zona y modalidad se anuncian como opciones.
+- [ ] Todas las áreas táctiles se tocan con el pulgar (fechas y horarios de
+      al menos 44 puntos).
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos.
+
+## Z Servicios · Incremento 5 — reserva y contratación (30/09/2026)
+
+**Nada de esta sección está comprobado en un teléfono: el QA físico sigue
+pendiente.** La 0093 **sí está aplicada** en Supabase y verificada en solo
+lectura el 01/10/2026, sin divergencias; el incremento está técnicamente
+cerrado (`Z_SERVICIOS_ARQUITECTURA.md` §80). El código sigue sin desplegar y
+las banderas, apagadas. Las pruebas automáticas cubren la migración, el
+dominio, las carreras contra PostgreSQL, la API, el recorrido integral con la
+API real reiniciada (100 de 100 comprobaciones en el cierre) y el código de
+las pantallas (§76 y §80).
+
+Antes de empezar:
+
+- La **0093** ya está en Supabase (§80). Si el QA usa **otra** base,
+  aplicarla y verificarla allí (`Z_SERVICIOS_ARQUITECTURA.md` §74–§75) y
+  **reiniciar la API** después: la puerta recuerda el «no».
+- La API de ese entorno corre el código de `Edson` con `FEATURE_SERVICES=true`
+  y `FEATURE_SERVICE_BOOKING=true` **solo allí**. `FEATURE_SERVICE_PAYMENTS`
+  apagada y `SERVICE_PAYMENTS_PROVIDER=none`, como en todas partes.
+- En administración, **publicar unas condiciones de contratación de prueba**
+  para el país del prestador de ese entorno (no las de producción: el texto
+  real es de la empresa, F9).
+- Un prestador aprobado con: un servicio **gratuito** en línea (60 min, 15 de
+  descanso, agenda de 09:00 a 12:00), uno con **precio fijo**, uno **a
+  consultar** y uno **de grupo** (2 plazas). Dos personas sin prestador, con
+  dos teléfonos.
+
+### Con una bandera apagada o sin la 0093
+
+- [ ] Con `FEATURE_SERVICE_BOOKING` apagada: los horarios se ven como en el
+      Incremento 4, con «Todavía no se puede contratar desde Z» y sin
+      «Continuar». «Mis reservas» dice que las reservas aún no están
+      disponibles. Nada se rompe.
+- [ ] Con la bandera encendida y SIN la 0093: igual; en administración,
+      «Nuevo borrador» de las condiciones de contratación dice que no se
+      pudo, sin cerrarse la app.
+
+### Contratar lo gratuito
+
+- [ ] Ficha › «Ver horarios» › elegir las 09:00: «Elegido, todavía no
+      apartado» y «Apartar este horario y continuar».
+- [ ] Continuar: «Tus datos» con la cuenta atrás desde 10:00 («Apartado para
+      ti…»). En línea no pide dirección.
+- [ ] En el otro teléfono, ese día ya no ofrece las 09:00.
+- [ ] Escribir una nota › «Revisar el resumen»: servicio, día y hora con su
+      zona, modalidad, duración, «Gratis», versión y huella de las
+      condiciones. «Leer las condiciones completas» y volver: las casillas
+      siguen como estaban.
+- [ ] «Confirmar» sin marcar las casillas: apagado. Marcarlas y confirmar:
+      «Tu reserva está confirmada», el código y «No se cobró nada».
+- [ ] Con la casilla marcada, publicar desde administración otra versión de
+      las condiciones y volver al resumen (o salir de la app y volver): la
+      casilla aparece **sin marcar**, con la versión nueva; «Confirmar»,
+      apagado hasta volver a marcarla.
+- [ ] Doble toque en «Confirmar» o en «Apartar»: una sola reserva y una sola
+      retención.
+- [ ] Mis reservas › «Por venir»: la reserva; su detalle, con lo aceptado y
+      el historial («Horario apartado», «Se confirmó la reserva»).
+- [ ] La bandeja de avisos: «Tu reserva está confirmada» lleva a la reserva.
+      El prestador recibe «Tienes una reserva nueva», que lleva a la de su
+      bandeja. Ningún aviso dice la nota.
+
+### Lo que se detiene, vence o cambia
+
+- [ ] Precio fijo: se aparta, el resumen dice «Todavía no se puede pagar en
+      Z» y no hay «Confirmar»; «Soltar este horario» lo libera. Nada se cobra
+      ni se pide una tarjeta.
+- [ ] «A consultar»: los horarios no ofrecen «Continuar».
+- [ ] Dejar vencer los 10 minutos en «Tus datos»: «El tiempo para confirmar
+      terminó» y «Elegir otro horario». El otro teléfono vuelve a ver la hora.
+- [ ] Con el teléfono con la hora mal puesta (adelantada 1 hora), la cuenta
+      atrás sigue diciendo 10 minutos.
+- [ ] Los dos teléfonos tocan «Apartar» a la vez en el mismo horario: uno lo
+      consigue; al otro le dice «Otra persona tomó ese horario» y vuelve a
+      elegir.
+- [ ] El grupo de 2 plazas: dos personas lo consiguen; la tercera, no.
+- [ ] Mientras alguien lee el resumen, publicar en administración otra
+      versión de las condiciones: al confirmar, «Algo cambió…» y el resumen
+      enseña la versión nueva.
+- [ ] Sin condiciones publicadas para el país: el resumen dice «Todavía no
+      hay condiciones de contratación» y no se confirma.
+- [ ] Con la app cerrada a mitad (en «Tus datos»), al volver lo escrito no
+      está (a propósito) y la retención sigue o venció, según el tiempo.
+
+### El prestador y administración
+
+- [ ] Área del prestador › «Reservas de mis servicios»: la reserva, con el
+      nombre público de quien contrata y su nota; nunca su correo ni su
+      teléfono. Otro prestador no la ve (no aparece; con el enlace, «No
+      encontramos esa reserva»).
+- [ ] Con el prestador **suspendido** desde administración: su área sigue
+      enseñando «Reservas de mis servicios» y sus reservas por venir.
+- [ ] Administración › Servicios › «Reservas y retenciones»: reservas y
+      retenciones por estado, sin nombres, notas ni direcciones. «Liberar las
+      vencidas» pide confirmación y dice cuántas marcó; repetirlo, 0.
+- [ ] Administración › «Condiciones de contratación»: crear, editar,
+      previsualizar y publicar sin campos de documentos ni credenciales.
+- [ ] Una persona con una reserva por venir intenta borrar su cuenta: no se
+      puede todavía, y se le dice.
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: la cuenta atrás no se anuncia cada segundo,
+      sí al vencer; las casillas de las condiciones se anuncian como casillas;
+      las pestañas «Por venir» y «Pasadas», como opciones.
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos
+      (`service_…`, `hold_…`), ni un «0» o «Gratis» donde el precio es a
+      consultar.
+
+## Z Servicios · Incremento 6 — atención, posventa y cierre (01/10/2026)
+
+**Nada de esta sección está comprobado en un teléfono: el QA físico sigue
+pendiente.** La 0094 **sí está aplicada** en Supabase y verificada en solo
+lectura el 01/10/2026, sin divergencias; el incremento está técnicamente
+cerrado (`Z_SERVICIOS_ARQUITECTURA.md` §102). El código sigue sin desplegar y
+las banderas, apagadas. Las pruebas automáticas cubren la migración, el
+dominio, las carreras contra PostgreSQL, la API, el recorrido integral con la
+API real reiniciada (116 de 116 comprobaciones en el cierre) y el código de
+las pantallas (§98 y §102).
+
+Antes de empezar:
+
+- La **0094** ya está en Supabase (§102). Si el QA usa **otra** base,
+  aplicarla y verificarla allí (`Z_SERVICIOS_ARQUITECTURA.md` §96–§97),
+  **antes** de arrancar el código nuevo, y **reiniciar la API** después: la
+  puerta recuerda el «no».
+- La API de ese entorno corre el código de `Edson` con `FEATURE_SERVICES=true`
+  y `FEATURE_SERVICE_BOOKING=true` **solo allí**. `FEATURE_SERVICE_PAYMENTS`
+  apagada y `SERVICE_PAYMENTS_PROVIDER=none`, como en todas partes.
+- Lo del Incremento 5: condiciones de contratación **de prueba** publicadas y
+  un prestador aprobado con un servicio **gratuito** en línea (60 min) y su
+  agenda.
+- **Dos personas en administración** (para la apelación), una de moderación,
+  el prestador y dos personas sin prestador, con al menos dos teléfonos.
+- Para no esperar: reservar un horario **cercano** (la llegada se abre 15
+  minutos antes) o bajar las ventanas en ese entorno
+  (`SERVICES_ATTENTION_CHECKIN_MINUTES`, `SERVICES_ATTENTION_TOLERANCE_MINUTES`,
+  `SERVICES_ATTENTION_CONFIRMATION_HOURS`). Nadie llama a los barridos: se
+  lanzan a mano desde administración.
+
+### Con una bandera apagada o sin la 0094
+
+- [ ] Sin la 0094 (y con las banderas encendidas): se contrata como en el
+      Incremento 5; la reserva se ve **sin** el panel de la atención y sin
+      botones de cancelar, cambiar el horario ni reportar. La ficha no enseña
+      la sección de reseñas. Nada se cierra ni da error.
+- [ ] Aplicada la 0094 **sin reiniciar** la API: sigue igual. Reiniciada:
+      aparece el panel.
+- [ ] Con `FEATURE_SERVICE_BOOKING` apagada: «Mis reservas» dice que aún no
+      están disponibles; la ficha sigue, sin reseñas.
+
+### Cancelar y cambiar el horario
+
+- [ ] Reserva a varios días: el panel ofrece «Cancelar la reserva» y cambiar
+      el horario, con hasta cuándo se puede cada cosa y «no tiene costo».
+- [ ] Cambiar el horario: lleva a los horarios del servicio, se elige otro, se
+      confirma el cambio. La reserva conserva su **código**, sus condiciones y
+      su precio; el horario anterior vuelve a ofrecerse en el otro teléfono.
+      Un segundo cambio ya no se ofrece.
+- [ ] El prestador recibe el aviso del cambio y, al tocarlo en la bandeja,
+      llega a la reserva.
+- [ ] Cancelar como quien contrata: pide confirmación, deja elegir un motivo;
+      la reserva queda «Cancelada», sin acciones, y el horario vuelve.
+- [ ] Cancelar como prestador: no deja enviar sin explicar por qué. Quien
+      contrata recibe el aviso.
+- [ ] De una reserva **cancelada**, el prestador ya no ve la nota de quien
+      contrató; quien la escribió, sí.
+- [ ] Pasada la hora de inicio, cancelar ya no se ofrece.
+- [ ] Doble toque en «Cancelar» o en «Confirmar el cambio»: una sola vez.
+
+### La atención
+
+- [ ] Quince minutos antes: quien contrata ve «Mostrar mi código de
+      asistencia»; el código tiene seis cifras y es el mismo al volver a
+      pedirlo. En el teléfono del prestador **no aparece**.
+- [ ] El prestador escribe un código equivocado: se le dice, con los intentos
+      que quedan; al quinto, ya no vale ni el bueno.
+- [ ] «Empezar con el código» con el correcto: «En curso». «Empezar sin el
+      código» pide confirmación y lo explica.
+- [ ] El prestador termina: quien contrata recibe el aviso de que falta su
+      confirmación. Confirma: «Cerrada», y aparece la reseña.
+- [ ] Una atención empezada **sin** código y que nadie confirma: tras lanzar
+      «Recordar y cerrar lo pendiente», sigue sin cerrarse y el resultado la
+      cuenta como «sin verificar».
+- [ ] Una empezada **con** código y pasado el plazo: el barrido la cierra una
+      vez; lanzarlo otra vez no hace nada.
+- [ ] Un prestador **suspendido** no ve «Empezar».
+- [ ] Pasada la tolerancia sin que nadie empiece: las dos partes ven «no se
+      presentó»; declararlo pide confirmación y la otra parte recibe el aviso.
+
+### El caso
+
+- [ ] Con la atención empezada: «Reportar un problema con esta atención». Los
+      motivos son los de esa parte; una descripción corta no se envía.
+- [ ] Abierto: la otra parte recibe el aviso y ya no puede abrir otro; puede
+      escribir en ese. Quien contrata ya no puede confirmar.
+- [ ] «Añadir una evidencia»: una foto y un PDF entran; un archivo que no es
+      ni lo uno ni lo otro, no. Abrirla la muestra; el enlace deja de servir a
+      los dos minutos.
+- [ ] Una persona ajena con el enlace de la reserva: «No encontramos esa
+      reserva».
+- [ ] Administración › Servicios › «Casos»: el caso aparece, sin la
+      descripción en la lista. Dentro: el expediente entero. Una **nota
+      interna** no la ve ninguna de las partes.
+- [ ] Resolver: se elige qué se decide, el efecto en la atención y el efecto
+      económico solicitado; el texto deja claro que **no se mueve dinero**. Las
+      dos partes reciben el aviso y ven el estado «no aplica».
+- [ ] Apelar: una parte lo hace una vez. La persona que resolvió ve que la
+      apelación la resuelve otra; la otra persona la resuelve, y solo se le
+      ofrecen los efectos que el servidor acepta. Cerrado, ya no se apela.
+- [ ] Con **una sola** persona en administración, «Apelar la resolución» no
+      se ofrece.
+- [ ] Una persona de administración que es parte de la reserva no puede abrir
+      el expediente desde administración.
+- [ ] «Retirar el caso»: avisa de que ya no podrá abrir otro y de que la otra
+      parte conserva el suyo. Retirado, la otra parte sí puede reportar.
+- [ ] Pasado el plazo para reportar, solo se ofrece el motivo de seguridad.
+
+### La reseña
+
+- [ ] Con la atención cerrada: «Reseña» pide nota, si lo recomienda y un
+      comentario; los ejes son opcionales. Enviada, dice que está en revisión.
+- [ ] Antes de publicarse no aparece en la ficha y el prestador no la ve.
+- [ ] Administración › Servicios › «Reseñas»: publicarla. Aparece en la ficha
+      con su promedio, **sin el nombre** de quien la escribió. Sin reseñas, la
+      ficha dice «todavía no hay reseñas», nunca «0».
+- [ ] El prestador responde una vez; la respuesta se ve en la ficha.
+- [ ] Esconderla pide un motivo de la lista; deja de verse.
+- [ ] Una reserva cancelada o con una inasistencia no ofrece la reseña.
+
+### Avisos, cuenta y registros
+
+- [ ] Cada aviso, en la bandeja, lleva a su reserva o a su caso. El **push
+      abre la aplicación**, no la reserva (pendiente conocido).
+- [ ] Ningún aviso enseña una nota, un motivo, una dirección ni un código.
+- [ ] Quien contrata borra su cuenta con un caso ya pasado: su reseña y el
+      caso quedan sin su nombre; su evidencia ya no se puede abrir y la app lo
+      dice sin cerrarse.
+- [ ] En el panel de Supabase, el depósito `service-incident-evidence` es
+      **privado** y sus archivos no tienen URL pública. (Sin archivos está
+      comprobado; **con un archivo real**, no: es lo único del depósito que
+      el cierre no pudo probar.)
+- [ ] Un servicio **virtual**: no hay sala de Z ni enlace en la reserva. Las
+      partes se ponen de acuerdo por fuera y quien contrató **dicta** su
+      código al prestador. Anotar si eso basta (decisión G17).
+
+### Accesibilidad e idiomas
+
+- [ ] Con TalkBack y VoiceOver: las opciones de motivo, resultado y efecto se
+      anuncian como opciones; el código de asistencia se lee cifra a cifra;
+      las estrellas de la reseña dicen su valor.
+- [ ] En inglés y portugués no queda ningún texto en español ni códigos
+      (`service_…`, `incident_…`), ni un «0,0» donde no hay reseñas, ni
+      «devuelto» o «reembolsado» en ningún estado.
+
+### La política congelada (corrección G18; la 0095, ya aplicada)
+
+La 0095 está aplicada en Supabase y verificada (01/10/2026). Hace falta un
+entorno de pruebas donde se puedan cambiar las variables de la API y
+reiniciarla. Nada de esto se probó en un teléfono.
+
+- [ ] *(Solo en una base de pruebas sin la 0095; en Supabase ya no se puede
+      reproducir.)* Con las banderas encendidas, «Mis reservas», la bandeja
+      del prestador y los horarios de un servicio dicen que todavía no está
+      disponible. La app no se cierra ni enseña un error técnico.
+- [ ] Con la API **reiniciada** tras la 0095: se contrata con normalidad, y
+      el detalle de la reserva enseña hasta cuándo se puede cambiar el horario
+      y cuántos cambios quedan.
+- [ ] Cambiar `SERVICES_BOOKING_RESCHEDULE_MIN_HOURS` (por ejemplo, de 24 a 2)
+      y reiniciar: la reserva **ya hecha** enseña el mismo límite que antes; una
+      **nueva** enseña el nuevo.
+- [ ] Lo mismo con `SERVICES_ATTENTION_TOLERANCE_MINUTES`: en la reserva ya
+      hecha, «no vino» se ofrece con la tolerancia de cuando se confirmó.
+- [ ] Lo mismo con `SERVICES_REVIEW_WINDOW_DAYS`: la reseña de una atención ya
+      contratada se ofrece durante el plazo de cuando se confirmó.
+- [ ] En ninguna pantalla aparece un texto técnico de la política (una huella,
+      `operating_policy`, un nombre de variable).
+
+### Las políticas de la primera versión (02/10/2026): qué comprobar antes de encender
+
+Las políticas están en `Z_REQUISITOS_Y_DECISIONES.md`, al comienzo. Cinco se
+cerraron en el código ese día (`Z_SERVICIOS_ARQUITECTURA.md`, Parte VIII) y
+están probadas contra el servidor y con las baterías del móvil. **Nada de esto
+se probó en un teléfono.** La migración 0096 está aplicada y verificada desde
+el 02/10/2026 (`Z_SERVICIOS_ARQUITECTURA.md` §131).
+
+**Antes de nada (la 0096).**
+
+- [x] La 0096 está aplicada en Supabase y verificada (`Z_SERVICIOS_ARQUITECTURA.md`
+      §131), el 02/10/2026.
+- [ ] El código de `Edson` está desplegado en el entorno de la prueba: son
+      procesos nuevos, que miran la base al arrancar. *(En una base sin la 0096, todo el
+      catálogo de Servicios dice que todavía no está disponible; la app no se
+      cierra ni enseña un error técnico.)*
+
+**Las imágenes (P29).**
+
+- [ ] Subir dos fotos a un borrador, publicar, abrir otro borrador y quitar
+      una: las fotos se ven en la ficha, en el borrador y en la bandeja de
+      administración, y la publicada no pierde la suya.
+- [ ] Con un servicio publicado con fotos, borrar la cuenta del prestador:
+      termina bien, y la ficha deja de existir.
+- [ ] En ninguna pantalla aparece una ruta de archivo.
+
+**Modalidades y moneda (P5 y P2).**
+
+- [ ] El formulario del servicio ofrece **dos** modalidades (en línea y en el
+      local). «A domicilio» no aparece.
+- [ ] El filtro del catálogo y el de la bandeja de administración ofrecen
+      esas dos.
+- [ ] Con precio fijo o «desde», la única moneda que se ofrece es **PEN**, en
+      el formulario y en el filtro.
+- [ ] Un servicio gratuito y uno «a consultar» se guardan, se envían y se ven
+      sin moneda ni importe.
+
+**La capacidad (P51).**
+
+- [ ] En un servicio con capacidad para varias personas, la ficha pública no
+      dice cuántas caben, y los horarios tampoco.
+- [ ] Su prestador sí la ve al editarlo y en su agenda, y administración en la
+      revisión.
+
+**El piloto (P101).** Hace falta un entorno donde se puedan cambiar las
+variables de la API y reiniciarla, y tres cuentas: una en la lista del piloto,
+otra fuera y una de administración.
+
+- [ ] Con Servicios encendido y la **lista vacía**: ninguna de las tres
+      cuentas ve entradas de Servicios en Explorar ni en el perfil. La de
+      administración sí ve su sección en el panel de administración.
+- [ ] Con una cuenta en la lista: esa cuenta ve las entradas y las usa. La
+      otra no las ve y, si abre un enlace a un servicio, lee que no está
+      disponible.
+- [ ] **Sin sesión**, el catálogo y la ficha de un servicio no se ven.
+- [ ] Cerrar sesión con la cuenta del piloto y entrar con la otra, sin cerrar
+      la app: las entradas desaparecen. Al revés, aparecen.
+- [ ] La cuenta de administración que no está en la lista ve la bandeja de
+      Servicios en administración y puede revisar, pero no ve el catálogo como
+      cliente.
+- [ ] La cuenta del piloto que no es de administración no puede abrir ninguna
+      pantalla de administración.
+- [ ] Con la apertura general encendida, cualquier cuenta ve Servicios.
+- [ ] Apagar `FEATURE_SERVICES`: desaparece para todos, también para el piloto
+      y para la sección del panel de administración.
+
+### La salida del piloto gratuito (02/10/2026): qué comprobar en un teléfono
+
+Nada de esto se probó en un teléfono. Hace falta un entorno de pruebas con
+Servicios y la contratación encendidos, y cuatro cuentas: quien contrata,
+quien presta y dos de administración.
+
+**La baja de una cuenta con historia de Servicios (F21).**
+
+- [ ] Quien **contrató** una reserva (por venir, pasada o cancelada) va a
+      Ajustes → Eliminar cuenta y confirma las dos veces: lee que no se puede
+      cerrar todavía y que escriba a soporte. **No** lee «inténtalo de nuevo
+      en unos momentos». Sigue con su sesión y su cuenta.
+- [ ] Lo mismo con quien **prestó** esa reserva.
+- [ ] Después del aviso, la reserva, el caso, la reseña y las evidencias
+      siguen ahí para las dos partes y para administración.
+- [ ] Repetir la baja da el mismo aviso.
+- [ ] Una cuenta con solo una postulación, o con un servicio publicado que
+      nadie contrató, o que solo guardó un servicio: se elimina con
+      normalidad.
+- [ ] El aviso se lee bien en español, inglés y portugués, y con lector de
+      pantalla.
+
+**Las condiciones de contratación.** Con unas condiciones de **prueba**
+publicadas en el entorno de pruebas (no las del piloto, que siguen sin
+aprobar).
+
+- [ ] El resumen de la contratación enseña la versión y la huella abreviada;
+      «Leer las condiciones completas» abre el texto entero, que se lee sin
+      cortes ni símbolos raros (es texto plano: los apartados numerados se
+      ven como párrafos).
+- [ ] La casilla «Leí y acepto…» aparece **sin marcar**, y «Confirmar» no se
+      puede tocar hasta marcarla.
+- [ ] Con el resumen abierto, publicar otra versión desde administración:
+      al confirmar, la aplicación enseña la versión nueva y la casilla vuelve
+      a estar sin marcar.
+- [ ] El detalle de una reserva hecha enseña qué versión se aceptó, y no
+      cambia al publicar otra.
+- [ ] En el panel de administración → Servicios → Condiciones de
+      contratación: crear el borrador pegando un texto largo, previsualizarlo
+      y comparar la huella abreviada con la que dice el guion **antes** de
+      publicar. Publicar pide confirmación.
+- [ ] Sin ninguna condición publicada, el resumen dice que todavía no se
+      puede contratar.
+
+**El piloto gratuito.**
+
+- [ ] En el formulario de un servicio, elegir «precio fijo» o «desde» y
+      enviarlo: la lista de lo que falta dice que Z no admite ese tipo de
+      precio por ahora, y no se envía. (**Desde el 03/10/2026 el formulario
+      ya no los ofrece**: este punto pasa a «el formulario solo ofrece Gratis
+      y A consultar», en la sección del cierre del piloto.)
+- [ ] Un servicio gratuito se envía, se publica y se reserva. Uno «a
+      consultar» se publica y se ve, y al intentar reservar un horario la
+      aplicación explica que no se reserva en Z.
+- [ ] En ninguna pantalla del recorrido aparece un botón de pagar, un
+      importe cobrado, un saldo o una devolución.
+
+**Las tareas sin planificador.** Con la cuenta de administración.
+
+- [ ] En la bandeja de reservas, «vencer retenciones» responde con cuántas
+      venció; repetirlo, con cero.
+- [ ] En la bandeja de casos, «ejecutar tareas» dice cuántas recordó y
+      cerró. Sin lanzarla, nadie recibe el recordatorio: es lo esperado
+      mientras no haya planificador.
+
+**Apelaciones.**
+
+- [ ] Con **una** sola cuenta de administración, tras resolver un caso las
+      partes no ven «Apelar». Con dos, sí; y quien resolvió no puede resolver
+      la apelación.
+
+## Z Servicios · cierre del piloto y mejora de vistas (03/10/2026)
+
+Lo de abajo está comprobado con pruebas que leen el código, con tipos y con la
+exportación web. **Nada se ha probado en un teléfono.** Es lo único que queda
+por probar antes de encender el piloto, junto con el planificador contra la
+cuenta de AWS.
+
+Hace falta: un Android con navegación de tres botones, un iPhone, y tres
+cuentas (una prestadora aprobada, una clienta del piloto, una de
+administración).
+
+**Primero, lo que más riesgo tiene.**
+
+- [ ] **Nota de voz en Android.** Grabar una nota de 10 segundos: el reloj
+      empieza en 0:00 y sube; no se para sola. (Por el código nativo, antes
+      se paraba en el primer instante marcando 5:00.)
+- [ ] **Audio de presentación en Android** (Perfil › editar): grabar 10
+      segundos; se guarda con 10 segundos, no con 60.
+- [ ] **El chat se abre por el final.** Una conversación larga se abre en el
+      último mensaje. Con dos mensajes, ver dónde quedan (pueden quedar
+      pegados abajo: es el efecto del modo de chat).
+- [ ] **El teclado no tapa.** En Android y en iPhone, en el formulario de un
+      servicio, en cancelar una reserva, en abrir un caso y en escribir una
+      reseña: el último campo se ve mientras se escribe, y no queda un hueco
+      entre el campo y el teclado.
+
+**Notas de voz y chat.**
+
+- [ ] En una instalación limpia, tocar el micrófono: sale el permiso; al
+      concederlo, empieza a grabar sin tener que tocar otra vez.
+- [ ] Negar el permiso: explica por qué hace falta y ofrece abrir Ajustes.
+- [ ] Mientras graba: un punto que late, la duración y «cancelar».
+- [ ] Al parar: se puede escuchar, borrar y enviar. Enviando, lo dice.
+- [ ] Con una nota grabada, tocar «atrás» en la cabecera y el Atrás de
+      Android: pregunta antes de salir. Cancelar se queda; salir la descarta.
+- [ ] Grabando, tocar el nombre de la cabecera (abre el perfil) y volver: el
+      micrófono se cerró y la nota está en la previa.
+- [ ] Abrir un chat con mala cobertura: se ve «cargando», no una pantalla en
+      blanco. Sin red: error con «reintentar». Sin mensajes: lo dice.
+- [ ] Dos envíos fallidos (modo avión): reintentar el primero manda el
+      primero.
+- [ ] Un vídeo y un PDF adjuntos se abren fuera de la aplicación.
+
+**Servicios.**
+
+- [ ] El formulario de un servicio ofrece solo «Gratis» y «A consultar». No
+      hay campo de importe ni de moneda.
+- [ ] El buscador de servicios no ofrece «con precio», moneda ni rango.
+- [ ] En el detalle de una reserva (quien contrata y quien presta), tirar
+      hacia abajo la actualiza.
+- [ ] Elegir horario sin red y tocar «Reintentar» al volver la red: carga el
+      calendario y los horarios del día.
+- [ ] Administración › Condiciones: con un borrador ya creado, escribir otro
+      y guardar: avisa, lo escrito sigue ahí, y guardar otra vez lo reemplaza.
+
+**Botones y avisos, en cualquier pantalla.**
+
+- [ ] Tocar dos veces rápido un botón que guarda o envía: la acción ocurre
+      una vez, y el botón enseña la espera sin cambiar de tamaño.
+- [ ] Un aviso breve (toast) sale por debajo de la cámara o la isla, no
+      tapado por ella.
+- [ ] Con «reducir movimiento» activado: los esqueletos de carga no laten y
+      el punto de grabación queda fijo.
+
+**Cursos, Eventos y Productos.**
+
+- [ ] Pagar una entrada o un producto en el navegador y volver a la
+      aplicación: el pedido se actualiza solo. Volver sin cobertura: el
+      pedido sigue a la vista y sale un aviso breve, no una pantalla de error.
+- [ ] El checkout de productos no nace en rojo; tocar «Reservar y continuar»
+      con algo sin rellenar marca lo que falta y no envía nada.
+- [ ] Sin escribir el país, las condiciones piden el país; con uno sin
+      condiciones, dice que no hay; sin red, error con reintento.
+- [ ] La galería de un producto para en cada foto.
+- [ ] En Eventos, la tarjeta destacada abre la ficha, y hay una fila a «Mis
+      entradas».
+- [ ] Al volver a una ficha de curso, de evento o de producto, lo que se
+      estaba viendo no desaparece mientras se recarga.
+
+**Cuenta.**
+
+- [ ] Registrarse con confirmación de correo: lleva al acceso.
+- [ ] Con el teléfono en inglés, una contraseña equivocada se marca en el
+      campo, no en un diálogo.
+- [ ] Eliminar la cuenta: tras confirmar dos veces, la fila enseña que está
+      en curso y no se puede volver a pulsar.
+
+**Los procesos automáticos**, una vez encendido el planificador
+(`Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`, paso 8).
+
+- [ ] Apartar un horario y no confirmarlo: pasados sus minutos, en menos de
+      cinco más aparece como vencido en la bandeja de administración, sin que
+      nadie lo lance.
+- [ ] Una reserva para mañana: llega el recordatorio.
+- [ ] Una atención terminada con código y sin confirmar: a las 24 horas se
+      cierra sola.
+- [ ] La alarma de los procesos está en `OK`.
+
+Sustituye a «Las tareas sin planificador» de la sección anterior: con el
+planificador encendido ya no hace falta lanzarlas a mano (se puede seguir
+haciendo). Y a la nota sobre el formulario de precios: ya no ofrece los
+cuatro.

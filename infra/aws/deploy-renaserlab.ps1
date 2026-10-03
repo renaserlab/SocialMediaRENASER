@@ -83,7 +83,12 @@ param(
     [switch] $PermitirReemplazos,
 
     # Deja cargar un secreto con una bandera de dinero encendida.
-    [switch] $PermitirBanderasFinancieras
+    [switch] $PermitirBanderasFinancieras,
+
+    # Con -Accion Secretos: genera un secreto NUEVO para el planificador de Z
+    # Servicios aunque ya haya uno. Despues hay que renovar las maquinas y
+    # desplegar con VersionDelSecretoDelPlanificador subido en uno.
+    [switch] $RotarSecretoDelPlanificador
 )
 
 Set-StrictMode -Version Latest
@@ -122,13 +127,29 @@ $ClaveDeCabecera = 'CLOUDFRONT_ORIGIN_SECRET'
 # nadie lo decida.
 $ClavesQueFijaLaPlantilla = @('APP_NAME', 'ENVIRONMENT', 'PORT', 'CORS_ORIGINS',
     'SUPABASE_JWT_ALGORITHM', 'SUPABASE_JWT_AUDIENCE', 'FEATURE_RECOMMENDATIONS_V1',
-    'PAYMENTS_ENABLED', 'PAYMENTS_RETURN_URL', 'BETA_FREE_ACCESS_ENABLED')
+    'PAYMENTS_ENABLED', 'PAYMENTS_RETURN_URL', 'BETA_FREE_ACCESS_ENABLED',
+    'FEATURE_SERVICES', 'FEATURE_SERVICE_BOOKING', 'FEATURE_SERVICE_PAYMENTS',
+    'SERVICE_PAYMENTS_PROVIDER', 'SERVICES_PUBLIC_ACCESS', 'SERVICES_CATALOG_MODALITIES',
+    'SERVICES_CATALOG_CURRENCIES', 'SERVICES_CATALOG_PRICE_MODELS')
+
+# El piloto de Z Servicios: los perfiles autorizados. Va en el secreto y no en
+# un parametro porque son identificadores de personas: un parametro acabaria en
+# los perfiles del repositorio, en las evidencias y en la consola. Vacia = no
+# entra nadie. Aqui solo se comprueba su FORMA; nunca se imprime su valor.
+$ClaveDelPiloto = 'SERVICES_PILOT_PROFILE_IDS'
+$PatronDelPiloto = '^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})*$'
+
+# El secreto del planificador de Z Servicios: la cabecera con la que la regla
+# de EventBridge llama a los barridos. Igual que la cabecera de origen, no lo
+# escribe nadie a mano: se conserva el que hay o se genera uno. Nunca se imprime.
+$ClaveDelPlanificador = 'SERVICES_TASKS_TOKEN'
+$PatronDelPlanificador = '^[0-9a-f]{32,128}$'
 
 # Lo que mueve dinero nace apagado y se enciende a mano, en otra decision.
 $BanderasDeDinero = @('PAYMENTS_ENABLED', 'STRIPE_PAYMENTS_ENABLED', 'STRIPE_REFUNDS_ENABLED',
     'STRIPE_CONNECT_ENABLED', 'CREATOR_TRANSFERS_ENABLED', 'FEATURE_COURSE_REFUNDS',
     'FEATURE_PRODUCT_SALES', 'FEATURE_EVENT_PAYMENTS', 'REVENUECAT_VERIFICATION_ENABLED',
-    'REVENUECAT_WEBHOOK_ENABLED', 'BETA_FREE_ACCESS_ENABLED')
+    'REVENUECAT_WEBHOOK_ENABLED', 'BETA_FREE_ACCESS_ENABLED', 'FEATURE_SERVICE_PAYMENTS')
 
 # Estados en los que una pila existe y tiene salidas que leer.
 $EstadosConPila = @('CREATE_COMPLETE', 'UPDATE_COMPLETE', 'UPDATE_ROLLBACK_COMPLETE',
@@ -344,7 +365,8 @@ function Test-ParidadDelPerfil([System.Collections.IDictionary] $Configuracion) 
             -not $Configuracion.Contains($_) -and $_ -notin $ParametrosInyectados -and $_ -notin $ParametrosPorDefectoAProposito })
     if ($sobran) { throw "El perfil trae parametros que la plantilla no tiene: $($sobran -join ', ')" }
     if ($faltan) { throw "El perfil no fija estos parametros (se aplicaria su valor por defecto): $($faltan -join ', ')" }
-    foreach ($bandera in 'PaymentsEnabled', 'BetaFreeAccessEnabled') {
+    foreach ($bandera in 'PaymentsEnabled', 'BetaFreeAccessEnabled', 'FeatureServices',
+        'FeatureServiceBooking', 'ServicesPublicAccess') {
         if ($Configuracion[$bandera] -ne 'false') {
             Write-Aviso "$bandera vale '$($Configuracion[$bandera])' en el perfil: se desplegaria encendido."
         }
@@ -687,6 +709,12 @@ function Read-FicheroDeSecretos([string] $Ruta) {
     if ($secreto.Contains('SUPABASE_URL') -and [string] $secreto['SUPABASE_URL'] -notmatch '^https://') {
         $problemas.Add('SUPABASE_URL tiene que ser https://')
     }
+    # La API cierra el piloto entero si UNA entrada no es un UUID. Mejor
+    # saberlo aqui que con Servicios encendido y nadie pudiendo entrar. Solo
+    # se dice que esta mal: el valor no se imprime.
+    if ($secreto.Contains($ClaveDelPiloto) -and [string] $secreto[$ClaveDelPiloto] -notmatch $PatronDelPiloto) {
+        $problemas.Add("$ClaveDelPiloto tiene que ser una lista de UUID separados por comas, sin espacios (o vacia)")
+    }
     if ($problemas.Count -gt 0) { throw "El fichero de secretos no vale: $($problemas -join '; ')." }
     return $secreto
 }
@@ -718,6 +746,22 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
         throw "$ClaveDeCabecera tiene que ser hexadecimal en minusculas: el balanceador trata * y ? como comodines."
     }
 
+    # El secreto del planificador de Z Servicios, lo mismo: se conserva o se
+    # genera. La API no acepta uno de menos de 32 caracteres.
+    if (-not $nuevo.Contains($ClaveDelPlanificador)) {
+        if ($actual -and $actual.Contains($ClaveDelPlanificador) -and -not $RotarSecretoDelPlanificador) {
+            $nuevo[$ClaveDelPlanificador] = $actual[$ClaveDelPlanificador]
+        }
+        else {
+            $bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+            $nuevo[$ClaveDelPlanificador] = [System.Convert]::ToHexString($bytes).ToLowerInvariant()
+            Write-Dato "Generada $ClaveDelPlanificador (64 caracteres hexadecimales)."
+        }
+    }
+    elseif ([string] $nuevo[$ClaveDelPlanificador] -notmatch $PatronDelPlanificador) {
+        throw "$ClaveDelPlanificador tiene que ser hexadecimal en minusculas, de 32 a 128 caracteres."
+    }
+
     # Solo NOMBRES en consola y en la evidencia, nunca valores.
     $anadidas = @($nuevo.Keys | Where-Object { -not $actual -or -not $actual.Contains($_) })
     $cambiadas = @($nuevo.Keys | Where-Object { $actual -and $actual.Contains($_) -and $actual[$_] -ne $nuevo[$_] })
@@ -732,6 +776,9 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
     if ($quitadas) { Write-Aviso "Claves que desaparecen: $($quitadas -join ', ')" }
     if ($cambiadas -contains $ClaveDeCabecera) {
         Write-Aviso "Cambia ${ClaveDeCabecera}: hay que redesplegar la plataforma (ver la rotacion en docs/AWS_MIGRACION_RENASERLAB.md)."
+    }
+    if ($cambiadas -contains $ClaveDelPlanificador) {
+        Write-Aviso "Cambia ${ClaveDelPlanificador}: (1) -Accion Renovar; (2) sube VersionDelSecretoDelPlanificador en el perfil y -Accion Plataforma. Sin subir ese numero la conexion de EventBridge se queda con el secreto anterior."
     }
 
     $accionDelSecreto = if ($actual) { 'Crear una version nueva' } else { 'Crear el secreto' }
@@ -770,6 +817,9 @@ function Assert-SecretoCompleto([System.Collections.IDictionary] $Configuracion)
     }
     $necesarias = @($ClavesObligatorias)
     if ($Configuracion.VerificarCabeceraDeOrigen -eq 'Si') { $necesarias += $ClaveDeCabecera }
+    # Sin esta clave la referencia dinamica de la conexion no resuelve y la
+    # pila falla a medio actualizar: mejor saberlo antes.
+    if ($Configuracion.PlanificadorDeServicios -eq 'Si') { $necesarias += $ClaveDelPlanificador }
     $faltan = @($necesarias | Where-Object { -not $actual.Contains($_) })
     if ($faltan) { throw "Al secreto le faltan: $($faltan -join ', '). Cargalo con -Accion Secretos." }
     Write-Bien "Secreto completo ($($actual.Count) claves)"

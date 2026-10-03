@@ -188,7 +188,10 @@ describe('la fila de filtros son píldoras, no columnas', () => {
 
 describe('los accesos a las verticales', () => {
   it('las que no existen lo dicen, en vez de llevar a ninguna parte', () => {
-    assert.ok(ACCESOS.includes("{ clave: 'servicios', icono: 'briefcase', ruta: null }"));
+    // Servicios existe desde el Incremento 3, pero SOLO con `FEATURE_SERVICES`
+    // encendida: apagada, el acceso sigue avisando de que aún no está.
+    assert.ok(ACCESOS.includes("{ clave: 'servicios', icono: 'briefcase', ruta: '/servicios', conBandera: true }"));
+    assert.ok(ACCESOS.includes('(!vertical.conBandera || serviciosEncendido)'));
     assert.ok(
       ACCESOS.includes('alTocarNoDisponible(nombre)'),
       'tocar una vertical que no existe tiene que avisar, no navegar.',

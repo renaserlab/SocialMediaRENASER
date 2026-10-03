@@ -73,6 +73,18 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Servicios, Incremento 4: formato puro («{n} min», «{desde} → {hasta}»),
+    // «SA» (sábado / Saturday) y la raya de un día desconocido.
+    'servicios.agenda.minutos',
+    'servicios.agenda.desdeHasta',
+    'servicios.agenda.dia.6.corto',
+    'servicios.agenda.dia.desconocido.corto',
+    // Servicios, Incremento 2: formato puro (un importe ya formateado, o un
+    // número con «min» y «h», que son símbolos del sistema internacional).
+    'servicios.catalogo.precio.fixed',
+    'servicios.catalogo.duracion.minutos',
+    'servicios.catalogo.duracion.horas',
+    'servicios.catalogo.duracion.horasYMinutos',
     // Incremento 8 de Productos: «No» se escribe igual en los dos idiomas.
     'resenaDeProducto.valorar.no',
     // Incremento 5 de Productos: se escriben igual en espanol y en ingles.
@@ -129,6 +141,66 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Servicios, Incremento 6: «Casos», «Caso», «Caso retirado», «Reserva
+    // confirmada», «Cancelada», «Publicada», «Publicar», «Nota interna» y
+    // «Marcar como realizada» se escriben EXACTAMENTE igual en portugués;
+    // «{n} de 5» es formato puro.
+    'servicios.admin.casos',
+    'servicios.atencion.admin.caso',
+    'servicios.atencion.admin.notaInterna',
+    'servicios.atencion.caso.estado.withdrawn',
+    'servicios.atencion.moderar.publicar',
+    'servicios.atencion.resena.deCinco',
+    'servicios.atencion.resena.estado.published',
+    'servicios.atencion.reserva.cancelled',
+    'servicios.atencion.reserva.confirmed',
+    'servicios.atencion.terminar',
+    // Servicios, Incremento 5: «Reservas» se escribe igual en portugués.
+    'servicios.reserva.admin.vista.bookings',
+    // Servicios, Incremento 4: «Configurar agenda», «Cancelar», «Motivo»,
+    // «sábado» y «domingo» se escriben EXACTAMENTE igual en portugués; el
+    // resto es formato puro.
+    'servicios.agenda.configurar',
+    'servicios.agenda.cancelar',
+    'servicios.agenda.campo.motivo',
+    'servicios.agenda.motivoPrivado',
+    'servicios.agenda.dia.6',
+    'servicios.agenda.dia.7',
+    'servicios.agenda.minutos',
+    'servicios.agenda.desdeHasta',
+    'servicios.agenda.dia.desconocido.corto',
+    // Servicios, Incremento 3: «Filtros», «título», «prestador» y «Empresa»
+    // se escriben EXACTAMENTE igual en portugués.
+    'servicios.descubrir.filtros.titulo',
+    'servicios.descubrir.filtros.conCuantos',
+    'servicios.descubrir.campo.title',
+    'servicios.descubrir.campo.provider',
+    'servicios.descubrir.tipo.company',
+    // Servicios, Incremento 2: el portugués escribe estas palabras EXACTAMENTE
+    // igual («Publicado», «Enviada», «Virtual», «Presencial», «Título»,
+    // «Prestador», «Sistema», «Publicar», «Suspender», «Todos», «País»…).
+    'servicios.catalogo.estado.published',
+    'servicios.catalogo.version.submitted',
+    'servicios.catalogo.version.published',
+    'servicios.catalogo.version.withdrawn',
+    'servicios.catalogo.modalidad.virtual',
+    'servicios.catalogo.modalidad.in_person',
+    'servicios.catalogo.campo.title',
+    'servicios.catalogo.suceso.published',
+    'servicios.catalogo.funcion.provider',
+    'servicios.catalogo.funcion.system',
+    'servicios.catalogo.admin.accion.publish',
+    'servicios.catalogo.admin.accion.suspend',
+    'servicios.catalogo.cola.published',
+    'servicios.catalogo.cola.retired',
+    'servicios.catalogo.cola.all',
+    'servicios.catalogo.categorias.pais',
+    // Y formato puro: un importe ya formateado, «min» y «h», «{n} de {total}».
+    'servicios.catalogo.precio.fixed',
+    'servicios.catalogo.duracion.minutos',
+    'servicios.catalogo.duracion.horas',
+    'servicios.catalogo.duracion.horasYMinutos',
+    'servicios.catalogo.imagenes.posicion',
     // Incremento 9 de Productos: se escriben IGUAL en español y en portugués.
     'finanzaDeProducto.estado.cancelled',
     'finanzaDeProducto.devolucion.cancelled',

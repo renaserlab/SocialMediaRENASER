@@ -375,7 +375,13 @@ export function describeStorageError(error: unknown): string {
   if (code === '413' || /exceeded the maximum allowed size|too large/i.test(message)) {
     // El servidor lo rechaza aunque pase el chequeo local: el limite del
     // proyecto/bucket en Supabase es menor que EXPO_PUBLIC_MAX_UPLOAD_MB.
-    return `Supabase rechazó el archivo por tamaño. Sube el límite en Storage → Settings → Upload file size limit (y en el bucket post-media).`;
+    // El remedio es de quien administra el proyecto, no de quien sube la foto:
+    // va a la consola, y a la pantalla solo lo que esa persona puede entender.
+    console.warn(
+      '[storage] archivo rechazado por tamaño: sube el límite en Storage → Settings → Upload file size limit (y en el bucket post-media)',
+      error,
+    );
+    return 'El archivo es demasiado grande.';
   }
   if (code === '403' || /unauthorized|row-level security|violates/i.test(message)) {
     return 'No tienes permiso para subir este archivo. Cierra sesión y vuelve a entrar.';
@@ -384,9 +390,14 @@ export function describeStorageError(error: unknown): string {
     return 'Ya existe un archivo con ese nombre. Inténtalo de nuevo.';
   }
   if (/mime|content-type/i.test(message)) {
-    return `El bucket no acepta este tipo de archivo (${message}).`;
+    console.warn(`[storage] el bucket no acepta este tipo de archivo (${message})`, error);
+    return 'Ese tipo de archivo no se admite.';
   }
-  return `Storage rechazó el archivo: ${message}${code ? ` (código ${code})` : ''}`;
+  console.warn(
+    `[storage] Storage rechazó el archivo: ${message}${code ? ` (código ${code})` : ''}`,
+    error,
+  );
+  return 'No se pudo subir el archivo. Inténtalo de nuevo.';
 }
 
 /**

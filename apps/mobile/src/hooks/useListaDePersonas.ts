@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { PersonRow } from '@/components/PeopleList';
+import { useTranslation } from '@/i18n/useTranslation';
+import { toast } from '@/lib/toast';
 import type { ProfileSummary } from '@/mappers/profileMapper';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
@@ -31,6 +33,7 @@ import { useAuthStore } from '@/store/useAuthStore';
  * salida que sirve para algo.
  */
 export function useListaDePersonas(cargar: (() => Promise<ProfileSummary[]>) | null) {
+  const { t } = useTranslation();
   const estadoDeSesion = useAuthStore((state) => state.status);
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,8 +106,10 @@ export function useListaDePersonas(cargar: (() => Promise<ProfileSummary[]>) | n
       setPeople((prev) =>
         prev.map((p) => (p.id === person.id ? { ...p, isFollowing: wasFollowing } : p)),
       );
+      // El boton volvia solo a su sitio y nadie decia que habia fallado.
+      toast(t('common.tryAgain'), 'alert-circle');
     }
-  }, []);
+  }, [t]);
 
   return { people, loading, error, necesitaCuenta, reload: load, toggleFollow };
 }

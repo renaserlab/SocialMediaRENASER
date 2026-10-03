@@ -231,7 +231,7 @@ export function StoryGalleryScreen({
 
         <Pressable onPress={onClose} hitSlop={10} style={styles.deniedLink}>
           <Text variant="secondary" color={media.textMuted}>
-            Cancelar
+            {t('common.cancel')}
           </Text>
         </Pressable>
       </View>

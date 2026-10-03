@@ -13,6 +13,7 @@ import {
   claveDelEstadoDeEntrada,
   repartirEntradas,
 } from '@/lib/pedidoDeEntradas';
+import { toast } from '@/lib/toast';
 import {
   EventOrderRepository,
   type Entrada,
@@ -84,7 +85,10 @@ export function MisEntradasScreen() {
       setEntradas((previas) => [...previas, ...pagina.items]);
       setCursor(pagina.next_cursor);
     } catch {
-      // Se deja la lista como está: no borrar lo que ya se pudo leer.
+      // Se deja la lista como está: no borrar lo que ya se pudo leer. Pero SE
+      // DICE: el botón volvía a su sitio sin una palabra y parecía que no
+      // había más entradas.
+      toast(t('common.tryAgain'), 'alert-circle');
     } finally {
       setTrayendoMas(false);
     }

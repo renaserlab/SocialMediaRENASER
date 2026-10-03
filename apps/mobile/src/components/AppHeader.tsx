@@ -19,6 +19,8 @@ type Props = {
   onBack?: () => void;
   rightIcon?: keyof typeof Feather.glyphMap;
   onRightPress?: () => void;
+  /** Qué hace el botón derecho, para el lector de pantalla. Sin él, «Acción». */
+  rightLabel?: string;
   /** Punto sobre el icono derecho: hay algo sin ver detras de el. */
   rightBadge?: boolean;
   /**
@@ -39,6 +41,7 @@ export function AppHeader({
   onBack,
   rightIcon,
   onRightPress,
+  rightLabel,
   rightBadge = false,
   center,
 }: Props) {
@@ -92,7 +95,7 @@ export function AppHeader({
           <Pressable
             onPress={onRightPress}
             hitSlop={12}
-            accessibilityLabel={t('common.rightAction')}
+            accessibilityLabel={rightLabel ?? t('common.rightAction')}
             accessibilityRole="button"
             style={styles.backButton}
           >

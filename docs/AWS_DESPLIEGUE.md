@@ -429,6 +429,58 @@ Si algo falla y hace falta ver por qué, `--disable-rollback` deja los recursos 
 pie para poder entrar por Session Manager y leer
 `/var/log/renaser-arranque.log`, que dice la línea exacta que se rompió.
 
+### Z Servicios: lo que la plataforma escribe y cómo se enciende un piloto
+
+Preparado el 02/10/2026; **nada de esto se ha desplegado**. La plantilla escribe
+en el entorno de la API la configuración de Z Servicios, y los dos perfiles la
+traen **apagada**:
+
+| Parámetro | Variable | Valor en los perfiles |
+|---|---|---|
+| `FeatureServices` | `FEATURE_SERVICES` | `false` |
+| `FeatureServiceBooking` | `FEATURE_SERVICE_BOOKING` | `false` |
+| `ServicesPublicAccess` | `SERVICES_PUBLIC_ACCESS` | `false` |
+| `ServicesCatalogModalities` | `SERVICES_CATALOG_MODALITIES` | `virtual,in_person` |
+| `ServicesCatalogCurrencies` | `SERVICES_CATALOG_CURRENCIES` | `PEN` |
+
+- `FEATURE_SERVICE_PAYMENTS=false` y `SERVICE_PAYMENTS_PROVIDER=none` van
+  **fijos** en la plantilla, sin parámetro: cobrar un servicio no se enciende
+  en un despliegue.
+- **La lista del piloto (`SERVICES_PILOT_PROFILE_IDS`) va en el secreto** (paso
+  4), no en un parámetro: son identificadores de personas, y un parámetro
+  quedaría en los perfiles versionados, en las evidencias y en la consola. Es
+  una lista de UUID separados por comas, sin espacios; vacía significa que no
+  entra nadie. El guion comprueba su forma y no imprime su valor.
+- Con `FeatureServices` en `true` y `ServicesPublicAccess` en `false`, solo
+  entran los perfiles de esa lista. `ServicesPublicAccess` en `true` es la
+  apertura general.
+
+Para encender un piloto: aplicar antes en Supabase las migraciones pendientes
+de Servicios, desplegar con todo apagado, poner la lista en el secreto y
+renovar las máquinas, y solo entonces cambiar `FeatureServices` a `true` con
+un Change Set revisado. Apagarlo es volver ese parámetro a `false`. El
+detalle está en `Z_SERVICIOS_ARQUITECTURA.md`, §127 y §128.
+
+Al 02/10/2026 **no queda ninguna migración pendiente**: la última, la 0096,
+está aplicada y verificada (§131 de ese documento). Lo siguiente es el
+despliegue con todo apagado. Nada de esto se ejecutó en AWS.
+
+**Desde el 03/10/2026** la plantilla trae además:
+
+| Parámetro o clave | Dónde | Valor inicial |
+|---|---|---|
+| `PlanificadorDeServicios` | parámetro, en los dos perfiles | `No` |
+| `VersionDelSecretoDelPlanificador` | parámetro, en los dos perfiles: un contador que se sube al rotar el secreto | `1` |
+| `SERVICES_CATALOG_PRICE_MODELS` | fijo en la plantilla, sin parámetro | `free,on_request` |
+| `SERVICES_TASKS_TOKEN` | en el secreto; lo genera `-Accion Secretos` | — |
+
+Con `PlanificadorDeServicios=Si` se crean una regla de EventBridge (cada 5
+minutos), su destino HTTPS, su conexión, un rol que solo puede invocar ese
+destino y una alarma. **`FeatureServiceBooking=true` exige
+`PlanificadorDeServicios=Si`**: sin él, CloudFormation rechaza el plan. El
+orden completo, con lo que se espera en cada Change Set, está en
+`Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`. Nada de esto se ejecutó en AWS.
+
 ### 7 · GitHub
 
 En **Settings > Secrets and variables > Actions > Variables**, crear la variable

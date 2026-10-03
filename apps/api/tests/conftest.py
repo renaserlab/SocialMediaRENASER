@@ -65,6 +65,19 @@ def _sin_salidas_a_produccion() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _servicios_abierto_a_todos(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Las pruebas de Servicios encienden `feature_services` y dan por hecho
+    que eso basta para entrar. Desde el piloto (P101) ya no basta: de fábrica,
+    con la bandera encendida no entra nadie que no esté en la lista.
+
+    Aquí se abre para todos, que es lo que esas pruebas prueban. EL VALOR DE
+    FÁBRICA SE PRUEBA APARTE, y cerrado (`test_servicios_piloto.py`), donde
+    cada prueba pone la lista y la apertura que necesita.
+    """
+    monkeypatch.setattr(get_settings(), "services_public_access", True)
+
+
+@pytest.fixture(autouse=True)
 def _sin_estado_heredado() -> None:
     """Cada prueba empieza sin lo que averiguo la anterior.
 

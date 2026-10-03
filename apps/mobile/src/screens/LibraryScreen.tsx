@@ -188,7 +188,17 @@ export function LibraryScreen() {
   const terminados = (cursos ?? []).filter((c) => c.state === 'completed');
   const sinEmpezar = (cursos ?? []).filter((c) => c.state === 'not_started');
 
+  /** Los cursos del estado que se está mirando dentro de «Mis cursos». */
+  const delEstadoElegido =
+    estadoElegido === 0 ? enCurso : estadoElegido === 1 ? sinEmpezar : terminados;
+
   const hayCursos = (cursos ?? []).length > 0;
+  /*
+    UN FALLO DE RED NO ES «TODAVÍA NO TIENES CURSOS». `cargar` deja la lista
+    vacía cuando falla, y sin esta rama eso se leía como una biblioteca sin
+    cursos —con el motivo del fallo de subtítulo— y sin botón para reintentar.
+    Es la misma regla que ya seguían los audios (`estadoDeGuardados`).
+  */
   const estado =
     pestana === 1
       ? estadoDeGuardados(audios, falloAudios)
@@ -196,7 +206,9 @@ export function LibraryScreen() {
         ? 'loading'
         : hayCursos
           ? 'content'
-          : 'empty';
+          : fallo !== null
+            ? 'error'
+            : 'empty';
 
   return (
     <AppScreen scroll={false}>
@@ -215,14 +227,18 @@ export function LibraryScreen() {
         onRetry={pestana === 0 ? cargar : cargarAudios}
         title={
           pestana === 0
-            ? t('library.noCourses')
+            ? estado === 'error'
+              ? undefined
+              : t('library.noCourses')
             : estado === 'error'
               ? t('library.audiosLoadFailedTitle')
               : t('library.noAudios')
         }
         description={
           pestana === 0
-            ? (fallo ?? t('library.noCoursesBody'))
+            ? estado === 'error'
+              ? (fallo ?? undefined)
+              : t('library.noCoursesBody')
             : estado === 'error'
               ? (falloAudios ?? undefined)
               : // El texto anterior prometia recoger lo escuchado. Nada lo
@@ -247,14 +263,22 @@ export function LibraryScreen() {
               onChange={setEstadoElegido}
               style={styles.filtro}
             />
-            {(estadoElegido === 0
-              ? enCurso
-              : estadoElegido === 1
-                ? sinEmpezar
-                : terminados
-            ).map((curso) => (
-              <FilaDeCurso key={curso.id} curso={curso} router={router} />
-            ))}
+            {/*
+              UNA PESTAÑA SIN CURSOS LO DICE. Quien tenía todo «en progreso» y
+              tocaba «Finalizados» veía un hueco en blanco, igual que si la
+              pantalla se hubiera quedado a medias.
+            */}
+            {delEstadoElegido.length === 0 ? (
+              <StateView
+                state="empty"
+                icon="book"
+                description={estadoElegido === 0 ? t('library.noCoursesBody') : undefined}
+              />
+            ) : (
+              delEstadoElegido.map((curso) => (
+                <FilaDeCurso key={curso.id} curso={curso} router={router} />
+              ))
+            )}
           </ScrollView>
         ) : (
           <FlashList

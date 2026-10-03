@@ -174,7 +174,10 @@ export function ConfigurarEntradasScreen() {
   const volver = () =>
     router.canGoBack() ? router.back() : router.replace('/mis-eventos' as never);
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez: cada cambio vuelve a pedir la
+  // configuración, y desmontar el formulario por un «Cargando…» borraba de la
+  // vista lo que se acababa de tocar.
+  if (cargando && config === null) {
     return (
       <AppScreen>
         <AppHeader title={t('entradas.configurar')} onBack={volver} />

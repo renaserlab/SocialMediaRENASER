@@ -315,7 +315,7 @@ function ShortVideoItemBase({
           disabled={!short.authorId}
           style={styles.sidebarItem}
           accessibilityRole="button"
-          accessibilityLabel={`Ver perfil de ${short.author}`}
+          accessibilityLabel={t('post.viewProfileOf', { nombre: short.author })}
         >
           <ExpoImage source={short.avatarUrl ? { uri: short.avatarUrl } : assets.avatar} style={styles.avatar} contentFit="cover" />
         </Pressable>
@@ -336,7 +336,7 @@ function ShortVideoItemBase({
             hitSlop={AREA_DEL_CORAZON}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: liked }}
-            accessibilityLabel="Dar me gusta"
+            accessibilityLabel={t('post.actionLike')}
           >
             <Feather name="heart" size={28} color={liked ? media.danger : media.text} />
           </Pressable>
@@ -426,9 +426,11 @@ function ShortVideoItemBase({
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           style={styles.authorButton}
           accessibilityRole="button"
-          accessibilityLabel={`Ver perfil de ${short.author}`}
+          accessibilityLabel={t('post.viewProfileOf', { nombre: short.author })}
         >
-          <Text style={[styles.author, { color: media.text }]}>{short.author}</Text>
+          <Text style={[styles.author, { color: media.text }]} numberOfLines={1}>
+            {short.author}
+          </Text>
         </Pressable>
         <Text style={[styles.caption, { color: media.text }]} numberOfLines={2}>
           {short.caption}

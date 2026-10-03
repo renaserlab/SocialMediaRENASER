@@ -320,7 +320,10 @@ export function InventarioDeProductoScreen() {
 
   const titulo = f('inventario.titulo');
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez. Cada entrada y cada ajuste vuelven
+  // a leer el inventario, y cambiar la lista entera por «Cargando…» la devolvía
+  // arriba del todo y cerraba el historial que se estaba mirando.
+  if (cargando && inventario === null) {
     return (
       <AppScreen contentStyle={styles.contenido}>
         <AppHeader title={titulo} onBack={volver} />

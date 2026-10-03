@@ -14,6 +14,7 @@ import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { assets } from '@/data/assets';
 import { events as mockEvents } from '@/data/mockData';
 import { useTranslation } from '@/i18n/useTranslation';
+import { modalidadDelEvento } from '@/lib/eventoEnDetalle';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import type { ModalidadDeEvento } from '@/repositories/CatalogRepository';
 import { useAppStore } from '@/store/useAppStore';
@@ -203,13 +204,19 @@ export function EventsScreen() {
           </View>
         ) : (
           <Pressable
-            onPress={() => (event.type === 'live' ? router.push('/live/main') : toggle(event.id))}
+            // «En directo» lleva a la FICHA del evento. Antes iba a
+            // `/live/main`, un id fijo que no es ninguna emisión.
+            onPress={() =>
+              event.type === 'live'
+                ? router.push(`/eventos/${event.id}` as never)
+                : toggle(event.id)
+            }
             style={[styles.reserve, { backgroundColor: colors.primary }]}
             accessibilityLabel={
               isReserved
                 ? t('event.reserved')
                 : event.type === 'live'
-                  ? t('event.watchBroadcast')
+                  ? t('event.viewDetailsOf', { titulo: event.title })
                   : t('event.reserve')
             }
             accessibilityRole="button"
@@ -237,14 +244,20 @@ export function EventsScreen() {
         />
         <View style={[styles.overlay, { backgroundColor: colors.overlay }]} />
         <View style={styles.mainContent}>
-          <Text style={styles.tag}>{event.type.toUpperCase()}</Text>
-          <Text style={styles.mainTitle}>{event.title}</Text>
-          <Text style={styles.mainDescription}>{event.description}</Text>
+          {/* La modalidad con su texto traducido, no el valor interno («WEBINAR»). */}
+          <Text style={styles.tag}>{t(modalidadDelEvento(event)).toUpperCase()}</Text>
+          <Text style={styles.mainTitle} numberOfLines={2}>{event.title}</Text>
+          <Text style={styles.mainDescription} numberOfLines={3}>{event.description}</Text>
           <Text style={styles.mainMeta}>{event.date}{`\n`}{event.location}</Text>
+          {/*
+            «Ver detalles y reservar» ABRE LA FICHA. Reservaba directamente, sin
+            enseñar ningún detalle; y con la reserva hecha, el mismo toque la
+            cancelaba sin preguntar.
+          */}
           <Button
             label={isReserved ? t('event.reserved') : t('event.viewAndReserve')}
             variant={isReserved ? 'secondary' : 'primary'}
-            onPress={() => toggle(event.id)}
+            onPress={() => router.push(`/eventos/${event.id}` as never)}
             style={{ marginTop: spacing.lg }}
           />
         </View>
@@ -332,12 +345,25 @@ export function EventsScreen() {
                 ruta. Crear un evento es libre; publicarlo pasa por revisión.
               */}
               {conSesion ? (
-                <AccesoDeCreador
-                  icono="calendar"
-                  titulo={t('creadores.eventoTitulo')}
-                  detalle={t('creadores.eventoDetalle')}
-                  onPress={() => router.push('/mis-eventos' as never)}
-                />
+                <View style={styles.accesos}>
+                  <AccesoDeCreador
+                    icono="calendar"
+                    titulo={t('creadores.eventoTitulo')}
+                    detalle={t('creadores.eventoDetalle')}
+                    onPress={() => router.push('/mis-eventos' as never)}
+                  />
+                  {/*
+                    MIS ENTRADAS, DONDE SE BUSCAN EVENTOS. Solo se llegaba desde
+                    el resumen de un pedido recién pagado: quien cerraba esa
+                    pantalla no tenía por dónde volver a su entrada.
+                  */}
+                  <AccesoDeCreador
+                    icono="tag"
+                    titulo={t('miEntrada.titulo')}
+                    detalle={t('miEntrada.ningunaCuerpo')}
+                    onPress={() => router.push('/mis-entradas' as never)}
+                  />
+                </View>
               ) : null}
             </React.Fragment>
           ) : null}
@@ -413,6 +439,7 @@ const styles = StyleSheet.create({
   },
   entrada: { flex: 1, paddingVertical: spacing.sm, fontSize: 14 },
   modalidades: { gap: spacing.sm, paddingBottom: spacing.md },
+  accesos: { gap: spacing.sm },
   modalidad: {
     borderWidth: 1,
     borderRadius: radius.lg,

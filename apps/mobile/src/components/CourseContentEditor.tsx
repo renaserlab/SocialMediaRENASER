@@ -109,6 +109,8 @@ export function CourseContentEditor({
   const [moduleTitle, setModuleTitle] = useState('');
   const [addingModule, setAddingModule] = useState(false);
   const [moduleError, setModuleError] = useState<string | null>(null);
+  /** La petición de crear el módulo está en vuelo: el botón gira y se apaga. */
+  const [guardandoModulo, setGuardandoModulo] = useState(false);
   /**
    * La clave de idempotencia del módulo que se está creando.
    *
@@ -186,6 +188,9 @@ export function CourseContentEditor({
     // Se reserva ANTES del `await`: es lo que hace que el segundo toque use la
     // clave del primero. Ya no se manda posición, el módulo va al final.
     claveDeModulo.current ??= nuevaClaveDeCreacion();
+    // Sin esto el botón se quedaba igual mientras viajaba la petición: no se
+    // sabía si el toque había llegado, y la respuesta era volver a tocar.
+    setGuardandoModulo(true);
     try {
       await CourseContentRepository.createModule({
         courseId,
@@ -206,6 +211,8 @@ export function CourseContentEditor({
       // La hoja sigue abierta al fallar: el aviso tiene que vivir dentro de
       // ella, porque en iOS un dialogo no se abre encima de un Modal.
       setModuleError(error instanceof Error ? error.message : t('syllabus.addFailed'));
+    } finally {
+      setGuardandoModulo(false);
     }
   };
 
@@ -483,7 +490,8 @@ export function CourseContentEditor({
         <Button
           label={t('syllabus.createModule')}
           onPress={() => void addModule()}
-          disabled={!moduleTitle.trim()}
+          loading={guardandoModulo}
+          disabled={!moduleTitle.trim() || guardandoModulo}
           style={styles.submit}
         />
       </BottomSheet>

@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { RecordingPresets, useAudioRecorder } from 'expo-audio';
+import { useFocusEffect } from 'expo-router';
 
 import { permitirGrabar } from '@/hooks/useBackgroundAudio';
+import { useTranslation } from '@/i18n/useTranslation';
 import {
   decidirDesenlace,
   duracionEnSegundos,
   llegoAlTope,
   MAX_DURACION_S,
 } from '@/lib/notaDeVoz';
-import { abrirAjustes, pedirPermiso, textoDePermiso } from '@/lib/permisos';
+import {
+  abrirAjustes,
+  pedirPermiso,
+  textoDePermiso,
+  type EstadoDePermiso,
+} from '@/lib/permisos';
 import type { AdjuntoElegido } from '@/services/messageMedia';
 
 /**
@@ -125,7 +132,32 @@ function describirFichero(uri: string): { nombre: string; tipo: string } {
   return { nombre: `nota-de-voz.${ext}`, tipo };
 }
 
+/**
+ * Borra del teléfono el fichero de una grabación que ya no hace falta.
+ *
+ * El grabador escribe en la caché de la aplicación y nadie lo recogía: cada
+ * nota cancelada, eliminada o ya enviada dejaba su `.m4a` ahí hasta que el
+ * sistema decidiera limpiar. Es la misma llamada que ya usa
+ * `services/storage.ts` para sus copias temporales (`deleteAsync` de la API
+ * antigua, importada aquí dentro para que no entre en el paquete web).
+ *
+ * NUNCA LANZA. Si no se puede borrar, la caché la acaba limpiando el sistema:
+ * no es motivo para estropear un envío que ya salió bien.
+ */
+async function borrarGrabacion(uri: string | null | undefined): Promise<void> {
+  // En web la «ruta» es un `blob:` del navegador: no hay fichero que borrar.
+  if (!uri || Platform.OS === 'web') return;
+  try {
+    const legacy = await import('expo-file-system/legacy');
+    await legacy.deleteAsync(uri, { idempotent: true });
+  } catch {
+    /* Se queda en la caché. No es un fallo que haya que contarle a nadie. */
+  }
+}
+
 export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
+  const { t } = useTranslation();
+
   /*
     `HIGH_QUALITY` y no `LOW_QUALITY`, aunque una nota de voz no necesite calidad
     de estudio. El motivo no es la calidad sino el FORMATO: el preset bajo cambia
@@ -154,6 +186,17 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     exactamente el fallo que dejaba la grabadora colgada.
   */
   const abandonar = useRef(false);
+  /*
+    Que el diálogo de permiso del SISTEMA está en pantalla ahora mismo.
+
+    Mientras se enseña, la aplicación deja de estar «activa» —`inactive` en iOS,
+    `background` en Android, porque el diálogo es otra actividad— y vuelve en
+    cuanto se contesta. Ese parpadeo se leía como «la persona se ha ido» y
+    marcaba `abandonar`: la PRIMERA vez que alguien concedía el micrófono, la
+    grabación se abortaba sin decir nada y había que pulsar otra vez sin saber
+    por qué. Con esto, contestar al diálogo no cuenta como irse.
+  */
+  const preguntando = useRef(false);
   /* Para no dejar el micrófono abierto si la pantalla se cierra a media nota. */
   const montado = useRef(true);
   useEffect(() => {
@@ -161,6 +204,22 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     return () => {
       montado.current = false;
     };
+  }, []);
+
+  /*
+    Los borrados de ficheros en vuelo, en fila.
+
+    En iOS el grabador escribe SIEMPRE en la misma ruta mientras viva la
+    pantalla (solo estrena fichero si se le pasan opciones al preparar). Un
+    borrado que aterrizara después de empezar la nota siguiente se llevaría el
+    fichero que se está escribiendo. `empezar` espera a esta fila antes de
+    preparar el grabador, así que el orden está garantizado y no depende de
+    quién sea más rápido.
+  */
+  const limpieza = useRef<Promise<void>>(Promise.resolve());
+  const tirarFichero = useCallback((uri: string | null | undefined) => {
+    limpieza.current = limpieza.current.then(() => borrarGrabacion(uri));
+    return limpieza.current;
   }, []);
 
   const grabando = fase === 'grabando';
@@ -182,12 +241,21 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
 
     Los 200 ms se conservan: con el medio segundo que traía por defecto, el reloj
     de «0:03» daba saltos perceptibles mientras alguien habla mirándolo.
+
+    SE LEE `getStatus().durationMillis` Y NO `currentTime`. En `expo-audio`
+    1.1.1 `currentTime` solo es la duración en iOS; en Android el módulo nativo
+    devuelve ahí el INSTANTE en que empezó la grabación (`startTime`, la hora
+    del reloj en milisegundos). Con eso el contador marcaba un número absurdo,
+    `llegoAlTope` daba verdadero en el primer tic y la nota se paraba sola a los
+    200 ms diciendo que duraba cinco minutos. `durationMillis` es lo que
+    `useAudioRecorderState` leía antes, y significa lo mismo en las dos
+    plataformas y en web.
   */
   useEffect(() => {
     if (fase !== 'grabando') return;
     const reloj = setInterval(() => {
       try {
-        setMilisegundos((grabador.currentTime ?? 0) * 1000);
+        setMilisegundos(grabador.getStatus().durationMillis ?? 0);
       } catch {
         /* El objeto nativo ya no está. Se deja el último valor leído. */
       }
@@ -233,19 +301,46 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     setNota(null);
     setFase('permiso');
 
-    const permiso = await pedirPermiso('microfono');
+    /*
+      PEDIR EL PERMISO TAMBIÉN PUEDE FALLAR, y antes estaba fuera de cualquier
+      `try`: si la llamada nativa lanzaba, la fase se quedaba en «permiso» para
+      siempre —una rueda girando donde iba el micrófono— y como `empezar` solo
+      entra desde «inactiva», ya no se podía grabar hasta salir del chat.
+    */
+    let permiso: EstadoDePermiso;
+    preguntando.current = true;
+    try {
+      permiso = await pedirPermiso('microfono');
+    } catch {
+      setFase('inactiva');
+      alAvisar({
+        titulo: t('chat.voiceStartFailedTitle'),
+        cuerpo: t('chat.voiceStartFailedBody'),
+      });
+      return;
+    } finally {
+      preguntando.current = false;
+    }
+
     if (permiso !== 'concedido' && permiso !== 'limitado') {
       setFase('inactiva');
-      const texto = textoDePermiso('microfono', permiso);
+      /*
+        `textoDePermiso` sigue decidiendo SI la única salida son los ajustes
+        (`vaAAjustes`). Lo que se LEE sale del diccionario: sus textos están en
+        español a mano y hablan de vídeo mudo; aquí lo que se pierde es la nota
+        entera, y decirlo con precisión es lo que hace que se entienda.
+      */
+      const texto = {
+        ...textoDePermiso('microfono', permiso),
+        accion: t('chat.voiceOpenSettings'),
+      };
       alAvisar({
-        titulo: texto.titulo,
-        // El texto genérico habla de vídeo mudo; aquí lo que se pierde es la
-        // nota entera, y decirlo con precisión es lo que hace que se entienda.
-        cuerpo:
-          permiso === 'bloqueado'
-            ? texto.cuerpo
-            : 'Sin micrófono no se pueden grabar notas de voz. Puedes seguir ' +
-              'escribiendo y mandando archivos con normalidad.',
+        titulo: texto.vaAAjustes
+          ? t('chat.voiceMicBlockedTitle')
+          : t('chat.voiceMicNeededTitle'),
+        cuerpo: texto.vaAAjustes
+          ? t('chat.voiceMicBlockedBody')
+          : t('chat.voiceMicNeededBody'),
         accion: texto.vaAAjustes
           ? { texto: texto.accion, alPulsar: abrirAjustes }
           : undefined,
@@ -261,6 +356,9 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     }
 
     try {
+      // Si queda un fichero anterior borrándose, primero termina: en iOS la
+      // ruta es la misma y el borrado se llevaría la nota nueva. Ver `limpieza`.
+      await limpieza.current;
       // La sesión de audio, ANTES de preparar: en iOS `prepareToRecordAsync`
       // falla si la categoría no admite grabar.
       await permitirGrabar(true);
@@ -273,16 +371,22 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
       grabador.record();
       setFase('grabando');
     } catch {
-      await permitirGrabar(false);
+      /*
+        `cerrar()` Y NO SOLO DEVOLVER LA SESIÓN. Si lo que falló fue `record()`
+        —el micrófono lo tiene una llamada—, el grabador ya estaba PREPARADO y
+        así se quedaba: el siguiente intento reventaba con «AudioRecorder has
+        already been prepared» y el micrófono no volvía a funcionar hasta salir
+        del chat. `stop()` es la única forma de deshacer una preparación, y
+        `cerrar` ya tolera que no hubiera nada que parar.
+      */
+      await cerrar();
       setFase('inactiva');
       alAvisar({
-        titulo: 'No se pudo grabar',
-        cuerpo:
-          'El micrófono no está disponible ahora mismo. Puede que lo esté ' +
-          'usando otra aplicación, como una llamada.',
+        titulo: t('chat.voiceStartFailedTitle'),
+        cuerpo: t('chat.voiceStartFailedBody'),
       });
     }
-  }, [fase, grabador, alAvisar, cerrar]);
+  }, [fase, grabador, alAvisar, cerrar, t]);
 
   /**
    * Cierra el micrófono y decide qué queda: una nota en la previa, o nada.
@@ -300,7 +404,10 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
       // nuestro reloj, que para decidir la duración vale igual.
       let ms = milisegundos;
       try {
-        if (grabador.currentTime) ms = grabador.currentTime * 1000;
+        // `durationMillis` y no `currentTime`: ver el comentario del contador.
+        // Se lee ANTES de parar, que es cuando todavía vale algo.
+        const medido = grabador.getStatus().durationMillis;
+        if (medido > 0) ms = medido;
       } catch {
         /* Liberado. Nos quedamos con lo contado. */
       }
@@ -317,19 +424,23 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
       setMilisegundos(0);
 
       if (desenlace === 'descartar') {
+        // Lo cancelado no se va a mandar nunca: su fichero sobra. Se espera al
+        // borrado ANTES de volver a «inactiva», que es lo que deja grabar otra.
+        await tirarFichero(uri);
         setNota(null);
         setFase('inactiva');
         return;
       }
       if (desenlace === 'demasiado-corta') {
+        await tirarFichero(uri);
         setNota(null);
         setFase('inactiva');
         alAvisar({
-          titulo: 'Muy corta',
-          // Ya NO dice «mantén pulsado»: la interacción es pulsar, hablar y
-          // pulsar «Detener». Un texto que explica un gesto que ya no existe
-          // deja a quien lo lee peor que sin texto.
-          cuerpo: 'Pulsa el micrófono, habla y pulsa «Detener» cuando acabes.',
+          titulo: t('chat.voiceTooShortTitle'),
+          // El texto ya NO habla de dejar el dedo puesto: la interacción es
+          // pulsar, hablar y pulsar «Detener». Un texto que explica un gesto
+          // que ya no existe deja a quien lo lee peor que sin texto.
+          cuerpo: t('chat.voiceTooShortBody'),
         });
         return;
       }
@@ -337,8 +448,8 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
         setNota(null);
         setFase('inactiva');
         alAvisar({
-          titulo: 'No se pudo guardar',
-          cuerpo: 'La grabación no llegó a escribirse. Inténtalo otra vez.',
+          titulo: t('chat.voiceSaveFailedTitle'),
+          cuerpo: t('chat.voiceSaveFailedBody'),
         });
         return;
       }
@@ -363,7 +474,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
       });
       setFase('lista');
     },
-    [milisegundos, grabador, cerrar, alAvisar],
+    [milisegundos, grabador, cerrar, alAvisar, tirarFichero, t],
   );
 
   /** Deja de grabar Y CONSERVA lo grabado: pasa a la previa. */
@@ -392,11 +503,14 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   /** Tira la nota que estaba en la previa —o la que falló al enviarse—. */
   const eliminar = useCallback(() => {
     if (fase !== 'lista' && fase !== 'fallida') return;
+    // El fichero se va con la nota. No se espera: la papelera responde en el
+    // acto, y `empezar` ya aguarda a la fila de borrados antes de grabar otra.
+    void tirarFichero(nota?.uri);
     setNota(null);
     setProgreso(0);
     setMilisegundos(0);
     setFase('inactiva');
-  }, [fase]);
+  }, [fase, nota, tirarFichero]);
 
   /**
    * Sube la nota y crea el mensaje. Es también el «reintentar» de un fallo.
@@ -428,6 +542,11 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
       confirmado = false;
     }
 
+    // Ya está en el servidor: la copia del teléfono sobra, siga o no la
+    // pantalla en pie. SOLO con confirmación: tras un fallo el fichero es lo
+    // único que permite reintentar sin volver a hablar.
+    if (confirmado) await tirarFichero(pendiente.uri);
+
     if (!montado.current) return;
     if (confirmado) {
       setNota(null);
@@ -436,7 +555,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     } else {
       setFase('fallida');
     }
-  }, [fase, nota, alEnviar]);
+  }, [fase, nota, alEnviar, tirarFichero]);
 
   /*
     Al llegar al tope se PARA SOLA y queda en la previa.
@@ -467,7 +586,9 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   */
   const alIrseAlFondo = useRef<() => void>(() => {});
   alIrseAlFondo.current = () => {
-    if (fase === 'permiso') abandonar.current = true;
+    // Con el diálogo de permiso del sistema delante NO cuenta como irse: ver
+    // `preguntando`. Sin esta guarda, conceder el permiso abortaba la grabación.
+    if (fase === 'permiso' && !preguntando.current) abandonar.current = true;
     if (fase === 'grabando') void detener();
   };
   useEffect(() => {
@@ -477,6 +598,39 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     });
     return () => suscripcion.remove();
   }, [fase]);
+
+  /*
+    LA PANTALLA PIERDE EL FOCO SIN DESMONTARSE: SE CIERRA EL MICRÓFONO Y SE
+    CONSERVA LO DICHO.
+
+    Tocar la cabecera abre el perfil ENCIMA del chat, y el chat sigue montado
+    debajo: la grabación seguía corriendo con el micrófono abierto en una
+    pantalla que nadie miraba, sin reloj, sin «Detener» y sin forma de saberlo.
+    Es el mismo trato que al irse a segundo plano: se para y la nota queda en
+    la previa, esperando a la vuelta.
+
+    EN EL DESMONTAJE ESTO NO HACE NADA, a propósito. `useFocusEffect` también
+    ejecuta su limpieza al desmontar, y ahí el grabador ya está liberado (ver
+    el comentario siguiente): `montado` —cuya limpieza se declaró antes y por
+    tanto corre antes— lo distingue, y de esa salida se encarga la limpieza de
+    abajo sin tocar nada nativo.
+
+    Por referencia, igual que `alIrseAlFondo`: la función cambia en cada tic.
+  */
+  const alPerderElFoco = useRef<() => void>(() => {});
+  alPerderElFoco.current = () => {
+    if (!montado.current) return;
+    if (fase === 'permiso') abandonar.current = true;
+    if (fase === 'grabando') void detener();
+  };
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        alPerderElFoco.current();
+      },
+      [],
+    ),
+  );
 
   /*
     AQUI ESTABA EL FALLO QUE CERRABA LA APLICACION AL SALIR DEL CHAT.

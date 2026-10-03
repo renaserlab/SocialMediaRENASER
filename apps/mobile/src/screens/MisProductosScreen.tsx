@@ -200,7 +200,10 @@ export function MisProductosScreen() {
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez. Postular o retirar un producto
+  // vuelve a pedir la lista, y cambiarla entera por «Cargando…» la devolvía
+  // arriba del todo después de cada acción.
+  if (cargando && productos === null) {
     return (
       <AppScreen contentStyle={styles.contenido}>
         <AppHeader title={f('proveedorProductos.productos.titulo')} onBack={volver} />

@@ -49,7 +49,9 @@ export type NotificationItem = {
     | 'edit-3'
     | 'eye-off'
     | 'image'
-    | 'radio';
+    | 'radio'
+    | 'clock'
+    | 'inbox';
   time: string;
   read: boolean;
   actorId?: string;
@@ -190,7 +192,9 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       const aviso = avisoAlCreador(dto.type);
       if (aviso !== null) {
         title = t(aviso.titulo as TranslationKey);
-        subtitle = detalleDelAviso(dto.payload) || title;
+        subtitle =
+          detalleDelAviso(dto.payload) ||
+          (aviso.cuerpo ? t(aviso.cuerpo as TranslationKey) : title);
         icon = aviso.icono;
       }
     }

@@ -173,7 +173,10 @@ export function LessonScreen() {
     };
   }, [mediaPath, hayVideo]);
 
-  if (loading) {
+  // SOLO SIN LECCION. `reload()` —al marcarla como completada o al guardar la
+  // descripcion— vuelve a poner `loading`, y con el retorno de siempre se
+  // desmontaba la pantalla entera: el video se paraba y volvia a empezar.
+  if (loading && !lesson) {
     /*
       LA LECCION SE VE ANTES DE ESTAR CARGADA.
 
@@ -270,6 +273,7 @@ export function LessonScreen() {
         // Eliminar vive aqui y no en el temario: alli tocar la fila borraba la
         // leccion, de modo que no habia forma de abrirla para revisarla.
         rightIcon={canManage ? 'trash-2' : undefined}
+        rightLabel={t('lesson.deleteTitle')}
         onRightPress={canManage ? () => void removeLesson() : undefined}
       />
       <ScrollView contentContainerStyle={styles.scrollContent}>

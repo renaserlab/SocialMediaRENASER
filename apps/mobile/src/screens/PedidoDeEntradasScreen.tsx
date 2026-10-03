@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { confirm, notify } from '@/lib/confirm';
+import { toast } from '@/lib/toast';
 import { importeConMoneda } from '@/lib/dinero';
 import { claveDeErrorDeEntradas, comoReloj, esFalloDeRed } from '@/lib/entradasDeEvento';
 import {
@@ -17,6 +18,7 @@ import {
   estaCerrado,
   siguePagable,
 } from '@/lib/pedidoDeEntradas';
+import { useSeccionActiva } from '@/navigation/foco';
 import { EventOrderRepository, type Pedido } from '@/repositories/EventOrderRepository';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -54,6 +56,8 @@ export function PedidoDeEntradasScreen() {
   >(null);
   const [ocupado, setOcupado] = useState(false);
   const ocupadoRef = useRef(false);
+  /** Si el pedido ya se llegó a pintar: una relectura fallida no lo quita. */
+  const yaPintado = useRef(false);
 
   const cargar = useCallback(async () => {
     if (!id) return;
@@ -62,6 +66,7 @@ export function PedidoDeEntradasScreen() {
     try {
       const datos = await EventOrderRepository.leerPedido(id);
       setPedido(datos);
+      yaPintado.current = true;
       // DEL SERVIDOR, no del reloj local: si el teléfono va adelantado, la
       // cuenta atrás empezaría ya vencida.
       setRestantes(datos.segundos_restantes);
@@ -74,6 +79,12 @@ export function PedidoDeEntradasScreen() {
           error.code === 'event_ticketing_not_available')
       ) {
         setFallo('noDisponible');
+      } else if (yaPintado.current) {
+        // UNA RELECTURA QUE FALLA NO BORRA EL PEDIDO QUE YA SE VE. Desde que
+        // la pantalla se relee al volver a primer plano, lo normal al reanudar
+        // es que la primera petición no salga: cambiar el pedido por una
+        // pantalla de error justo al volver de pagar sería peor que no releer.
+        toast(t('common.tryAgain'), 'alert-circle');
       } else if (error instanceof ApiError && esFalloDeRed(error.code)) {
         setFallo('sinConexion');
       } else {
@@ -82,11 +93,22 @@ export function PedidoDeEntradasScreen() {
     } finally {
       setCargando(false);
     }
+    // `t` no va en las dependencias a propósito: si cambiara de identidad en
+    // cada render, `cargar` cambiaría con ella y el efecto de abajo releería
+    // el pedido sin parar. El aviso usa el idioma con el que se abrió.
   }, [id]);
 
+  /*
+    AL ENTRAR, Y CADA VEZ QUE SE VUELVE A MIRAR ESTA PANTALLA. El cobro ocurre
+    en el navegador del sistema: al volver, el pedido ya no está como estaba y
+    nadie lo releía, así que seguía diciendo «pendiente de pago» después de
+    pagar. `useSeccionActiva` y no solo el foco de navegación: irse al
+    navegador y volver no cambia de pantalla, cambia de aplicación.
+  */
+  const activa = useSeccionActiva();
   useEffect(() => {
-    void cargar();
-  }, [cargar]);
+    if (activa) void cargar();
+  }, [activa, cargar]);
 
   useEffect(() => {
     if (pedido === null || !siguePagable(pedido.status, restantes)) return;
@@ -153,7 +175,9 @@ export function PedidoDeEntradasScreen() {
     router.replace((evento ? `/eventos/${evento}` : '/mis-eventos') as never);
   };
 
-  if (cargando) {
+  // A pantalla completa SOLO la primera vez: releer el pedido al volver del
+  // pago no puede sustituir el resumen por «Cargando…».
+  if (cargando && !pedido) {
     return (
       <AppScreen>
         <AppHeader title={t('pedido.titulo')} onBack={volver} />

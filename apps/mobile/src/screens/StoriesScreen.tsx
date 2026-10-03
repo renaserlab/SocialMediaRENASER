@@ -279,7 +279,7 @@ export function StoriesScreen() {
     return (
       <View style={[styles.root, styles.empty]}>
         <Text style={[styles.author, { color: media.text }]}>No hay historias que mostrar.</Text>
-        <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel="Cerrar">
+        <Pressable onPress={close} hitSlop={12} accessibilityRole="button" accessibilityLabel={t('common.close')}>
           <Feather name="x" size={26} color={media.text} />
         </Pressable>
       </View>
@@ -468,7 +468,7 @@ export function StoriesScreen() {
       >
         <Text style={styles.sheetTitle}>VISTO POR</Text>
         {viewers === null ? (
-          <Text style={styles.sheetEmpty}>Cargando…</Text>
+          <Text style={styles.sheetEmpty}>{t('common.loading')}</Text>
         ) : viewers.length === 0 ? (
           <Text style={styles.sheetEmpty}>Todavía no la ha visto nadie.</Text>
         ) : (

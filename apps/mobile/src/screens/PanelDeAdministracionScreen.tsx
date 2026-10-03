@@ -12,6 +12,7 @@ import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
+import { useServiciosDeAdministracion } from '@/hooks/useServiciosEncendido';
 
 type Entrada = { titulo: TranslationKey; icono: keyof typeof Feather.glyphMap; ruta: string };
 
@@ -59,11 +60,30 @@ export const SECCIONES_DE_ADMINISTRACION: { titulo: TranslationKey; entradas: En
   },
 ];
 
+/**
+ * Z SERVICIOS, aparte: solo se enseña con `FEATURE_SERVICES` encendida en el
+ * servidor. Apagada, el panel queda exactamente como estaba. Durante el piloto
+ * se enseña a quien administra por su rol, esté o no entre los participantes.
+ */
+export const SECCION_DE_SERVICIOS: { titulo: TranslationKey; entradas: Entrada[] } = {
+  titulo: 'panelAdmin.seccionServicios',
+  entradas: [
+    { titulo: 'panelAdmin.serviciosAdmision', icono: 'briefcase', ruta: '/admin/servicios' },
+    { titulo: 'panelAdmin.serviciosCondiciones', icono: 'file-text', ruta: '/admin/servicios/condiciones' },
+    { titulo: 'panelAdmin.serviciosCatalogo', icono: 'layers', ruta: '/admin/servicios/catalogo' },
+    { titulo: 'panelAdmin.serviciosCategorias', icono: 'grid', ruta: '/admin/servicios/categorias' },
+  ],
+};
+
 export function PanelDeAdministracionScreen() {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
   const router = useRouter();
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  const serviciosEncendido = useServiciosDeAdministracion();
+  const secciones = serviciosEncendido
+    ? [...SECCIONES_DE_ADMINISTRACION, SECCION_DE_SERVICIOS]
+    : SECCIONES_DE_ADMINISTRACION;
 
   return (
     <AppScreen contentStyle={styles.contenido}>
@@ -71,7 +91,7 @@ export function PanelDeAdministracionScreen() {
       <Text variant="caption" color={colors.textMuted}>
         {t('panelAdmin.intro')}
       </Text>
-      {SECCIONES_DE_ADMINISTRACION.map((seccion) => (
+      {secciones.map((seccion) => (
         <View key={seccion.titulo} style={styles.seccion}>
           <SectionTitle title={t(seccion.titulo)} />
           {seccion.entradas.map((entrada) => (

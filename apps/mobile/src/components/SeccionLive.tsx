@@ -39,6 +39,12 @@ export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
   const { t } = useTranslation();
   const [emisiones, setEmisiones] = useState<Emision[] | null>(null);
   const [fallo, setFallo] = useState(false);
+  /*
+    Reintento explicito. Con un fallo de red solo se ofrecia «Descubrir», asi
+    que para volver a preguntar habia que salir de la pestana y volver. El
+    numero solo existe para que el efecto de abajo repita `cargar()`.
+  */
+  const [intento, setIntento] = useState(0);
 
   const cargar = useCallback(() => {
     setFallo(false);
@@ -66,7 +72,13 @@ export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
     return () => {
       vigente = false;
     };
-  }, [activo, cargar]);
+  }, [activo, cargar, intento]);
+
+  const reintentar = () => {
+    // De vuelta a la rueda de carga: asi se ve que el toque hizo algo.
+    setEmisiones(null);
+    setIntento((n) => n + 1);
+  };
 
   const cargando = FEATURE_LIVE && emisiones === null;
 
@@ -119,6 +131,17 @@ export function SeccionLive({ activo, espacioInferior, alDescubrir }: Props) {
                está emitiendo ahora mismo. */
             t('live.emptyBody')}
       </Text>
+      {fallo ? (
+        <Pressable
+          onPress={reintentar}
+          style={[estilos.boton, { borderColor: media.border }]}
+          accessibilityRole="button"
+        >
+          <Text variant="body" weight="700" color={media.text}>
+            {t('common.retry')}
+          </Text>
+        </Pressable>
+      ) : null}
       <Pressable
         onPress={alDescubrir}
         style={[estilos.boton, { borderColor: media.border }]}

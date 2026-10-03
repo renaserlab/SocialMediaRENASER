@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,7 +11,7 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
@@ -22,6 +23,7 @@ import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
 import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
+import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useTranslation } from '@/i18n/useTranslation';
 import { afterSheetClose } from '@/lib/afterSheetClose';
@@ -35,6 +37,7 @@ import {
   reconciliarEnvio,
 } from '@/lib/mensajesEnVivo';
 import { toMessageFromRow } from '@/mappers/messageMapper';
+import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import {
   MessageRepository,
   MENSAJES_POR_PAGINA,
@@ -88,6 +91,18 @@ function pesoLegible(bytes?: number | null): string {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
+/**
+ * Si el adjunto ya tiene un enlace del SERVIDOR, y no la ruta local con la que
+ * se pinta la burbuja mientras sube.
+ *
+ * Es lo que decide si se puede abrir fuera de la aplicación: una ruta del
+ * teléfono no se puede entregar a otra aplicación —en Android lanza—, y un
+ * enlace firmado sí.
+ */
+function estaEnElServidor(adjunto: MessageAttachment): boolean {
+  return !!adjunto.url && adjunto.url.startsWith('http');
+}
+
 /** El día de un mensaje, o `null` si todavía no ha llegado al servidor. */
 function diaDe(mensaje?: Message): string | null {
   if (!mensaje?.createdAtIso) return null;
@@ -138,6 +153,20 @@ export function ChatScreen() {
   const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  /*
+    La PRIMERA carga de la conversación, mientras dura.
+
+    Sin esto, abrir un chat enseñaba una pantalla en blanco que era
+    indistinguible de una conversación sin mensajes: quien tenía cobertura mala
+    veía «nada» durante segundos y no sabía si esperar o si se habían perdido
+    sus mensajes. Empieza en `true` cuando hay algo que pedir, para que el
+    primer fotograma ya sea el de «cargando» y no el de «vacío».
+  */
+  const [cargandoMensajes, setCargandoMensajes] = useState(
+    supabaseEnabled && !!params.id,
+  );
+  /* Sube en uno con cada «Reintentar»: es lo que vuelve a lanzar la carga. */
+  const [intentoDeCarga, setIntentoDeCarga] = useState(0);
   const [elegidos, setElegidos] = useState<AdjuntoElegido[]>([]);
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [enviando, setEnviando] = useState(false);
@@ -176,12 +205,20 @@ export function ChatScreen() {
   });
 
   /*
-    Lo último que se intentó enviar, para poder repetirlo.
+    Lo último que se intentó enviar DESDE CADA BURBUJA, para poder repetirlo.
+
+    ES UN MAPA POR IDENTIFICADOR DE BURBUJA Y NO UN SOLO HUECO. Antes era una
+    única referencia (`ultimoEnvio`), y con dos envíos fallidos en pantalla el
+    segundo pisaba al primero: pulsar «reintentar» en la PRIMERA burbuja mandaba
+    el contenido de la SEGUNDA con el identificador de la primera, y al salir
+    bien se vaciaba el hueco, así que la segunda ya no se podía reintentar. Cada
+    burbuja fallida guarda ahora lo suyo, y solo lo suelta cuando se envía o se
+    descarta.
 
     Vive en una referencia y no en el estado porque cambiarlo no tiene que
     repintar nada: solo se lee cuando alguien pulsa «reintentar».
   */
-  const ultimoEnvio = useRef<EnvioPendiente | null>(null);
+  const ultimoEnvioDe = useRef(new Map<string, EnvioPendiente>());
 
   /*
     Lo que ya se ha pintado, accesible desde los callbacks de Realtime.
@@ -204,6 +241,11 @@ export function ChatScreen() {
     let montado = true;
     const conversationId = params.id;
 
+    // Cada carga —la primera y cada reintento— empieza limpia: «cargando» a la
+    // vista y sin el error del intento anterior.
+    setCargandoMensajes(true);
+    setLoadError(null);
+
     MessageRepository.listMessages(conversationId, currentUserId)
       .then((msgs) => {
         if (!montado) return;
@@ -215,6 +257,9 @@ export function ChatScreen() {
       // mensajes, en vez de avisar de que no se pudieron cargar.
       .catch(() => {
         if (montado) setLoadError(t('chat.loadFailed'));
+      })
+      .finally(() => {
+        if (montado) setCargandoMensajes(false);
       });
     MessageRepository.markRead(conversationId).catch(() => {});
 
@@ -267,7 +312,9 @@ export function ChatScreen() {
       montado = false;
       unsubscribe();
     };
-  }, [supabaseEnabled, params.id, currentUserId, aplicar]);
+    // `intentoDeCarga` no se lee dentro: está para que «Reintentar» vuelva a
+    // lanzar la carga entera —y la suscripción con ella— tras un fallo.
+  }, [supabaseEnabled, params.id, currentUserId, aplicar, intentoDeCarga]);
 
   /*
     Qué se puede hacer en esta instalación. Una sola pregunta al abrir el chat.
@@ -408,7 +455,7 @@ export function ChatScreen() {
           subidos,
         );
         aplicar(reconciliarEnvio(mensajesRef.current, idTemporal, guardado));
-        ultimoEnvio.current = null;
+        ultimoEnvioDe.current.delete(idTemporal);
       } catch (error) {
         /*
           La burbuja se QUEDA, marcada como fallida y con su botón de reintentar.
@@ -423,7 +470,9 @@ export function ChatScreen() {
               : m,
           ),
         );
-        ultimoEnvio.current = envio;
+        // Bajo el identificador de SU burbuja: es lo que permite reintentar
+        // esta sin tocar otra que también haya fallado.
+        ultimoEnvioDe.current.set(idTemporal, envio);
 
         const codigo = error instanceof ApiError ? error.code : undefined;
         const esFaltaDeMigracion =
@@ -520,7 +569,8 @@ export function ChatScreen() {
 
   const reintentar = useCallback(
     async (mensaje: Message) => {
-      const envio = ultimoEnvio.current;
+      // Lo que se intentó mandar desde ESTA burbuja, no lo último que falló.
+      const envio = ultimoEnvioDe.current.get(mensaje.id);
       if (!envio || enviando) return;
       setEnviando(true);
       aplicar(
@@ -538,7 +588,7 @@ export function ChatScreen() {
   const descartar = useCallback(
     (mensaje: Message) => {
       aplicar(descartarEnvio(mensajesRef.current, mensaje.id));
-      ultimoEnvio.current = null;
+      ultimoEnvioDe.current.delete(mensaje.id);
     },
     [aplicar],
   );
@@ -659,6 +709,72 @@ export function ChatScreen() {
   });
 
   // -------------------------------------------------------------------------
+  // Salir con una nota de voz a medias
+  // -------------------------------------------------------------------------
+
+  /*
+    Hay una nota que se perdería al salir: grabándose, en la previa o fallida.
+
+    «Enviando» NO cuenta: la subida sigue aunque la pantalla se cierre y el
+    mensaje llega igual. Las dos fases de paso («permiso», «guardando») tampoco:
+    duran un instante y todavía no hay nada que perder.
+  */
+  const notaEnJuego =
+    grabadora.fase === 'grabando' ||
+    grabadora.fase === 'lista' ||
+    grabadora.fase === 'fallida';
+  const grabadoraActual = useRef(grabadora);
+  grabadoraActual.current = grabadora;
+
+  /**
+   * Volver atrás, PREGUNTANDO ANTES si hay una nota de voz que se perdería.
+   *
+   * Antes, pulsar atrás con una nota grabada la tiraba sin decir nada: lo que
+   * cuesta rehacer es haberla dicho. Si la persona confirma, la nota se
+   * descarta POR SU CAMINO —`cancelar` cierra el micrófono, `eliminar` suelta
+   * la previa, y los dos borran el fichero— y solo entonces se navega.
+   */
+  const salirDelChat = async () => {
+    if (notaEnJuego) {
+      const ok = await confirm({
+        title: t('chat.voiceLeaveTitle'),
+        message: t('chat.voiceLeaveBody'),
+        confirmLabel: t('chat.voiceLeaveConfirm'),
+        cancelLabel: t('common.cancel'),
+        destructive: true,
+      });
+      if (!ok) return;
+      // La grabadora de AHORA, no la del render en que se pulsó atrás: mientras
+      // el diálogo está abierto la fase puede haber cambiado (el tope de
+      // duración para la grabación sola y la deja en la previa).
+      const actual = grabadoraActual.current;
+      if (actual.fase === 'grabando') await actual.cancelar();
+      else actual.eliminar();
+    }
+    return router.canGoBack() ? router.back() : router.replace('/');
+  };
+
+  /*
+    EL ATRÁS FÍSICO DE ANDROID TAMBIÉN PREGUNTA. La tecla del teléfono no pasa
+    por el botón de la cabecera: la atiende `navigation/atras.ts`, que ve una
+    ruta anterior y vuelve sin más. Es el mismo registro que usa el asistente de
+    cursos para no perder lo escrito (`registrarSalidaPropia`).
+
+    SOLO MIENTRAS HAY UNA NOTA EN JUEGO, y solo con el foco: sin nota, el Atrás
+    sigue su camino normal y esta pantalla no se queda ningún evento.
+
+    Por referencia: `salirDelChat` cambia en cada render.
+  */
+  const ultimaSalida = useRef<() => void>(() => {});
+  ultimaSalida.current = () => void salirDelChat();
+  useFocusEffect(
+    useCallback(() => {
+      if (!notaEnJuego) return undefined;
+      return registrarSalidaPropia(() => ultimaSalida.current());
+    }, [notaEnJuego]),
+  );
+
+  // -------------------------------------------------------------------------
   // Menú de acciones y borrado
   // -------------------------------------------------------------------------
 
@@ -752,6 +868,21 @@ export function ChatScreen() {
   // Pintar
   // -------------------------------------------------------------------------
 
+  /**
+   * Abre un adjunto con lo que el teléfono tenga para él: un documento en su
+   * lector, un vídeo en su reproductor.
+   *
+   * Es el mismo `Linking.openURL` sobre un enlace firmado que ya usan las
+   * pantallas de evidencias y documentos. Si el sistema no sabe abrirlo, se
+   * dice: un toque que no hace nada se lee como un botón roto.
+   */
+  const abrirFuera = (adjunto: MessageAttachment) => {
+    if (!adjunto.url || !estaEnElServidor(adjunto)) return;
+    Linking.openURL(adjunto.url).catch(() => {
+      notify(t('common.couldNotOpen'), t('common.tryAgainSoon'));
+    });
+  };
+
   const pintarAdjunto = (adjunto: MessageAttachment, mio: boolean) => {
     const colorTexto = mio ? colors.onPrimary : colors.text;
 
@@ -774,8 +905,30 @@ export function ChatScreen() {
     }
 
     if (adjunto.kind === 'document') {
+      /*
+        UN DOCUMENTO SE ABRE. Antes era una ficha con el nombre y el peso que no
+        respondía a nada: se podía mandar un PDF pero no leerlo. Se abre fuera,
+        con lo que el teléfono tenga para ese tipo de archivo — igual que las
+        evidencias y los documentos de las demás pantallas.
+
+        Solo cuando ya hay enlace del servidor: mientras sube, lo que hay es una
+        ruta local que no se puede entregar a otra aplicación, y un botón que no
+        hace nada es peor que una ficha quieta.
+      */
+      const sePuedeAbrir = estaEnElServidor(adjunto);
       return (
-        <View key={adjunto.id} style={[styles.documento, { borderColor: colors.border }]}>
+        <Pressable
+          key={adjunto.id}
+          onPress={() => abrirFuera(adjunto)}
+          disabled={!sePuedeAbrir}
+          accessibilityRole={sePuedeAbrir ? 'button' : undefined}
+          accessibilityLabel={
+            sePuedeAbrir
+              ? t('chat.openFile', { nombre: adjunto.fileName ?? '' }).trim()
+              : undefined
+          }
+          style={[styles.documento, { borderColor: colors.border }]}
+        >
           <Feather name="file-text" size={20} color={colorTexto} />
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={{ color: colorTexto, fontSize: 13, fontWeight: '600' }}>
@@ -787,7 +940,7 @@ export function ChatScreen() {
               </Text>
             ) : null}
           </View>
-        </View>
+        </Pressable>
       );
     }
 
@@ -799,7 +952,16 @@ export function ChatScreen() {
     return (
       <Pressable
         key={adjunto.id}
-        onPress={() => (adjunto.url ? setFotoAmpliada(adjunto) : undefined)}
+        onPress={() => {
+          /*
+            UN VÍDEO NO VA AL VISOR DE IMÁGENES. `ImageViewer` pinta una imagen:
+            con la URL de un vídeo enseñaba una pantalla negra con «pellizca
+            para ampliar». La aplicación no tiene un visor de vídeo a pantalla
+            completa, así que se abre fuera, como los documentos.
+          */
+          if (adjunto.kind === 'video') abrirFuera(adjunto);
+          else if (adjunto.url) setFotoAmpliada(adjunto);
+        }}
         accessibilityRole="button"
         accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
         style={[styles.medio, { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) }]}
@@ -843,9 +1005,15 @@ export function ChatScreen() {
         avatarDeRespaldo={demoConversation?.avatarUrl}
         idDeRespaldo={demoConversation?.otherId}
         resolverEnElServidor={supabaseEnabled && !!params.id}
-        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        onBack={() => void salirDelChat()}
       />
-      {loadError ? (
+      {/*
+        La franja roja solo cuando YA hay algo pintado (una burbuja propia, un
+        mensaje que entró por Realtime) y la carga del historial falló. Con la
+        lista vacía el error lo cuenta el estado de abajo, que además ofrece
+        reintentar: las dos cosas a la vez serían el mismo aviso dos veces.
+      */}
+      {loadError && messages.length > 0 ? (
         <Text style={{ color: colors.danger, textAlign: 'center', padding: spacing.sm, fontSize: 12 }}>
           {loadError}
         </Text>
@@ -856,6 +1024,48 @@ export function ChatScreen() {
           keyExtractor={(item: Message) => item.id}
           contentContainerStyle={styles.messages}
           showsVerticalScrollIndicator={false}
+          /*
+            ANCLADA ABAJO. Sin esto la conversación se abría por el mensaje más
+            ANTIGUO de la página y había que bajar a mano hasta lo último, que
+            es lo único que se viene a leer. `startRenderingFromBottom` hace que
+            el primer pintado empiece por el final, y el umbral hace que un
+            mensaje nuevo —propio o ajeno— arrastre la lista hasta él SOLO si ya
+            se estaba abajo: quien ha subido a leer el historial no pierde el
+            sitio. Es el modo de chat que trae FlashList 2; no hay lista
+            invertida ni desplazamientos a mano.
+          */
+          maintainVisibleContentPosition={{
+            startRenderingFromBottom: true,
+            autoscrollToBottomThreshold: 0.2,
+          }}
+          /*
+            CARGANDO, ERROR O VACÍO: los tres estados de una lista sin mensajes,
+            con el componente de estados de siempre. Solo existen con la lista
+            vacía: en cuanto hay una burbuja, manda la conversación.
+
+            El redactor sigue debajo en los tres casos. En una conversación
+            recién creada «vacío» es justo desde donde se escribe el primer
+            mensaje, y tras un error se puede reintentar sin salir del chat.
+          */
+          ListEmptyComponent={
+            supabaseEnabled && cargandoMensajes ? (
+              <StateView state="loading" />
+            ) : supabaseEnabled && loadError ? (
+              <StateView
+                state="error"
+                title={loadError}
+                description={t('common.checkConnection')}
+                onRetry={() => setIntentoDeCarga((intento) => intento + 1)}
+              />
+            ) : (
+              <StateView
+                state="empty"
+                icon="message-circle"
+                title={t('chat.emptyTitle')}
+                description={t('chat.emptyBody')}
+              />
+            )
+          }
           // El historial se pide al llegar ARRIBA, que en una lista de chat es
           // el final de la lista invertida... y esta no lo está, así que se usa
           // el desplazamiento: `onStartReached` no existe en esta versión.
