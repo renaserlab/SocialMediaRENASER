@@ -287,8 +287,13 @@ DE_SERVICIOS = {
     "SERVICES_CATALOG_MODALITIES": "ServicesCatalogModalities",
     "SERVICES_CATALOG_CURRENCIES": "ServicesCatalogCurrencies",
 }
-#: Lo que va FIJO: cobrar un servicio no se enciende desde la infraestructura.
-FIJAS_DE_SERVICIOS = {"FEATURE_SERVICE_PAYMENTS": "false", "SERVICE_PAYMENTS_PROVIDER": "none"}
+#: Lo que va FIJO: ni cobrar un servicio ni ponerle un importe se enciende
+#: desde la infraestructura. El piloto es gratuito.
+FIJAS_DE_SERVICIOS = {
+    "FEATURE_SERVICE_PAYMENTS": "false",
+    "SERVICE_PAYMENTS_PROVIDER": "none",
+    "SERVICES_CATALOG_PRICE_MODELS": "free,on_request",
+}
 CLAVE_DEL_PILOTO = "SERVICES_PILOT_PROFILE_IDS"
 
 
@@ -394,3 +399,156 @@ def test_el_guion_rechaza_una_lista_del_piloto_mal_escrita() -> None:
     # Y nunca imprime el valor: el problema solo nombra la clave.
     problema = re.search(r"\$problemas\.Add\(\"\$ClaveDelPiloto[^\n]*", guion).group(0)
     assert "$secreto[" not in problema
+
+
+# --------------------------------------------------------------------------
+# LOS PROCESOS AUTOMÁTICOS DE Z SERVICIOS (el planificador)
+# --------------------------------------------------------------------------
+
+CLAVE_DEL_PLANIFICADOR = "SERVICES_TASKS_TOKEN"
+RECURSOS_DEL_PLANIFICADOR = {
+    "ConexionDelPlanificadorDeServicios": "AWS::Events::Connection",
+    "DestinoDelPlanificadorDeServicios": "AWS::Events::ApiDestination",
+    "RolDelPlanificadorDeServicios": "AWS::IAM::Role",
+    "ReglaDelPlanificadorDeServicios": "AWS::Events::Rule",
+    "AlarmaProcesosDeServicios": "AWS::CloudWatch::Alarm",
+}
+
+
+def _recurso(nombre: str) -> str:
+    """El bloque de texto de UN recurso de la plantilla de la plataforma."""
+    texto = PLATAFORMA.read_text(encoding="utf-8").replace("\r\n", "\n")
+    hallado = re.search(rf"^  {nombre}:\n(.*?)(?=^  [A-Za-z0-9]+:\n|^Outputs:)", texto, re.S | re.M)
+    assert hallado, f"la plantilla no tiene el recurso {nombre}"
+    return hallado.group(1)
+
+
+@pytest.mark.parametrize("fichero", PERFILES, ids=lambda p: p.stem)
+def test_ningun_perfil_enciende_el_planificador(fichero: Path) -> None:
+    """Crear la regla es una decisión escrita en un Change Set, no un valor
+    que viaja en un perfil versionado."""
+    assert _perfil(fichero)["PlanificadorDeServicios"] == "No"
+
+
+def test_el_planificador_nace_apagado_y_no_crea_nada_sin_pedirlo() -> None:
+    parametro = _parametros(PLATAFORMA)["PlanificadorDeServicios"]
+    assert "Default: 'No'" in parametro and "AllowedValues: ['Si', 'No']" in parametro
+    texto = PLATAFORMA.read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert re.search(
+        r"HayPlanificadorDeServicios: !And\n    - !Equals \[!Ref PlanificadorDeServicios, 'Si'\]\n"
+        r"    - !Condition HayFrenteHttps\n",
+        texto,
+    ), "sin frente HTTPS no hay a dónde llamar"
+    for nombre, tipo in RECURSOS_DEL_PLANIFICADOR.items():
+        bloque = _recurso(nombre)
+        assert f"Type: {tipo}\n" in bloque, nombre
+        assert "Condition: HayPlanificadorDeServicios\n" in bloque, f"{nombre} se crearía siempre"
+    # Y NADA MÁS: ni Lambda, ni cola, ni otro servicio para los barridos.
+    assert sorted(re.findall(r"Type: (AWS::(?:Events|Scheduler|Lambda|SQS|StepFunctions)::\w+)", texto)) == [
+        "AWS::Events::ApiDestination", "AWS::Events::Connection", "AWS::Events::Rule",
+    ]
+
+
+def test_el_secreto_del_planificador_no_es_un_parametro_ni_va_en_un_perfil() -> None:
+    """Sale del secreto de la API con una referencia dinámica: ni la consola
+    de CloudFormation, ni las evidencias, ni el repositorio lo ven."""
+    parametros = "".join(_parametros(PLATAFORMA))
+    assert "Token" not in parametros.replace("SERVICES_TASKS_TOKEN", "")
+    assert CLAVE_DEL_PLANIFICADOR not in _entorno_que_escribe_la_plantilla()
+    for fichero in PERFILES:
+        assert "TOKEN" not in fichero.read_text(encoding="utf-8").upper(), fichero.name
+    conexion = _recurso("ConexionDelPlanificadorDeServicios")
+    assert "AuthorizationType: API_KEY\n" in conexion
+    assert (
+        "ApiKeyValue: !Sub '{{resolve:secretsmanager:${NombreDelSecreto}:SecretString:"
+        + CLAVE_DEL_PLANIFICADOR + "}}'\n"
+    ) in conexion
+    ejemplo = json.loads((INFRA / "secretos.ejemplo.json").read_text(encoding="utf-8"))
+    assert CLAVE_DEL_PLANIFICADOR not in ejemplo, "no se escribe a mano: lo genera el guion"
+
+
+def test_el_planificador_llama_a_la_ruta_y_con_la_cabecera_que_la_api_espera() -> None:
+    from app.core.config import get_settings
+    from app.modules.services import procesos_router as procesos
+
+    ruta = get_settings().api_v1_prefix + procesos.router.prefix + "/tasks/run"
+    assert ruta == "/api/v1/internal/services/tasks/run"
+    destino = _recurso("DestinoDelPlanificadorDeServicios")
+    assert "HttpMethod: POST\n" in destino
+    assert re.findall(r"!Sub 'https://\$\{(?:NombreDeDominio|FrenteHttps\.DomainName)\}(\S+)'", destino) == [ruta, ruta]
+    assert "http://" not in destino, "el secreto no viaja en claro"
+    assert f"ApiKeyName: {procesos.CABECERA}\n" in _recurso("ConexionDelPlanificadorDeServicios")
+
+
+def test_el_rol_del_planificador_solo_puede_invocar_su_destino() -> None:
+    rol = _recurso("RolDelPlanificadorDeServicios")
+    assert "Principal: {Service: events.amazonaws.com}" in rol
+    assert "aws:SourceAccount: !Ref 'AWS::AccountId'" in rol, "otra cuenta no puede asumirlo"
+    assert re.findall(r"Action: (.+)", rol) == ["sts:AssumeRole", "events:InvokeApiDestination"]
+    assert re.findall(r"Resource: (.+)", rol) == ["!GetAtt DestinoDelPlanificadorDeServicios.Arn"]
+    assert "*" not in rol and "ManagedPolicyArns" not in rol
+
+
+def test_la_regla_solo_esta_activa_con_la_contratacion_encendida_y_reintenta_poco() -> None:
+    texto = PLATAFORMA.read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert re.search(
+        r"SeContrataEnServicios: !And\n    - !Equals \[!Ref FeatureServices, 'true'\]\n"
+        r"    - !Equals \[!Ref FeatureServiceBooking, 'true'\]\n",
+        texto,
+    )
+    regla = _recurso("ReglaDelPlanificadorDeServicios")
+    assert "State: !If [SeContrataEnServicios, ENABLED, DISABLED]\n" in regla
+    assert "ScheduleExpression: rate(5 minutes)\n" in regla
+    assert "Input: '{}'\n" in regla, "a la API no le llega ni el evento ni la cuenta"
+    assert "RoleArn: !GetAtt RolDelPlanificadorDeServicios.Arn\n" in regla
+    intentos = int(re.search(r"MaximumRetryAttempts: (\d+)", regla).group(1))
+    edad = int(re.search(r"MaximumEventAgeInSeconds: (\d+)", regla).group(1))
+    assert 1 <= intentos <= 3 and 60 <= edad < 300, "los reintentos caben dentro de una pasada"
+
+
+def test_si_los_procesos_fallan_avisa_por_el_tema_de_alertas() -> None:
+    alarma = _recurso("AlarmaProcesosDeServicios")
+    assert "Namespace: AWS/Events\n" in alarma and "MetricName: FailedInvocations\n" in alarma
+    assert "{Name: RuleName, Value: !Ref ReglaDelPlanificadorDeServicios}" in alarma
+    assert "AlarmActions: [!Ref TemaDeAlertas]\n" in alarma
+    assert "TreatMissingData: notBreaching\n" in alarma, "con la regla desactivada no hay datos, y eso no es una avería"
+
+
+def test_el_guion_genera_el_secreto_del_planificador_y_no_lo_imprime() -> None:
+    guion = GUION.read_text(encoding="utf-8")
+    assert f"$ClaveDelPlanificador = '{CLAVE_DEL_PLANIFICADOR}'" in guion
+    patron = re.compile(re.search(r"\$PatronDelPlanificador = '(.+)'", guion).group(1))
+    from app.modules.services.procesos_router import LARGO_MINIMO_DEL_SECRETO
+
+    assert patron.fullmatch("a" * LARGO_MINIMO_DEL_SECRETO) and not patron.fullmatch("a" * (LARGO_MINIMO_DEL_SECRETO - 1))
+    assert not patron.fullmatch("") and not patron.fullmatch("A" * 64) and not patron.fullmatch("zz" * 32)
+    # Se genera con el generador criptográfico (32 bytes = 64 hexadecimales) o
+    # se conserva el que había; lo que se imprime es el NOMBRE.
+    bloque = re.search(r"if \(-not \$nuevo\.Contains\(\$ClaveDelPlanificador\)\) \{.*?\n    \}\n    elseif", guion, re.S).group(0)
+    assert "$nuevo[$ClaveDelPlanificador] = $actual[$ClaveDelPlanificador]" in bloque
+    assert "RandomNumberGenerator]::GetBytes(32)" in bloque
+    for linea in re.findall(r"(?:Write-\w+|throw) [^\n]*ClaveDelPlanificador[^\n]*", guion):
+        assert "$nuevo[" not in linea and "$actual[" not in linea and "$secreto[" not in linea, linea
+    # Sin la clave en el secreto, la referencia dinámica no resuelve y la pila
+    # falla a medio actualizar: el guion lo comprueba antes.
+    assert "if ($Configuracion.PlanificadorDeServicios -eq 'Si') { $necesarias += $ClaveDelPlanificador }" in guion
+    # No la fija la plantilla: viene del secreto.
+    lista = re.search(r"\$ClavesQueFijaLaPlantilla = @\((.*?)\)", guion, re.S).group(1)
+    assert CLAVE_DEL_PLANIFICADOR not in lista and "SERVICES_CATALOG_PRICE_MODELS" in lista
+
+
+def test_no_se_puede_encender_la_contratacion_sin_el_planificador() -> None:
+    """Las condiciones prometen que una atención terminada se cierra sola a las
+    24 horas. Sin planificador no se cierra: la plantilla rechaza el plan."""
+    texto = PLATAFORMA.read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert re.search(
+        r"LaContratacionTieneSusProcesos: !Or\n    - !Not \[!Condition SeContrataEnServicios\]\n"
+        r"    - !Condition HayPlanificadorDeServicios\n",
+        texto,
+    )
+    barrera = _recurso("BarreraLaContratacionExigeElPlanificador")
+    assert "Type: AWS::CloudFormation::WaitConditionHandle\n" in barrera
+    assert "Condition: LaContratacionTieneSusProcesos\n" in barrera
+    quien = _recurso("ComprobacionDeLosProcesosDeServicios")
+    assert "DependsOn: BarreraLaContratacionExigeElPlanificador\n" in quien, "nadie depende de la barrera: no para nada"
+    assert "Condition:" not in quien, "tiene que existir siempre, o la barrera no se evalúa"

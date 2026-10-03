@@ -302,6 +302,12 @@ class Settings(BaseSettings):
     #: Días para reseñar, y si una reseña espera a moderación antes de verse.
     services_review_window_days: int = 30
     services_reviews_premoderation: bool = True
+    #: EL SECRETO DEL PLANIFICADOR (`services/procesos_router.py`). Lo manda en
+    #: una cabecera la regla que lanza los barridos de Servicios cada pocos
+    #: minutos. VACÍO (o con menos de 32 caracteres) = SIN CONFIGURAR: la ruta
+    #: contesta 503 y no acepta nada. Va en el secreto de la API, nunca en un
+    #: parámetro ni en el repositorio; lo genera el guion de despliegue.
+    services_tasks_token: str = ""
 
     #: CUANTOS MINUTOS APARTA UN PEDIDO SU INVENTARIO antes de vencer.
     #:

@@ -42,7 +42,7 @@ Metadata:
       - Label: {default: Aplicacion}
         Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl, BetaFreeAccessEnabled]
       - Label: {default: Z Servicios (apagado de fabrica)}
-        Parameters: [FeatureServices, FeatureServiceBooking, ServicesPublicAccess, ServicesCatalogModalities, ServicesCatalogCurrencies]
+        Parameters: [FeatureServices, FeatureServiceBooking, ServicesPublicAccess, ServicesCatalogModalities, ServicesCatalogCurrencies, PlanificadorDeServicios]
       - Label: {default: Observabilidad y escalado}
         Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, UmbralLatenciaP95Segundos, UmbralErrores5xxDeLaApi, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
     ParameterLabels:
@@ -379,6 +379,11 @@ Parameters:
   #   * `FEATURE_SERVICE_PAYMENTS` y `SERVICE_PAYMENTS_PROVIDER` no tienen
   #     parametro: se escriben fijos (`false` y `none`) en el arranque. Cobrar
   #     un servicio no se enciende desde la infraestructura.
+  #   * `SERVICES_CATALOG_PRICE_MODELS` tampoco: va fijo (`free,on_request`).
+  #     El piloto es gratuito, y un precio con importe sin cobro detras seria
+  #     prometer algo que Z no hace.
+  #   * `SERVICES_TASKS_TOKEN` va en el SECRETO: es la credencial del
+  #     planificador (ver PlanificadorDeServicios).
   FeatureServices:
     Type: String
     Default: 'false'
@@ -426,6 +431,20 @@ Parameters:
     Description: >-
       Monedas en las que se admite un precio. La primera version (politica P2)
       solo usa soles. No se convierte ninguna moneda.
+
+  PlanificadorDeServicios:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      LOS PROCESOS AUTOMATICOS de Z Servicios: una regla de EventBridge que
+      llama cada 5 minutos a la API para vencer las retenciones, recordar las
+      reservas y cerrar las atenciones cuyo plazo paso. `No`: no se crea nada, y
+      esos barridos solo corren si alguien de administracion los lanza a mano.
+      `Si`: exige el frente HTTPS y la clave SERVICES_TASKS_TOKEN en el secreto
+      (la genera `-Accion Secretos`). La regla solo queda ACTIVA con
+      FeatureServices y FeatureServiceBooking encendidos; con cualquiera de los
+      dos apagado existe, pero DESACTIVADA.
 
   RetencionDeLogsEnDias:
     Type: Number
@@ -570,6 +589,21 @@ Conditions:
   MaquinasEnPrivada: !Not [!Equals [!Ref NumeroDeNatGateways, '0']]
   HayNatEnZonaA: !Not [!Equals [!Ref NumeroDeNatGateways, '0']]
   HayNatEnZonaB: !Equals [!Ref NumeroDeNatGateways, '2']
+  # Los procesos automaticos de Z Servicios llaman a la API por HTTPS: sin el
+  # frente de CloudFront no hay a donde llamar, y no se crea nada.
+  HayPlanificadorDeServicios: !And
+    - !Equals [!Ref PlanificadorDeServicios, 'Si']
+    - !Condition HayFrenteHttps
+  # Con la contratacion apagada la API contesta 503 a los barridos: llamarla
+  # cada 5 minutos solo serviria para disparar la alarma.
+  SeContrataEnServicios: !And
+    - !Equals [!Ref FeatureServices, 'true']
+    - !Equals [!Ref FeatureServiceBooking, 'true']
+  # O no se contrata, o hay quien lance los barridos. Ver la barrera
+  # `BarreraLaContratacionExigeElPlanificador`.
+  LaContratacionTieneSusProcesos: !Or
+    - !Not [!Condition SeContrataEnServicios]
+    - !Condition HayPlanificadorDeServicios
 
 # -----------------------------------------------------------------------------
 Resources:
@@ -1480,14 +1514,17 @@ Resources:
                 echo "PAYMENTS_ENABLED=${PaymentsEnabled}"
                 echo "PAYMENTS_RETURN_URL=${PaymentsReturnUrl}"
                 echo "BETA_FREE_ACCESS_ENABLED=${BetaFreeAccessEnabled}"
-                # Z Servicios. Las dos ultimas van FIJAS: cobrar un servicio no
-                # se enciende desde la infraestructura. La lista del piloto
-                # (SERVICES_PILOT_PROFILE_IDS) viene del secreto, mas arriba.
+                # Z Servicios. Las tres ultimas van FIJAS: ni cobrar un servicio
+                # ni ponerle un importe se enciende desde la infraestructura.
+                # La lista del piloto (SERVICES_PILOT_PROFILE_IDS) y el secreto
+                # del planificador (SERVICES_TASKS_TOKEN) vienen del secreto,
+                # mas arriba.
                 echo "FEATURE_SERVICES=${FeatureServices}"
                 echo "FEATURE_SERVICE_BOOKING=${FeatureServiceBooking}"
                 echo "SERVICES_PUBLIC_ACCESS=${ServicesPublicAccess}"
                 echo "SERVICES_CATALOG_MODALITIES=${ServicesCatalogModalities}"
                 echo "SERVICES_CATALOG_CURRENCIES=${ServicesCatalogCurrencies}"
+                echo "SERVICES_CATALOG_PRICE_MODELS=free,on_request"
                 echo "FEATURE_SERVICE_PAYMENTS=false"
                 echo "SERVICE_PAYMENTS_PROVIDER=none"
               } >> /etc/renaser/api.env
@@ -1978,6 +2015,139 @@ Resources:
       Tags:
         - {Key: Proyecto, Value: !Ref Proyecto}
         - {Key: Entorno, Value: !Ref Entorno}
+
+  # ===========================================================================
+  # LOS PROCESOS AUTOMATICOS DE Z SERVICIOS
+  # ===========================================================================
+  #
+  # Dentro de la API no hay temporizador (corre en varias maquinas y cada una
+  # lo lanzaria). Los barridos de Servicios —vencer retenciones, recordar
+  # reservas, cerrar atenciones— son rutas idempotentes que alguien tiene que
+  # llamar. Ese alguien es esta regla: cada 5 minutos, un POST sin cuerpo a
+  # `/api/v1/internal/services/tasks/run`.
+  #
+  # NO ES UN SERVICIO NUEVO: no hay Lambda, ni cola, ni contenedor. EventBridge
+  # hace la llamada HTTPS por la misma puerta que todo el mundo (CloudFront), y
+  # la API la reconoce por una cabecera con un secreto.
+  #
+  # EL SECRETO NO APARECE EN NINGUN SITIO VISIBLE: sale del secreto de la API
+  # con una referencia dinamica (ni parametro, ni perfil, ni evidencias, ni la
+  # consola de CloudFormation), y EventBridge lo guarda cifrado en su conexion.
+  #
+  # LO QUE PUEDE HACER EL ROL: invocar ESTE destino, y nada mas.
+  #
+  # SI FALLA: dos reintentos dentro de la misma ventana de 5 minutos y, si aun
+  # asi no sale, la alarma avisa por el tema de alertas. No pasa nada grave
+  # mientras tanto: el vencimiento lo decide la hora, no el barrido, y la
+  # siguiente pasada recoge lo pendiente.
+  # LA CONTRATACION EXIGE SUS PROCESOS. Las condiciones que acepta quien
+  # contrata dicen que una atencion terminada se cierra sola a las 24 horas, y
+  # eso solo ocurre si alguien lanza los barridos. Encender
+  # FeatureServiceBooking sin el planificador (o sin el frente HTTPS por el que
+  # llama) seria prometer un cierre que no llega. Es la misma barrera que la de
+  # la cuenta: con la contratacion encendida y sin planificador, CloudFormation
+  # rechaza el PLAN con «Unresolved resource dependencies
+  # [BarreraLaContratacionExigeElPlanificador]» y no cambia nada.
+  BarreraLaContratacionExigeElPlanificador:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: LaContratacionTieneSusProcesos
+
+  ComprobacionDeLosProcesosDeServicios:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    DependsOn: BarreraLaContratacionExigeElPlanificador
+    Metadata:
+      # E3005: la barrera no existe cuando falta el planificador. Es lo buscado.
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+
+  ConexionDelPlanificadorDeServicios:
+    Type: AWS::Events::Connection
+    Condition: HayPlanificadorDeServicios
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-servicios-procesos'
+      Description: Credencial con la que el planificador llama a los barridos de Z Servicios.
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: X-Services-Tasks-Token
+          ApiKeyValue: !Sub '{{resolve:secretsmanager:${NombreDelSecreto}:SecretString:SERVICES_TASKS_TOKEN}}'
+
+  DestinoDelPlanificadorDeServicios:
+    Type: AWS::Events::ApiDestination
+    Condition: HayPlanificadorDeServicios
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-servicios-procesos'
+      Description: Los barridos de Z Servicios (vencer retenciones, recordar y cerrar atenciones).
+      ConnectionArn: !GetAtt ConexionDelPlanificadorDeServicios.Arn
+      HttpMethod: POST
+      InvocationEndpoint: !If
+        - HayDominioEnCloudFront
+        - !Sub 'https://${NombreDeDominio}/api/v1/internal/services/tasks/run'
+        - !Sub 'https://${FrenteHttps.DomainName}/api/v1/internal/services/tasks/run'
+      InvocationRateLimitPerSecond: 1
+
+  RolDelPlanificadorDeServicios:
+    Type: AWS::IAM::Role
+    Condition: HayPlanificadorDeServicios
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+      Policies:
+        - PolicyName: invocar-los-procesos-de-servicios
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: events:InvokeApiDestination
+                Resource: !GetAtt DestinoDelPlanificadorDeServicios.Arn
+
+  ReglaDelPlanificadorDeServicios:
+    Type: AWS::Events::Rule
+    Condition: HayPlanificadorDeServicios
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-servicios-procesos'
+      Description: Cada 5 minutos, los barridos de Z Servicios. Desactivada mientras la contratacion este apagada.
+      ScheduleExpression: rate(5 minutes)
+      State: !If [SeContrataEnServicios, ENABLED, DISABLED]
+      Targets:
+        - Id: procesos-de-servicios
+          Arn: !GetAtt DestinoDelPlanificadorDeServicios.Arn
+          RoleArn: !GetAtt RolDelPlanificadorDeServicios.Arn
+          # La ruta no recibe nada: ni el evento ni la cuenta viajan a la API.
+          Input: '{}'
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+            MaximumEventAgeInSeconds: 240
+
+  AlarmaProcesosDeServicios:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HayPlanificadorDeServicios
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-procesos-de-servicios'
+      AlarmDescription: >-
+        El planificador no consigue lanzar los barridos de Z Servicios: las
+        retenciones vencidas no se limpian, no se recuerda ninguna reserva y las
+        atenciones terminadas no se cierran solas. Mirar el secreto
+        SERVICES_TASKS_TOKEN, las banderas y los logs de la API.
+      Namespace: AWS/Events
+      MetricName: FailedInvocations
+      Dimensions:
+        - {Name: RuleName, Value: !Ref ReglaDelPlanificadorDeServicios}
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
 
 Outputs:
 

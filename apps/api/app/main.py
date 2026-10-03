@@ -48,6 +48,7 @@ from app.modules.services.atencion_router import router as services_attention_ro
 from app.modules.services.catalogo_router import admin_router as services_catalog_admin_router
 from app.modules.services.catalogo_router import router as services_catalog_router
 from app.modules.services.descubrimiento_router import router as services_discovery_router
+from app.modules.services.procesos_router import router as services_tasks_router
 from app.modules.services.reserva_router import admin_router as services_booking_admin_router
 from app.modules.services.reserva_router import router as services_booking_router
 from app.modules.services.router import admin_router as services_admin_router
@@ -249,6 +250,10 @@ def create_app() -> FastAPI:
     # las puertas de la reserva exige la 0094.
     app.include_router(services_attention_router, prefix=prefix, dependencies=del_piloto)
     app.include_router(services_attention_admin_router, prefix=prefix)
+    # Los procesos automáticos: `/internal/services/tasks/run`. La ÚNICA ruta
+    # de Servicios sin sesión de persona; la llama el planificador con un
+    # secreto, y sin secreto configurado contesta 503.
+    app.include_router(services_tasks_router, prefix=prefix)
     app.include_router(events_admin_router, prefix=prefix)
     app.include_router(communities_router, prefix=prefix)
     app.include_router(learning_router, prefix=prefix)

@@ -440,12 +440,17 @@ RUTAS_DE_LA_ATENCION = {
 }
 
 
+#: Los procesos automáticos: la única ruta sin sesión de persona. La llama el
+#: planificador con un secreto (`services/procesos_router.py`).
+RUTAS_DE_LOS_PROCESOS = {("POST", "/internal/services/tasks/run")}
+
+
 def test_estan_exactamente_las_rutas_de_los_incrementos_1_a_6() -> None:
     rutas = {(m, p[len(API):]) for m, p in _rutas(create_app()) if "/services" in p}
     assert len(RUTAS_DE_LA_AGENDA) == 14 and len(RUTAS_DE_LA_RESERVA) == 13 and len(RUTAS_DE_LA_ATENCION) == 34
     assert rutas == (
         RUTAS_DE_SERVICIOS | RUTAS_DEL_CATALOGO | RUTAS_DEL_DESCUBRIMIENTO | RUTAS_DE_LA_AGENDA
-        | RUTAS_DE_LA_RESERVA | RUTAS_DE_LA_ATENCION
+        | RUTAS_DE_LA_RESERVA | RUTAS_DE_LA_ATENCION | RUTAS_DE_LOS_PROCESOS
     )
 
 

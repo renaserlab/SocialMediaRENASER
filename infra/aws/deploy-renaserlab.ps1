@@ -125,7 +125,7 @@ $ClavesQueFijaLaPlantilla = @('APP_NAME', 'ENVIRONMENT', 'PORT', 'CORS_ORIGINS',
     'PAYMENTS_ENABLED', 'PAYMENTS_RETURN_URL', 'BETA_FREE_ACCESS_ENABLED',
     'FEATURE_SERVICES', 'FEATURE_SERVICE_BOOKING', 'FEATURE_SERVICE_PAYMENTS',
     'SERVICE_PAYMENTS_PROVIDER', 'SERVICES_PUBLIC_ACCESS', 'SERVICES_CATALOG_MODALITIES',
-    'SERVICES_CATALOG_CURRENCIES')
+    'SERVICES_CATALOG_CURRENCIES', 'SERVICES_CATALOG_PRICE_MODELS')
 
 # El piloto de Z Servicios: los perfiles autorizados. Va en el secreto y no en
 # un parametro porque son identificadores de personas: un parametro acabaria en
@@ -133,6 +133,12 @@ $ClavesQueFijaLaPlantilla = @('APP_NAME', 'ENVIRONMENT', 'PORT', 'CORS_ORIGINS',
 # entra nadie. Aqui solo se comprueba su FORMA; nunca se imprime su valor.
 $ClaveDelPiloto = 'SERVICES_PILOT_PROFILE_IDS'
 $PatronDelPiloto = '^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})*$'
+
+# El secreto del planificador de Z Servicios: la cabecera con la que la regla
+# de EventBridge llama a los barridos. Igual que la cabecera de origen, no lo
+# escribe nadie a mano: se conserva el que hay o se genera uno. Nunca se imprime.
+$ClaveDelPlanificador = 'SERVICES_TASKS_TOKEN'
+$PatronDelPlanificador = '^[0-9a-f]{32,128}$'
 
 # Lo que mueve dinero nace apagado y se enciende a mano, en otra decision.
 $BanderasDeDinero = @('PAYMENTS_ENABLED', 'STRIPE_PAYMENTS_ENABLED', 'STRIPE_REFUNDS_ENABLED',
@@ -735,6 +741,22 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
         throw "$ClaveDeCabecera tiene que ser hexadecimal en minusculas: el balanceador trata * y ? como comodines."
     }
 
+    # El secreto del planificador de Z Servicios, lo mismo: se conserva o se
+    # genera. La API no acepta uno de menos de 32 caracteres.
+    if (-not $nuevo.Contains($ClaveDelPlanificador)) {
+        if ($actual -and $actual.Contains($ClaveDelPlanificador)) {
+            $nuevo[$ClaveDelPlanificador] = $actual[$ClaveDelPlanificador]
+        }
+        else {
+            $bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+            $nuevo[$ClaveDelPlanificador] = [System.Convert]::ToHexString($bytes).ToLowerInvariant()
+            Write-Dato "Generada $ClaveDelPlanificador (64 caracteres hexadecimales)."
+        }
+    }
+    elseif ([string] $nuevo[$ClaveDelPlanificador] -notmatch $PatronDelPlanificador) {
+        throw "$ClaveDelPlanificador tiene que ser hexadecimal en minusculas, de 32 a 128 caracteres."
+    }
+
     # Solo NOMBRES en consola y en la evidencia, nunca valores.
     $anadidas = @($nuevo.Keys | Where-Object { -not $actual -or -not $actual.Contains($_) })
     $cambiadas = @($nuevo.Keys | Where-Object { $actual -and $actual.Contains($_) -and $actual[$_] -ne $nuevo[$_] })
@@ -749,6 +771,9 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
     if ($quitadas) { Write-Aviso "Claves que desaparecen: $($quitadas -join ', ')" }
     if ($cambiadas -contains $ClaveDeCabecera) {
         Write-Aviso "Cambia ${ClaveDeCabecera}: hay que redesplegar la plataforma (ver la rotacion en docs/AWS_MIGRACION_RENASERLAB.md)."
+    }
+    if ($cambiadas -contains $ClaveDelPlanificador) {
+        Write-Aviso "Cambia ${ClaveDelPlanificador}: hay que redesplegar la plataforma (la conexion de EventBridge guarda el anterior) y renovar las maquinas."
     }
 
     $accionDelSecreto = if ($actual) { 'Crear una version nueva' } else { 'Crear el secreto' }
@@ -787,6 +812,9 @@ function Assert-SecretoCompleto([System.Collections.IDictionary] $Configuracion)
     }
     $necesarias = @($ClavesObligatorias)
     if ($Configuracion.VerificarCabeceraDeOrigen -eq 'Si') { $necesarias += $ClaveDeCabecera }
+    # Sin esta clave la referencia dinamica de la conexion no resuelve y la
+    # pila falla a medio actualizar: mejor saberlo antes.
+    if ($Configuracion.PlanificadorDeServicios -eq 'Si') { $necesarias += $ClaveDelPlanificador }
     $faltan = @($necesarias | Where-Object { -not $actual.Contains($_) })
     if ($faltan) { throw "Al secreto le faltan: $($faltan -join ', '). Cargalo con -Accion Secretos." }
     Write-Bien "Secreto completo ($($actual.Count) claves)"
