@@ -382,6 +382,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'notif.demo3Time': 'Há 3 h',
 
   'messages.headerTitle': 'MENSAGENS',
+  'messages.title': 'Mensagens',
   'messages.signedOutTitle': 'Suas mensagens esperam por você',
   'messages.signedOutBody':
     'Crie sua conta para escrever para outras pessoas e receber as respostas delas.',

@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
+  Platform,
   StyleProp,
   StyleSheet,
   TextInput,
   TextInputProps,
+  TextStyle,
   View,
   ViewStyle,
 } from 'react-native';
@@ -23,7 +25,7 @@ import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import { DURACION, ESCALA_AL_PULSAR, MUELLE } from '@/lib/movimiento';
-import { radius, spacing } from '@/theme/tokens';
+import { getTextStyle, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type Props = {
@@ -44,15 +46,25 @@ type Props = {
 /** Hasta dónde se abre el hueco de «Cancelar». Sobra para los tres idiomas. */
 const ANCHO_DE_CANCELAR = 96;
 
+/*
+  EL ANILLO DE FOCO DEL NAVEGADOR. En web el navegador dibujaba su propio marco
+  DENTRO de la caja al enfocar: se veía un recuadro pequeño metido en el
+  buscador (reportado el 04/10/2026). Tiene que ser el ESTILO a `none`: ese
+  anillo es `outline: auto` y con `auto` el grosor se ignora. React Native no
+  tipa `none` —en el teléfono no existe—, de ahí la conversión.
+*/
+const SIN_ANILLO_DEL_NAVEGADOR =
+  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : null;
+
 /**
  * El campo de búsqueda de la aplicación: el de Explorar y el de Mensajes.
  *
  * Eran dos campos escritos dos veces —una lupa, un `TextInput`, una X— que solo
  * cambiaban el color del borde al tocarlos. Aquí hay uno, y RESPONDE:
  *
- *   - AL ENFOCAR el borde gana contraste poco a poco, la lupa salta un instante
- *     y a la derecha se abre «Cancelar», que borra, quita el foco y cierra el
- *     teclado de un toque.
+ *   - AL ENFOCAR la lupa se enciende y salta un instante, el contorno apenas
+ *     se insinúa y a la derecha se abre «Cancelar», que borra, quita el foco y
+ *     cierra el teclado de un toque.
  *   - AL ESCRIBIR aparece la X, creciendo desde su centro.
  *   - MIENTRAS BUSCA la lupa se convierte en un indicador: se ve que la
  *     pregunta salió y que la respuesta está por llegar.
@@ -64,6 +76,13 @@ const ANCHO_DE_CANCELAR = 96;
  *
  * SIN SALTOS: el alto es fijo y el borde no cambia de grosor. «Cancelar» abre
  * su hueco animando el ancho; con «reducir movimiento» aparece de golpe.
+ *
+ * LA FORMA (04/10/2026). Era una cápsula con un borde de un punto que al
+ * enfocar se volvía blanco: un marco dentro de otro marco, con aspecto de
+ * formulario antiguo. Ahora es una caja RELLENA de esquinas suaves y sin
+ * marco, como el buscador de cualquier bandeja actual: el relleno la separa del
+ * fondo sin dibujar una línea. Enfocada, el contorno pasa de invisible a un
+ * gris tenue —lo justo para quien navega con teclado— y nunca a un marco duro.
  */
 export function CampoDeBusqueda({
   value,
@@ -102,8 +121,12 @@ export function CampoDeBusqueda({
     equis.value = reducir ? (hayTexto ? 1 : 0) : withSpring(hayTexto ? 1 : 0, MUELLE);
   }, [hayTexto, equis, reducir]);
 
-  const sinFoco = colors.border;
-  const conFoco = colors.text;
+  // En oscuro el gris de superficie (#111) se despega del negro; en claro el
+  // que se despega del blanco es `surfaceAlt` (#F7F7F7).
+  const relleno = mode === 'dark' ? colors.surface : colors.surfaceAlt;
+  // Sin foco el contorno es del color del relleno: está, y no se ve.
+  const sinFoco = relleno;
+  const conFoco = colors.disabled;
   const borde = useAnimatedStyle(() => ({
     borderColor: interpolateColor(foco.value, [0, 1], [sinFoco, conFoco]),
   }));
@@ -133,13 +156,8 @@ export function CampoDeBusqueda({
     <View style={[styles.fila, style]}>
       <Animated.View
         style={[
-          styles.capsula,
-          {
-            height: alto,
-            // En oscuro el gris de superficie (#111) se despega del negro; en
-            // claro el que se despega del blanco es `surfaceAlt` (#F7F7F7).
-            backgroundColor: mode === 'dark' ? colors.surface : colors.surfaceAlt,
-          },
+          styles.caja,
+          { height: alto, backgroundColor: relleno },
           borde,
         ]}
       >
@@ -152,7 +170,7 @@ export function CampoDeBusqueda({
             <ActivityIndicator size="small" color={colors.textMuted} />
           ) : (
             <Animated.View style={lupaAnimada}>
-              <Feather name="search" size={17} color={enfocado ? colors.text : colors.textMuted} />
+              <Feather name="search" size={16} color={enfocado ? colors.text : colors.textMuted} />
             </Animated.View>
           )}
         </View>
@@ -164,7 +182,7 @@ export function CampoDeBusqueda({
           onBlur={() => cambiarFoco(false)}
           placeholder={placeholder}
           placeholderTextColor={colors.textMuted}
-          style={[styles.entrada, { color: colors.text }]}
+          style={[styles.entrada, SIN_ANILLO_DEL_NAVEGADOR, { color: colors.text }]}
           accessibilityLabel={placeholder}
           // Un nombre no se escribe en mayúscula automática ni se autocorrige:
           // el corrector convertía apellidos poco comunes en otra palabra y la
@@ -233,15 +251,15 @@ export function CampoDeBusqueda({
 
 const styles = StyleSheet.create({
   fila: { flexDirection: 'row', alignItems: 'center' },
-  capsula: {
+  caja: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    // Cápsula, no rectángulo: es la forma con la que se reconoce un buscador.
-    borderRadius: radius.pill,
-    // El borde no cambia de grosor al enfocar, solo de contraste: si cambiara,
-    // la cápsula daría un salto de un punto al tocarla.
+    // Esquinas suaves, no cápsula: es la forma del buscador de una bandeja.
+    borderRadius: radius.md,
+    // El borde no cambia de grosor al enfocar, solo de tono: si cambiara, la
+    // caja daría un salto de un punto al tocarla.
     borderWidth: 1,
     paddingLeft: spacing.md,
     paddingRight: spacing.sm + 2,
@@ -249,7 +267,9 @@ const styles = StyleSheet.create({
   lupa: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
   // `flex: 1` para que el texto ocupe lo que sobra entre la lupa y la X. Sin
   // relleno propio: Android añade uno vertical que descuadra el texto.
-  entrada: { flex: 1, fontSize: 14, padding: 0 },
+  // Con la letra de la aplicación: sin ella lo escrito salía con la del
+  // sistema. `minWidth: 0` para que en web el campo encoja y no empuje a la X.
+  entrada: { ...getTextStyle('400'), flex: 1, minWidth: 0, fontSize: 15, padding: 0 },
   equis: {
     width: 18,
     height: 18,

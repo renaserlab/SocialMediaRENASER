@@ -186,6 +186,76 @@ export const ESPERA_DE_TECLEO_MS = 250;
 /** Cuantos resultados trae cada grupo por pagina. Es el defecto del backend. */
 export const LIMITE_POR_GRUPO = 10;
 
+/* ========================================================================== *
+ * LA MEMORIA DE LO YA PREGUNTADO
+ *
+ * Reportado el 04/10/2026: «se demora demasiado en buscar». Lo que no se puede
+ * quitar es el viaje a la API; lo que si, es REPETIRLO. Quien escribe «renas»,
+ * borra una letra y vuelve a escribirla, o busca lo mismo que hace diez
+ * segundos, volvia a esperar al antirrebote y a la red para recibir lo que ya
+ * habia tenido en pantalla.
+ *
+ * Con esto, un termino que ya se pregunto hace poco se pinta EN EL ACTO: sin
+ * antirrebote y sin peticion.
+ *
+ * POR QUE CADUCA Y POR QUE TIENE TOPE. El resultado depende de quien pregunta
+ * y cambia con el tiempo —alguien se registra, alguien te bloquea—, asi que no
+ * es una cache de larga vida: un minuto cubre la sesion de busqueda de alguien
+ * y nada mas. La pantalla ademas la vacia al cambiar la sesion. Y el tope evita
+ * que una tarde buscando la deje crecer sin limite.
+ *
+ * Solo se guarda la primera pagina de una busqueda completa; los «ver mas» no.
+ * ========================================================================== */
+
+/** Cuanto vale una respuesta guardada. */
+export const VALIDEZ_DE_LA_MEMORIA_MS = 60_000;
+
+/** Cuantos terminos se recuerdan. Al pasar de aqui se olvida el mas antiguo. */
+export const TOPE_DE_LA_MEMORIA = 30;
+
+type Recuerdo = { cuando: number; respuesta: RespuestaDeBusqueda };
+
+/** Un `Map` conserva el orden de insercion: el primero es el mas antiguo. */
+export type MemoriaDeBusqueda = Map<string, Recuerdo>;
+
+/** «Ana» y «ana» son la misma pregunta: el servidor busca sin distinguir. */
+function claveDeMemoria(termino: string): string {
+  return normalizarTermino(termino).toLowerCase();
+}
+
+/** Guarda la respuesta de un termino. Si ya estaba, pasa a ser la mas reciente. */
+export function recordar(
+  memoria: MemoriaDeBusqueda,
+  termino: string,
+  respuesta: RespuestaDeBusqueda,
+  ahora: number,
+): void {
+  const clave = claveDeMemoria(termino);
+  memoria.delete(clave);
+  memoria.set(clave, { cuando: ahora, respuesta });
+  while (memoria.size > TOPE_DE_LA_MEMORIA) {
+    const masAntigua = memoria.keys().next().value;
+    if (masAntigua === undefined) break;
+    memoria.delete(masAntigua);
+  }
+}
+
+/** La respuesta guardada de un termino, si la hay y sigue valiendo. */
+export function recuperar(
+  memoria: MemoriaDeBusqueda,
+  termino: string,
+  ahora: number,
+): RespuestaDeBusqueda | null {
+  const clave = claveDeMemoria(termino);
+  const recuerdo = memoria.get(clave);
+  if (!recuerdo) return null;
+  if (ahora - recuerdo.cuando >= VALIDEZ_DE_LA_MEMORIA_MS) {
+    memoria.delete(clave);
+    return null;
+  }
+  return recuerdo.respuesta;
+}
+
 function resultadosVacios(): ResultadosDeBusqueda {
   return { temas: [], people: [], posts: [], hashtags: [], courses: [], events: [], siguiente: {} };
 }

@@ -16,6 +16,16 @@ type Props = {
    * entera. Nunca se llama con lo que se está tecleando a medias.
    */
   alBuscar: (termino: string) => void;
+  /**
+   * Se llama EN CADA TECLA, sin antirrebote, con el mismo término normalizado.
+   *
+   * No dispara ninguna petición: sirve para que la pantalla estreche al
+   * instante lo que ya tiene cargado mientras la pregunta al servidor espera su
+   * turno (ver `filasVisibles` en `lib/bandeja.ts`).
+   */
+  alTeclear?: (termino: string) => void;
+  /** La pregunta ya salió y la respuesta no ha llegado: la lupa sigue girando. */
+  ocupado?: boolean;
 };
 
 /**
@@ -48,6 +58,8 @@ type Props = {
  */
 export const BuscadorDeConversaciones = React.memo(function BuscadorDeConversaciones({
   alBuscar,
+  alTeclear,
+  ocupado = false,
 }: Props) {
   const { t } = useTranslation();
   const [texto, setTexto] = useState('');
@@ -65,6 +77,8 @@ export const BuscadorDeConversaciones = React.memo(function BuscadorDeConversaci
 
   useEffect(() => {
     const termino = esBuscable(texto) ? normalizarTermino(texto) : '';
+    // Lo tecleado se dice YA; lo que espera al antirrebote es la petición.
+    alTeclear?.(termino);
     if (termino === ultimoEnviado.current) {
       setPendiente(false);
       return;
@@ -78,7 +92,7 @@ export const BuscadorDeConversaciones = React.memo(function BuscadorDeConversaci
     // Cada tecla cancela el disparo anterior: es lo que convierte ocho
     // peticiones en una.
     return () => clearTimeout(temporizador);
-  }, [texto, alBuscar]);
+  }, [texto, alBuscar, alTeclear]);
 
   /*
     EL CAMPO ES EL MISMO QUE EL DE EXPLORAR (`CampoDeBusqueda`): el foco, la X,
@@ -91,9 +105,10 @@ export const BuscadorDeConversaciones = React.memo(function BuscadorDeConversaci
       onChangeText={setTexto}
       placeholder={t('messages.searchPlaceholder')}
       etiquetaDeLimpiar={t('messages.searchClear')}
-      // Mientras el termino aun no se ha asentado, la pregunta esta por salir.
-      buscando={pendiente}
-      alto={40}
+      // Mientras el termino aun no se ha asentado la pregunta esta por salir,
+      // y despues esta en vuelo: en los dos casos la lupa lo dice.
+      buscando={pendiente || ocupado}
+      alto={42}
     />
   );
 });

@@ -380,6 +380,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'notif.demo3Time': '3 h ago',
 
   'messages.headerTitle': 'MESSAGES',
+  'messages.title': 'Messages',
   'messages.signedOutTitle': 'Your messages are waiting',
   'messages.signedOutBody': 'Create your account to write to other people and get their replies.',
   'messages.searchPlaceholder': 'Search by name or username',

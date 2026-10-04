@@ -408,6 +408,7 @@ export const es = {
 
   // Mensajes
   'messages.headerTitle': 'MENSAJES',
+  'messages.title': 'Mensajes',
   'messages.signedOutTitle': 'Tus mensajes te esperan',
   'messages.signedOutBody':
     'Crea tu cuenta para escribir a otras personas y recibir sus respuestas.',

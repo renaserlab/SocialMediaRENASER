@@ -55,8 +55,11 @@ import {
   lanzar,
   marcarFallo,
   normalizarTermino,
+  recordar,
+  recuperar,
   type EstadoDeBusqueda,
   type Grupo,
+  type MemoriaDeBusqueda,
 } from '@/lib/busquedaProgresiva';
 
 /**
@@ -309,14 +312,35 @@ export function ExploreScreen() {
     setEstado(siguiente);
   }, []);
 
+  /*
+    LO YA PREGUNTADO HACE UN MOMENTO NO SE VUELVE A PREGUNTAR. Borrar una letra
+    y volver a escribirla, o repetir una busqueda, se pinta en el acto. Ver
+    «La memoria de lo ya preguntado» en `lib/busquedaProgresiva.ts`.
+
+    Se vacia al cambiar la sesion: el resultado depende de quien pregunta
+    (bloqueos, borradores propios) y no puede heredarlo otra cuenta.
+  */
+  const memoria = useRef<MemoriaDeBusqueda>(new Map());
+  useEffect(() => {
+    memoria.current.clear();
+  }, [estadoDeSesion]);
+
   /** Lanza la busqueda del texto que haya escrito ahora mismo. */
   const buscar = useCallback(
     (texto: string, signal?: AbortSignal) => {
       const { estado: enVuelo, sello } = lanzar(refEstado.current, texto);
       refEstado.current = enVuelo;
       setEstado(enVuelo);
+      const guardada = recuperar(memoria.current, texto, Date.now());
+      if (guardada) {
+        cambiar((previo) => aplicar(previo, sello, guardada));
+        return;
+      }
       SearchRepository.buscar(texto, { signal })
-        .then((respuesta) => cambiar((previo) => aplicar(previo, sello, respuesta)))
+        .then((respuesta) => {
+          recordar(memoria.current, texto, respuesta, Date.now());
+          cambiar((previo) => aplicar(previo, sello, respuesta));
+        })
         .catch((error) => {
           // Cancelar no es fallar: el aviso seria de una busqueda que ya nadie
           // espera. Y «no hay resultados» cuando en realidad no se pudo
@@ -333,6 +357,13 @@ export function ExploreScreen() {
     cambiar((previo) => anotarTecleo(previo, query));
     const texto = normalizarTermino(query);
     if (!esBuscable(texto)) return;
+
+    // Con la respuesta en la memoria no hay nada que esperar: ni el
+    // antirrebote, que existe para no mandar peticiones de mas, ni la red.
+    if (recuperar(memoria.current, texto, Date.now())) {
+      buscar(texto);
+      return;
+    }
 
     const control = new AbortController();
     const temporizador = setTimeout(() => buscar(texto, control.signal), ESPERA_DE_TECLEO_MS);
