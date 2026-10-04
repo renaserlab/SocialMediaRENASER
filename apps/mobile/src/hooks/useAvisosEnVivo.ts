@@ -10,12 +10,25 @@ import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
 import { refrescarMensajes, refrescarNotificaciones } from '@/services/contadores';
+import { asegurarRegistroDePush } from '@/services/notifications';
 import { supabase } from '@/services/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useContadoresStore } from '@/store/useContadoresStore';
 
-/** Cada cuánto se pregunta por avisos nuevos con la aplicación abierta. */
-const CADA_MS = 60_000;
+/**
+ * Cada cuánto se pregunta por avisos nuevos con la aplicación abierta.
+ *
+ * Eran 60 s. Un mensaje llega al momento por tiempo real, pero todo lo demás
+ * —que alguien pida una sesión, te siga o reaccione— depende de esta pregunta
+ * mientras el push no la adelante: en web no hay push, y en Android no lo
+ * habrá hasta que la compilación lleve las credenciales. Un minuto entero
+ * entre que te piden una sesión y que te enteras se lee como «no funciona».
+ *
+ * Es una cuenta, no la bandeja: una consulta con índice. Lo que dejaría esto
+ * en instantáneo es publicar `notifications` en tiempo real, y eso es una
+ * migración que no se ha hecho.
+ */
+const CADA_MS = 30_000;
 /** Varios mensajes seguidos son una sola consulta, pasado este respiro. */
 const RESPIRO_DE_MENSAJES_MS = 500;
 /** Cuántos mensajes ya anunciados se recuerdan para no repetirlos. */
@@ -241,6 +254,9 @@ export function useAvisosEnVivo(): void {
       // Lo que llegó estando fuera ya lo avisó el sistema: al día, sin anunciar.
       void mirarAvisos(true);
       void refrescarMensajes();
+      // Y si este teléfono aún no dejó su token (sin red al entrar, permiso
+      // concedido después), se intenta ahora.
+      void asegurarRegistroDePush();
     });
 
     ponerseAlDia = () => {

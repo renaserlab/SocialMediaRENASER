@@ -146,6 +146,12 @@ function projectId(): string | null {
 }
 
 /**
+ * Si este teléfono ya dejó su token en el servidor desde que arrancó la
+ * aplicación. Ver `asegurarRegistroDePush`.
+ */
+let registrado = false;
+
+/**
  * Registra este dispositivo para recibir push y guarda su token.
  *
  * Devuelve el token, o null si no se pudo (sin permiso, en Expo Go, o en un
@@ -192,7 +198,37 @@ export async function registerForPush(): Promise<string | null> {
     return null;
   }
 
+  registrado = true;
   return token;
+}
+
+/**
+ * Vuelve a intentar el registro si todavía no se logró. Se llama al volver a
+ * la aplicación.
+ *
+ * QUÉ ARREGLA (auditoría del 04/10/2026). El registro se intentaba UNA vez, al
+ * entrar, y si fallaba no se repetía hasta cerrar la aplicación del todo y
+ * volver a abrirla. Fallaba en casos corrientes:
+ *
+ *   - sin cobertura justo al arrancar: no se obtiene el token o no se guarda;
+ *   - se negó el permiso y después se concedió desde los ajustes del sistema.
+ *
+ * En los dos la persona tiene sesión, tiene el permiso y no le llega ningún
+ * push, sin nada que se lo diga.
+ *
+ * NO VUELVE A PREGUNTAR. Solo actúa si el permiso YA está concedido: insistir
+ * con el diálogo cada vez que alguien vuelve a la aplicación es la forma de
+ * que lo niegue para siempre.
+ */
+export async function asegurarRegistroDePush(): Promise<void> {
+  if (registrado || Platform.OS === 'web' || !Device.isDevice) return;
+  try {
+    const permiso = await Notifications.getPermissionsAsync();
+    if (!permiso.granted) return;
+    await registerForPush();
+  } catch {
+    // Volverá a intentarse la próxima vez que se vuelva a la aplicación.
+  }
 }
 
 /**
@@ -202,6 +238,8 @@ export async function registerForPush(): Promise<string | null> {
  * los avisos de su cuenta en un aparato que ya no usa.
  */
 export async function unregisterPush(): Promise<void> {
+  // La cuenta siguiente tiene que registrarse de nuevo en este teléfono.
+  registrado = false;
   if (!supabase || !Device.isDevice) return;
   const id = projectId();
   if (!id) return;

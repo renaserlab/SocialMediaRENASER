@@ -357,3 +357,50 @@ describe('los contadores de no leídos', () => {
     }
   });
 });
+
+describe('que el teléfono quede registrado para el push', () => {
+  const SERVICIO = sinComentarios(fuente('services/notifications.ts'));
+  const EN_VIVO = sinComentarios(fuente('hooks/useAvisosEnVivo.ts'));
+
+  it('el registro se reintenta al volver a la aplicación', () => {
+    // Se intentaba UNA vez, al entrar. Sin cobertura en ese momento, o con el
+    // permiso concedido después desde los ajustes, no había push hasta cerrar
+    // la aplicación del todo y volver a abrirla.
+    assert.match(SERVICIO, /export async function asegurarRegistroDePush\(\): Promise<void>/);
+    const alVolver = EN_VIVO.slice(EN_VIVO.indexOf("AppState.addEventListener('change'"));
+    assert.match(alVolver, /void asegurarRegistroDePush\(\);/);
+  });
+
+  it('el reintento NO vuelve a preguntar por el permiso', () => {
+    const reintento = SERVICIO.slice(SERVICIO.indexOf('export async function asegurarRegistroDePush'));
+    const cuerpo = reintento.slice(0, reintento.indexOf('\n}\n'));
+    assert.match(cuerpo, /const permiso = await Notifications\.getPermissionsAsync\(\);/);
+    assert.match(cuerpo, /if \(!permiso\.granted\) return;/);
+    assert.ok(!/requestPermissionsAsync/.test(cuerpo), 'insistir con el diálogo acaba en un «no» para siempre');
+    // Y ya registrado, o en web, no hace nada.
+    assert.match(cuerpo, /if \(registrado \|\| Platform\.OS === 'web' \|\| !Device\.isDevice\) return;/);
+  });
+
+  it('solo se da por registrado cuando el token quedó guardado', () => {
+    const registro = SERVICIO.slice(
+      SERVICIO.indexOf('export async function registerForPush'),
+      SERVICIO.indexOf('export async function asegurarRegistroDePush'),
+    );
+    const fallo = registro.indexOf("console.warn('[push] no se pudo guardar el token:'");
+    const hecho = registro.indexOf('registrado = true;');
+    assert.ok(fallo > 0 && hecho > fallo, 'se marca después de comprobar que guardar no falló');
+  });
+
+  it('al cerrar sesión, la cuenta siguiente vuelve a registrarse', () => {
+    const baja = SERVICIO.slice(SERVICIO.indexOf('export async function unregisterPush'));
+    assert.match(baja.slice(0, 200), /registrado = false;/);
+  });
+
+  it('los avisos se miran cada medio minuto, no cada minuto', () => {
+    // Todo lo que no es un mensaje —una sesión pedida, un seguidor— depende de
+    // esta pregunta mientras no llegue el push: en web, siempre.
+    assert.match(EN_VIVO, /const CADA_MS = 30_000;/);
+    // Y solo en primer plano: en segundo plano no se pregunta.
+    assert.match(EN_VIVO, /if \(AppState\.currentState === 'active'\) void mirarAvisos\(\);/);
+  });
+});

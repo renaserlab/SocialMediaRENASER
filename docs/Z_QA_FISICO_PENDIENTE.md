@@ -2327,3 +2327,29 @@ requisito de la contraseña. En teléfono falta:
       escrito sigue ahí.
 - [ ] Con el teclado abierto en un teléfono pequeño se llega al botón
       desplazando; nada queda tapado.
+
+**Mensajes, búsqueda y avisos (04/10/2026, tarde).** El buscador se comprobó
+en el navegador; la bandeja con conversaciones reales NO (necesita sesión).
+
+- [ ] La bandeja: título «Mensajes» grande a la izquierda, buscador arriba,
+      historias debajo, filas sin rayas con la foto grande y la hora pegada al
+      último mensaje («Que fue bro · 12:47»).
+- [ ] Lo no leído sale en negrita y con el globo; un nombre largo se recorta y
+      no empuja el globo fuera.
+- [ ] Buscar en Mensajes: la lista se estrecha con cada letra, sin vaciarse ni
+      pintar un indicador en medio. Al llegar la respuesta puede aparecer una
+      conversación que casa por el texto de un mensaje.
+- [ ] Buscar algo que no existe: «Nada por aquí» solo cuando el servidor lo
+      confirma.
+- [ ] El buscador de Explorar y el de Mensajes: caja rellena, sin marco ni
+      recuadro interior al enfocar; «Cancelar» a la derecha.
+- [ ] Explorar: buscar, borrar una letra y volver a escribirla se pinta al
+      instante.
+- [ ] Cursos: tocar el marcador guarda sin abrir el curso; guardado se ve
+      relleno, también en tema oscuro.
+- [ ] A pide una sesión a B con la aplicación de B abierta: a B le sale el
+      aviso con el nombre de A en menos de medio minuto.
+- [ ] A bloquea a B. B la sigue, reacciona y comenta: a A no le llega nada.
+- [ ] Negar el permiso de notificaciones al entrar, concederlo luego en los
+      ajustes del sistema y volver a la aplicación sin cerrarla: el push
+      empieza a llegar (con la compilación nueva).
