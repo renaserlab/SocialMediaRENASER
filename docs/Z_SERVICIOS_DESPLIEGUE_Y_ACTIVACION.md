@@ -1,14 +1,21 @@
 # Z Servicios · despliegue y activación del piloto gratuito
 
-**Estado al 03/10/2026, por la noche: ejecutados los pasos 1 a 3, todo
-apagado.** El push, el PR #7 (CI en verde, fusionado), la API desplegada
-(`sha-2f7e19a`, comprobada: la ruta interna contesta 503 y `/health` 200) y la
-plataforma actualizada. **Sin ejecutar:** el margen de arranque corregido
-(apartado 3), el secreto del planificador, las condiciones, las banderas y la
-lista del piloto. Cada paso lo ejecuta una persona, con el plan a la vista.
+**Estado al 03/10/2026, por la noche.** Cada paso lo ejecuta una persona, con
+el plan a la vista.
 
-**El paso 3 tiró la API cinco minutos** (18:28–18:33, hora de Lima). Está
-explicado en su apartado, y hay que aplicar su arreglo antes de los pasos 5 y 7.
+| Paso | Estado |
+|---|---|
+| 1 · Push y PR #7 | hecho: CI en verde |
+| 2 · Fusión a `main` y despliegue apagado | hecho: `sha-2f7e19a`; la ruta interna contesta 503 y `/health` 200 |
+| 3 · Plataforma actualizada, apagada | hecho, **con cinco minutos de 502** (18:28–18:33, hora de Lima); el margen de arranque corregido está aplicado |
+| 5 · Encender Servicios para nadie | hecho a las 20:45, **sin corte** |
+| 5 · Publicar las dos condiciones | **en espera**: falta una cuenta con el rol `admin` |
+| 6 · Categorías y actualización de la aplicación | sin hacer |
+| 4 y 7 · El secreto, la lista del piloto y la contratación | sin hacer |
+
+**El paso 4 se ha dejado para el 7.** El secreto del planificador solo hace
+falta para encender la contratación, y la lista del piloto vacía es lo mismo
+que no tenerla: cargarlos juntos ahorra una renovación de máquinas.
 
 El detalle técnico está en `Z_SERVICIOS_ARQUITECTURA.md`, Parte X (§147–§156).
 Aquí está solo **el orden y los comandos**.
@@ -104,9 +111,13 @@ El grupo daba 300 s a una máquina para estar lista. La nueva tardó lo mismo,
 al balanceador le faltaban 30 s para darla por sana, y el grupo la mató siendo
 la única. El margen pasa a **600 s** en la plantilla.
 
-**Antes de los pasos 5 y 7**, que vuelven a renovar las máquinas por este
-camino, se aplica ese margen (un plan con una sola línea, `GrupoDeAutoescalado`,
-y sin `PlantillaDeArranque`: no renueva nada) y se comprueba:
+El margen se aplicó ese mismo día a las 18:56 (un plan con una sola línea,
+`GrupoDeAutoescalado`, y sin `PlantillaDeArranque`: no renovó nada), y el paso
+5, que renueva las máquinas por el mismo camino, salió sin corte: la máquina
+nueva avisó en 4 min 22 s y la comprobación de salud encontró un destino sano.
+
+**Antes de un paso que renueve las máquinas por este camino** (el 5 y el 7) se
+comprueba que el margen sigue ahí:
 
 ```powershell
 aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names zexcelencia-api-produccion --region us-east-1 --query "AutoScalingGroups[0].HealthCheckGracePeriod"
@@ -172,21 +183,49 @@ más las seis líneas que acompañan al grupo (tres alarmas, dos de escalado y e
 panel: ver el apartado 3). **Renueva las máquinas**: con el margen de 600 s ya
 aplicado, y en hora de poco tráfico.
 
-Después, una persona con rol `admin` publica las dos condiciones. El token es
-el `access_token` de **su** sesión (caduca en una hora); lo obtiene ella con
-su propia cuenta, no se guarda en ningún fichero y, pidiéndolo así, tampoco
-queda en el historial de la consola:
+Después, una persona con rol `admin` publica las dos condiciones.
 
-```powershell
-$env:Z_ADMIN_TOKEN = Read-Host "Token de la sesion de administracion"
+**Quién es esa persona.** No hay una cuenta de administración con credenciales
+propias: es una cuenta normal cuyo perfil tiene `role = 'admin'`
+(`profiles.role`; la API lo lee en cada petición). La primera se marca en la
+base, y hace falta acceso a ella:
+
+```sql
+select id, username, full_name, role from public.profiles where role in ('admin', 'moderator');
+```
+
+```sql
+update public.profiles set role = 'admin' where username = '<cuenta>' returning id, username, role;
+```
+
+Qué cuenta es la decide la empresa. Tres cosas antes de decidir:
+
+- `admin` no es solo de Servicios: en toda la plataforma modera contenido y
+  aprueba devoluciones.
+- Lo que haga queda a su nombre aunque después pierda el rol: quién publicó
+  cada condición (`published_by`), quién aprobó a cada prestador.
+- Nadie revisa ni decide su propia postulación ni su propio servicio: la
+  cuenta que administra no puede ser, sin otra que la apruebe, la que se
+  prueba como prestador.
+
+**El token** es el `access_token` de **su** sesión (caduca en una hora). No se
+guarda en ningún fichero ni se enseña en pantalla. Con la sesión iniciada en
+la versión web, en la consola del navegador:
+
+```js
+copy(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token')))).access_token)
 ```
 
 ```powershell
-python apps/api/scripts/publicar_condiciones.py --tipo prestador --api https://<url publica de la API>
+$env:Z_ADMIN_TOKEN = Get-Clipboard
 ```
 
 ```powershell
-python apps/api/scripts/publicar_condiciones.py --tipo contratacion --api https://<url publica de la API>
+./apps/api/.venv/Scripts/python.exe apps/api/scripts/publicar_condiciones.py --tipo prestador --api https://<url publica de la API>
+```
+
+```powershell
+./apps/api/.venv/Scripts/python.exe apps/api/scripts/publicar_condiciones.py --tipo contratacion --api https://<url publica de la API>
 ```
 
 Sin `--publicar` el guion deja el borrador, comprueba que su huella es la del

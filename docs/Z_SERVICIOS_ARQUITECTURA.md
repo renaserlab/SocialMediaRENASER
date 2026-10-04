@@ -6378,3 +6378,46 @@ Por decidir, sin que impida el piloto cerrado:
 - si el **perfil versionado** pasa a encendido cuando el piloto sea estable.
 
 Fuera de este piloto: pagos, domicilio, categorías reguladas, sala propia.
+
+## 157. Lo ejecutado el 03/10/2026, y lo que queda
+
+Los §155 y §156 describen el estado **antes** de ejecutar nada. Esto es lo
+que se ejecutó ese mismo día, por una persona y con el plan a la vista:
+
+| Paso | Resultado |
+|---|---|
+| Push de `Edson`, PR #7 y CI remoto | en verde: móvil, API y la batería completa con PostgreSQL 16, sin omitidas |
+| Fusión a `main` (`2f7e19a`) | el árbol de `main` es el que se probó; «Desplegar API en AWS» en verde |
+| Código nuevo en producción, apagado | la ruta interna contesta 503 `services_disabled` y `/health` 200 |
+| Plataforma actualizada, apagada | `UPDATE_COMPLETE`, **con cinco minutos de 502** (ver abajo) |
+| Margen de arranque a 600 s | aplicado sin renovar máquinas y comprobado en el grupo |
+| `FeatureServices=true` con la lista del piloto vacía | `UPDATE_COMPLETE`, **sin corte**: Servicios existe y no entra nadie |
+
+**El corte.** El plan real contra la cuenta enseñó lo previsto, y aplicarlo
+tiró la API de 18:28 a 18:33 (hora de Lima). No fue la configuración —sus
+ocho valores son los de fábrica— sino la forma de cambiar la máquina: el
+margen de arranque del grupo (300 s) era igual a lo que tarda en arrancar una
+máquina, y el grupo retiró a la nueva, siendo la única, antes de que el
+balanceador la diera por sana. El margen es ahora de 600 s y la siguiente
+renovación por ese camino salió sin corte. El detalle, con las horas del
+historial del grupo, está en `Z_SERVICIOS_DESPLIEGUE_Y_ACTIVACION.md`,
+apartado 3.
+
+**Lo que queda, en orden:**
+
+1. **Publicar las dos condiciones.** En espera: hace falta una cuenta con el
+   rol `admin` (`profiles.role`), y hoy nadie con acceso a la base puede
+   marcarla. Qué cuenta es la decide la empresa; lo que publique queda a su
+   nombre para siempre (`published_by`).
+2. **Las categorías**, también con esa cuenta.
+3. **La actualización de la aplicación.**
+4. **El secreto**: la clave del planificador y la lista del piloto, juntas, y
+   `Renovar`. Antes, el fichero local de secretos tiene que traer las claves
+   vigentes.
+5. **La contratación con el planificador.** Es la primera vez que se crean los
+   recursos de EventBridge en la cuenta: sigue sin comprobar que quien
+   despliega pueda crearlos.
+6. **Comprobar el planificador contra la cuenta.**
+7. **El QA físico.**
+
+El perfil del repositorio sigue apagado; el encendido está solo en la cuenta.
