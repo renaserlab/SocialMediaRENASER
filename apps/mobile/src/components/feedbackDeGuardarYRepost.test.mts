@@ -68,13 +68,15 @@ test('no se creo un segundo sistema de avisos', () => {
 
 test('el aviso con accion sigue yendose solo', () => {
   // Un aviso que espera a que lo atiendan es un dialogo, y esto no lo es.
-  assert.match(TOAST, /duration = 3000/);
-  assert.match(TOAST, /setTimeout\(/);
+  // Cuanto dura lo decide la cola segun el tipo (`colaDeAvisos`), y con una
+  // accion dura mas —hay que llegar con el dedo—, pero SIEMPRE tiene reloj.
+  assert.match(TOAST, /setTimeout\(despedir, duration\)/);
+  assert.match(fuente('components/ToastHost.tsx'), /duration=\{duracionDelAviso\(/);
 });
 
 test('pulsar la accion hace lo suyo y cierra el aviso', () => {
   // Dejarlo puesto despues de navegar seria un cartel sobre la pantalla nueva.
-  assert.match(TOAST, /accion\.alPulsar\(\);\s*\n\s*onHide\?\.\(\);/);
+  assert.match(TOAST, /accion\.alPulsar\(\);\s*\n\s*despedir\(\);/);
 });
 
 // ---------------------------------------------------------------------------

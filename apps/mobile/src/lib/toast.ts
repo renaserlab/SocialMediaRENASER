@@ -1,5 +1,7 @@
 import type { Feather } from '@expo/vector-icons';
 
+import type { TipoDeAviso } from './colaDeAvisos';
+
 export type ToastRequest = {
   message: string;
   icon?: keyof typeof Feather.glyphMap;
@@ -14,6 +16,26 @@ export type ToastRequest = {
     etiqueta: string;
     alPulsar: () => void;
   };
+  /**
+   * De que clase es. Decide el icono por defecto, cuanto dura y como convive
+   * con los demas (ver `colaDeAvisos`). Sin el, es una confirmacion de exito:
+   * lo que eran todos antes de existir los tipos.
+   */
+  tipo?: TipoDeAviso;
+  /** Una linea en negrita encima del mensaje: quien escribe, de que va. */
+  titulo?: string;
+  /** La foto de quien lo origina, en vez del icono. Solo en notificaciones. */
+  avatarUrl?: string | null;
+  /** Tocar el aviso entero (no la accion): abrir aquello de lo que habla. */
+  alTocar?: () => void;
+  /**
+   * Lo que hace que dos avisos sean el mismo. Sin ella, tipo y texto. Las
+   * notificaciones mandan la suya (la conversacion, la publicacion) para que
+   * cinco seguidas de lo mismo sean un aviso y no cinco.
+   */
+  clave?: string;
+  /** Milisegundos en pantalla, si hay motivo para no usar los del tipo. */
+  duracion?: number;
 };
 
 /**
@@ -24,9 +46,14 @@ export type ToastRequest = {
  * un contexto de React. `ToastHost` se registra aqui al montarse.
  */
 let present: ((request: ToastRequest) => void) | null = null;
+let retirar: ((esDeLaClave: (clave: string) => boolean) => void) | null = null;
 
-export function registerToastHost(fn: ((request: ToastRequest) => void) | null): void {
+export function registerToastHost(
+  fn: ((request: ToastRequest) => void) | null,
+  quitar: ((esDeLaClave: (clave: string) => boolean) => void) | null = null,
+): void {
   present = fn;
+  retirar = quitar;
 }
 
 /**
@@ -64,4 +91,35 @@ export function toastConAccion(
   icon: keyof typeof Feather.glyphMap = 'check-circle',
 ): void {
   present?.({ message, icon, accion });
+}
+
+/**
+ * Cualquier aviso transitorio, con todos sus campos.
+ *
+ * Es la puerta completa de la misma autoridad: `toast` y `toastConAccion` son
+ * dos atajos suyos. Se usa para lo que no es una simple confirmacion —un error
+ * de red, una advertencia, una notificacion que llega con la aplicacion
+ * abierta—.
+ *
+ * NO PARA ERRORES DE FORMULARIO. Lo que la persona tiene que corregir en un
+ * campo se dice junto al campo, que es donde va a mirar; un aviso que se va
+ * solo le quitaria la explicacion antes de que termine de arreglarlo.
+ */
+export function avisar(peticion: ToastRequest): void {
+  present?.(peticion);
+}
+
+/** Algo no salio, y no hay un campo donde decirlo: la red, el servidor. */
+export function toastDeError(message: string): void {
+  present?.({ message, tipo: 'error' });
+}
+
+/**
+ * Retira los avisos que ya no vienen a cuento.
+ *
+ * El caso: llega el aviso de un mensaje y la persona abre esa conversacion
+ * antes de que se vaya. Dejarlo encima seria anunciarle lo que ya esta leyendo.
+ */
+export function retirarAvisosDe(esDeLaClave: (clave: string) => boolean): void {
+  retirar?.(esDeLaClave);
 }
