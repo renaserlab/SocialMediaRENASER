@@ -1,43 +1,158 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { directoDelPush, rutaDelPush } from './rutaDelPush.ts';
+import {
+  RUTA_DE_LA_BANDEJA,
+  claveDeConversacion,
+  claveDelPush,
+  conversacionDelPush,
+  directoDelPush,
+  rutaDelPush,
+} from './rutaDelPush.ts';
 
-const ID = '8f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b';
+/**
+ * TOCAR UN AVISO LLEVA A LO QUE ANUNCIA, Y SOLO A DONDE LA APLICACIÓN DECIDE.
+ *
+ * Antes solo el aviso de un directo llevaba a algún sitio. Ahora cada tipo
+ * tiene su destino, y lo que se fija aquí es que ese destino sale de un mapa
+ * CERRADO: lo que llega en un push viene de fuera del teléfono y no puede
+ * elegir pantalla.
+ */
+
+const ID = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
+const OTRO = '11111111-2222-4333-8444-555555555555';
 
 test('un aviso de directo lleva al directo', () => {
   assert.equal(rutaDelPush({ type: 'live_started', liveId: ID }), `/live/${ID}`);
   assert.equal(directoDelPush({ type: 'live_started', liveId: ID }), ID);
 });
 
-test('los demas avisos siguen abriendo la aplicacion sin mas', () => {
-  for (const datos of [
-    { type: 'follow', profileId: ID },
-    { type: 'like' },
-    {},
-    null,
-    undefined,
-    'live_started',
+test('un mensaje lleva a su conversación', () => {
+  assert.equal(rutaDelPush({ type: 'message', conversationId: ID }), `/chat/${ID}`);
+  assert.equal(conversacionDelPush({ type: 'message', conversationId: ID }), ID);
+});
+
+test('lo que habla de una publicación lleva a la publicación', () => {
+  for (const type of ['like', 'comment', 'comment_reply', 'comment_like', 'post_mention']) {
+    assert.equal(rutaDelPush({ type, postId: ID }), `/post/${ID}`, type);
+  }
+});
+
+test('un seguidor nuevo lleva a su perfil', () => {
+  assert.equal(rutaDelPush({ type: 'follow', profileId: ID }), `/profile/${ID}`);
+});
+
+test('lo de las sesiones lleva a la agenda', () => {
+  for (const type of [
+    'booking',
+    'session_booked',
+    'session_accepted',
+    'session_rejected',
+    'session_cancelled',
+    'session_rescheduled',
+    'session_completed',
   ]) {
+    assert.equal(rutaDelPush({ type, id: ID }), '/agenda', type);
+  }
+});
+
+test('una decisión sobre algo del creador usa el mapa de la bandeja', () => {
+  const rutaDeDecision = (tipo: string, entidad: string | null | undefined) =>
+    tipo === 'event_published' && entidad ? `/eventos/${entidad}` : null;
+  assert.equal(
+    rutaDelPush({ type: 'event_published', entityType: 'event', entityId: ID }, { rutaDeDecision }),
+    `/eventos/${ID}`,
+  );
+  // Sin ese mapa, o si no reconoce el tipo, a la bandeja.
+  assert.equal(rutaDelPush({ type: 'event_published', entityId: ID }), RUTA_DE_LA_BANDEJA);
+  assert.equal(rutaDelPush({ type: 'otra_cosa', entityId: ID }, { rutaDeDecision }), RUTA_DE_LA_BANDEJA);
+});
+
+test('un aviso sin destino conocido lleva a la bandeja, que siempre existe', () => {
+  for (const datos of [{}, { type: 'service_booking_confirmed' }, { type: 'algo_nuevo', x: 1 }]) {
+    assert.equal(rutaDelPush(datos), RUTA_DE_LA_BANDEJA, JSON.stringify(datos));
+  }
+});
+
+test('lo que ni siquiera es un aviso abre la aplicación sin más', () => {
+  for (const datos of [null, undefined, 'live_started', 42, ['message', ID]]) {
     assert.equal(rutaDelPush(datos), null, JSON.stringify(datos));
     assert.equal(directoDelPush(datos), null);
   }
 });
 
 test('un identificador que no es un UUID no acaba metido en una ruta', () => {
-  for (const liveId of [
-    '../admin',
-    `${ID}/../../settings`,
-    `${ID}?x=1`,
-    'abc',
+  const raros = [
+    '../../admin',
+    `${ID}/../../admin`,
+    `${ID}?next=https://malo.example`,
+    'javascript:alert(1)',
     '',
-    42,
+    ' ',
+    123,
     null,
-  ]) {
-    assert.equal(
-      rutaDelPush({ type: 'live_started', liveId }),
-      null,
-      `se aceptó ${String(liveId)}`,
-    );
+    { id: ID },
+  ];
+  for (const raro of raros) {
+    assert.equal(rutaDelPush({ type: 'live_started', liveId: raro }), RUTA_DE_LA_BANDEJA);
+    assert.equal(rutaDelPush({ type: 'message', conversationId: raro }), '/messages');
+    assert.equal(rutaDelPush({ type: 'like', postId: raro }), RUTA_DE_LA_BANDEJA);
+    assert.equal(rutaDelPush({ type: 'follow', profileId: raro }), RUTA_DE_LA_BANDEJA);
+    assert.equal(conversacionDelPush({ type: 'message', conversationId: raro }), null);
   }
+});
+
+test('una ruta que venga escrita en el aviso se ignora', () => {
+  // El aviso trae un tipo y un identificador. Cualquier «ve aquí» no existe.
+  const trampa = {
+    type: 'like',
+    postId: ID,
+    url: 'https://malo.example',
+    route: '/admin',
+    ruta: '/admin/finanzas',
+    path: '/pago',
+    href: 'zexcelencia://admin',
+  };
+  assert.equal(rutaDelPush(trampa), `/post/${ID}`);
+  assert.equal(rutaDelPush({ url: '/admin', route: '/admin' }), RUTA_DE_LA_BANDEJA);
+});
+
+test('todos los destinos posibles salen de una lista conocida', () => {
+  const permitidos = [
+    /^\/live\/[0-9a-f-]{36}$/,
+    /^\/chat\/[0-9a-f-]{36}$/,
+    /^\/post\/[0-9a-f-]{36}$/,
+    /^\/profile\/[0-9a-f-]{36}$/,
+    /^\/agenda$/,
+    /^\/messages$/,
+    /^\/notifications$/,
+  ];
+  const tipos = [
+    'live_started', 'message', 'like', 'comment', 'comment_reply', 'comment_like',
+    'post_mention', 'follow', 'booking', 'session_booked', 'session_accepted',
+    'desconocido', '',
+  ];
+  for (const type of tipos) {
+    for (const id of [ID, 'no-es-uuid', undefined]) {
+      const ruta = rutaDelPush({
+        type, liveId: id, conversationId: id, postId: id, profileId: id, entityId: id, id,
+      });
+      assert.ok(ruta !== null && permitidos.some((patron) => patron.test(ruta)), `${type} → ${ruta}`);
+    }
+  }
+});
+
+test('los avisos de una conversación comparten clave: son uno que se renueva', () => {
+  const uno = claveDelPush({ type: 'message', conversationId: ID });
+  const otro = claveDelPush({ type: 'message', conversationId: ID });
+  assert.equal(uno, otro);
+  assert.equal(uno, claveDeConversacion(ID));
+  assert.notEqual(uno, claveDelPush({ type: 'message', conversationId: OTRO }));
+});
+
+test('lo demás se agrupa por tipo y por aquello de lo que habla', () => {
+  assert.equal(claveDelPush({ type: 'like', postId: ID }), claveDelPush({ type: 'like', postId: ID }));
+  assert.notEqual(claveDelPush({ type: 'like', postId: ID }), claveDelPush({ type: 'like', postId: OTRO }));
+  assert.notEqual(claveDelPush({ type: 'like', postId: ID }), claveDelPush({ type: 'comment', postId: ID }));
+  assert.equal(claveDelPush(null), 'aviso');
 });

@@ -31,6 +31,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useContadoresStore } from '@/store/useContadoresStore';
 import { CatalogRepository } from '@/repositories/CatalogRepository';
 import { CommunityRepository, type CircleDetail } from '@/repositories/CommunityRepository';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -223,6 +224,7 @@ export function ExploreScreen() {
   */
   const estadoDeSesion = useAuthStore((state) => state.status);
   const [avisosSinLeer, setAvisosSinLeer] = useState(0);
+  const avisosEnVivo = useContadoresStore((state) => state.notificaciones);
   const contarAvisos = useCallback(() => {
     if (!AuthRepository.enabled) return;
     /*
@@ -718,7 +720,9 @@ export function ExploreScreen() {
         // El punto se enciende por lo que hay sin ver DETRAS: la actividad
         // real sobre esta persona, o el aviso de contenido gratuito que
         // sigue esperando dentro.
-        rightBadge={avisosSinLeer > 0 || darrenNoticePending}
+        // `enVivo` es el contador común: se mueve cuando llega un aviso con
+        // la aplicación abierta, sin tener que salir de Explorar y volver.
+        rightBadge={avisosSinLeer > 0 || avisosEnVivo > 0 || darrenNoticePending}
         onRightPress={() => router.push('/notifications')}
       />
 

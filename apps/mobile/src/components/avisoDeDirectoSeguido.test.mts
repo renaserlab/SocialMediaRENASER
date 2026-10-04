@@ -85,7 +85,11 @@ test('tocar el push abre el directo, una vez y con la navegacion ya montada', ()
   assert.match(PUSH_NATIVO, /Notifications\.useLastNotificationResponse\(\)/);
   assert.match(PUSH_NATIVO, /if \(!lista \|\| !respuesta\) return;/);
   assert.match(PUSH_NATIVO, /if \(atendidas\.current\.has\(identificador\)\) return;/);
-  assert.match(PUSH_NATIVO, /const ruta = rutaDelPush\(datos\);/);
+  // El destino sale del mapa cerrado; lo que no trae datos, a la bandeja.
+  assert.match(
+    PUSH_NATIVO,
+    /const ruta = rutaDelPush\(datos, \{ rutaDeDecision: rutaDelAviso \}\) \?\? RUTA_DE_LA_BANDEJA;/,
+  );
   // Quien entra por el push no ve encima el aviso del mismo directo.
   assert.match(PUSH_NATIVO, /if \(directo\) marcarDirectoComoAvisado\(directo\);/);
   // La web no escucha push nativos: ni siquiera importa la libreria.

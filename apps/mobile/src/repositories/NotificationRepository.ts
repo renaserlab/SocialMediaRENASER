@@ -5,10 +5,18 @@ import {
   toNotificationItem,
 } from '@/mappers/notificationMapper';
 
+/** Lo que se pide de una vez. El servidor admite hasta 100. */
+export const AVISOS_POR_PAGINA = 50;
+
 export const NotificationRepository = {
-  async list(): Promise<NotificationItem[]> {
+  /**
+   * Una página de avisos. `desde` es cuántos se han pedido ya: la bandeja
+   * pide la siguiente al llegar al final en vez de quedarse en los primeros
+   * cincuenta para siempre.
+   */
+  async list(desde = 0): Promise<NotificationItem[]> {
     const dtos = await apiRequest<NotificationDto[]>(
-      `${API_V1}/notifications?limit=50`,
+      `${API_V1}/notifications?limit=${AVISOS_POR_PAGINA}&offset=${Math.max(0, desde)}`,
     );
     return dtos.map(toNotificationItem);
   },

@@ -53,6 +53,8 @@ export type NotificationItem = {
     | 'clock'
     | 'inbox';
   time: string;
+  /** Cuándo se creó, tal como lo dice el servidor: para saber si es nuevo. */
+  createdAtIso?: string;
   read: boolean;
   actorId?: string;
   /**
@@ -183,6 +185,36 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       subtitle = t('notif.liveBody', { actor });
       icon = 'radio';
       break;
+    /*
+      Compras y devoluciones. El servidor ya escribía estos avisos en la
+      bandeja, pero aquí no tenían texto y salían con el genérico «Tienes una
+      notificación», que no dice qué ha pasado.
+    */
+    case 'course_purchase':
+      title = t('notif.coursePurchaseTitle');
+      subtitle = t('notif.coursePurchaseBody', { actor });
+      icon = 'award';
+      break;
+    case 'refund_requested':
+      title = t('notif.refundRequestedTitle');
+      subtitle = t('notif.refundRequestedBody');
+      icon = 'clock';
+      break;
+    case 'refund_approved':
+      title = t('notif.refundApprovedTitle');
+      subtitle = t('notif.refundApprovedBody');
+      icon = 'check-circle';
+      break;
+    case 'refund_rejected':
+      title = t('notif.refundRejectedTitle');
+      subtitle = t('notif.refundRejectedBody');
+      icon = 'x-circle';
+      break;
+    case 'refund_refunded':
+      title = t('notif.refundRefundedTitle');
+      subtitle = t('notif.refundRefundedBody');
+      icon = 'check-circle';
+      break;
     default: {
       /*
         AVISOS AL CREADOR (desde el 24/09/2026): su evento, curso, postulación
@@ -206,6 +238,7 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
     subtitle,
     icon,
     time: formatRelativeTime(dto.created_at),
+    createdAtIso: dto.created_at,
     read: dto.read,
     actorId: dto.actor?.id,
     entityType: dto.entity_type,

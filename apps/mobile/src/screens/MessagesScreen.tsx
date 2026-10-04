@@ -33,6 +33,7 @@ import {
 } from '@/repositories/EtiquetasRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { anotarMensajes } from '@/services/contadores';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Conversation } from '@/types';
@@ -167,6 +168,10 @@ export function MessagesScreen() {
           setHayMas(data.length >= CONVERSACIONES_POR_PAGINA);
           setStatus('idle');
           ultimaCarga.current = Date.now();
+          // La bandeja sin filtrar es la fuente del globo de la barra: ya
+          // está aquí, no hace falta otra petición para contarla. Con una
+          // búsqueda o un filtro puestos NO se anota: sería contar un trozo.
+          if (!hayConsulta(consultaRef.current)) anotarMensajes(data);
         })
         .catch(() => {
           if (!esVigente(mio, sello.current)) return;

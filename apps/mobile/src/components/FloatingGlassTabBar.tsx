@@ -4,9 +4,14 @@ import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
+import { Pulsable } from '@/components/Pulsable';
+import { useTranslation } from '@/i18n/useTranslation';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { SECCIONES } from '@/navigation/secciones';
 import type { PropsDeBarra } from '@/navigation/SwipeTabs';
 import { useAppStore } from '@/store/useAppStore';
+import { useContadoresStore } from '@/store/useContadoresStore';
 import { getFontFamily, motion, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -84,9 +89,20 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeB
     Mensajes sin leer para el globo de la pestaña. Se leen del estado global
     con un selector primitivo: la barra solo se redibuja si el NUMERO cambia.
   */
-  const unread = useAppStore((s) =>
+  /*
+    EL GLOBO DE MENSAJES ESTABA MUERTO. Sumaba las conversaciones del almacen,
+    que con servidor nace vacio y nadie rellenaba: llegaba un mensaje y aqui no
+    se movia nada. Ahora lee el contador comun (`useContadoresStore`), que se
+    actualiza con el mensaje que llega en vivo, con el push y al abrir la
+    bandeja. Las conversaciones del almacen siguen contando en la demo sin
+    servidor, que es donde unicamente tienen algo.
+  */
+  const { t } = useTranslation();
+  const enVivo = useContadoresStore((s) => s.mensajes);
+  const deLaDemo = useAppStore((s) =>
     s.conversations.reduce((total, c) => total + (c.unread ?? 0), 0),
   );
+  const unread = Math.max(enVivo, deLaDemo);
 
   /*
     Los botones salen de la lista de secciones, no del orden en que el navegador
@@ -170,29 +186,37 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeB
             };
 
             return (
-              <Pressable
+              <Pulsable
                 key={route.key}
                 onPress={onPress}
+                // Se hunde bajo el dedo y da un toque en la mano: cambiar de
+                // sección es de lo poco que merece vibrar. La cápsula, el
+                // orden y las etiquetas no cambian.
+                escala={ESCALA_AL_PULSAR.chip}
+                atenuar={0.8}
+                haptica="ligera"
                 style={styles.item}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: focused }}
-                accessibilityLabel={etiqueta}
+                accessibilityLabel={
+                  globo ? `${etiqueta}. ${t('notif.unreadTab', { cuenta: unread })}` : etiqueta
+                }
               >
                 <ActivePill focused={focused} color={colors.glassActive} />
                 <View>
                   <Feather name={icono} size={22} color={color} />
-                  {globo ? (
-                    <View style={[styles.badge, { backgroundColor: colors.primary, borderColor: colors.surface }]}>
-                      <Text style={[styles.badgeText, { color: colors.onPrimary }]}>
-                        {unread > 99 ? '99+' : unread}
-                      </Text>
-                    </View>
+                  {/*
+                    El mismo globo que en la lista de conversaciones: aparece
+                    creciendo y salta cuando llega otro mensaje.
+                  */}
+                  {route.name === 'messages' ? (
+                    <GloboDeNoLeidos cuenta={unread} tamano={16} style={styles.badge} />
                   ) : null}
                 </View>
                 <Text numberOfLines={1} style={[styles.label, { color }]}>
                   {etiqueta}
                 </Text>
-              </Pressable>
+              </Pulsable>
             );
           })}
         </View>
@@ -264,17 +288,6 @@ const styles = StyleSheet.create({
     fontFamily: getFontFamily('700'),
     fontWeight: Platform.OS === 'ios' ? '700' : undefined,
   },
-  badge: {
-    position: 'absolute',
-    top: -5,
-    right: -9,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  badgeText: { fontSize: 9, fontWeight: '800' },
+  // El tamaño y el color los pone `GloboDeNoLeidos`; aquí solo dónde va.
+  badge: { position: 'absolute', top: -5, right: -9 },
 });

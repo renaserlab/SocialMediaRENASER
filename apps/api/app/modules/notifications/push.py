@@ -138,6 +138,22 @@ CHANNELS: dict[str, str] = {
 }
 
 
+#: La generación de los canales de Android.
+#:
+#: Los de la primera se crearon en el teléfono con `sound: null`, que en
+#: `expo-notifications` es «sin sonido»: los avisos llegaban mudos. Android no
+#: deja cambiar el sonido de un canal ya creado, así que la aplicación estrena
+#: ids (`services/notifications.ts`) y aquí se manda a esos mismos. Si algún
+#: día hay que volver a cambiar algo de los canales, se sube este sufijo en los
+#: DOS sitios a la vez.
+SUFIJO_DE_CANAL = "-v2"
+
+
+def canal_android(nombre: str) -> str:
+    """El id del canal tal como existe en el teléfono."""
+    return f"{nombre}{SUFIJO_DE_CANAL}"
+
+
 def build_message(notification_type: str, actor_name: str | None) -> tuple[str, str] | None:
     """Título y cuerpo del aviso, o None si el tipo no tiene texto definido."""
     template = TEMPLATES.get(notification_type)
@@ -210,7 +226,7 @@ async def send_push_many(
             "body": body,
             # "default" = el sonido de notificación del propio teléfono.
             "sound": "default",
-            "channelId": channel,
+            "channelId": canal_android(channel),
             # Sin esto Android puede retener el aviso hasta que el teléfono
             # despierte por otra cosa: con el aparato en reposo, un mensaje
             # llegaba minutos tarde o al desbloquear.
@@ -395,7 +411,8 @@ async def enviar_de_la_cola(
             "title": titulo,
             "body": cuerpo,
             "sound": "default",
-            "channelId": textos.CANALES.get(tipo, "contenido"),
+            "channelId": canal_android(textos.CANALES.get(tipo, "contenido")),
+            "priority": "high",
         }
         for token in tokens
     ]

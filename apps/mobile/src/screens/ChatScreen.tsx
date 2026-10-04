@@ -30,6 +30,10 @@ import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useTranslation } from '@/i18n/useTranslation';
 import { afterSheetClose } from '@/lib/afterSheetClose';
+import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
+import { claveDeConversacion } from '@/lib/rutaDelPush';
+import { retirarAvisosDe } from '@/lib/toast';
+import { refrescarMensajes } from '@/services/contadores';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { confirm, notify } from '@/lib/confirm';
 import {
@@ -769,6 +773,29 @@ export function ChatScreen() {
 
     Por referencia: `salirDelChat` cambia en cada render.
   */
+  /*
+    ESTA CONVERSACIÓN ESTÁ A LA VISTA mientras la pantalla tiene el foco.
+
+    Es lo que evita el aviso redundante: si llega un mensaje de la conversación
+    que la persona tiene delante, aparece en la conversación y NO sale un aviso
+    flotante ni suena el teléfono para decirle lo que ya está leyendo. Al salir
+    se quita la marca y se retira cualquier aviso de esta conversación que
+    estuviera esperando; los contadores se ponen al día, porque entrar aquí ha
+    marcado sus mensajes como leídos.
+  */
+  const conversacionALaVista = typeof params.id === 'string' ? params.id : null;
+  useFocusEffect(
+    useCallback(() => {
+      if (!conversacionALaVista) return undefined;
+      marcarConversacionALaVista(conversacionALaVista);
+      retirarAvisosDe((clave) => clave === claveDeConversacion(conversacionALaVista));
+      return () => {
+        dejarDeVerConversacion(conversacionALaVista);
+        void refrescarMensajes();
+      };
+    }, [conversacionALaVista]),
+  );
+
   const ultimaSalida = useRef<() => void>(() => {});
   ultimaSalida.current = () => void salirDelChat();
   useFocusEffect(
