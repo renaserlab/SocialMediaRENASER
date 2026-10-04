@@ -86,7 +86,8 @@ export function CampoDeBusqueda({
   const foco = useSharedValue(0);
   const lupa = useSharedValue(1);
   const hayTexto = value.length > 0;
-  const equis = useSharedValue(hayTexto ? 1 : 0);
+  // Nace en cero: la X se monta al escribir la primera letra y crece desde ahi.
+  const equis = useSharedValue(0);
 
   useEffect(() => {
     const duracion = reducir ? 0 : DURACION.normal;
@@ -178,28 +179,38 @@ export function CampoDeBusqueda({
           // pero Android y web no.
           clearButtonMode="never"
         />
-        <Animated.View style={equisAnimada} pointerEvents={hayTexto ? 'auto' : 'none'}>
-          <Pulsable
-            onPress={() => onChangeText('')}
-            disabled={!hayTexto}
-            hitSlop={12}
-            escala={ESCALA_AL_PULSAR.icono}
-            accessibilityRole="button"
-            accessibilityLabel={etiquetaDeLimpiar}
-            accessibilityElementsHidden={!hayTexto}
-            importantForAccessibility={hayTexto ? 'yes' : 'no-hide-descendants'}
-            style={[styles.equis, { backgroundColor: colors.textMuted }]}
-          >
-            <Feather name="x" size={12} color={colors.background} />
-          </Pulsable>
-        </Animated.View>
+        {/*
+          La X SOLO EXISTE cuando hay algo que borrar. Antes estaba siempre,
+          invisible y apagada: no se veia, pero un lector de pantalla —y el
+          navegador— la seguian anunciando como «Borrar la busqueda» sobre un
+          campo vacio. Al aparecer crece desde su centro.
+        */}
+        {hayTexto ? (
+          <Animated.View style={equisAnimada}>
+            <Pulsable
+              onPress={() => onChangeText('')}
+              hitSlop={12}
+              escala={ESCALA_AL_PULSAR.icono}
+              accessibilityRole="button"
+              accessibilityLabel={etiquetaDeLimpiar}
+              style={[styles.equis, { backgroundColor: colors.textMuted }]}
+            >
+              <Feather name="x" size={12} color={colors.background} />
+            </Pulsable>
+          </Animated.View>
+        ) : null}
       </Animated.View>
 
       {/*
         «Cancelar» abre su hueco al enfocar. Con el campo sin foco mide cero y
         no se puede pulsar ni lo lee el lector de pantalla.
       */}
-      <Animated.View style={[styles.cancelar, cancelar]} pointerEvents={enfocado ? 'auto' : 'none'}>
+      <Animated.View
+        style={[styles.cancelar, cancelar]}
+        pointerEvents={enfocado ? 'auto' : 'none'}
+        // Tambien para el navegador: `aria-hidden` es lo que entiende la web.
+        aria-hidden={!enfocado}
+      >
         <Pulsable
           onPress={alCancelar}
           disabled={!enfocado}
