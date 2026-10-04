@@ -16,7 +16,7 @@ import logging
 
 import httpx
 from fastapi import BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.notifications.device_tokens import DeviceToken
@@ -50,6 +50,9 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "refund_rejected": ("Solicitud rechazada", "Revisa el motivo en tus compras."),
     "refund_refunded": ("Devolución completada", "El importe vuelve a tu método de pago."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
+    # Un mensaje de chat. SIN EL TEXTO DEL MENSAJE: un push se lee en la
+    # pantalla bloqueada. Dice quién escribe; el contenido se lee dentro.
+    "message": ("Nuevo mensaje", "{actor} te envió un mensaje."),
     # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
     # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
     "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
@@ -97,6 +100,7 @@ CHANNELS: dict[str, str] = {
     "refund_rejected": "contenido",
     "refund_refunded": "contenido",
     "follow": "interacciones",
+    "message": "mensajes",
     # Con los seguidores y los «me gusta»: es alguien a quien sigues haciendo
     # algo, no una gestion tuya.
     "live_started": "interacciones",
@@ -207,19 +211,89 @@ async def send_push_many(
             # "default" = el sonido de notificación del propio teléfono.
             "sound": "default",
             "channelId": channel,
+            # Sin esto Android puede retener el aviso hasta que el teléfono
+            # despierte por otra cosa: con el aparato en reposo, un mensaje
+            # llegaba minutos tarde o al desbloquear.
+            "priority": "high",
             "data": data or {},
         }
         for token in tokens
     ]
 
+    muertos: list[str] = []
     for start in range(0, len(messages), BATCH_SIZE):
         batch = messages[start : start + BATCH_SIZE]
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(EXPO_PUSH_URL, json=batch)
                 response.raise_for_status()
+                muertos.extend(tokens_muertos(batch, _cuerpo(response)))
         except Exception:  # noqa: BLE001
             logger.warning("[push] fallo al enviar un lote", exc_info=True)
+
+    await olvidar_tokens(muertos)
+
+
+def _cuerpo(respuesta) -> object:
+    """El JSON de la respuesta de Expo, o `None` si no se entiende."""
+    try:
+        return respuesta.json()
+    except Exception:  # noqa: BLE001 - un cuerpo raro no es motivo para fallar
+        return None
+
+
+def tokens_muertos(lote: list[dict], cuerpo: object) -> list[str]:
+    """Los tokens de un lote que Expo dice que ya no existen.
+
+    Expo contesta 200 y mete dentro un resultado POR MENSAJE, en el mismo orden
+    en que se mandaron. Una aplicación desinstalada, o un token caducado, llega
+    como `{"status": "error", "details": {"error": "DeviceNotRegistered"}}`.
+
+    Antes no se miraba: el token se quedaba en la tabla para siempre y cada
+    aviso volvía a mandarse a un teléfono que ya no estaba. No hace daño a
+    nadie, pero Expo penaliza a quien insiste, y la tabla solo crecía.
+
+    SOLO `DeviceNotRegistered`. Otros errores —límite de mensajes, credenciales
+    del proyecto— no dicen nada del token y borrarlo dejaría sin avisos a
+    alguien que sí tiene la aplicación.
+
+    Función pura, para poder probarla sin red.
+    """
+    if not isinstance(cuerpo, dict):
+        return []
+    recibos = cuerpo.get("data")
+    if not isinstance(recibos, list) or len(recibos) != len(lote):
+        # Sin correspondencia uno a uno no se sabe de quién es cada resultado.
+        return []
+    muertos: list[str] = []
+    for mensaje, recibo in zip(lote, recibos, strict=True):
+        if not isinstance(recibo, dict) or recibo.get("status") != "error":
+            continue
+        detalles = recibo.get("details")
+        if isinstance(detalles, dict) and detalles.get("error") == "DeviceNotRegistered":
+            token = mensaje.get("to")
+            if isinstance(token, str):
+                muertos.append(token)
+    return muertos
+
+
+async def olvidar_tokens(tokens: list[str]) -> None:
+    """Borra los tokens que ya no existen. NUNCA LANZA.
+
+    Con sesión PROPIA: quien llama puede estar usando la de una petición, y
+    hacer `commit` sobre ella desde aquí cerraría una transacción que no es
+    nuestra.
+    """
+    if not tokens:
+        return
+    try:
+        async with SessionLocal() as db:
+            await db.execute(delete(DeviceToken).where(DeviceToken.token.in_(tokens)))
+            await db.commit()
+        # Cuántos, nunca cuáles: un token es una credencial de envío.
+        logger.info("[push] %s token(s) dados de baja por Expo", len(tokens))
+    except Exception:  # noqa: BLE001
+        logger.warning("[push] no se pudieron borrar los tokens caducados", exc_info=True)
 
 
 async def _enviar_con_sesion_propia(
