@@ -1,9 +1,21 @@
 # Z Servicios · despliegue y activación del piloto gratuito
 
-**Estado al 03/10/2026: NADA de esto se ha ejecutado.** El código, la
-plantilla, los textos y los guiones están preparados en la rama `Edson`. No
-hay push, ni PR, ni despliegue, ni condiciones publicadas, ni banderas
-encendidas. Cada paso de abajo lo ejecuta una persona, con el plan a la vista.
+**Estado al 03/10/2026, por la noche.** Cada paso lo ejecuta una persona, con
+el plan a la vista.
+
+| Paso | Estado |
+|---|---|
+| 1 · Push y PR #7 | hecho: CI en verde |
+| 2 · Fusión a `main` y despliegue apagado | hecho: `sha-2f7e19a`; la ruta interna contesta 503 y `/health` 200 |
+| 3 · Plataforma actualizada, apagada | hecho, **con cinco minutos de 502** (18:28–18:33, hora de Lima); el margen de arranque corregido está aplicado |
+| 5 · Encender Servicios para nadie | hecho a las 20:45, **sin corte** |
+| 5 · Publicar las dos condiciones | **en espera**: falta una cuenta con el rol `admin` |
+| 6 · Categorías y actualización de la aplicación | sin hacer |
+| 4 y 7 · El secreto, la lista del piloto y la contratación | sin hacer |
+
+**El paso 4 se ha dejado para el 7.** El secreto del planificador solo hace
+falta para encender la contratación, y la lista del piloto vacía es lo mismo
+que no tenerla: cargarlos juntos ahorra una renovación de máquinas.
 
 El detalle técnico está en `Z_SERVICIOS_ARQUITECTURA.md`, Parte X (§147–§156).
 Aquí está solo **el orden y los comandos**.
@@ -65,19 +77,55 @@ $env:RENASERLAB_AWS_ACCOUNT_ID = Read-Host "Cuenta de RenaserLab"
 ```
 
 `Planificar` enseña el plan y lo descarta. Con los perfiles tal como están en
-el repositorio (todo apagado, `PlanificadorDeServicios=No`), lo que se espera
-en el plan es **solo** esto (la plantilla pasa `cfn-lint`; el plan real no se
-ha generado todavía contra la cuenta):
+el repositorio (todo apagado, `PlanificadorDeServicios=No`), el plan es
+**solo** esto (es el que salió contra la cuenta el 03/10/2026):
 
 | Recurso | Cambio | Por qué |
 |---|---|---|
-| `PlantillaDeArranque` | Modify | una línea nueva en el entorno: `SERVICES_CATALOG_PRICE_MODELS=free,on_request` |
-| `GrupoDeAutoescalado` | Modify | usa la plantilla nueva: renueva las máquinas, sin corte |
+| `PlantillaDeArranque` | Modify | ocho líneas nuevas en el entorno, las de Servicios, con los mismos valores que la API ya usa de fábrica |
+| `GrupoDeAutoescalado` | Modify, «puede reemplazarse» | usa la plantilla nueva: **renueva las máquinas** |
 | `BarreraLaContratacionExigeElPlanificador`, `ComprobacionDeLosProcesosDeServicios` | Add | dos marcadores sin coste; no crean nada en AWS |
+| `AlarmaCreditosDeCpu`, `AlarmaCreditosDeCpuBajando`, `AlarmaMemoriaAlta`, `EscaladoPorCpu`, `EscaladoPorPeticiones`, `Panel` | Modify | no cambian: CloudFormation lista todo lo que apunta a un grupo que «puede reemplazarse» |
 
 **Parar si aparece** cualquier `Remove`, un `Replacement: True` en un recurso
 que no sea una máquina, un rol o una política con `*`, o un recurso que no
 esté en esta tabla.
+
+Este plan se generó y se aplicó el 03/10/2026 (18:22, hora de Lima) y quedó en
+`UPDATE_COMPLETE`.
+
+### Lo que pasó al aplicarlo, y lo que hay que hacer antes de repetirlo
+
+**Cinco minutos de 502, de 18:28 a 18:33.** No fue la configuración: fue la
+forma de cambiar la máquina.
+
+| Hora (UTC) | Qué pasó |
+|---|---|
+| 23:22:42 | CloudFormation lanza la máquina nueva |
+| 23:27:56 | la nueva avisa de que su API responde: tardó 5 min 2 s |
+| 23:27:58 | CloudFormation apaga la vieja |
+| 23:28:08 | el grupo retira la nueva «por fallar la comprobación de salud del balanceador» y lanza otra |
+| 23:33:00 | la tercera responde; estable desde entonces |
+
+El grupo daba 300 s a una máquina para estar lista. La nueva tardó lo mismo,
+al balanceador le faltaban 30 s para darla por sana, y el grupo la mató siendo
+la única. El margen pasa a **600 s** en la plantilla.
+
+El margen se aplicó ese mismo día a las 18:56 (un plan con una sola línea,
+`GrupoDeAutoescalado`, y sin `PlantillaDeArranque`: no renovó nada), y el paso
+5, que renueva las máquinas por el mismo camino, salió sin corte: la máquina
+nueva avisó en 4 min 22 s y la comprobación de salud encontró un destino sano.
+
+**Antes de un paso que renueve las máquinas por este camino** (el 5 y el 7) se
+comprueba que el margen sigue ahí:
+
+```powershell
+aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names zexcelencia-api-produccion --region us-east-1 --query "AutoScalingGroups[0].HealthCheckGracePeriod"
+```
+
+Tiene que decir `600`. Aun así, los pasos 5 y 7 se hacen en hora de poco
+tráfico. `Secretos` y `Renovar` (pasos 4 y 7) no tienen este riesgo: no apagan
+la máquina vieja hasta que la nueva está sana.
 
 ```powershell
 ./infra/aws/deploy-renaserlab.ps1 -Accion Plataforma
@@ -130,23 +178,54 @@ versionado siga apagado; ver el apartado 11).
 ./infra/aws/deploy-renaserlab.ps1 -Accion Plataforma
 ```
 
-Se espera que el plan enseñe solo `PlantillaDeArranque` y `GrupoDeAutoescalado`.
+Se espera que el plan enseñe `PlantillaDeArranque` y `GrupoDeAutoescalado`,
+más las seis líneas que acompañan al grupo (tres alarmas, dos de escalado y el
+panel: ver el apartado 3). **Renueva las máquinas**: con el margen de 600 s ya
+aplicado, y en hora de poco tráfico.
 
-Después, una persona con rol `admin` publica las dos condiciones. El token es
-el `access_token` de **su** sesión (caduca en una hora); lo obtiene ella con
-su propia cuenta, no se guarda en ningún fichero y, pidiéndolo así, tampoco
-queda en el historial de la consola:
+Después, una persona con rol `admin` publica las dos condiciones.
 
-```powershell
-$env:Z_ADMIN_TOKEN = Read-Host "Token de la sesion de administracion"
+**Quién es esa persona.** No hay una cuenta de administración con credenciales
+propias: es una cuenta normal cuyo perfil tiene `role = 'admin'`
+(`profiles.role`; la API lo lee en cada petición). La primera se marca en la
+base, y hace falta acceso a ella:
+
+```sql
+select id, username, full_name, role from public.profiles where role in ('admin', 'moderator');
+```
+
+```sql
+update public.profiles set role = 'admin' where username = '<cuenta>' returning id, username, role;
+```
+
+Qué cuenta es la decide la empresa. Tres cosas antes de decidir:
+
+- `admin` no es solo de Servicios: en toda la plataforma modera contenido y
+  aprueba devoluciones.
+- Lo que haga queda a su nombre aunque después pierda el rol: quién publicó
+  cada condición (`published_by`), quién aprobó a cada prestador.
+- Nadie revisa ni decide su propia postulación ni su propio servicio: la
+  cuenta que administra no puede ser, sin otra que la apruebe, la que se
+  prueba como prestador.
+
+**El token** es el `access_token` de **su** sesión (caduca en una hora). No se
+guarda en ningún fichero ni se enseña en pantalla. Con la sesión iniciada en
+la versión web, en la consola del navegador:
+
+```js
+copy(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('sb-') && k.endsWith('-auth-token')))).access_token)
 ```
 
 ```powershell
-python apps/api/scripts/publicar_condiciones.py --tipo prestador --api https://<url publica de la API>
+$env:Z_ADMIN_TOKEN = Get-Clipboard
 ```
 
 ```powershell
-python apps/api/scripts/publicar_condiciones.py --tipo contratacion --api https://<url publica de la API>
+./apps/api/.venv/Scripts/python.exe apps/api/scripts/publicar_condiciones.py --tipo prestador --api https://<url publica de la API>
+```
+
+```powershell
+./apps/api/.venv/Scripts/python.exe apps/api/scripts/publicar_condiciones.py --tipo contratacion --api https://<url publica de la API>
 ```
 
 Sin `--publicar` el guion deja el borrador, comprueba que su huella es la del
@@ -207,8 +286,10 @@ Dos cosas sin las que el piloto encendido no sirve:
 ./infra/aws/deploy-renaserlab.ps1 -Accion Planificar
 ```
 
-Se espera que el plan enseñe, además de `PlantillaDeArranque` y
-`GrupoDeAutoescalado`, **cinco recursos nuevos y ninguno más**:
+Se espera que el plan enseñe, además de `PlantillaDeArranque`,
+`GrupoDeAutoescalado` y las seis líneas que acompañan al grupo (apartado 3),
+**cinco recursos nuevos y ninguno más**. También renueva las máquinas: mismo
+cuidado que en el apartado 5.
 
 | Recurso | Tipo |
 |---|---|

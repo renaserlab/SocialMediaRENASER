@@ -218,6 +218,20 @@ def test_renovar_lanza_la_maquina_nueva_antes_de_terminar_la_vieja() -> None:
     assert flujo.count('"MinHealthyPercentage"') == 2, "hay una renovacion sin el maximo"
 
 
+def test_el_grupo_no_mata_a_la_maquina_nueva_antes_de_que_el_balanceador_la_vea() -> None:
+    """El margen de arranque tiene que cubrir el arranque medido, con holgura.
+
+    Medido el 03/10/2026 al cambiar la plantilla de arranque: la maquina nueva
+    tardo 5 min 2 s en responder, con un margen de 300 s. CloudFormation apago
+    la vieja al recibir el aviso, el balanceador aun no daba a la nueva por
+    sana, y el grupo la mato siendo la unica: cinco minutos de 502.
+    """
+    texto = PLATAFORMA.read_text(encoding="utf-8")
+    margen = re.search(r"^\s+HealthCheckGracePeriod: (\d+)\s*$", texto, re.M)
+    assert margen, "el grupo no declara su margen de arranque"
+    assert int(margen.group(1)) >= 600, "el margen vuelve a ser el que no cubria el arranque"
+
+
 def test_el_flujo_de_despliegue_no_lleva_la_cuenta_escrita() -> None:
     """Mudar de cuenta es cambiar variables de GitHub, no editar el flujo."""
     flujo = FLUJO.read_text(encoding="utf-8")

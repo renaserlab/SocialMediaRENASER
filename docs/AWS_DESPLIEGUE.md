@@ -429,6 +429,19 @@ Si algo falla y hace falta ver por qué, `--disable-rollback` deja los recursos 
 pie para poder entrar por Session Manager y leer
 `/var/log/renaser-arranque.log`, que dice la línea exacta que se rompió.
 
+> **Actualizar la plataforma puede renovar las máquinas, y el 03/10/2026 eso
+> tiró la API cinco minutos.** Cuando un cambio toca la plantilla de arranque
+> (una variable de entorno nueva, por ejemplo), CloudFormation lanza una máquina
+> nueva y apaga la vieja **en cuanto la nueva avisa**. Ese día la nueva tardó
+> 5 min 2 s en responder y el margen de arranque del grupo era de 300 s: ya
+> vencido, y con el balanceador a 30 s de darla por sana, el grupo la retiró
+> «por fallar la comprobación de salud» siendo la única. Hubo 502 de 18:28 a
+> 18:33 (hora de Lima), hasta que arrancó otra. El margen es ahora de **600 s**
+> (`HealthCheckGracePeriod`). Las renovaciones del flujo de GitHub y de
+> `-Accion Renovar` no pasan por ahí: no apagan la vieja hasta que la nueva
+> está sana. Aun así, un cambio de plataforma que renueve máquinas se hace en
+> hora de poco tráfico.
+
 ### Z Servicios: lo que la plataforma escribe y cómo se enciende un piloto
 
 Preparado el 02/10/2026; **nada de esto se ha desplegado**. La plantilla escribe
