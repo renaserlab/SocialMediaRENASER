@@ -1,13 +1,14 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { useServiciosEncendido } from '@/hooks/useServiciosEncendido';
 import { useTranslation } from '@/i18n/useTranslation';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
-import { spacing } from '@/theme/tokens';
+import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
@@ -90,7 +91,7 @@ export function AccesosAVerticales({
         const nombre = t(`verticales.${vertical.clave}`);
         const disponible = vertical.ruta !== null && (!vertical.conBandera || serviciosEncendido);
         return (
-          <Pressable
+          <Pulsable
             key={vertical.clave}
             onPress={() =>
               /*
@@ -104,20 +105,27 @@ export function AccesosAVerticales({
                 ? router.push(vertical.ruta! as never)
                 : alTocarNoDisponible(nombre)
             }
-            style={({ pressed }) => [
+            // Se hunde bajo el dedo, como el resto de lo que se pulsa.
+            style={[
               styles.acceso,
-              { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+              { borderColor: colors.border, backgroundColor: colors.surface },
             ]}
             accessibilityRole="button"
             accessibilityLabel={
               disponible ? nombre : `${nombre}. ${t('verticales.proximamente')}`
             }
           >
-            <Feather
-              name={vertical.icono}
-              size={20}
-              color={disponible ? colors.text : colors.textMuted}
-            />
+            {/*
+              El icono va en un circulo suave: suelto sobre blanco parecia una
+              casilla vacia; con su fondo es una entrada a una seccion.
+            */}
+            <View style={[styles.circulo, { backgroundColor: colors.backgroundAlt }]}>
+              <Feather
+                name={vertical.icono}
+                size={20}
+                color={disponible ? colors.text : colors.textMuted}
+              />
+            </View>
             <Text
               style={[
                 styles.etiqueta,
@@ -126,7 +134,7 @@ export function AccesosAVerticales({
             >
               {nombre}
             </Text>
-          </Pressable>
+          </Pulsable>
         );
         })}
       </ScrollView>
@@ -157,7 +165,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
+    borderRadius: radius.lg,
+  },
+  circulo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   etiqueta: { fontSize: 13, fontWeight: '600' },
 });

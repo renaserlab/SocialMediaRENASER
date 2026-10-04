@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { toast } from '@/lib/toast';
 import { AccesosAVerticales } from '@/components/AccesosAVerticales';
 import { AppHeader } from '@/components/AppHeader';
+import { CampoDeBusqueda } from '@/components/CampoDeBusqueda';
 import { CoachMark } from '@/components/CoachMark';
 import { CreateCatalogSheet, type CatalogKind } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
@@ -290,7 +291,6 @@ export function ExploreScreen() {
   */
   const [query, setQuery] = useState('');
   /** Solo para pintar el foco del campo. No entra en la búsqueda. */
-  const [enfocado, setEnfocado] = useState(false);
   const [estado, setEstado] = useState<EstadoDeBusqueda>(estadoInicial);
 
   /*
@@ -748,59 +748,22 @@ export function ExploreScreen() {
           contraste del borde, no con color —el sistema es blanco y negro y
           tiene que leerse igual en los dos temas—.
         */}
-        <View
-          style={[
-            styles.campoDeBusqueda,
-            {
-              // En oscuro el gris de superficie (#111) se despega del negro;
-              // en claro el que se despega del blanco es `surfaceAlt` (#F7F7F7).
-              backgroundColor: mode === 'dark' ? colors.surface : colors.surfaceAlt,
-              borderColor: enfocado ? colors.text : colors.border,
-            },
-          ]}
-        >
-          <Feather
-            name="search"
-            size={17}
-            color={enfocado ? colors.text : colors.textMuted}
-          />
-          <TextInput
-            /*
-              El texto de ayuda decia «Buscar personas...», y no era un detalle
-              de redaccion: describia exactamente lo que el buscador sabia hacer.
-              Quien queria un curso leia eso y buscaba igualmente, porque es el
-              unico buscador que hay.
-            */
-            placeholder={t('search.placeholder')}
-            placeholderTextColor={colors.textMuted}
-            style={[styles.textoDeBusqueda, { color: colors.text }]}
-            value={query}
-            onChangeText={setQuery}
-            onFocus={() => setEnfocado(true)}
-            onBlur={() => setEnfocado(false)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            // El teclado dice «buscar» en vez de «intro»: la tecla ya no
-            // pretende dar un salto de línea en un campo de una sola línea.
-            returnKeyType="search"
-            accessibilityLabel={t('search.placeholder')}
-          />
-          {query.length > 0 ? (
-            /*
-              Borrar lo escrito de un toque. iOS tiene su propia X, pero Android
-              no: sin esto, en la mitad del parque hay que mantener el borrado
-              pulsado hasta vaciar la caja para volver a ver el muro.
-            */
-            <Pressable
-              onPress={() => setQuery('')}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel={t('search.clear')}
-            >
-              <Feather name="x" size={16} color={colors.textMuted} />
-            </Pressable>
-          ) : null}
-        </View>
+        <CampoDeBusqueda
+          /*
+            El texto de ayuda decia «Buscar personas...», y no era un detalle
+            de redaccion: describia exactamente lo que el buscador sabia hacer.
+            Quien queria un curso leia eso y buscaba igualmente, porque es el
+            unico buscador que hay.
+          */
+          placeholder={t('search.placeholder')}
+          value={query}
+          onChangeText={setQuery}
+          // La lupa se convierte en un indicador mientras la pregunta esta en
+          // vuelo: se ve que salio aunque los resultados de antes sigan ahi.
+          buscando={isSearching && estaOcupado(estado)}
+          etiquetaDeLimpiar={t('search.clear')}
+          style={styles.campoDeBusqueda}
+        />
       </View>
 
       {/*
@@ -915,27 +878,8 @@ const styles = StyleSheet.create({
   buscador: { paddingTop: spacing.sm },
   avisoCarga: { paddingVertical: spacing.md },
   buscandoAviso: { paddingVertical: spacing.sm, fontSize: 13 },
-  campoDeBusqueda: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    // Cápsula, no rectángulo: es la forma con la que se reconoce un buscador.
-    borderRadius: radius.pill,
-    // El borde no desaparece al enfocar, solo cambia de contraste: si el grosor
-    // cambiara, la cápsula daría un salto de un punto al tocarla.
-    borderWidth: 1,
-    paddingHorizontal: spacing.lg,
-    // 44 es el mínimo táctil del sistema, el mismo de los demás controles.
-    height: 44,
-    marginBottom: spacing.md,
-  },
-  textoDeBusqueda: {
-    flex: 1,
-    fontSize: 14,
-    // Sin relleno propio: la altura y el centrado los pone la cápsula. Android
-    // añade un relleno vertical por su cuenta que descuadra el texto.
-    padding: 0,
-  },
+  // La forma y el foco los lleva `CampoDeBusqueda`; aqui solo el hueco de debajo.
+  campoDeBusqueda: { marginBottom: spacing.md },
   listaVacia: { fontSize: 13, lineHeight: 18, paddingVertical: spacing.sm },
   resultados: { ...StyleSheet.absoluteFillObject, zIndex: 5 },
   tabs: { marginBottom: spacing.lg },
