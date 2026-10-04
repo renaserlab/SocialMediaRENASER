@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { Pressable, Share, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -152,17 +152,42 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     falta es decirlo en vez de dejar el icono volviendo solo a su sitio.
   */
   const [guardando, setGuardando] = useState(false);
+  /*
+    LA TARJETA SE RECICLA, Y SU ESTADO NO PUEDE VIAJAR CON ELLA.
+
+    El muro reutiliza las celdas: la misma tarjeta pasa a pintar otra
+    publicacion sin desmontarse, y lo que guardaba en `useState` —republicada,
+    su contador, los dos «pendiente»— se quedaba con los valores de la
+    anterior. Al cambiar de publicacion se vuelve a lo que dice la nueva, en
+    el mismo render (el patron de React para «estado derivado de una prop»:
+    sin efecto, sin un fotograma con datos de otra).
+  */
+  const [pintada, setPintada] = useState(post.id);
+  if (pintada !== post.id) {
+    setPintada(post.id);
+    setRepublicado(post.repostedByMe ?? false);
+    setRepostsCount(post.repostsCount ?? 0);
+    setRepublicando(false);
+    setGuardando(false);
+  }
+  // Para lo que vuelve de una espera: saber si esta tarjeta sigue con la misma.
+  const publicacionPintada = useRef(post.id);
+  publicacionPintada.current = post.id;
   const alternarGuardado = async () => {
     await requireAuth('auth.reasonSave', async () => {
       // El icono cambia YA —lo pinta el store en este mismo toque— y la mano
       // lo nota. Lo que tarda es el servidor, no la respuesta.
       haptics.light();
+      const publicacion = post.id;
       setGuardando(true);
-      const { guardada, ok, absorbida } = await toggleSave(post.id);
+      const { guardada, ok, absorbida } = await toggleSave(publicacion);
+      // La rafaga se asento: deja de estar pendiente, la empezara quien la
+      // empezara. (Solo si esta tarjeta sigue pintando esa publicacion: la
+      // lista recicla celdas.)
+      if (publicacionPintada.current === publicacion) setGuardando(false);
       // Un toque dentro de una rafaga que ya estaba en marcha: quien la
       // empezo cuenta como acabo. Asi diez toques dan UN aviso.
       if (absorbida) return;
-      setGuardando(false);
       if (!ok) {
         toastDeError(t('post.saveFailed'));
         return;
@@ -201,22 +226,32 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         en una tarjeta republicada, porque una republicacion no tiene id de
         publicacion propio: por ahi no puede entrar una cadena.
       */
-      const peticion = republicaciones.pedir(post.id, siguiente, () => ({
+      const publicacion = post.id;
+      const peticion = republicaciones.pedir(publicacion, siguiente, () => ({
         confirmado: republicado,
         contexto: { contador: repostsCount, confirmado: republicado },
       }));
       const { contador, confirmado } = peticion.contexto;
       setRepublicado(siguiente);
       setRepostsCount(contadorOptimista(contador, confirmado, siguiente));
-      if (peticion.absorbida) return;
-
       setRepublicando(true);
       const final = await peticion.asentada;
-      setRepublicando(false);
+      /*
+        LA CELDA PUEDE HABER CAMBIADO DE PUBLICACION mientras se esperaba: la
+        lista recicla. Lo que sigue solo toca el estado si esta tarjeta sigue
+        pintando la misma; si no, se lo aplicaria a la que ocupa ahora el
+        hueco.
+      */
+      const sigueAqui = publicacionPintada.current === publicacion;
+      if (sigueAqui) setRepublicando(false);
+      // Un toque dentro de una rafaga en marcha: quien la empezo la cierra.
+      if (peticion.absorbida) return;
       if (!final.ok) {
         // Vuelve a lo que el servidor confirmo, y se dice.
-        setRepublicado(final.valor);
-        setRepostsCount(contadorOptimista(contador, confirmado, final.valor));
+        if (sigueAqui) {
+          setRepublicado(final.valor);
+          setRepostsCount(contadorOptimista(contador, confirmado, final.valor));
+        }
         toastDeError(t('post.repostFailed'));
         return;
       }
@@ -641,6 +676,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           otras. El area pulsable la sostiene `AccionDePublicacion`.
         */}
         <AccionDePublicacion
+          clave={post.id}
           icono="heart"
           // Relleno al reaccionar: cambia la forma, no solo el color.
           iconoRelleno="heart"
@@ -663,6 +699,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           etiquetaDelContador={t('post.whoReacted')}
         />
         <AccionDePublicacion
+          clave={post.id}
           icono="message-square"
           etiqueta={t('post.actionComment')}
           contador={commentCount}
@@ -670,6 +707,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           accessibilityLabel={t('post.comments')}
         />
         <AccionDePublicacion
+          clave={post.id}
           icono="repeat"
           etiqueta={t('post.actionRepost')}
           // Sin republicaciones no se enseña un cero: el nombre ya explica el boton.
@@ -684,12 +722,14 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           accessibilityLabel={republicado ? t('post.undoRepost') : t('post.repost')}
         />
         <AccionDePublicacion
+          clave={post.id}
           icono="share-2"
           etiqueta={t('post.actionShare')}
           onPress={sharePost}
           accessibilityLabel={t('post.share')}
         />
         <AccionDePublicacion
+          clave={post.id}
           icono="bookmark"
           /*
             RELLENO al guardar, CONTORNO al quitar: cambia la forma, no solo el

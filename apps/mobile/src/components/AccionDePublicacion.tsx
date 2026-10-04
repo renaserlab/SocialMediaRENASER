@@ -54,6 +54,12 @@ type Props = {
   iconoRelleno?: keyof typeof MaterialCommunityIcons.glyphMap;
   /** El nombre que se lee debajo. Traducido por quien llama. */
   etiqueta: string;
+  /**
+   * De qué publicación es este botón. La lista recicla tarjetas: sin esto, al
+   * pasar la celda a otra publicación el icono saltaba y el contador se fundía
+   * como si alguien acabara de reaccionar.
+   */
+  clave?: string;
   /** Se omite cuando no hay nada que contar (compartir, guardar). */
   contador?: number;
   /** Estado encendido: pinta el icono con `colorActivo`. */
@@ -90,6 +96,7 @@ export function AccionDePublicacion({
   icono,
   iconoRelleno,
   etiqueta,
+  clave,
   contador,
   activo = false,
   pendiente = false,
@@ -124,7 +131,7 @@ export function AccionDePublicacion({
           accessibilityRole={accessibilityRole}
           accessibilityState={{ ...accessibilityState, disabled, busy: pendiente }}
         >
-          <IconoQueSeEnciende activo={activo} pendiente={pendiente}>
+          <IconoQueSeEnciende activo={activo} pendiente={pendiente} clave={clave}>
             {/*
               Encendido y con variante rellena: cambia la FORMA, no solo el
               tono. Es lo que hace que se vea que quedo guardada.
@@ -151,11 +158,18 @@ export function AccionDePublicacion({
               accessibilityRole="button"
               style={styles.contadorPulsable}
             >
-              <ContadorAnimado valor={contador} variant="secondary" weight="600" style={styles.contador} />
+              <ContadorAnimado
+                valor={contador}
+                clave={clave}
+                variant="secondary"
+                weight="600"
+                style={styles.contador}
+              />
             </Pressable>
           ) : (
             <ContadorAnimado
               valor={contador}
+              clave={clave}
               variant="secondary"
               weight="600"
               style={styles.contador}

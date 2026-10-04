@@ -215,11 +215,19 @@ async def test_sin_nombre_se_usa_el_usuario(entorno, pushes):
     assert pushes[0]["actor_name"] == "carla"
 
 
-async def test_los_datos_son_un_tipo_y_un_identificador_y_ninguna_ruta(entorno, pushes):
-    http, _, _ = entorno
+async def test_los_datos_son_un_tipo_y_dos_identificadores_y_ninguna_ruta(entorno, pushes):
+    http, sesiones, _ = entorno
     await _enviar(http)
 
-    assert pushes[0]["data"] == {"type": "message", "conversationId": CHAT}
+    async with sesiones() as db:
+        mensaje = (await db.scalars(select(Message).where(Message.conversation_id == CHAT))).one()
+    # El del mensaje es lo que permite a la aplicación no avisar dos veces del
+    # mismo (llega en tiempo real y por push). Un UUID: no dice nada de él.
+    assert pushes[0]["data"] == {
+        "type": "message",
+        "conversationId": CHAT,
+        "messageId": str(mensaje.id),
+    }
     # Nada que el teléfono tenga que creerse como destino.
     for clave in ("url", "route", "ruta", "path", "href", "token"):
         assert clave not in pushes[0]["data"]
@@ -324,3 +332,58 @@ async def test_olvidar_nunca_lanza(monkeypatch):
 
     monkeypatch.setattr(push, "SessionLocal", _roto)
     await push.olvidar_tokens(["ExponentPushToken[x]"])
+
+
+# --------------------------------------------------------------------------- #
+# 5. El envío no retiene una conexión mientras habla con Expo
+# --------------------------------------------------------------------------- #
+async def test_la_sesion_ya_esta_cerrada_cuando_se_habla_con_expo(monkeypatch):
+    """El pool son 5+5 conexiones: un aviso lento no puede quedarse con una.
+
+    Desde que cada mensaje manda un push, diez a la vez con Expo lento agotaban
+    el pool y se paraba la API entera.
+    """
+    orden: list[str] = []
+
+    class _SesionDeMentira:
+        async def __aenter__(self):
+            orden.append("abre")
+            return self
+
+        async def __aexit__(self, *exc):
+            orden.append("cierra")
+            return False
+
+    async def _tokens(db, user_ids):
+        orden.append("lee tokens")
+        return ["ExponentPushToken[uno]"]
+
+    async def _enviar(tokens, **kwargs):
+        orden.append("habla con Expo")
+        assert tokens == ["ExponentPushToken[uno]"]
+        assert kwargs["channel"] == "mensajes"
+
+    monkeypatch.setattr(push, "SessionLocal", _SesionDeMentira)
+    monkeypatch.setattr(push, "_leer_tokens", _tokens)
+    monkeypatch.setattr(push, "_enviar_a", _enviar)
+
+    await push._enviar_con_sesion_propia([BRUNO], "message", "Ana", {"type": "message"})
+
+    assert orden == ["abre", "lee tokens", "cierra", "habla con Expo"]
+
+
+async def test_sin_texto_para_el_tipo_ni_siquiera_se_abre_sesion(monkeypatch):
+    def _no_deberia():
+        raise AssertionError("un tipo sin plantilla no tiene nada que mandar")
+
+    monkeypatch.setattr(push, "SessionLocal", _no_deberia)
+    await push._enviar_con_sesion_propia([BRUNO], "tipo_que_no_existe", None, None)
+
+
+async def test_sin_aparatos_registrados_no_se_llama_a_expo(monkeypatch):
+    class _Cliente:
+        def __init__(self, *a, **k):
+            raise AssertionError("no hay a quién mandar: no se abre conexión con Expo")
+
+    monkeypatch.setattr(push.httpx, "AsyncClient", _Cliente)
+    await push._enviar_a([], title="t", body="b", channel="mensajes", data=None)

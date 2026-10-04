@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 
 import { traduceEnElIdiomaActual } from '@/i18n';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
-import { adelantarMarca, destinoDelAviso, queAnunciar } from '@/lib/avisosNuevos';
+import { destinoDelAviso, queAnunciar } from '@/lib/avisosNuevos';
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
@@ -18,19 +18,38 @@ import { useContadoresStore } from '@/store/useContadoresStore';
 const CADA_MS = 60_000;
 /** Varios mensajes seguidos son una sola consulta, pasado este respiro. */
 const RESPIRO_DE_MENSAJES_MS = 500;
+/** Cuántos mensajes ya anunciados se recuerdan para no repetirlos. */
+const MENSAJES_RECORDADOS = 200;
 
-type FilaDeMensaje = { conversation_id?: string; sender_id?: string };
+type FilaDeMensaje = { id?: string; conversation_id?: string; sender_id?: string };
 
 /**
  * El puente con el oyente del push (`useAvisosDelPush`), que vive en otro
- * fichero porque solo existe en el teléfono. Cuando llega un push con la
- * aplicación abierta, ese oyente enseña el aviso y llama aquí para que la
- * lectura periódica no lo anuncie otra vez y los contadores se pongan al día.
+ * fichero porque solo existe en el teléfono.
+ *
+ * - `ponerseAlDia`: llegó un push con la aplicación abierta y ya se enseñó. La
+ *   lectura periódica no tiene que anunciarlo otra vez.
+ * - `mensajeDelPush`: llegó el push DE UN MENSAJE. No se enseña allí: se trae
+ *   aquí, al mismo camino que el mensaje en tiempo real, para que los dos
+ *   —que son el mismo mensaje— den UN aviso.
+ *
+ * Son `null` cuando el hook no está escuchando (sin sesión).
  */
 let ponerseAlDia: (() => void) | null = null;
+let mensajeDelPush: ((conversacionId: string, mensajeId: string | null) => void) | null = null;
 
 export function alRecibirUnPush(): void {
   ponerseAlDia?.();
+}
+
+/**
+ * Entrega al camino en vivo el push de un mensaje. Devuelve `false` si nadie
+ * escucha: entonces quien llama enseña el aviso por su cuenta.
+ */
+export function alRecibirUnMensajePorPush(conversacionId: string, mensajeId: string | null): boolean {
+  if (!mensajeDelPush) return false;
+  mensajeDelPush(conversacionId, mensajeId);
+  return true;
 }
 
 /**
@@ -51,10 +70,19 @@ export function alRecibirUnPush(): void {
  *     y el servidor solo entrega las filas que puede leer). Al llegar uno de
  *     otra persona se refresca el contador y sale el aviso flotante, salvo que
  *     sea de la conversación que tiene delante.
- *   - LO DEMÁS, CADA MINUTO y al volver a la aplicación: se pregunta cuántos
- *     avisos hay sin leer y, si han subido, se piden los últimos y se anuncian
- *     los nuevos. No hay un segundo sistema: es la misma bandeja y el mismo
- *     aviso flotante (`avisar`, con su cola y su deduplicación).
+ *   - LO DEMÁS, CADA MINUTO: se pregunta cuántos avisos hay sin leer y, si han
+ *     subido, se piden los últimos y se anuncian los nuevos. No hay un segundo
+ *     sistema: es la misma bandeja y el mismo aviso flotante (`avisar`).
+ *
+ * UN HECHO, UN AVISO.
+ *
+ *   - Un mensaje llega por dos caminos —tiempo real y push— y los dos acaban
+ *     aquí con el identificador del mensaje: el segundo se descarta.
+ *   - Lo que llegó mientras la aplicación estaba en segundo plano ya lo avisó
+ *     el sistema. Al volver se ponen al día los contadores y la marca SIN
+ *     anunciar nada.
+ *   - La marca se fija con las fechas del SERVIDOR, nunca con el reloj del
+ *     teléfono, que puede ir adelantado o atrasado.
  *
  * TODO SE DESMONTA. Al cerrar sesión o al desmontarse se quitan el canal, el
  * reloj y el oyente de `AppState`; no queda nada preguntando por detrás.
@@ -78,27 +106,39 @@ export function useAvisosEnVivo(): void {
     let vivo = true;
     /** Hasta cuándo se han visto pasar avisos. `null` hasta la primera lectura. */
     let marca: number | null = null;
-    let cuentaAnterior: number | null = null;
+    /** Quién soy. `null` hasta que se sabe: mientras tanto no se anuncia nada. */
     let yo: string | null = null;
 
     const abrir = (ruta: string) => navegar.current.push(ruta as never);
 
     /* ------------------------------------------------ avisos de la bandeja */
-    const mirarAvisos = async () => {
+    /**
+     * @param callado pone al día los contadores y la marca SIN anunciar. Es lo
+     *   que toca cuando lo nuevo ya se avisó por otro lado: el sistema lo hizo
+     *   mientras la aplicación estaba en segundo plano, o acaba de salir el
+     *   aviso de un push.
+     */
+    const mirarAvisos = async (callado = false) => {
+      /*
+        LA CUENTA DE ANTES SE LEE DEL CONTADOR COMÚN, no de una variable de
+        aquí. Abrir la bandeja lo pone a cero; con una copia propia, tener 3,
+        abrir la bandeja y recibir 1 daba «1 no es más que 3» y ese aviso no
+        se anunciaba nunca.
+      */
+      const antes = useContadoresStore.getState().notificaciones;
       const cuenta = await refrescarNotificaciones();
       if (!vivo || cuenta === null) return;
-      const subio = cuentaAnterior !== null && cuenta > cuentaAnterior;
       const primera = marca === null;
-      cuentaAnterior = cuenta;
       // La lista solo se pide cuando hace falta: al empezar, para fijar la
-      // marca, y cuando la cuenta sube. Un minuto tras otro sin novedad es una
-      // consulta de un número, nada más.
-      if (!primera && !subio) return;
+      // marca; cuando la cuenta sube; o para ponerse al día sin anunciar. Un
+      // minuto tras otro sin novedad es una consulta de un número, nada más.
+      if (!primera && !callado && cuenta <= antes) return;
       try {
         const avisos = await NotificationRepository.list();
         if (!vivo) return;
-        const resultado = queAnunciar(avisos, marca);
-        marca = resultado.marca;
+        // Callado es lo mismo que la primera vez: solo se fija la marca.
+        const resultado = queAnunciar(avisos, callado ? null : marca);
+        marca = Math.max(marca ?? 0, resultado.marca);
         for (const aviso of resultado.anunciar) {
           const destino = destinoDelAviso(aviso, rutaDelAviso);
           avisar({
@@ -118,6 +158,8 @@ export function useAvisosEnVivo(): void {
     /* --------------------------------------------------------- mensajes */
     let respiro: ReturnType<typeof setTimeout> | null = null;
     const pendientes = new Set<string>();
+    /** Los mensajes ya anunciados, por identificador. Con tope. */
+    const anunciados = new Set<string>();
 
     const mirarMensajes = async () => {
       respiro = null;
@@ -136,17 +178,35 @@ export function useAvisosEnVivo(): void {
           message: conversacion.subtitle || traduceEnElIdiomaActual('notif.newMessage'),
           avatarUrl: conversacion.avatarUrl ?? null,
           icon: 'message-square',
-          // La misma clave que el push: si llegan los dos, es UN aviso.
           clave: claveDeConversacion(id),
           alTocar: () => abrir(`/chat/${id}`),
         });
       }
     };
 
-    const alLlegarMensaje = (fila: FilaDeMensaje) => {
-      if (!fila.conversation_id || fila.sender_id === yo) return;
-      pendientes.add(fila.conversation_id);
+    /**
+     * Un mensaje nuevo, venga del tiempo real o del push. El identificador es
+     * lo que hace que los dos caminos den un solo aviso.
+     */
+    const anotarMensaje = (conversacionId: string, mensajeId: string | null) => {
+      if (mensajeId) {
+        if (anunciados.has(mensajeId)) return;
+        anunciados.add(mensajeId);
+        if (anunciados.size > MENSAJES_RECORDADOS) {
+          // Se cae el más antiguo: un `Set` conserva el orden de inserción.
+          const primero = anunciados.values().next().value;
+          if (primero !== undefined) anunciados.delete(primero);
+        }
+      }
+      pendientes.add(conversacionId);
       if (respiro === null) respiro = setTimeout(() => void mirarMensajes(), RESPIRO_DE_MENSAJES_MS);
+    };
+
+    const alLlegarMensaje = (fila: FilaDeMensaje) => {
+      // Sin saber quién soy no se puede distinguir mi propio mensaje —enviado
+      // desde este u otro aparato— del de otra persona: no se anuncia.
+      if (!fila.conversation_id || yo === null || fila.sender_id === yo) return;
+      anotarMensaje(fila.conversation_id, fila.id ?? null);
     };
 
     const cliente = supabase;
@@ -160,9 +220,14 @@ export function useAvisosEnVivo(): void {
       .subscribe();
 
     /* --------------------------------------------------------- arranque */
-    void cliente?.auth.getSession().then(({ data }) => {
-      yo = data.session?.user?.id ?? null;
-    });
+    cliente?.auth
+      .getSession()
+      .then(({ data }) => {
+        if (vivo) yo = data.session?.user?.id ?? null;
+      })
+      .catch(() => {
+        /* Sin saber quién soy no se anuncian mensajes; lo demás sigue. */
+      });
     void mirarAvisos();
     void refrescarMensajes();
 
@@ -173,23 +238,22 @@ export function useAvisosEnVivo(): void {
 
     const alVolver = AppState.addEventListener('change', (estado) => {
       if (estado !== 'active') return;
-      void mirarAvisos();
+      // Lo que llegó estando fuera ya lo avisó el sistema: al día, sin anunciar.
+      void mirarAvisos(true);
       void refrescarMensajes();
     });
 
-    /* Un push recibido con la aplicación abierta ya salió en pantalla. */
     ponerseAlDia = () => {
-      marca = adelantarMarca(marca, Date.now());
-      cuentaAnterior = null;
-      void refrescarNotificaciones().then((cuenta) => {
-        if (vivo && cuenta !== null) cuentaAnterior = cuenta;
-      });
+      void mirarAvisos(true);
       void refrescarMensajes();
     };
+    // El push de un mensaje lo manda otra persona: no hace falta saber quién soy.
+    mensajeDelPush = anotarMensaje;
 
     return () => {
       vivo = false;
       ponerseAlDia = null;
+      mensajeDelPush = null;
       clearInterval(reloj);
       if (respiro !== null) clearTimeout(respiro);
       alVolver.remove();

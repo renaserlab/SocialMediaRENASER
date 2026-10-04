@@ -56,7 +56,10 @@ describe('la pestaña Publicaciones', () => {
 
   it('los accesos se anuncian como pestañas, con cuál está elegida', () => {
     const acceso = PERFIL.slice(PERFIL.indexOf('function Shortcut('));
-    assert.match(acceso, /accessibilityRole="tab"/);
+    // Pestaña por defecto; «Agenda», que navega fuera, se anuncia como botón.
+    assert.match(acceso, /rol = 'tab',/);
+    assert.match(acceso, /accessibilityRole=\{rol\}/);
+    assert.match(ACCESOS, /rol="button"\s*onPress=\{\(\) =>\s*isPublic \? setBookingVisible\(true\)/);
     assert.match(acceso, /accessibilityState=\{\{ selected: active \}\}/);
     // El estado no vive solo en el color: el círculo se invierte, la etiqueta
     // pasa a negrita y el icono salta al encenderse.

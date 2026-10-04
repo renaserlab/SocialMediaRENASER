@@ -124,6 +124,26 @@ export function NotificationsScreen() {
     }, [load]),
   );
 
+  /*
+    Cada aviso lleva a donde está lo que anuncia: la publicación, la agenda,
+    lo decidido sobre su evento o su curso. La decisión vive en
+    `destinoDelAviso`, que es la MISMA que usa el aviso flotante.
+
+    UNA SOLA FUNCIÓN PARA TODAS LAS FILAS, y estable: una flecha nueva por fila
+    en cada render anulaba el `React.memo` de `FilaDeAviso` y la lista entera
+    se repintaba al cargar una página más.
+
+    Si lo anunciado ya no existe —la publicación se borró—, quien lo dice es
+    la pantalla de destino, con su estado de «no encontrado».
+  */
+  const abrirAviso = useCallback(
+    (aviso: NotificationItem) => {
+      const destino = destinoDelAviso(aviso, rutaDelAviso);
+      if (destino) router.push(destino as never);
+    },
+    [router],
+  );
+
   const cargarMas = useCallback(() => {
     if (!supabaseEnabled || !signedIn || !hayMas || cargandoMas || status !== 'idle') return;
     setCargandoMas(true);
@@ -238,10 +258,7 @@ export function NotificationsScreen() {
                 lo dice es la pantalla de destino, con su estado de «no
                 encontrado»; aquí no hay nada que comprobar por adelantado.
               */
-              alAbrir={() => {
-                const destino = destinoDelAviso(item, rutaDelAviso);
-                if (destino) router.push(destino as never);
-              }}
+              alAbrir={abrirAviso}
             />
           )}
         />
@@ -269,7 +286,7 @@ const FilaDeAviso = React.memo(function FilaDeAviso({
 }: {
   aviso: NotificationItem;
   indice: number;
-  alAbrir: () => void;
+  alAbrir: (aviso: NotificationItem) => void;
 }) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -280,7 +297,7 @@ const FilaDeAviso = React.memo(function FilaDeAviso({
     // sitio. `clave` porque la lista recicla celdas.
     <Aparecer retraso={indice < 6 ? retrasoEnCascada(indice) : 0} inmediato={indice >= 6} clave={aviso.id}>
       <Pulsable
-        onPress={alAbrir}
+        onPress={() => alAbrir(aviso)}
         escala={0.985}
         atenuar={0.7}
         accessibilityRole="button"

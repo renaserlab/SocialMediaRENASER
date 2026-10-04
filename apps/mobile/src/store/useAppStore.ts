@@ -688,11 +688,18 @@ export const useAppStore = create<AppState>()(
         });
         const { contador, confirmado } = peticion.contexto;
         pintar(guardada, contadorOptimista(contador, confirmado, guardada));
-        // Este toque se sumo a una rafaga en marcha: quien la empezo cuenta
-        // como acabo. Asi diez toques dan UN aviso.
-        if (peticion.absorbida) return { guardada, ok: true, absorbida: true };
-
         const final = await peticion.asentada;
+        /*
+          Este toque se sumo a una rafaga en marcha: quien la empezo cuenta
+          como acabo y deshace si hizo falta. Asi diez toques dan UN aviso.
+
+          PERO TAMBIEN ESPERA. Antes volvia en el acto, y quien lo llamaba no
+          tenia forma de saber cuando habia terminado: la misma publicacion
+          pintada en dos sitios —el muro y su detalle— dejaba el segundo
+          marcador «pendiente» para siempre.
+        */
+        if (peticion.absorbida) return { guardada: final.valor, ok: true, absorbida: true };
+
         if (!final.ok) {
           // Se deshace al estado que el servidor confirmo y al contador
           // exacto de partida, no a «uno menos»: restar a ciegas dejaria un

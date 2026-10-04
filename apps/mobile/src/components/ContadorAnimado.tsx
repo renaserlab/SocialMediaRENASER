@@ -12,6 +12,8 @@ import { DURACION } from '@/lib/movimiento';
 
 type Props = {
   valor: number;
+  /** De qué elemento es el número, en las listas que reciclan celdas. */
+  clave?: string;
   style?: StyleProp<TextStyle>;
   color?: string;
   variant?: React.ComponentProps<typeof Text>['variant'];
@@ -32,13 +34,20 @@ const RECORRIDO = 6;
  *
  * NO ANIMA AL MONTARSE, ni con «reducir movimiento»: el número cambia y ya.
  */
-export function ContadorAnimado({ valor, style, color, variant, weight }: Props) {
+export function ContadorAnimado({ valor, clave, style, color, variant, weight }: Props) {
   const reducir = useReducedMotion();
   const desplazamiento = useSharedValue(0);
   const opacidad = useSharedValue(1);
   const anterior = useRef(valor);
+  const claveAnterior = useRef(clave);
 
   useEffect(() => {
+    if (claveAnterior.current !== clave) {
+      // Otro elemento en la misma celda: su número no «cambia», es otro.
+      claveAnterior.current = clave;
+      anterior.current = valor;
+      return;
+    }
     if (anterior.current === valor) return;
     const sube = valor > anterior.current;
     anterior.current = valor;
@@ -47,7 +56,7 @@ export function ContadorAnimado({ valor, style, color, variant, weight }: Props)
     opacidad.value = 0;
     desplazamiento.value = withTiming(0, { duration: DURACION.breve });
     opacidad.value = withTiming(1, { duration: DURACION.breve });
-  }, [valor, desplazamiento, opacidad, reducir]);
+  }, [valor, clave, desplazamiento, opacidad, reducir]);
 
   const animado = useAnimatedStyle(() => ({
     opacity: opacidad.value,

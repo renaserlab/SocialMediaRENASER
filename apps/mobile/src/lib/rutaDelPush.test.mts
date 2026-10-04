@@ -7,6 +7,7 @@ import {
   claveDelPush,
   conversacionDelPush,
   directoDelPush,
+  mensajeDelPush,
   rutaDelPush,
 } from './rutaDelPush.ts';
 
@@ -155,4 +156,14 @@ test('lo demás se agrupa por tipo y por aquello de lo que habla', () => {
   assert.notEqual(claveDelPush({ type: 'like', postId: ID }), claveDelPush({ type: 'like', postId: OTRO }));
   assert.notEqual(claveDelPush({ type: 'like', postId: ID }), claveDelPush({ type: 'comment', postId: ID }));
   assert.equal(claveDelPush(null), 'aviso');
+});
+
+test('el identificador del mensaje sirve para no avisar dos veces, y solo si es un UUID', () => {
+  assert.equal(mensajeDelPush({ type: 'message', conversationId: ID, messageId: OTRO }), OTRO);
+  assert.equal(mensajeDelPush({ type: 'message', conversationId: ID }), null);
+  assert.equal(mensajeDelPush({ type: 'message', messageId: '../../x' }), null);
+  assert.equal(mensajeDelPush({ type: 'like', messageId: OTRO }), null);
+  assert.equal(mensajeDelPush(null), null);
+  // No cambia a dónde lleva el aviso.
+  assert.equal(rutaDelPush({ type: 'message', conversationId: ID, messageId: OTRO }), `/chat/${ID}`);
 });

@@ -2,10 +2,10 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 
-import { alRecibirUnPush } from '@/hooks/useAvisosEnVivo';
+import { alRecibirUnMensajePorPush, alRecibirUnPush } from '@/hooks/useAvisosEnVivo';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
-import { claveDelPush, conversacionDelPush, rutaDelPush } from '@/lib/rutaDelPush';
+import { claveDelPush, conversacionDelPush, mensajeDelPush, rutaDelPush } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
 
 /**
@@ -41,11 +41,23 @@ export function useAvisosDelPush(): void {
     const oyente = Notifications.addNotificationReceivedListener((notificacion) => {
       const { title, body, data } = notificacion.request.content;
 
+      const conversacion = conversacionDelPush(data);
+
       // Lo que ya se está leyendo no se anuncia.
-      if (seEstaViendoLaConversacion(conversacionDelPush(data))) {
+      if (seEstaViendoLaConversacion(conversacion)) {
         alRecibirUnPush();
         return;
       }
+
+      /*
+        EL PUSH DE UN MENSAJE NO SE PINTA AQUÍ. Con la aplicación abierta ese
+        mismo mensaje llega también en tiempo real, y eran dos avisos del mismo
+        hecho: el segundo volvía a entrar, a vibrar y a anunciarse. Se entrega
+        al camino en vivo, que lo reconoce por su identificador y da UNO, con
+        el nombre y el resumen de la conversación. Solo si nadie escucha allí
+        se enseña el del push, que es mejor que nada.
+      */
+      if (conversacion && alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data))) return;
 
       const texto = (body ?? '').trim();
       const titulo = (title ?? '').trim();

@@ -351,7 +351,7 @@ function ShortVideoItemBase({
             accessibilityState={{ checked: liked }}
             accessibilityLabel={t('post.actionLike')}
           >
-            <IconoQueSeEnciende activo={liked}>
+            <IconoQueSeEnciende activo={liked} clave={short.id}>
               {/*
                 Relleno al reaccionar: cambia la FORMA, no solo el color. Un
                 contorno rojo sobre un video rojizo no se distingue del blanco.
@@ -370,10 +370,10 @@ function ShortVideoItemBase({
               accessibilityRole="button"
               accessibilityLabel={t('post.whoReacted')}
             >
-              <ContadorAnimado valor={likes} color={media.text} style={styles.sidebarLabel} />
+              <ContadorAnimado valor={likes} clave={short.id} color={media.text} style={styles.sidebarLabel} />
             </Pressable>
           ) : (
-            <ContadorAnimado valor={likes} color={media.text} style={styles.sidebarLabel} />
+            <ContadorAnimado valor={likes} clave={short.id} color={media.text} style={styles.sidebarLabel} />
           )}
         </View>
 
@@ -385,7 +385,7 @@ function ShortVideoItemBase({
           accessibilityLabel={t('post.comments')}
         >
           <Feather name="message-square" size={28} color={media.text} />
-          <ContadorAnimado valor={comentarios} color={media.text} style={styles.sidebarLabel} />
+          <ContadorAnimado valor={comentarios} clave={short.id} color={media.text} style={styles.sidebarLabel} />
         </Pulsable>
 
         <Pulsable

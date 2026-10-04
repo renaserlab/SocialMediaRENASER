@@ -205,20 +205,46 @@ async def send_push_many(
         return
     title, body = message
 
+    tokens = await _leer_tokens(db, user_ids)
+    await _enviar_a(
+        tokens,
+        title=title,
+        body=body,
+        channel=CHANNELS.get(notification_type, "interacciones"),
+        data=data,
+    )
+
+
+async def _leer_tokens(db: AsyncSession, user_ids: list[str]) -> list[str]:
+    """Los aparatos registrados de esas personas. NUNCA LANZA."""
     try:
         result = await db.execute(
             select(DeviceToken.token).where(DeviceToken.user_id.in_(user_ids))
         )
-        tokens = [row[0] for row in result.all()]
+        return [row[0] for row in result.all()]
     except Exception:  # noqa: BLE001 - un fallo aquí no debe romper la petición
         logger.warning("[push] no se pudieron leer los tokens", exc_info=True)
-        return
+        return []
 
+
+async def _enviar_a(
+    tokens: list[str],
+    *,
+    title: str,
+    body: str,
+    channel: str,
+    data: dict | None,
+) -> None:
+    """Habla con Expo. NO TOCA LA BASE DE DATOS mientras lo hace.
+
+    Recibe los tokens ya leídos, a propósito: quien llama puede haber soltado
+    su conexión antes de entrar aquí, y esta función puede tardar hasta diez
+    segundos por lote sin tener ninguna ocupada.
+    """
     if not tokens:
         # Nadie ha registrado un dispositivo todavía; no es un error.
         return
 
-    channel = CHANNELS.get(notification_type, "interacciones")
     messages = [
         {
             "to": token,
@@ -318,15 +344,37 @@ async def _enviar_con_sesion_propia(
     actor_name: str | None,
     data: dict | None,
 ) -> None:
-    """El envío real, ya fuera de la petición y con su propia sesión."""
+    """El envío real, ya fuera de la petición y con su propia sesión.
+
+    LA CONEXIÓN SE SUELTA ANTES DE HABLAR CON EXPO. Antes se leían los tokens y
+    se hacía el POST —con hasta diez segundos de espera— dentro del mismo
+    `async with`: la transacción seguía abierta y la conexión ocupada todo ese
+    tiempo. El pool son cinco conexiones más cinco de reserva
+    (`shared/database.py`); con Expo lento y diez avisos a la vez se agotaba y
+    se paraba la API entera, que es justo lo que `encolar_push` existe para
+    evitar. Desde que cada mensaje de chat manda un aviso, eso dejó de ser un
+    caso raro.
+
+    Ahora la sesión vive lo que tarda UNA consulta. El envío va después, sin
+    ninguna conexión cogida.
+    """
+    if not user_ids:
+        return
+    message = build_message(notification_type, actor_name)
+    if message is None:
+        return
+    title, body = message
+
     async with SessionLocal() as db:
-        await send_push_many(
-            db,
-            user_ids=user_ids,
-            notification_type=notification_type,
-            actor_name=actor_name,
-            data=data,
-        )
+        tokens = await _leer_tokens(db, user_ids)
+
+    await _enviar_a(
+        tokens,
+        title=title,
+        body=body,
+        channel=CHANNELS.get(notification_type, "interacciones"),
+        data=data,
+    )
 
 
 def encolar_push(

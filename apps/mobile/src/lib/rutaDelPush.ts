@@ -111,6 +111,18 @@ export function conversacionDelPush(datos: unknown): string | null {
   return d.type === 'message' ? uuid(d.conversationId) : null;
 }
 
+/**
+ * El mensaje concreto del que habla un aviso de mensaje, si lo trae.
+ *
+ * Sirve para no avisar dos veces del mismo: con la aplicación abierta llega en
+ * tiempo real y por push, y este identificador dice que son el mismo.
+ */
+export function mensajeDelPush(datos: unknown): string | null {
+  if (datos === null || typeof datos !== 'object') return null;
+  const d = datos as Record<string, unknown>;
+  return d.type === 'message' ? uuid(d.messageId) : null;
+}
+
 /** La clave con la que se agrupan los avisos de una conversación. */
 export function claveDeConversacion(conversacionId: string): string {
   return `conversacion:${conversacionId}`;

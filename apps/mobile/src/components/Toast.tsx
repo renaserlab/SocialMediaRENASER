@@ -101,8 +101,11 @@ export function Toast({
     despedido.current = true;
     const salida = reducir ? 0 : duracionDeSalida(DURACION.normal);
     desplazamiento.value = withTiming(reducir ? 0 : ENTRADA, { duration: salida });
-    opacidad.value = withTiming(0, { duration: salida }, (terminada) => {
-      if (terminada) runOnJS(onHide)();
+    // SIEMPRE avisa de que se ha ido, termine la animacion o la corten: si no
+    // avisara, este aviso —ya invisible— se quedaria en la cabeza de la cola y
+    // no saldria ninguno mas.
+    opacidad.value = withTiming(0, { duration: salida }, () => {
+      runOnJS(onHide)();
     });
   }, [desplazamiento, opacidad, onHide, reducir]);
 
@@ -180,7 +183,9 @@ export function Toast({
     <GestureDetector gesture={gesto}>
       <Animated.View
         accessibilityRole="alert"
-        accessibilityLiveRegion={tipo === 'error' ? 'assertive' : 'polite'}
+        // El aviso ya se anuncia en voz alta al aparecer (ver el efecto). Con
+        // una region viva ademas, Android lo leia dos veces.
+        accessibilityLiveRegion="none"
         style={[
           styles.container,
           { top: arriba, backgroundColor: colors.primary, shadowColor: colors.glassShadow },

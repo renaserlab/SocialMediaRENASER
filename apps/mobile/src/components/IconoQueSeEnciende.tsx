@@ -20,6 +20,12 @@ type Props = {
    * toque se ha recibido y también cuándo ha quedado hecho.
    */
   pendiente?: boolean;
+  /**
+   * De qué elemento es este icono, en las listas que reciclan celdas. Al
+   * cambiar de elemento el estado nuevo se pinta SIN saltar: que la celda pase
+   * a una publicación ya gustada no es que alguien acabe de reaccionar.
+   */
+  clave?: string;
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 };
@@ -37,13 +43,20 @@ type Props = {
  *
  * CON «REDUCIR MOVIMIENTO» no salta: el cambio de dibujo sigue diciéndolo.
  */
-export function IconoQueSeEnciende({ activo, pendiente = false, children, style }: Props) {
+export function IconoQueSeEnciende({ activo, pendiente = false, clave, children, style }: Props) {
   const reducir = useReducedMotion();
   const escala = useSharedValue(1);
   const tinta = useSharedValue(pendiente ? 0.55 : 1);
   const anterior = useRef(activo);
+  const claveAnterior = useRef(clave);
 
   useEffect(() => {
+    if (claveAnterior.current !== clave) {
+      // Otro elemento en la misma celda: se toma su estado tal cual.
+      claveAnterior.current = clave;
+      anterior.current = activo;
+      return;
+    }
     if (anterior.current === activo) return;
     anterior.current = activo;
     if (reducir) return;
@@ -51,7 +64,7 @@ export function IconoQueSeEnciende({ activo, pendiente = false, children, style 
       withTiming(activo ? ESCALA_AL_ENCENDER : 0.86, { duration: DURACION.toque }),
       withSpring(1, MUELLE),
     );
-  }, [activo, escala, reducir]);
+  }, [activo, clave, escala, reducir]);
 
   useEffect(() => {
     tinta.value = withTiming(pendiente ? 0.55 : 1, { duration: reducir ? 0 : DURACION.breve });

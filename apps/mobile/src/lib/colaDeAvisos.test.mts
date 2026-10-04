@@ -149,3 +149,18 @@ test('el aviso se puede quitar con el dedo y respeta «reducir movimiento»', ()
   assert.match(toast, /useSafeAreaInsets\(\)\.top/, 'debajo de la muesca');
   assert.match(toast, /announceForAccessibility\(/, 'quien no ve la pantalla también se entera');
 });
+
+test('el aviso SIEMPRE dice que se ha ido: si no, bloquearía la cola', () => {
+  // `onHide` solo corría si la animación de salida terminaba entera. Una
+  // salida cortada dejaba el aviso —ya invisible— en la cabeza de la cola.
+  const toast = fuente('components/Toast.tsx');
+  const salida = toast.slice(toast.indexOf('const despedir'), toast.indexOf('useEffect('));
+  assert.match(salida, /\(\) => \{\s*runOnJS\(onHide\)\(\);\s*\}/);
+  assert.ok(!/if \(terminada\)/.test(salida));
+});
+
+test('no se anuncia dos veces al lector de pantalla', () => {
+  const toast = fuente('components/Toast.tsx');
+  assert.match(toast, /announceForAccessibility\(/);
+  assert.match(toast, /accessibilityLiveRegion="none"/);
+});

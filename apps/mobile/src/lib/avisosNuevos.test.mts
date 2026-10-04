@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { MAXIMO_A_ANUNCIAR, adelantarMarca, destinoDelAviso, queAnunciar } from './avisosNuevos.ts';
+import { MAXIMO_A_ANUNCIAR, destinoDelAviso, queAnunciar } from './avisosNuevos.ts';
 import {
   dejarDeVerConversacion,
   marcarConversacionALaVista,
@@ -73,13 +73,29 @@ describe('qué avisos de la bandeja se anuncian', () => {
     assert.deepEqual(queAnunciar([roto], ms(5)).anunciar, []);
   });
 
-  it('lo que llegó por push ya está anunciado: adelantar la marca lo deja fuera', () => {
-    // Llega el push, se enseña el aviso y se adelanta la marca. Cuando después
-    // la lectura periódica trae ese mismo hecho, ya queda por detrás.
-    const marca = adelantarMarca(ms(5), ms(10));
-    assert.deepEqual(queAnunciar([aviso('el-del-push', 9)], marca).anunciar, []);
-    assert.equal(adelantarMarca(ms(10), ms(5)), ms(10), 'tampoco retrocede');
-    assert.equal(adelantarMarca(null, ms(5)), ms(5));
+  it('ponerse al día sin anunciar: lo que ya se avisó por otro lado no vuelve a salir', () => {
+    // Llega un push y se enseña; o la aplicación vuelve de segundo plano, donde
+    // el sistema ya avisó. Se llama «en callado» —sin marca— y solo se fija la
+    // marca. Cuando después la lectura periódica trae ese mismo hecho, ya queda
+    // por detrás.
+    const lista = [aviso('el-del-push', 9)];
+    const callado = queAnunciar(lista, null);
+    assert.deepEqual(callado.anunciar, []);
+    assert.deepEqual(queAnunciar(lista, callado.marca).anunciar, []);
+    // Y lo que llegue DESPUÉS sí se anuncia.
+    assert.deepEqual(
+      queAnunciar([...lista, aviso('otro', 12)], callado.marca).anunciar.map((a) => a.id),
+      ['otro'],
+    );
+  });
+
+  it('la marca sale de las fechas del servidor, no del reloj del teléfono', () => {
+    const lib = sinComentarios(fuente('lib/avisosNuevos.ts'));
+    const hook = sinComentarios(fuente('hooks/useAvisosEnVivo.ts'));
+    assert.ok(!/Date\.now\(\)/.test(lib));
+    // En el hook, `Date.now()` solo nombra el canal; la marca nunca sale de él.
+    assert.ok(!/marca\s*=[^;]*Date\.now\(\)/.test(hook));
+    assert.match(hook, /marca = Math\.max\(marca \?\? 0, resultado\.marca\);/);
   });
 });
 
@@ -113,7 +129,7 @@ describe('a dónde lleva un aviso de la bandeja', () => {
   });
 
   it('la bandeja y el aviso flotante usan la MISMA decisión', () => {
-    assert.match(sinComentarios(fuente('screens/NotificationsScreen.tsx')), /destinoDelAviso\(item, rutaDelAviso\)/);
+    assert.match(sinComentarios(fuente('screens/NotificationsScreen.tsx')), /destinoDelAviso\(aviso, rutaDelAviso\)/);
     assert.match(sinComentarios(fuente('hooks/useAvisosEnVivo.ts')), /destinoDelAviso\(aviso, rutaDelAviso\)/);
   });
 });
@@ -150,10 +166,9 @@ describe('lo que ya se está leyendo no se anuncia', () => {
       sinComentarios(fuente('hooks/useAvisosEnVivo.ts')),
       /if \(seEstaViendoLaConversacion\(id\)\) continue;/,
     );
-    assert.match(
-      sinComentarios(fuente('hooks/useAvisosDelPush.native.ts')),
-      /if \(seEstaViendoLaConversacion\(conversacionDelPush\(data\)\)\) \{/,
-    );
+    const push = sinComentarios(fuente('hooks/useAvisosDelPush.native.ts'));
+    assert.match(push, /const conversacion = conversacionDelPush\(data\);/);
+    assert.match(push, /if \(seEstaViendoLaConversacion\(conversacion\)\) \{/);
   });
 });
 
@@ -174,9 +189,55 @@ describe('un solo sistema de avisos, enchufado', () => {
     assert.ok(!/Snackbar|react-native-toast|flash-message|Alert\.alert/.test(VIVO + PUSH));
   });
 
-  it('el mensaje en vivo y su push comparten clave: no salen dos avisos', () => {
+  it('el mensaje en vivo y su push son UN aviso: se reconocen por el identificador', () => {
+    // El push de un mensaje no se pinta en su oyente: se entrega al camino en
+    // vivo, que ya puede haber anunciado ese mismo mensaje.
+    assert.match(
+      PUSH,
+      /if \(conversacion && alRecibirUnMensajePorPush\(conversacion, mensajeDelPush\(data\)\)\) return;/,
+    );
+    // Y allí el segundo se descarta por su identificador.
+    assert.match(VIVO, /if \(anunciados\.has\(mensajeId\)\) return;/);
+    assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null\);/);
+    assert.match(VIVO, /mensajeDelPush = anotarMensaje;/);
+    // La memoria de lo anunciado tiene tope.
+    assert.match(VIVO, /if \(anunciados\.size > MENSAJES_RECORDADOS\)/);
+    // Lo demás sigue agrupándose por clave en la cola.
     assert.match(VIVO, /clave: claveDeConversacion\(id\)/);
     assert.match(PUSH, /clave: claveDelPush\(data\)/);
+  });
+
+  it('el servidor manda el identificador del mensaje, que es lo que los une', () => {
+    const avisos = readFileSync(
+      join(SRC, '..', '..', 'api', 'app', 'modules', 'messaging', 'avisos.py'),
+      'utf8',
+    );
+    assert.match(avisos, /"messageId": message_id/);
+  });
+
+  it('sin saber quién soy no se anuncia un mensaje: podría ser mío', () => {
+    assert.match(VIVO, /if \(!fila\.conversation_id \|\| yo === null \|\| fila\.sender_id === yo\) return;/);
+    assert.match(VIVO, /\.catch\(\(\) => \{/, 'averiguar la sesión no puede reventar el hook');
+  });
+
+  it('al volver a la aplicación se pone al día SIN anunciar: eso ya lo avisó el sistema', () => {
+    const alVolver = VIVO.slice(VIVO.indexOf("AppState.addEventListener('change'"));
+    assert.match(alVolver.slice(0, 300), /void mirarAvisos\(true\);/);
+    // Y lo mismo tras un push recibido con la aplicación abierta.
+    assert.match(VIVO, /ponerseAlDia = \(\) => \{\s*void mirarAvisos\(true\);/);
+    // Callado solo fija la marca.
+    assert.match(VIVO, /queAnunciar\(avisos, callado \? null : marca\)/);
+  });
+
+  it('la cuenta de antes se lee del contador común: abrir la bandeja no esconde el siguiente aviso', () => {
+    // Tenía 3, abre la bandeja (queda en 0) y llega 1. Con una copia propia de
+    // la cuenta, «1 no es más que 3» y ese aviso no se anunciaba nunca.
+    const mirar = VIVO.slice(VIVO.indexOf('const mirarAvisos'), VIVO.indexOf('const mirarMensajes'));
+    const antes = mirar.indexOf('const antes = useContadoresStore.getState().notificaciones;');
+    const refresco = mirar.indexOf('await refrescarNotificaciones()');
+    assert.ok(antes !== -1 && refresco !== -1 && antes < refresco, 'se lee ANTES de refrescar');
+    assert.match(mirar, /if \(!primera && !callado && cuenta <= antes\) return;/);
+    assert.ok(!/cuentaAnterior/.test(VIVO));
   });
 
   it('nada se queda escuchando al cerrar sesión o desmontar', () => {

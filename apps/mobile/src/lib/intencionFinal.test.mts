@@ -234,5 +234,85 @@ test('guardar y reaccionar pasan por el consolidador, no llaman al servidor a pe
 });
 
 test('un toque absorbido no anuncia nada: lo hace quien empezó la ráfaga', () => {
-  assert.match(STORE, /if \(peticion\.absorbida\) return \{ guardada, ok: true, absorbida: true \};/);
+  assert.match(
+    STORE,
+    /if \(peticion\.absorbida\) return \{ guardada: final\.valor, ok: true, absorbida: true \};/,
+  );
+});
+
+test('pero también espera a que la ráfaga se asiente', () => {
+  /*
+    La misma publicación puede estar pintada en dos sitios —el muro y su
+    detalle—. Si el toque absorbido volviera en el acto, la segunda tarjeta no
+    sabría cuándo ha terminado y su marcador se quedaría «pendiente» para
+    siempre.
+  */
+  const guardar = STORE.slice(STORE.indexOf('toggleSavePost: async'), STORE.indexOf('addComment: async'));
+  const espera = guardar.indexOf('const final = await peticion.asentada;');
+  const absorbida = guardar.indexOf('if (peticion.absorbida) return');
+  assert.ok(espera !== -1 && absorbida !== -1 && espera < absorbida);
+});
+
+test('todos los que esperan una ráfaga reciben el mismo final', async () => {
+  const { llamadas, enviar } = servidorDeMentira();
+  const cola = crearConsolidador<number, { contador: number }>(enviar);
+
+  const primera = cola.pedir('p1', true, partida(false));
+  const segunda = cola.pedir('p1', false, partida(false));
+  assert.equal(segunda.absorbida, true);
+  llamadas[0]?.resolver(1);
+  await respirar();
+  llamadas[1]?.resolver(0);
+
+  const [uno, dos] = await Promise.all([primera.asentada, segunda.asentada]);
+  assert.deepEqual(uno, dos);
+  assert.equal(uno.valor, false);
+});
+
+// ---------------------------------------------------------------------------
+// La tarjeta: lo pendiente se apaga, y el estado no viaja con la celda
+// ---------------------------------------------------------------------------
+
+const TARJETA = readFileSync(join(SRC, 'components', 'PostCard.tsx'), 'utf8')
+  .replace(/\r\n/g, '\n')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\/\/.*$/gm, '');
+
+test('«pendiente» se apaga también en el toque absorbido', () => {
+  const guardar = TARJETA.slice(TARJETA.indexOf('const alternarGuardado'), TARJETA.indexOf('const alternarRepost'));
+  const apaga = guardar.indexOf('setGuardando(false);');
+  const sale = guardar.indexOf('if (absorbida) return;');
+  assert.ok(apaga !== -1 && sale !== -1 && apaga < sale, 'se apaga ANTES de salir por absorbida');
+
+  const repost = TARJETA.slice(TARJETA.indexOf('const alternarRepost'));
+  const apagaRepost = repost.indexOf('if (sigueAqui) setRepublicando(false);');
+  const saleRepost = repost.indexOf('if (peticion.absorbida) return;');
+  assert.ok(apagaRepost !== -1 && saleRepost !== -1 && apagaRepost < saleRepost);
+});
+
+test('al reciclarse la celda, el estado local vuelve a lo que dice la publicación nueva', () => {
+  // El muro reutiliza tarjetas: lo que estaba en `useState` no puede viajar a
+  // otra publicación.
+  assert.match(
+    TARJETA,
+    /if \(pintada !== post\.id\) \{\s*setPintada\(post\.id\);\s*setRepublicado\(post\.repostedByMe \?\? false\);\s*setRepostsCount\(post\.repostsCount \?\? 0\);\s*setRepublicando\(false\);\s*setGuardando\(false\);\s*\}/,
+  );
+});
+
+test('lo que vuelve de una espera no se aplica a otra publicación', () => {
+  assert.match(TARJETA, /publicacionPintada\.current = post\.id;/);
+  assert.match(TARJETA, /if \(publicacionPintada\.current === publicacion\) setGuardando\(false\);/);
+  assert.match(TARJETA, /const sigueAqui = publicacionPintada\.current === publicacion;/);
+  assert.match(TARJETA, /if \(sigueAqui\) \{\s*setRepublicado\(final\.valor\);/);
+});
+
+test('el icono y el contador no animan cuando la celda cambia de publicación', () => {
+  assert.equal(TARJETA.match(/<AccionDePublicacion\s+clave=\{post\.id\}/g)?.length, 5);
+  for (const componente of ['IconoQueSeEnciende', 'ContadorAnimado']) {
+    const codigo = readFileSync(join(SRC, 'components', `${componente}.tsx`), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(codigo, /if \(claveAnterior\.current !== clave\) \{/, componente);
+    // Al cambiar de elemento se toma su estado y se SALE: no hay animación.
+    const rama = codigo.slice(codigo.indexOf('if (claveAnterior.current !== clave) {'));
+    assert.match(rama.slice(0, 260), /return;/, componente);
+  }
 });

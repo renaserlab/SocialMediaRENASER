@@ -17,7 +17,11 @@
  *     campana cuenta el resto.
  *   - LA MARCA AVANZA SIEMPRE, se anuncie o no: lo que ya se vio pasar no
  *     vuelve a salir. Es también lo que impide el doble aviso cuando el mismo
- *     hecho llegó antes por push.
+ *     hecho ya se avisó por otro lado —un push, o el sistema mientras la
+ *     aplicación estaba en segundo plano—: basta llamar con `marca = null`,
+ *     que fija la marca sin anunciar nada.
+ *   - LA MARCA SALE DE LAS FECHAS DEL SERVIDOR, nunca del reloj del teléfono:
+ *     uno adelantado se comería avisos y uno atrasado los repetiría.
  *
  * SIN REACT: se prueba con el runner de Node.
  */
@@ -54,11 +58,6 @@ export function queAnunciar<T extends AvisoFechado>(
     .filter((aviso) => !aviso.read && instante(aviso) > marca)
     .sort((a, b) => instante(a) - instante(b));
   return { anunciar: nuevos.slice(-maximo), marca: masReciente };
-}
-
-/** Adelanta la marca hasta ahora: lo que llegue por push ya está anunciado. */
-export function adelantarMarca(marca: number | null, ahora: number): number {
-  return Math.max(marca ?? 0, ahora);
 }
 
 /** Lo que hace falta de un aviso de la bandeja para saber a dónde lleva. */

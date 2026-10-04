@@ -29,6 +29,10 @@ type Props = {
  * caja anima hasta ahí. Si el contenido cambia de alto —llegan datos— la caja
  * lo sigue.
  *
+ * SI NACE ABIERTO, mientras todavía no hay medida el contenido va en el flujo
+ * normal, a su alto: sin eso la caja mediría cero un fotograma y lo de debajo
+ * daría un salto al llegar la medida.
+ *
  * CERRADO NO SE PUEDE TOCAR NI LEER: sin `pointerEvents` ni las marcas de
  * accesibilidad, un lector de pantalla seguiría recorriendo lo que no se ve.
  *
@@ -38,6 +42,7 @@ export function Desplegable({ abierto, children }: Props) {
   const reducir = useReducedMotion();
   const [alto, setAlto] = useState(0);
   const avance = useSharedValue(abierto ? 1 : 0);
+  const medido = alto > 0;
 
   useEffect(() => {
     const destino = abierto ? 1 : 0;
@@ -57,18 +62,23 @@ export function Desplegable({ abierto, children }: Props) {
   }));
 
   const medir = (evento: LayoutChangeEvent) => {
-    const medido = Math.ceil(evento.nativeEvent.layout.height);
-    if (medido !== alto) setAlto(medido);
+    const nuevo = Math.ceil(evento.nativeEvent.layout.height);
+    if (nuevo !== alto) setAlto(nuevo);
   };
+
+  // Sin medida todavía: abierto, a su alto natural; cerrado, a cero.
+  const sinMedida = abierto ? null : styles.cerrada;
 
   return (
     <Animated.View
-      style={[styles.caja, caja]}
+      style={[styles.caja, medido ? caja : sinMedida]}
       pointerEvents={abierto ? 'auto' : 'none'}
       accessibilityElementsHidden={!abierto}
       importantForAccessibility={abierto ? 'auto' : 'no-hide-descendants'}
+      // Para el navegador, que no entiende las dos de arriba.
+      aria-hidden={!abierto}
     >
-      <View style={styles.contenido} onLayout={medir}>
+      <View style={medido || !abierto ? styles.contenido : null} onLayout={medir}>
         {children}
       </View>
     </Animated.View>
@@ -101,5 +111,6 @@ export function FlechaDeDesplegable({ abierto, color }: { abierto: boolean; colo
 
 const styles = StyleSheet.create({
   caja: { overflow: 'hidden' },
+  cerrada: { height: 0, opacity: 0 },
   contenido: { position: 'absolute', left: 0, right: 0, top: 0 },
 });

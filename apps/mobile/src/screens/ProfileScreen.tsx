@@ -1124,6 +1124,9 @@ export function ProfileScreen() {
               icono={{ familia: 'feather', nombre: 'calendar' }}
               label={t('profile.bookSession')}
               active={isPublic && bookingVisible}
+              // Lleva a otra pantalla (o abre una hoja): es un boton, no una
+              // de las pestañas del perfil.
+              rol="button"
               onPress={() =>
                 isPublic ? setBookingVisible(true) : router.push('/agenda' as never)
               }
@@ -1509,18 +1512,21 @@ function Shortcut({
   label,
   onPress,
   active = false,
+  rol = 'tab',
 }: {
   icono: IconoDeAcceso;
   label: string;
   onPress: () => void;
   active?: boolean;
+  /** `tab` para las secciones del perfil; `button` para lo que navega fuera. */
+  rol?: 'tab' | 'button';
 }) {
   const { colors } = useAppTheme();
   return (
     <Pulsable
       onPress={onPress}
       // Son pestañas: una sola está elegida, y se anuncia así.
-      accessibilityRole="tab"
+      accessibilityRole={rol}
       accessibilityLabel={label}
       accessibilityState={{ selected: active }}
       escala={ESCALA_AL_PULSAR.chip}

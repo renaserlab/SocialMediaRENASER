@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -68,6 +68,8 @@ export function ContenidoDeComentarios({
   } = comentarios;
 
   const hilos = useMemo(() => enHilos(estado.lista), [estado.lista]);
+  /** Los hilos que ya hicieron su entrada. */
+  const yaEntraron = useRef(new Set<string>());
 
   const pedirCuenta = () => void requireAuth('auth.reasonComment', () => {});
 
@@ -187,14 +189,24 @@ export function ContenidoDeComentarios({
               <ActivityIndicator style={styles.masAbajo} color={colors.textMuted} />
             ) : null
           }
-          renderItem={({ item, index }) => (
-            // Cada hilo entra subiendo unos puntos, en cascada los primeros.
-            // Un comentario recien enviado entra igual: se ve llegar.
-            <Aparecer retraso={index < 6 ? retrasoEnCascada(index) : 0}>
-              {fila(item.raiz, false)}
-              {item.respuestas.map((respuesta) => fila(respuesta, true))}
-            </Aparecer>
-          )}
+          renderItem={({ item, index }) => {
+            /*
+              Cada hilo entra subiendo unos puntos, en cascada los primeros.
+              Un comentario recien enviado entra igual: se ve llegar.
+
+              UNA VEZ. La lista desmonta las filas que quedan lejos y las
+              vuelve a montar al regresar: sin apuntar las que ya entraron,
+              volver arriba las animaba otra vez.
+            */
+            const yaEntro = yaEntraron.current.has(item.raiz.id);
+            yaEntraron.current.add(item.raiz.id);
+            return (
+              <Aparecer inmediato={yaEntro} retraso={index < 6 ? retrasoEnCascada(index) : 0}>
+                {fila(item.raiz, false)}
+                {item.respuestas.map((respuesta) => fila(respuesta, true))}
+              </Aparecer>
+            );
+          }}
         />
       </StateView>
 

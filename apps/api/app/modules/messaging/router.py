@@ -982,7 +982,7 @@ async def send_message(
             user_ids=a_quien,
             notification_type=avisos.TIPO,
             actor_name=avisos.nombre_para_el_aviso(profile),
-            data=avisos.datos_del_aviso(conversation_id),
+            data=avisos.datos_del_aviso(conversation_id, str(message_id)),
         )
     except Exception:  # noqa: BLE001 - el aviso nunca tumba el envio
         logger.warning("[mensajes] no se pudo programar el aviso", exc_info=True)

@@ -81,11 +81,16 @@ def nombre_para_el_aviso(perfil: Profile | None) -> str | None:
     return (perfil.full_name or "").strip() or perfil.username or None
 
 
-def datos_del_aviso(conversation_id: str) -> dict[str, str]:
+def datos_del_aviso(conversation_id: str, message_id: str) -> dict[str, str]:
     """Lo que viaja en el push para poder abrir la conversación.
 
-    Un tipo y un identificador, nada más. La aplicación decide a qué pantalla
-    lleva con un mapa cerrado de destinos; aquí no viaja ninguna ruta ni
-    ninguna dirección que el teléfono tenga que creerse.
+    Un tipo y dos identificadores, nada más. La aplicación decide a qué
+    pantalla lleva con un mapa cerrado de destinos; aquí no viaja ninguna ruta
+    ni ninguna dirección que el teléfono tenga que creerse.
+
+    EL IDENTIFICADOR DEL MENSAJE es para no avisar dos veces. Con la
+    aplicación abierta, el mismo mensaje llega por dos caminos —en tiempo real
+    y por push— y sin algo que diga «son el mismo» salían dos avisos. No dice
+    nada del contenido: es un UUID.
     """
-    return {"type": TIPO, "conversationId": conversation_id}
+    return {"type": TIPO, "conversationId": conversation_id, "messageId": message_id}
