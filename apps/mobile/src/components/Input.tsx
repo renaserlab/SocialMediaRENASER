@@ -11,6 +11,12 @@ type InputProps = TextInputProps & {
   error?: string;
   disabled?: boolean;
   containerStyle?: ViewStyle;
+  /**
+   * `pastilla` para los redactores (chat, comentarios): los extremos
+   * redondos y un fondo suave lo distinguen de un campo de formulario, que es
+   * una `caja`. Mismo componente, mismo foco, mismo error.
+   */
+  forma?: 'caja' | 'pastilla';
 };
 
 export function Input({
@@ -18,6 +24,7 @@ export function Input({
   error,
   disabled = false,
   containerStyle,
+  forma = 'caja',
   onFocus,
   onBlur,
   style,
@@ -36,9 +43,10 @@ export function Input({
       <View
         style={[
           styles.inputWrapper,
+          forma === 'pastilla' && styles.pastilla,
           {
             borderColor: error ? colors.danger : focused ? colors.primary : colors.border,
-            backgroundColor: colors.background,
+            backgroundColor: forma === 'pastilla' ? colors.surfaceAlt : colors.background,
             opacity: disabled ? 0.5 : 1,
           },
         ]}
@@ -84,6 +92,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     justifyContent: 'center',
+  },
+  pastilla: {
+    borderRadius: 22,
+    paddingHorizontal: spacing.lg,
   },
   input: {
     fontSize: 14,

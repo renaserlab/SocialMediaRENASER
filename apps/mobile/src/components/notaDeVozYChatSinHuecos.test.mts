@@ -416,7 +416,7 @@ describe('la duración y las acciones de cada fase', () => {
     );
     assert.match(
       GRABADORA,
-      /setMilisegundos\(grabador\.getStatus\(\)\.durationMillis \?\? 0\);/,
+      /const estado = grabador\.getStatus\(\);\s*setMilisegundos\(estado\.durationMillis \?\? 0\);/,
     );
     // Y EL MISMO RELOJ EN EL AUDIO DE PRESENTACIÓN DEL PERFIL: allí el tope es
     // de un minuto y se cortaba igual, en el primer tic.

@@ -15,7 +15,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { Aparecer } from '@/components/Aparecer';
+import { BotonDeEnviar } from '@/components/BotonDeEnviar';
 import { BotonDeNotaDeVoz } from '@/components/BotonDeNotaDeVoz';
+import { Pulsable } from '@/components/Pulsable';
 import { CabeceraDeChat } from '@/components/CabeceraDeChat';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
@@ -27,6 +30,7 @@ import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useTranslation } from '@/i18n/useTranslation';
 import { afterSheetClose } from '@/lib/afterSheetClose';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
@@ -1158,7 +1162,20 @@ export function ChatScreen() {
             }
 
             return (
-              <View>
+              /*
+                EL MENSAJE QUE SE ACABA DE MANDAR ENTRA; EL HISTORIAL NO.
+
+                Una burbuja nueva sube unos puntos hasta su sitio: se ve salir
+                lo que se acaba de escribir. El historial está ya en pantalla
+                al abrir —y vuelve al desplazar, porque la lista recicla— y
+                animarlo sería ver aparecer mensajes de hace un mes.
+
+                `clave` porque la lista RECICLA celdas: sin ella la entrada no
+                se repetiría al reutilizar una celda para otro mensaje. Y cuando
+                el servidor confirma y la burbuja deja de estar «enviando», no
+                vuelve a animarse.
+              */
+              <Aparecer inmediato={item.estado !== 'enviando'} desde={12} clave={item.id}>
                 {cabecera}
                 <View style={mine ? styles.filaMia : styles.filaSuya}>
                   <View
@@ -1170,8 +1187,15 @@ export function ChatScreen() {
                       agrupado && (mine ? styles.mineSeguida : styles.theirsSeguida),
                       agrupado && styles.pegada,
                       {
-                        backgroundColor: mine ? colors.primary : colors.surface,
-                        borderColor: fallido ? colors.danger : colors.border,
+                        // La ajena se despega del fondo con un gris suave en
+                        // vez de un borde: en claro, blanco sobre blanco con
+                        // una línea parecía una casilla de formulario.
+                        backgroundColor: mine ? colors.primary : colors.surfaceAlt,
+                        borderColor: fallido
+                          ? colors.danger
+                          : mine
+                            ? colors.primary
+                            : colors.border,
                         opacity: item.estado === 'enviando' ? 0.75 : 1,
                       },
                     ]}
@@ -1225,7 +1249,7 @@ export function ChatScreen() {
                       }
                     >
                       {item.text ? (
-                        <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 21 }}>
+                        <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 22 }}>
                           {item.text}
                         </Text>
                       ) : null}
@@ -1245,38 +1269,64 @@ export function ChatScreen() {
                       ) : null}
 
                       {mostrarHora ? (
-                        <Text
-                          style={{
-                            color: mine ? colors.onPrimary : colors.textMuted,
-                            fontSize: 9,
-                            marginTop: 5,
-                            opacity: 0.7,
-                            textAlign: mine ? 'right' : 'left',
-                          }}
-                        >
-                          {item.estado === 'enviando'
-                            ? t('chat.sending')
-                            : fallido
-                              ? t('chat.notSent')
-                              : item.createdAt}
-                        </Text>
+                        /*
+                          LA HORA Y EL ESTADO, legibles. Eran 9 puntos al 70 %:
+                          sobre la burbuja negra no se leía. Y el estado del
+                          envío se dice con un icono además de con el texto:
+                          reloj mientras sale, una marca cuando el servidor lo
+                          confirma, aviso si no salió.
+
+                          UNA SOLA MARCA Y NO DOS. Significa «enviado», que es
+                          lo que el servidor confirma. La aplicación no sabe si
+                          se ha leído, y dos marcas lo darían a entender.
+                        */
+                        <View style={[styles.pieDeBurbuja, mine && styles.pieDeBurbujaMia]}>
+                          <Text
+                            style={{
+                              color: mine ? colors.onPrimary : colors.textMuted,
+                              fontSize: 11,
+                              opacity: 0.8,
+                            }}
+                          >
+                            {item.estado === 'enviando'
+                              ? t('chat.sending')
+                              : fallido
+                                ? t('chat.notSent')
+                                : item.createdAt}
+                          </Text>
+                          {mine ? (
+                            <Feather
+                              name={
+                                item.estado === 'enviando'
+                                  ? 'clock'
+                                  : fallido
+                                    ? 'alert-circle'
+                                    : 'check'
+                              }
+                              size={11}
+                              color={colors.onPrimary}
+                              style={styles.iconoDeEstado}
+                            />
+                          ) : null}
+                        </View>
                       ) : null}
                     </Pressable>
                   </View>
 
                   {fallido ? (
                     <View style={styles.accionesFallo}>
-                      <Pressable
+                      <Pulsable
                         onPress={() => reintentar(item)}
+                        escala={ESCALA_AL_PULSAR.chip}
                         accessibilityRole="button"
                         accessibilityLabel={t('chat.retrySend')}
                         style={styles.accionFallo}
                       >
                         <Feather name="refresh-cw" size={13} color={colors.primary} />
-                        <Text style={{ color: colors.primary, fontSize: 11 }}>
+                        <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>
                           {t('common.retry')}
                         </Text>
-                      </Pressable>
+                      </Pulsable>
                       <Pressable
                         onPress={() => descartar(item)}
                         accessibilityRole="button"
@@ -1290,7 +1340,7 @@ export function ChatScreen() {
                     </View>
                   ) : null}
                 </View>
-              </View>
+              </Aparecer>
             );
           }}
         />
@@ -1354,19 +1404,21 @@ export function ChatScreen() {
             },
           ]}
         >
-          <Pressable
-            accessibilityLabel="Adjuntar archivo"
+          {/*
+            El `+` es un botón: lleva su círculo y se hunde al tocarlo. Suelto
+            sobre el fondo parecía un signo, no algo que se pulsa.
+          */}
+          <Pulsable
+            accessibilityLabel={t('chat.attach')}
             accessibilityRole="button"
             onPress={() => setMenuAbierto(true)}
             disabled={!supabaseEnabled || grabadora.ocupada}
-            style={styles.addButton}
+            escala={ESCALA_AL_PULSAR.icono}
+            opacidad={supabaseEnabled && !grabadora.ocupada ? 1 : 0.4}
+            style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
           >
-            <Feather
-              name="plus"
-              size={24}
-              color={supabaseEnabled && !grabadora.ocupada ? colors.text : colors.border}
-            />
-          </Pressable>
+            <Feather name="plus" size={22} color={colors.text} />
+          </Pulsable>
 
           {/*
             MIENTRAS HAY UNA NOTA DE VOZ EN MARCHA, EL CAMPO DE TEXTO SE APARTA.
@@ -1384,6 +1436,7 @@ export function ChatScreen() {
               placeholderTextColor={colors.textMuted}
               returnKeyType="send"
               containerStyle={styles.inputContainer}
+              forma="pastilla"
               style={{ minHeight: 40 }}
             />
           )}
@@ -1403,6 +1456,7 @@ export function ChatScreen() {
               segundos={grabadora.segundos}
               avance={grabadora.avance}
               progreso={grabadora.progreso}
+              nivel={grabadora.nivel}
               uri={grabadora.nota?.uri ?? null}
               empezar={() => void grabadora.empezar()}
               detener={() => void grabadora.detener()}
@@ -1412,23 +1466,16 @@ export function ChatScreen() {
               deshabilitado={enviando}
             />
           ) : (
-            <Pressable
-              onPress={submit}
-              disabled={!hayQueEnviar || enviando}
-              style={styles.sendButton}
-              accessibilityLabel={t('chat.sendMessage')}
-              accessibilityRole="button"
-            >
-              {enviando ? (
-                <ActivityIndicator size="small" color={colors.text} />
-              ) : (
-                <Feather
-                  name="send"
-                  size={20}
-                  color={hayQueEnviar ? colors.text : colors.border}
-                />
-              )}
-            </Pressable>
+            // El mismo botón redondo que en comentarios: crece cuando hay algo
+            // que mandar y enseña la espera dentro, sin cambiar de tamaño.
+            <View style={styles.sendButton}>
+              <BotonDeEnviar
+                onPress={submit}
+                listo={hayQueEnviar}
+                enviando={enviando}
+                accessibilityLabel={t('chat.sendMessage')}
+              />
+            </View>
           )}
         </View>
       </SinTecladoDelante>
@@ -1489,7 +1536,19 @@ const styles = StyleSheet.create({
   },
   filaMia: { alignItems: 'flex-end' },
   filaSuya: { alignItems: 'flex-start' },
-  bubble: { maxWidth: '82%', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, marginBottom: spacing.md },
+  // 80 % y no más: una burbuja que casi toca el borde contrario deja de
+  // decir de quién es.
+  bubble: {
+    maxWidth: '80%',
+    borderRadius: 20,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md + 2,
+    borderWidth: 1,
+    marginBottom: spacing.md,
+  },
+  pieDeBurbuja: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  pieDeBurbujaMia: { justifyContent: 'flex-end' },
+  iconoDeEstado: { opacity: 0.8 },
   mine: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
   theirs: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
   // Dentro de una ráfaga se recupera la esquina redonda y se juntan: el bloque
@@ -1578,8 +1637,10 @@ const styles = StyleSheet.create({
   },
   inputContainer: { flex: 1 },
   addButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

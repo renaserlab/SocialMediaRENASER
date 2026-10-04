@@ -1,7 +1,9 @@
 import React, { useCallback } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 
+import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
@@ -70,19 +72,20 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
   const sinLeer = conversacion.unread > 0;
 
   return (
-    <Pressable
+    <Pulsable
       onPress={abrir}
       onLongPress={alEtiquetar ? etiquetar : undefined}
       delayLongPress={350}
+      // Una fila ocupa todo el ancho: encoge apenas, lo justo para que se
+      // note bajo el dedo antes de que se abra la conversación.
+      escala={0.985}
+      atenuar={0.72}
       accessibilityRole="button"
       accessibilityLabel={t('messages.chatWith', {
         nombre: conversacion.name,
         detalle: conversacion.subtitle,
       })}
-      style={({ pressed }) => [
-        styles.fila,
-        { borderBottomColor: colors.border, opacity: pressed ? 0.78 : 1 },
-      ]}
+      style={[styles.fila, { borderBottomColor: colors.border }]}
     >
       {/*
         La foto real de la otra persona. Antes se elegia una imagen de muestra
@@ -111,7 +114,14 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
           >
             {conversacion.name}
           </Text>
-          <Text variant="caption" style={styles.hora} color={colors.textMuted}>
+          <Text
+            variant="caption"
+            style={styles.hora}
+            // Con mensajes sin leer la hora también se marca: es lo segundo
+            // que se mira después del nombre.
+            color={sinLeer ? colors.text : colors.textMuted}
+            weight={sinLeer ? '700' : '400'}
+          >
             {conversacion.time ?? conversacion.messages.at(-1)?.createdAt}
           </Text>
         </View>
@@ -149,15 +159,12 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
         ) : null}
       </View>
 
-      {sinLeer ? (
-        <View style={[styles.globo, { backgroundColor: colors.primary }]}>
-          <Text variant="caption" weight="700" color={colors.onPrimary} style={styles.globoTexto}>
-            {/* Más de 99 no cabe y tampoco aporta: lo que importa es «muchos». */}
-            {conversacion.unread > 99 ? '99+' : conversacion.unread}
-          </Text>
-        </View>
-      ) : null}
-    </Pressable>
+      {/*
+        El globo aparece creciendo y salta cuando llega otro mensaje: es el
+        mismo de la barra inferior (`GloboDeNoLeidos`).
+      */}
+      <GloboDeNoLeidos cuenta={conversacion.unread} />
+    </Pulsable>
   );
 });
 
@@ -169,7 +176,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  avatar: { width: 52, height: 52, borderRadius: 26, borderWidth: 1 },
+  avatar: { width: 54, height: 54, borderRadius: 27, borderWidth: 1 },
   centro: { flex: 1, gap: 3 },
   lineaDeNombre: {
     flexDirection: 'row',
@@ -179,9 +186,9 @@ const styles = StyleSheet.create({
   },
   // `flexShrink` para que un nombre largo se recorte y no empuje la hora fuera
   // de la pantalla; la hora no encoge porque siempre es corta.
-  nombre: { fontSize: 14, flexShrink: 1 },
+  nombre: { fontSize: 15, flexShrink: 1 },
   hora: { fontSize: 11 },
-  resumen: { fontSize: 12 },
+  resumen: { fontSize: 13 },
   etiquetas: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
   etiqueta: {
     borderWidth: 1,
@@ -190,13 +197,4 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   etiquetaTexto: { fontSize: 10 },
-  globo: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-  },
-  globoTexto: { fontSize: 10 },
 });
