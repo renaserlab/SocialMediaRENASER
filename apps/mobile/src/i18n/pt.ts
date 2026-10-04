@@ -71,6 +71,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'profile.message': 'Mensagem',
   'profile.saved': 'Salvos',
   'profile.podcast': 'Podcast',
+  'profile.postsTab': 'Publicações',
   'profile.events': 'Eventos',
   'profile.courses': 'Cursos',
   'profile.circles': 'Círculos',

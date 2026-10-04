@@ -22,7 +22,11 @@ import { EditarPerfilSheet } from '@/components/EditarPerfilSheet';
 import { ListRow } from '@/components/ListRow';
 import { OfertaDelPerfil } from '@/components/OfertaDelPerfil';
 import { ProfileGallery } from '@/components/ProfileGallery';
+import { Aparecer } from '@/components/Aparecer';
+import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
+import { Pulsable } from '@/components/Pulsable';
 import { ProfileSection, type ProfileSectionKind } from '@/components/ProfileSection';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { StateView } from '@/components/StateView';
 import { useFormularioDePerfil } from '@/hooks/useFormularioDePerfil';
 import { useProfilePosts } from '@/hooks/useProfilePosts';
@@ -1048,17 +1052,37 @@ export function ProfileScreen() {
 
           {/* TODO: Reactivar el shortcut "Círculos" (icon="users") cuando el perfil alcance un umbral de seguidores */}
           <View style={styles.shortcuts}>
+            {/*
+              «PUBLICACIONES» ES UN ACCESO MÁS, Y EL PRIMERO.
+
+              Lo reportado: al entrar en Cursos, Podcast o Reseñas las
+              publicaciones desaparecían y no había botón para volver. La única
+              forma era pulsar OTRA VEZ el círculo en el que se estaba —un
+              interruptor que nadie adivina—. Ahora volver a las publicaciones
+              es un acceso con su nombre, encendido cuando es lo que se está
+              viendo, y los demás YA NO SE APAGAN al tocarlos por segunda vez:
+              cada círculo lleva a su sección y nada más.
+
+              No es una ruta nueva ni toca el servidor: es el mismo estado
+              (`activeSection === null`) con un botón que lo dice.
+            */}
+            <Shortcut
+              icono={{ familia: 'feather', nombre: 'grid' }}
+              label={t('profile.postsTab')}
+              active={activeSection === null}
+              onPress={() => setActiveSection(null)}
+            />
             <Shortcut
               icono={{ familia: 'feather', nombre: 'headphones' }}
               label={t('profile.podcast')}
               active={activeSection === 'podcast'}
-              onPress={() => setActiveSection((v) => (v === 'podcast' ? null : 'podcast'))}
+              onPress={() => setActiveSection('podcast')}
             />
             <Shortcut
               icono={{ familia: 'feather', nombre: 'book' }}
               label={t('profile.courses')}
               active={activeSection === 'cursos'}
-              onPress={() => setActiveSection((v) => (v === 'cursos' ? null : 'cursos'))}
+              onPress={() => setActiveSection('cursos')}
             />
             {/*
               UNAS COMILLAS, NO UNA ESTRELLA.
@@ -1080,7 +1104,7 @@ export function ProfileScreen() {
               icono={{ familia: 'material', nombre: 'format-quote-close' }}
               label={t('profile.testimonials')}
               active={activeSection === 'testimonios'}
-              onPress={() => setActiveSection((v) => (v === 'testimonios' ? null : 'testimonios'))}
+              onPress={() => setActiveSection('testimonios')}
             />
             {/*
               «Agenda» en el perfil propio abre TU agenda —lo que te piden y lo
@@ -1106,6 +1130,13 @@ export function ProfileScreen() {
             />
           </View>
 
+          {/*
+            Al cambiar de acceso el contenido ENTRA: aparece y sube unos
+            puntos. La `key` es la sección, así que cada cambio es una entrada
+            nueva y se ve que lo de abajo es otra cosa. El desplazamiento de la
+            pantalla no se toca: se sigue donde se estaba.
+          */}
+          <Aparecer key={activeSection ?? 'publicaciones'}>
           {activeSection ? (
             <ProfileSection
               kind={activeSection}
@@ -1142,6 +1173,7 @@ export function ProfileScreen() {
             }
           />
           )}
+          </Aparecer>
             </React.Fragment>
           )}
         </View>
@@ -1485,14 +1517,18 @@ function Shortcut({
 }) {
   const { colors } = useAppTheme();
   return (
-    <Pressable
+    <Pulsable
       onPress={onPress}
-      accessibilityRole="button"
+      // Son pestañas: una sola está elegida, y se anuncia así.
+      accessibilityRole="tab"
       accessibilityLabel={label}
       accessibilityState={{ selected: active }}
-      style={({ pressed }) => [styles.shortcutItem, { opacity: pressed ? 0.8 : 1 }]}
+      escala={ESCALA_AL_PULSAR.chip}
+      style={styles.shortcutItem}
     >
-      <View
+      {/* El círculo salta al encenderse: se ve cuál se acaba de elegir. */}
+      <IconoQueSeEnciende
+        activo={active}
         style={[
           styles.shortcutIcon,
           {
@@ -1520,11 +1556,14 @@ function Shortcut({
             color={active ? colors.onPrimary : colors.text}
           />
         )}
-      </View>
-      <Text style={{ color: colors.text, fontSize: 11, fontWeight: active ? '800' : '500' }}>
+      </IconoQueSeEnciende>
+      <Text
+        numberOfLines={1}
+        style={{ color: colors.text, fontSize: 11, fontWeight: active ? '800' : '500' }}
+      >
         {label}
       </Text>
-    </Pressable>
+    </Pulsable>
   );
 }
 
@@ -1616,7 +1655,8 @@ const styles = StyleSheet.create({
   bloqueadoTitulo: { fontSize: 15, fontWeight: '800', textAlign: 'center' },
   bloqueadoTexto: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
   audioBtn: { width: '100%', marginBottom: spacing.lg },
-  shortcuts: { flexDirection: 'row', marginVertical: spacing.sm, gap: spacing.sm },
+  // Cinco accesos: menos hueco entre ellos para que quepan en un teléfono estrecho.
+  shortcuts: { flexDirection: 'row', marginVertical: spacing.sm, gap: spacing.xs },
   shortcutItem: { alignItems: 'center', gap: 6, flex: 1 },
   shortcutIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   // Formas de la espera. Mismas medidas que las piezas que sustituyen.

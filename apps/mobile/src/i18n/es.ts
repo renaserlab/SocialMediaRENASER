@@ -78,6 +78,7 @@ export const es = {
   'profile.message': 'Mensaje',
   'profile.saved': 'Guardados',
   'profile.podcast': 'Podcast',
+  'profile.postsTab': 'Publicaciones',
   'profile.events': 'Eventos',
   'profile.courses': 'Cursos',
   'profile.circles': 'Círculos',
