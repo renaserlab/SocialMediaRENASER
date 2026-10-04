@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -143,6 +143,8 @@ describe('EL SDK NATIVO ESTA AISLADO EN UN SOLO FICHERO', () => {
   */
 
   const PAQUETE = '@100mslive/react-native-hms';
+  /** El complemento de video de 100ms (desenfoque y fondo virtual). */
+  const COMPLEMENTO = '@100mslive/react-native-video-plugin';
 
   /** Otros proveedores. Estos siguen prohibidos: no se ha aprobado ninguno. */
   const PROHIBIDOS = [
@@ -167,6 +169,28 @@ describe('EL SDK NATIVO ESTA AISLADO EN UN SOLO FICHERO', () => {
     assert.match(String(version), /^\d+\.\d+\.\d+$/);
   });
 
+  it('el complemento de video tambien, con version fija y compatible', () => {
+    const version = paquete().dependencies?.[COMPLEMENTO];
+    assert.equal(typeof version, 'string', 'falta el complemento de efectos');
+    assert.match(String(version), /^\d+\.\d+\.\d+$/, 'el complemento lleva un rango');
+    // El complemento declara con que SDK funciona (`>=1.12.0 <2.0.0`). Si
+    // alguien sube el SDK a la 2 sin mirar el complemento, esto salta.
+    const instalado = JSON.parse(
+      readFileSync(
+        join(MOVIL, '..', '..', 'node_modules', COMPLEMENTO, 'package.json'),
+        'utf8',
+      ),
+    ) as { version: string; peerDependencies?: Record<string, string>; scripts?: Record<string, string> };
+    assert.equal(instalado.version, version);
+    assert.equal(instalado.peerDependencies?.[PAQUETE], '>=1.12.0 <2.0.0');
+    const [mayor, menor] = String(paquete().dependencies?.[PAQUETE]).split('.').map(Number);
+    assert.ok(mayor === 1 && (menor ?? 0) >= 12, 'el SDK instalado no es el que pide el complemento');
+    // Un paquete que ejecuta codigo al instalarse no entra sin que alguien lo lea.
+    for (const gancho of ['preinstall', 'install', 'postinstall']) {
+      assert.equal(instalado.scripts?.[gancho], undefined, `el complemento trae un script «${gancho}»`);
+    }
+  });
+
   it('ningun otro proveedor se ha colado', () => {
     const instalados = new Set([
       ...Object.keys(paquete().dependencies ?? {}),
@@ -188,14 +212,26 @@ describe('EL SDK NATIVO ESTA AISLADO EN UN SOLO FICHERO', () => {
       'live/reintentos.ts',
       'live/registro100ms.ts',
       'live/registro100ms.native.ts',
+      'live/efectosDeVideo.ts',
+      'live/calidadDeVideo.ts',
+      'live/fondosVirtuales.ts',
+      'live/reaccionesEnVivo.ts',
+      'live/burbujas.ts',
+      'live/ventanaDeChat.ts',
+      'live/suscripcionViva.ts',
       'hooks/useSesionDeDirecto.ts',
       'screens/LiveScreen.tsx',
       'components/crear/ModoVivo.tsx',
+      'components/live/ChatDeDirecto.tsx',
+      'components/live/ReaccionesDeDirecto.tsx',
+      'components/live/HojaDeEfectos.tsx',
+      'components/live/HojaDeCalidad.tsx',
+      'services/directoEnVivo.ts',
     ]) {
       // Sin comentarios: varios ficheros NOMBRAN el paquete en su cabecera para
       // explicar donde vive. Documentarlo no es importarlo.
       const texto = sinComentarios(fuente(rel));
-      for (const nombre of [PAQUETE, ...PROHIBIDOS]) {
+      for (const nombre of [PAQUETE, COMPLEMENTO, ...PROHIBIDOS]) {
         // Barra DOBLE en `\\s`: dentro de una plantilla, una sola se queda en
         // una `s` suelta, el patron buscaba «froms» y esta comprobacion no
         // podia fallar nunca (corregido el 23/09/2026, comprobado importando
@@ -209,6 +245,35 @@ describe('EL SDK NATIVO ESTA AISLADO EN UN SOLO FICHERO', () => {
       sinComentarios(fuente('live/salaDeVideo100ms.ts')),
       new RegExp(`from '${PAQUETE.replace(/[/@]/g, '\$&')}'`),
     );
+    assert.match(
+      sinComentarios(fuente('live/salaDeVideo100ms.ts')),
+      new RegExp(`from '${COMPLEMENTO.replace(/[/@]/g, '\$&')}'`),
+      'el complemento de efectos tiene que entrar por el adaptador',
+    );
+  });
+
+  it('NINGUN otro fichero de `src` importa nada de 100ms', () => {
+    /*
+      La lista de arriba nombra los ficheros que mas tentacion tienen. Esta
+      recorre todos: un componente nuevo que importe `HmsView` o el complemento
+      no esta en ninguna lista, y es justo el que hay que cazar.
+    */
+    const culpables: string[] = [];
+    const recorrer = (carpeta: string) => {
+      for (const entrada of readdirSync(carpeta, { withFileTypes: true })) {
+        const ruta = join(carpeta, entrada.name);
+        if (entrada.isDirectory()) {
+          recorrer(ruta);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(entrada.name) || /\.test\./.test(entrada.name)) continue;
+        if (ruta.endsWith(join('live', 'salaDeVideo100ms.ts'))) continue;
+        const texto = sinComentarios(readFileSync(ruta, 'utf8'));
+        if (/(from|require\()\s*['"]@100mslive\//.test(texto)) culpables.push(ruta);
+      }
+    };
+    recorrer(SRC);
+    assert.deepEqual(culpables, [], `importan 100ms fuera del adaptador: ${culpables.join(', ')}`);
   });
 
   it('se carga TARDE y SOLO en un aparato', () => {
@@ -267,7 +332,19 @@ describe('los modulos probados con Node siguen sin importar nada', () => {
       (`ComponentType` de React), el 23/09/2026. Cualquier otro `import`, aunque
       sea de un solo valor, sigue fallando aqui.
     */
-    for (const rel of ['live/salaDeVideo.ts', 'live/maquinaDeDirecto.ts', 'live/reintentos.ts']) {
+    for (const rel of [
+      'live/salaDeVideo.ts',
+      'live/maquinaDeDirecto.ts',
+      'live/reintentos.ts',
+      // Los de este bloque (04/10/2026). Si alguno importara un valor, las
+      // baterias que los EJECUTAN con varios clientes dejarian de arrancar.
+      'live/reaccionesEnVivo.ts',
+      'live/burbujas.ts',
+      'live/ventanaDeChat.ts',
+      'live/suscripcionViva.ts',
+      'live/efectosDeVideo.ts',
+      'live/calidadDeVideo.ts',
+    ]) {
       const importaciones = [...fuente(rel).matchAll(/^\s*import\s.+$/gm)]
         .map((m) => m[0])
         .filter((linea) => !/^\s*import\s+type\s/.test(linea));
