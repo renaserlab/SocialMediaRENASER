@@ -132,6 +132,11 @@ export function ForgotPasswordScreen() {
               </Text>
 
               <Input
+                // La misma caja que en el acceso, de donde se viene.
+                forma="destacada"
+                icono="mail"
+                inputMode="email"
+                autoCorrect={false}
                 label={t('auth.email')}
                 value={email}
                 onChangeText={(texto) => {

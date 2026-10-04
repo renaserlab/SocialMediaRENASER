@@ -6,7 +6,7 @@ import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
-import { Input } from '@/components/Input';
+import { CampoDeContrasena } from '@/components/CampoDeContrasena';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -124,7 +124,10 @@ export function ResetPasswordScreen() {
             {t('auth.newPasswordBody')}
           </Text>
 
-          <Input
+          {/* Con su ojo: una contraseña nueva escrita a ciegas dos veces es
+              la forma más fácil de guardar una que no se sabe cuál es. */}
+          <CampoDeContrasena
+            forma="destacada"
             label={t('auth.newPassword')}
             value={password}
             onChangeText={(texto) => {
@@ -132,11 +135,10 @@ export function ResetPasswordScreen() {
               setError(null);
             }}
             placeholder={t('auth.newPasswordPlaceholder', { min: MIN_LENGTH })}
-            secureTextEntry
-            autoCapitalize="none"
             autoComplete="new-password"
           />
-          <Input
+          <CampoDeContrasena
+            forma="destacada"
             label={t('auth.repeatPassword')}
             value={repeat}
             onChangeText={(texto) => {
@@ -144,8 +146,6 @@ export function ResetPasswordScreen() {
               setError(null);
             }}
             placeholder={t('auth.repeatPasswordPlaceholder')}
-            secureTextEntry
-            autoCapitalize="none"
             autoComplete="new-password"
             error={error ?? undefined}
             onSubmitEditing={() => void submit()}

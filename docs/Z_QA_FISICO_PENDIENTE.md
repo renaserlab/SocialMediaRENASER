@@ -2304,3 +2304,26 @@ nueva.
 - [ ] Cerrar sesión en un teléfono: deja de recibir los avisos de esa cuenta.
 - [ ] El icono de la aplicación lleva el número de lo no leído y se limpia al
       abrir la bandeja.
+
+**Entrar y crear la cuenta (04/10/2026).** Rehechas tras verlas en el
+navegador; en web se comprobaron los dos temas, el foco, los errores y el
+requisito de la contraseña. En teléfono falta:
+
+- [ ] La marca llega una vez (crece y suelta una onda) y no se queda animada.
+- [ ] «Siguiente» en el teclado pasa de un campo al otro sin cerrarlo; «Ir» en
+      la contraseña entra o crea la cuenta.
+- [ ] El gestor de contraseñas del teléfono ofrece rellenar el acceso y
+      generar una contraseña en el alta.
+- [ ] El ojo muestra y oculta la contraseña sin cambiar la letra ni mover el
+      cursor (Android).
+- [ ] Enviar con un campo mal: ese campo se mueve un instante a los lados y
+      queda el motivo debajo. Con «reducir movimiento» no se mueve.
+- [ ] Al enfocar un campo se ve su halo (Android 9 o superior; en versiones
+      anteriores solo cambia el borde).
+- [ ] Al entrar o crear la cuenta con éxito se nota una vibración corta.
+- [ ] En el alta, «Mínimo 6 caracteres» pasa de círculo vacío a círculo
+      marcado al llegar a seis.
+- [ ] «Términos» y «Política de Privacidad» abren su pantalla; al volver, lo
+      escrito sigue ahí.
+- [ ] Con el teclado abierto en un teléfono pequeño se llega al botón
+      desplazando; nada queda tapado.
