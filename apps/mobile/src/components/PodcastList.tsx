@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { Text } from '@/components/Text';
 import { usePodcastUnlock } from '@/hooks/usePodcastUnlock';
@@ -122,7 +123,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
               </View>
 
               {onEdit && episode ? (
-                <Pressable
+                <Pulsable
                   onPress={() => onEdit(episode.id)}
                   hitSlop={10}
                   accessibilityRole="button"
@@ -130,7 +131,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                   style={styles.action}
                 >
                   <Feather name="edit-2" size={15} color={colors.textMuted} />
-                </Pressable>
+                </Pulsable>
               ) : null}
 
               {locked ? (
@@ -138,7 +139,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                   <Feather name="lock" size={17} color={colors.textMuted} />
                 </View>
               ) : playable ? (
-                <Pressable
+                <Pulsable
                   /*
                     UNA sola pulsacion. Elegir un episodio cambia el unico
                     `playingId`, asi que React desmonta el reproductor anterior
@@ -158,7 +159,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                     size={15}
                     color={colors.onPrimary}
                   />
-                </Pressable>
+                </Pulsable>
               ) : (
                 <View style={styles.action}>
                   <Feather name="clock" size={16} color={colors.textMuted} />

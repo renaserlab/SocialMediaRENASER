@@ -1,7 +1,8 @@
 import React from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import { notify } from '@/lib/confirm';
@@ -69,7 +70,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
   return (
     <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
       {/* Zona pulsable detras del contenido: evita anidar botones en web. */}
-      <Pressable
+      <Pulsable
         onPress={onPress}
         style={StyleSheet.absoluteFill}
         accessibilityRole="button"
@@ -103,7 +104,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
         </View>
 
         {onEdit ? (
-          <Pressable
+          <Pulsable
             onPress={onEdit}
             hitSlop={10}
             accessibilityRole="button"
@@ -111,12 +112,12 @@ export function EventCard({ event, onPress, onEdit }: Props) {
             style={styles.edit}
           >
             <Feather name="edit-2" size={16} color={colors.textMuted} />
-          </Pressable>
+          </Pulsable>
         ) : null}
       </View>
 
       {event.whatsappUrl ? (
-        <Pressable
+        <Pulsable
           onPress={() => void openWhatsApp()}
           style={[styles.whatsapp, { borderColor: colors.border }]}
           accessibilityRole="button"
@@ -126,7 +127,7 @@ export function EventCard({ event, onPress, onEdit }: Props) {
           <Text variant="secondary" weight="700">
             {t('event.joinWhatsApp')}
           </Text>
-        </Pressable>
+        </Pulsable>
       ) : null}
     </View>
   );

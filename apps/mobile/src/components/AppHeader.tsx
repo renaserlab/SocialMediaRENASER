@@ -1,9 +1,10 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { ZLogo } from '@/components/ZLogo';
 import { spacing } from '@/theme/tokens';
@@ -67,7 +68,7 @@ export function AppHeader({
     <View style={[styles.row, { height: APP_HEADER_HEIGHT + insets.top, paddingTop: insets.top }]}>
       <View style={styles.side}>
         {back || onBack ? (
-          <Pressable
+          <Pulsable
             onPress={handleBack}
             hitSlop={12}
             accessibilityLabel={t('common.back')}
@@ -75,7 +76,7 @@ export function AppHeader({
             style={styles.backButton}
           >
             <Feather name="chevron-left" size={24} color={colors.text} />
-          </Pressable>
+          </Pulsable>
         ) : null}
       </View>
       {/* La marca se pinta con su logo; el resto de pantallas llevan su
@@ -92,7 +93,7 @@ export function AppHeader({
       )}
       <View style={[styles.side, { alignItems: 'flex-end' }]}>
         {rightIcon ? (
-          <Pressable
+          <Pulsable
             onPress={onRightPress}
             hitSlop={12}
             accessibilityLabel={rightLabel ?? t('common.rightAction')}
@@ -107,7 +108,7 @@ export function AppHeader({
                 style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}
               />
             ) : null}
-          </Pressable>
+          </Pulsable>
         ) : null}
       </View>
     </View>

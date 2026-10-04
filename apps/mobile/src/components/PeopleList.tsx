@@ -1,9 +1,10 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Button } from '@/components/Button';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { StateView } from '@/components/StateView';
@@ -127,7 +128,7 @@ export function PeopleList({
       contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: espacioInferior + spacing.lg }}
       renderItem={({ item }: { item: PersonRow }) => (
         <View style={[styles.row, { borderBottomColor: colors.border }]}>
-          <Pressable
+          <Pulsable
             style={styles.info}
             onPress={() => (onPersonPress ? onPersonPress(item) : irAlPerfil(router, item.id))}
             accessibilityRole="button"
@@ -143,7 +144,7 @@ export function PeopleList({
               <Text variant="body" weight="700" numberOfLines={1}>{item.fullName}</Text>
               <Text variant="secondary" color={colors.textMuted} numberOfLines={1}>{item.username}</Text>
             </View>
-          </Pressable>
+          </Pulsable>
           {onToggleFollow && item.id !== currentUserId ? (
             <Button
               label={item.isFollowing ? t('profile.unfollow') : t('profile.follow')}

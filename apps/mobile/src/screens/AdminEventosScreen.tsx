@@ -116,6 +116,9 @@ export function AdminEventosScreen() {
       {estado === 'empty' ? (
         <StateView
           state="empty"
+          // El icono dice de qué vacío se trata: un candado no es lo mismo que
+          // una cola al día.
+          icon={sinPermiso ? 'lock' : noDisponible ? 'clock' : 'check-circle'}
           title={
             noDisponible
               ? t('misEventos.noDisponible')
@@ -177,10 +180,20 @@ export function AdminEventosScreen() {
         />
       ) : null}
 
+      {/*
+        SIN PERMISO NO SE OFRECEN LAS OTRAS COLAS. Quien llega aquí sin ser
+        curaduría lee «esta cola no es para tu cuenta» y debajo tenía tres
+        botones más —reseñas, productos, postulaciones— que tampoco puede
+        usar: cada uno llevaba a otra pantalla que decía lo mismo. Un botón
+        que solo sirve para rebotar no es una salida.
+      */}
+      {sinPermiso ? null : (
+        <>
       {/* Moderar reseñas es otra cola, y se llega desde aquí. */}
       <Button
         label={t('moderacionResenas.tituloPanel' as TranslationKey)}
         variant="secondary"
+        icon="message-square"
         onPress={() => router.push('/admin/resenas' as never)}
       />
 
@@ -190,13 +203,17 @@ export function AdminEventosScreen() {
       <Button
         label={t('productosAdmin.tituloPanel' as TranslationKey)}
         variant="secondary"
+        icon="shopping-bag"
         onPress={() => router.push('/admin/productos' as never)}
       />
       <Button
         label={t('productosAdmin.tituloAdmision' as TranslationKey)}
         variant="secondary"
+        icon="user-check"
         onPress={() => router.push('/admin/productos/admision' as never)}
       />
+        </>
+      )}
     </AppScreen>
   );
 }

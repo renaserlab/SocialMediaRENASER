@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -11,6 +10,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Avatar } from '@/components/Avatar';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';
@@ -352,7 +352,7 @@ export function PersonasParaTi() {
                     { borderColor: colors.border, backgroundColor: colors.surface },
                   ]}
                 >
-                  <Pressable
+                  <Pulsable
                     onPress={() => verPerfil(persona)}
                     accessibilityRole="button"
                     accessibilityLabel={t('post.viewProfileOf', { nombre: persona.fullName })}
@@ -362,7 +362,7 @@ export function PersonasParaTi() {
                       image={profileImageUrl(persona.avatarPath) ?? null}
                       name={persona.fullName}
                     />
-                  </Pressable>
+                  </Pulsable>
 
                   <Text variant="body" weight="700" numberOfLines={1} style={styles.nombre}>
                     {persona.fullName}
@@ -387,7 +387,7 @@ export function PersonasParaTi() {
                     style={styles.accion}
                   />
 
-                  <Pressable
+                  <Pulsable
                     onPress={() => setDetalle(persona)}
                     hitSlop={8}
                     accessibilityRole="button"
@@ -398,7 +398,7 @@ export function PersonasParaTi() {
                     <Text variant="secondary" color={colors.textMuted}>
                       {t('reco.why')}
                     </Text>
-                  </Pressable>
+                  </Pulsable>
                 </View>
               );
             })}

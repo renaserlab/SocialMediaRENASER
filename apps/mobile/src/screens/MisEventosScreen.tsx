@@ -1,11 +1,13 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { ListRow } from '@/components/ListRow';
+import { Pulsable } from '@/components/Pulsable';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { claveDelEstado } from '@/lib/admisionDeEvento';
@@ -170,10 +172,10 @@ export function MisEventosScreen() {
 
       {estado === 'content'
         ? eventos.map((evento) => (
-            <Pressable
+            <Pulsable
               key={evento.id}
               onPress={() => router.push(`/editar-evento/${evento.id}` as never)}
-              style={[styles.fila, { borderColor: colors.border }]}
+              style={[styles.fila, { borderColor: colors.border, backgroundColor: colors.surface }]}
               accessibilityRole="button"
               accessibilityLabel={evento.title}
             >
@@ -216,7 +218,7 @@ export function MisEventosScreen() {
                 ) : null}
               </View>
               <Feather name="chevron-right" size={18} color={colors.textMuted} />
-            </Pressable>
+            </Pulsable>
           ))
         : null}
 
@@ -240,63 +242,49 @@ export function MisEventosScreen() {
       ) : null}
 
       {/*
+        LAS BANDEJAS, COMO UNA LISTA. Eran cuatro líneas de texto gris con un
+        icono, centradas y sueltas: no parecían botones y se leían como una
+        nota al pie. Ahora son filas, con su icono, su flecha y la misma
+        respuesta al toque que el resto de las listas de la aplicación.
+      */}
+      {/*
         LA COLA DE REVISION. Se ofrece a todo el mundo y el servidor decide:
         quien no sea curaduria recibe un 403 y la pantalla lo dice. Esconderla
         seria comodidad, no permiso, y ademas dejaria sin puerta a quien SI
         puede revisar.
       */}
-      <Pressable
+      <ListRow
+        title={t('admisionEvento.cola')}
+        leftIcon="inbox"
+        rightIcon="chevron-right"
         onPress={() => router.push('/admin/eventos' as never)}
-        style={styles.cola}
-        accessibilityRole="button"
-        accessibilityLabel={t('admisionEvento.cola')}
-      >
-        <Feather name="inbox" size={16} color={colors.textMuted} />
-        <Text variant="caption" color={colors.textMuted}>
-          {t('admisionEvento.cola')}
-        </Text>
-      </Pressable>
+      />
 
       {/* Las otras dos bandejas de plataforma, con la misma regla: se ofrecen y
           el servidor contesta. La de posventa la puede abrir quien gestiona
           casos; la financiera, solo quien puede mover dinero. */}
-      <Pressable
+      <ListRow
+        title={t('posventaAdmin.tituloBandeja')}
+        leftIcon="life-buoy"
+        rightIcon="chevron-right"
         onPress={() => router.push('/admin/posventa' as never)}
-        style={styles.cola}
-        accessibilityRole="button"
-        accessibilityLabel={t('posventaAdmin.tituloBandeja')}
-      >
-        <Feather name="life-buoy" size={16} color={colors.textMuted} />
-        <Text variant="caption" color={colors.textMuted}>
-          {t('posventaAdmin.tituloBandeja')}
-        </Text>
-      </Pressable>
+      />
 
-      <Pressable
+      <ListRow
+        title={t('finanzasEvento.tituloPanel')}
+        leftIcon="dollar-sign"
+        rightIcon="chevron-right"
         onPress={() => router.push('/admin/finanzas' as never)}
-        style={styles.cola}
-        accessibilityRole="button"
-        accessibilityLabel={t('finanzasEvento.tituloPanel')}
-      >
-        <Feather name="dollar-sign" size={16} color={colors.textMuted} />
-        <Text variant="caption" color={colors.textMuted}>
-          {t('finanzasEvento.tituloPanel')}
-        </Text>
-      </Pressable>
+      />
 
       {/* La supervision de politicas: SOLO MIRAR. Quien no administra recibe un
           403 y la pantalla lo dice, igual que las tres de arriba. */}
-      <Pressable
+      <ListRow
+        title={t('politicasAdmin.tituloPanel' as TranslationKey)}
+        leftIcon="file-text"
+        rightIcon="chevron-right"
         onPress={() => router.push('/admin/politicas' as never)}
-        style={styles.cola}
-        accessibilityRole="button"
-        accessibilityLabel={t('politicasAdmin.tituloPanel' as TranslationKey)}
-      >
-        <Feather name="file-text" size={16} color={colors.textMuted} />
-        <Text variant="caption" color={colors.textMuted}>
-          {t('politicasAdmin.tituloPanel' as TranslationKey)}
-        </Text>
-      </Pressable>
+      />
     </AppScreen>
   );
 }
@@ -315,11 +303,4 @@ const styles = StyleSheet.create({
   crece: { flex: 1, gap: 4 },
   estado: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   punto: { width: 8, height: 8, borderRadius: 4 },
-  cola: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    minHeight: 44,
-  },
 });

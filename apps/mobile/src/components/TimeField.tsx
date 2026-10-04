@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -28,7 +29,7 @@ export function TimeField({ label, value, onChange, placeholder = '--:--' }: Tim
     <View style={styles.container}>
       {label ? <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text> : null}
 
-      <Pressable
+      <Pulsable
         onPress={() => setOpen(true)}
         style={[styles.field, { borderColor: colors.border, backgroundColor: colors.background }]}
         accessibilityRole="button"
@@ -43,7 +44,7 @@ export function TimeField({ label, value, onChange, placeholder = '--:--' }: Tim
           {value ? toHumanTime(value) : placeholder}
         </Text>
         <Feather name="clock" size={18} color={colors.textMuted} />
-      </Pressable>
+      </Pulsable>
 
       {open ? (
         <DateTimePicker

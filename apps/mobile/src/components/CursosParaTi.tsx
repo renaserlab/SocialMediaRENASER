@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -12,6 +11,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { SectionTitle } from '@/components/SectionTitle';
 import { Skeleton } from '@/components/Skeleton';
 import { Text } from '@/components/Text';
@@ -368,7 +368,7 @@ export function CursosParaTi() {
                       anidar «No me interesa» dentro del de la tarjeta rompe la
                       hidratacion.
                     */}
-                    <Pressable
+                    <Pulsable
                       onPress={() => abrir(curso, rank)}
                       style={StyleSheet.absoluteFill}
                       accessibilityRole="button"
@@ -408,7 +408,7 @@ export function CursosParaTi() {
                         ) : null}
                       </View>
 
-                      <Pressable
+                      <Pulsable
                         onPress={() => noInteresa(curso, rank)}
                         hitSlop={8}
                         accessibilityRole="button"
@@ -419,7 +419,7 @@ export function CursosParaTi() {
                         <Text variant="caption" color={colors.textMuted}>
                           {t('reco.notInterested')}
                         </Text>
-                      </Pressable>
+                      </Pulsable>
                     </View>
                   </View>
                 );
