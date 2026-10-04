@@ -53,7 +53,7 @@ from app.modules.live.schemas import (
     ReactionFlush,
     ReactionTotals,
 )
-from app.modules.notifications.push import encolar_push
+from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import esquema
 from app.modules.social_graph.models import Follow, UserBlock
@@ -331,7 +331,9 @@ async def _avisar_de_que_empieza(
         background,
         user_ids=destinatarios,
         notification_type=avisos.TIPO,
-        actor_name=anfitrion.full_name if anfitrion else None,
+        actor_name=(
+            nombre_visible(anfitrion.full_name, anfitrion.username) if anfitrion else None
+        ),
         data={"type": avisos.TIPO, "liveId": sesion.id},
     )
 

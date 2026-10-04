@@ -47,11 +47,12 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.notifications import deduplicacion, esquema
 from app.modules.notifications.models import Notification
+from app.modules.social_graph.models import UserBlock
 
 logger = logging.getLogger("renaser.notifications")
 
@@ -79,6 +80,44 @@ TIPOS_IDEMPOTENTES: frozenset[str] = frozenset(
         "session_completed",
     }
 )
+
+
+#: Los avisos SOCIALES: existen porque otra persona ha hecho algo contigo o
+#: con lo tuyo. Con un bloqueo entre los dos —en cualquier sentido— no se
+#: escriben, y como el push solo sale si el aviso se escribio, tampoco suenan.
+#:
+#: POR QUE HACE FALTA AQUI (auditoria del 04/10/2026). Mensajes, menciones,
+#: pedir una sesion y los directos ya miraban el bloqueo, cada uno en su sitio.
+#: Seguir, dar me gusta, comentar, responder y dar me gusta a un comentario NO:
+#: quien estaba bloqueado podia seguir haciendolo por la API, y a quien le
+#: bloqueo le sonaba el telefono con su nombre. Bloquear a alguien es,
+#: precisamente, dejar de saber de el.
+#:
+#: SE ENUMERAN EN POSITIVO, y fuera quedan a proposito:
+#:   · los de la agenda (`session_*`): que te cancelen una sesion ya acordada
+#:     te afecta aunque hayas bloqueado despues a esa persona;
+#:   · compras, devoluciones y decisiones de la plataforma: no son sociales.
+#:
+#: ESTO NO IMPIDE LA ACCION, solo el aviso. Si un bloqueado puede o no seguir
+#: o comentar es otra regla, y no se cambia desde aqui.
+TIPOS_QUE_EL_BLOQUEO_CALLA: frozenset[str] = frozenset(
+    {"follow", "like", "comment", "comment_reply", "comment_like", "post_mention"}
+)
+
+
+async def _hay_bloqueo(db: AsyncSession, uno: str, otro: str) -> bool:
+    """Si alguno de los dos ha bloqueado al otro. Una consulta, una fila."""
+    fila = await db.scalar(
+        select(UserBlock.blocker_id)
+        .where(
+            or_(
+                and_(UserBlock.blocker_id == uno, UserBlock.blocked_id == otro),
+                and_(UserBlock.blocker_id == otro, UserBlock.blocked_id == uno),
+            )
+        )
+        .limit(1)
+    )
+    return fila is not None
 
 
 def clave_de_aviso(
@@ -140,6 +179,14 @@ async def add_notification(
     """
     # No notificar acciones sobre uno mismo.
     if actor_id is not None and actor_id == user_id:
+        return False
+
+    # Ni lo que hace alguien con quien hay un bloqueo. Ver la constante.
+    if (
+        actor_id is not None
+        and type in TIPOS_QUE_EL_BLOQUEO_CALLA
+        and await _hay_bloqueo(db, user_id, actor_id)
+    ):
         return False
 
     clave = clave_de_aviso(

@@ -154,6 +154,19 @@ def canal_android(nombre: str) -> str:
     return f"{nombre}{SUFIJO_DE_CANAL}"
 
 
+def nombre_visible(full_name: str | None, username: str | None) -> str | None:
+    """Como se nombra a quien provoca un aviso: su nombre, o su usuario.
+
+    El aviso tiene que decir QUIEN: «Ana empezó a seguirte» se puede decidir
+    desde la pantalla bloqueada; «Alguien empezó a seguirte» no. Casi todos los
+    sitios pasaban solo `full_name`, y un perfil con el nombre vacio salia como
+    «Alguien» aunque tuviera usuario. Ahora cae al usuario antes que al
+    generico. `None` deja el «Alguien» de la plantilla: mejor eso que ningun
+    aviso.
+    """
+    return (full_name or "").strip() or (username or "").strip() or None
+
+
 def build_message(notification_type: str, actor_name: str | None) -> tuple[str, str] | None:
     """Título y cuerpo del aviso, o None si el tipo no tiene texto definido."""
     template = TEMPLATES.get(notification_type)
