@@ -123,14 +123,18 @@ export function AvisoDeDirectoSeguido() {
         },
       ]}
     >
+      {/*
+        LA TARJETA NO ES UN BOTÓN: lleva DOS, uno al lado del otro. Antes el
+        de cerrar iba DENTRO del que abre el directo, y en web un botón dentro
+        de otro es HTML inválido (React lo avisa como error de hidratación) y
+        cerrar podía acabar abriendo el directo.
+      */}
+      <View style={[styles.tarjeta, { backgroundColor: media.surface, borderColor: media.border }]}>
       <Pressable
         onPress={ver}
         accessibilityRole="button"
         accessibilityLabel={t('live.noticeA11y', { actor: emision.anfitrionNombre })}
-        style={({ pressed }) => [
-          styles.tarjeta,
-          { backgroundColor: media.surface, borderColor: media.border, opacity: pressed ? 0.9 : 1 },
-        ]}
+        style={({ pressed }) => [styles.cuerpo, { opacity: pressed ? 0.9 : 1 }]}
       >
         <View style={[styles.aro, { borderColor: media.danger }]}>
           <Avatar size={40} image={emision.anfitrionAvatarUrl} name={emision.anfitrionNombre} />
@@ -157,17 +161,18 @@ export function AvisoDeDirectoSeguido() {
             {t('live.watchNow')}
           </Text>
         </View>
-
-        <Pressable
-          onPress={cerrar}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.close')}
-          style={styles.cerrar}
-        >
-          <Feather name="x" size={16} color={media.textMuted} />
-        </Pressable>
       </Pressable>
+
+      <Pressable
+        onPress={cerrar}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel={t('common.close')}
+        style={styles.cerrar}
+      >
+        <Feather name="x" size={16} color={media.textMuted} />
+      </Pressable>
+      </View>
     </Animated.View>
   );
 }
@@ -182,6 +187,8 @@ const styles = StyleSheet.create({
     zIndex: 50,
     elevation: 12,
   },
+  // Lo que abre el directo: ocupa todo menos el botón de cerrar.
+  cuerpo: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   tarjeta: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -2,19 +2,22 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { AccesoDeCreador } from '@/components/AccesoDeCreador';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
+import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
+import { Pulsable } from '@/components/Pulsable';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { useTranslation } from '@/i18n/useTranslation';
 import { etiquetaDePrecio } from '@/lib/dinero';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import type { FiltrosDeCatalogo } from '@/repositories/LearningRepository';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
@@ -407,52 +410,67 @@ export function CursosScreen() {
               <StateView state="empty" description={t('cursos.catalogoVacio')} />
             ) : (
               <View style={styles.rejilla}>
-                {catalogo.map((curso) => (
-                  <Pressable
-                    key={curso.id}
-                    style={({ pressed }) => [
-                      styles.tarjeta,
-                      { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-                    ]}
-                    onPress={() => router.push(`/course/${curso.id}`)}
-                    accessibilityRole="button"
-                    accessibilityLabel={curso.title}
-                  >
-                    <View>
-                      {curso.coverUrl ? (
-                        <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
-                      ) : (
-                        <View style={[styles.portada, { backgroundColor: colors.surface }]} />
-                      )}
-                      <Pressable
+                {catalogo.map((curso) => {
+                  const guardado = idsGuardados.has(curso.id);
+                  return (
+                    /*
+                      LA TARJETA NO ES UN BOTÓN: lleva DOS, hermanos. Antes el
+                      marcador iba DENTRO del que abre el curso, y en web un
+                      botón dentro de otro es HTML inválido —React lo avisaba
+                      como error de hidratación al entrar en Cursos— y guardar
+                      podía acabar abriendo el curso.
+                    */
+                    <View key={curso.id} style={styles.tarjeta}>
+                      <Pulsable
+                        style={styles.cuerpoDeTarjeta}
+                        onPress={() => router.push(`/course/${curso.id}`)}
+                        accessibilityRole="button"
+                        accessibilityLabel={curso.title}
+                      >
+                        {curso.coverUrl ? (
+                          <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                        ) : (
+                          <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                        )}
+                        <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
+                          {curso.title}
+                        </Text>
+                        {/* Precio y moneda son columnas reales. Valoración, número de
+                            alumnos, duración y nivel NO lo son, y por eso no están. */}
+                        <Text style={[styles.precio, { color: colors.textMuted }]}>
+                          {etiquetaDePrecio(curso.priceMinor, curso.currency)}
+                        </Text>
+                      </Pulsable>
+                      <Pulsable
                         onPress={() => void alternarGuardado(curso)}
                         hitSlop={10}
-                        style={styles.marcador}
+                        escala={ESCALA_AL_PULSAR.icono}
+                        haptica="ligera"
+                        // El fondo sale del tema: antes era un blanco fijo y,
+                        // en oscuro, el marcador encendido —blanco— no se veía.
+                        style={[styles.marcador, { backgroundColor: colors.glassSurfaceStrong }]}
                         accessibilityRole="button"
-                        accessibilityState={{ selected: idsGuardados.has(curso.id) }}
+                        accessibilityState={{ selected: guardado }}
                         accessibilityLabel={
-                          idsGuardados.has(curso.id)
-                            ? t('cursos.quitarDeGuardados')
-                            : t('cursos.guardar')
+                          guardado ? t('cursos.quitarDeGuardados') : t('cursos.guardar')
                         }
                       >
-                        <Feather
-                          name={idsGuardados.has(curso.id) ? 'bookmark' : 'bookmark'}
-                          size={18}
-                          color={idsGuardados.has(curso.id) ? colors.text : colors.textMuted}
-                        />
-                      </Pressable>
+                        {/*
+                          Relleno si está guardado, contorno si no. Antes los
+                          dos estados eran el MISMO dibujo en dos grises: el
+                          color era lo único que decía si estaba guardado.
+                        */}
+                        <IconoQueSeEnciende activo={guardado}>
+                          {guardado ? (
+                            <MaterialCommunityIcons name="bookmark" size={18} color={colors.text} />
+                          ) : (
+                            <Feather name="bookmark" size={18} color={colors.textMuted} />
+                          )}
+                        </IconoQueSeEnciende>
+                      </Pulsable>
                     </View>
-                    <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
-                      {curso.title}
-                    </Text>
-                    {/* Precio y moneda son columnas reales. Valoración, número de
-                        alumnos, duración y nivel NO lo son, y por eso no están. */}
-                    <Text style={[styles.precio, { color: colors.textMuted }]}>
-                      {etiquetaDePrecio(curso.priceMinor, curso.currency)}
-                    </Text>
-                  </Pressable>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -524,14 +542,14 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
   },
-  tarjeta: { width: '47%', gap: 4 },
+  tarjeta: { width: '47%' },
+  cuerpoDeTarjeta: { gap: 4 },
   marcador: {
     position: 'absolute',
     top: 6,
     right: 6,
     padding: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.85)',
   },
   carrusel: { gap: spacing.sm, paddingHorizontal: spacing.md },
   guardado: { width: 160, gap: 4 },
