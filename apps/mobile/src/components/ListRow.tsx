@@ -1,7 +1,8 @@
 import React from 'react';
-import { Pressable, StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -33,30 +34,14 @@ export function ListRow({
   const { colors } = useAppTheme();
   const accent = destructive ? colors.danger : colors.text;
 
-  const RowContainer = onPress ? Pressable : View;
-
-  /**
-   * Solo `Pressable` acepta `style` como funcion; `View` la descarta entera.
-   * Las filas sin `onPress` (p. ej. la de la cuenta en Ajustes) se quedaban sin
-   * padding ni borde y su icono aparecia desalineado respecto al resto.
-   */
   const baseStyle = [
     styles.container,
     { borderColor: colors.border, backgroundColor: colors.surface },
     style,
   ];
 
-  return (
-    <RowContainer
-      onPress={onPress}
-      accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityLabel={`${title}${subtitle ? `, ${subtitle}` : ''}`}
-      style={
-        onPress
-          ? ({ pressed }: { pressed?: boolean }) => [...baseStyle, { opacity: pressed ? 0.78 : 1 }]
-          : baseStyle
-      }
-    >
+  const contenido = (
+    <>
       <View style={styles.leftSection}>
         {leftComponent}
         {!leftComponent && leftIcon && (
@@ -73,7 +58,33 @@ export function ListRow({
           <Feather name={rightIcon} size={18} color={colors.textMuted} />
         )}
       </View>
-    </RowContainer>
+    </>
+  );
+
+  // Una fila que no lleva a ningún sitio no responde al dedo: animarla sería
+  // prometer que se puede pulsar (p. ej. la de la cuenta en Ajustes).
+  const etiqueta = `${title}${subtitle ? `, ${subtitle}` : ''}`;
+  if (!onPress) {
+    return (
+      <View accessibilityLabel={etiqueta} style={baseStyle}>
+        {contenido}
+      </View>
+    );
+  }
+
+  return (
+    <Pulsable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={etiqueta}
+      // Una fila ocupa todo el ancho: encoge menos que un botón para que no
+      // parezca que se despega de sus vecinas.
+      escala={0.985}
+      atenuar={0.7}
+      style={baseStyle}
+    >
+      {contenido}
+    </Pulsable>
   );
 }
 

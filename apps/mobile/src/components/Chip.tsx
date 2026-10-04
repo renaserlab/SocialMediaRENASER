@@ -1,8 +1,10 @@
 import React from 'react';
-import { Pressable, StyleSheet, ViewStyle } from 'react-native';
+import { StyleSheet, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -47,20 +49,21 @@ export function Chip({
   const { colors } = useAppTheme();
 
   return (
-    <Pressable
+    <Pulsable
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
+      escala={ESCALA_AL_PULSAR.chip}
+      opacidad={disabled ? 0.4 : 1}
       accessibilityRole={rol}
       // `checked` vale para los dos papeles; `selected` es el que leen algunos
       // lectores para los botones de opcion, asi que se mandan ambos.
       accessibilityState={{ checked: selected, selected, disabled }}
       accessibilityLabel={label}
-      style={({ pressed }: { pressed: boolean }) => [
+      style={[
         styles.base,
         {
           backgroundColor: selected ? colors.primary : colors.background,
           borderColor: selected ? colors.primary : colors.border,
-          opacity: disabled ? 0.4 : pressed ? 0.8 : 1,
         },
         style,
       ]}
@@ -72,12 +75,11 @@ export function Chip({
           color={selected ? colors.onPrimary : colors.text}
           style={styles.icon}
         />
-      )
-      }
+      )}
       <Text style={[styles.label, { color: selected ? colors.onPrimary : colors.text }]}>
         {label}
       </Text>
-    </Pressable>
+    </Pulsable>
   );
 }
 
