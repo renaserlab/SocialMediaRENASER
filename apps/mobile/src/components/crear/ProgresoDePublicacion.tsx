@@ -1,11 +1,18 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { sobreMedio } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
 import type { FaseDePublicacion } from '@/hooks/usePublicacion';
 import type { TranslationKey } from '@/i18n';
+import { DURACION } from '@/lib/movimiento';
 import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -47,6 +54,23 @@ type Props = {
  * duplicadas—. Aqui siempre hay tres cosas: en que va, cuanto lleva y una
  * salida (cancelar mientras sube, reintentar si fallo).
  */
+/**
+ * El relleno de la barra, que AVANZA en vez de saltar.
+ *
+ * El progreso de una subida llega a golpes —un 12 %, luego un 31 %— y pintado
+ * tal cual la barra daba tirones que parecian cuelgues. Aqui cada valor nuevo
+ * se alcanza deslizando; con «reducir movimiento» se pone en su sitio sin mas.
+ */
+function RellenoAnimado({ progreso, color }: { progreso: number; color: string }) {
+  const reducir = useReducedMotion();
+  const avance = useSharedValue(progreso);
+  useEffect(() => {
+    avance.value = reducir ? progreso : withTiming(progreso, { duration: DURACION.normal });
+  }, [progreso, avance, reducir]);
+  const animado = useAnimatedStyle(() => ({ width: `${Math.max(2, avance.value * 100)}%` }));
+  return <Animated.View style={[styles.relleno, { backgroundColor: color }, animado]} />;
+}
+
 export function ProgresoDePublicacion({
   fase,
   progreso,
@@ -125,12 +149,7 @@ export function ProgresoDePublicacion({
           ) : null}
         </View>
         <View style={[styles.pista, { backgroundColor: sobreOscuro ? media.glassBorder : c.borde }]}>
-          <View
-            style={[
-              styles.relleno,
-              { width: `${Math.max(2, progreso * 100)}%`, backgroundColor: c.texto },
-            ]}
-          />
+          <RellenoAnimado progreso={progreso} color={c.texto} />
         </View>
         {/*
           Cancelar solo mientras hay algo que cancelar. Durante «Publicando» ya
