@@ -298,6 +298,7 @@ export const es = {
   'common.delete': 'Eliminar',
   'common.publish': 'Publicar',
   'common.retry': 'Reintentar',
+  'common.undo': 'Deshacer',
   'common.loadMore': 'Cargar más',
   'common.loadMoreFailed': 'No pudimos cargar más. Toca para reintentar.',
   'common.loading': 'Cargando…',

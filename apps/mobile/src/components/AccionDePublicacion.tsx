@@ -2,7 +2,11 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
+import { ContadorAnimado } from '@/components/ContadorAnimado';
+import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -55,6 +59,12 @@ type Props = {
   /** Estado encendido: pinta el icono con `colorActivo`. */
   activo?: boolean;
   /**
+   * El servidor aún no ha confirmado el último toque. El icono ya enseña lo
+   * pedido, algo atenuado, y recupera su tinta al confirmarse. El botón NO se
+   * apaga: se puede seguir pulsando y la última intención es la que vale.
+   */
+  pendiente?: boolean;
+  /**
    * El color del estado encendido. Se pide explícito porque no es el mismo en
    * todas: «me gusta» es el color de peligro y guardar el primario.
    */
@@ -82,6 +92,7 @@ export function AccionDePublicacion({
   etiqueta,
   contador,
   activo = false,
+  pendiente = false,
   colorActivo,
   onPress,
   disabled,
@@ -97,24 +108,34 @@ export function AccionDePublicacion({
   return (
     <View style={styles.accion}>
       <View style={styles.fila}>
-        <Pressable
+        {/*
+          Se hunde bajo el dedo (`Pulsable`) y, al cambiar de estado, el icono
+          salta (`IconoQueSeEnciende`). Son dos respuestas distintas: la
+          primera dice «te he oído» y la segunda «ha cambiado».
+        */}
+        <Pulsable
           hitSlop={AREA_PULSABLE}
           onPress={onPress}
           disabled={disabled}
+          escala={ESCALA_AL_PULSAR.icono}
+          atenuar={0.7}
+          opacidad={disabled ? 0.4 : 1}
           accessibilityLabel={accessibilityLabel}
           accessibilityRole={accessibilityRole}
-          accessibilityState={accessibilityState}
+          accessibilityState={{ ...accessibilityState, disabled, busy: pendiente }}
         >
-          {/*
-            Encendido y con variante rellena: cambia la FORMA, no solo el
-            tono. Es lo que hace que se vea que quedo guardada.
-          */}
-          {activo && iconoRelleno ? (
-            <MaterialCommunityIcons name={iconoRelleno} size={20} color={colorDelIcono} />
-          ) : (
-            <Feather name={icono} size={19} color={colorDelIcono} />
-          )}
-        </Pressable>
+          <IconoQueSeEnciende activo={activo} pendiente={pendiente}>
+            {/*
+              Encendido y con variante rellena: cambia la FORMA, no solo el
+              tono. Es lo que hace que se vea que quedo guardada.
+            */}
+            {activo && iconoRelleno ? (
+              <MaterialCommunityIcons name={iconoRelleno} size={21} color={colorDelIcono} />
+            ) : (
+              <Feather name={icono} size={20} color={colorDelIcono} />
+            )}
+          </IconoQueSeEnciende>
+        </Pulsable>
 
         {/*
           Se pinta tambien el cero: «0 comentarios» es informacion, y que el
@@ -130,14 +151,15 @@ export function AccionDePublicacion({
               accessibilityRole="button"
               style={styles.contadorPulsable}
             >
-              <Text variant="secondary" weight="600" style={styles.contador}>
-                {contador}
-              </Text>
+              <ContadorAnimado valor={contador} variant="secondary" weight="600" style={styles.contador} />
             </Pressable>
           ) : (
-            <Text variant="secondary" weight="600" style={styles.contador}>
-              {contador}
-            </Text>
+            <ContadorAnimado
+              valor={contador}
+              variant="secondary"
+              weight="600"
+              style={styles.contador}
+            />
           )
         ) : null}
       </View>

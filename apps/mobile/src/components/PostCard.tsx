@@ -19,7 +19,8 @@ import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { compartirPublicacion } from '@/lib/enlaces';
-import { toast, toastConAccion } from '@/lib/toast';
+import { toast, toastConAccion, toastDeError } from '@/lib/toast';
+import { contadorOptimista, crearConsolidador } from '@/lib/intencionFinal';
 import { relacionDeVideo } from '@/lib/formaDelVideo';
 import { haptics } from '@/lib/haptics';
 import { bestVideoSource } from '@/lib/videoSource';
@@ -72,6 +73,16 @@ type Props = {
    */
   videoPreload?: boolean;
 };
+
+/**
+ * Republicar es un interruptor contra el servidor, como guardar. Vive fuera
+ * del componente porque la clave es la publicacion, no la tarjeta: la misma
+ * publicacion puede estar pintada dos veces.
+ */
+const republicaciones = crearConsolidador<void, { contador: number; confirmado: boolean }>(
+  (postId, republicar) =>
+    republicar ? PostRepository.repost(postId) : PostRepository.unrepost(postId),
+);
 
 /**
  * Tarjeta de publicacion.
@@ -140,11 +151,20 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
     acabo: si el servidor la rechazo, el store ya deshizo el cambio y lo que
     falta es decirlo en vez de dejar el icono volviendo solo a su sitio.
   */
+  const [guardando, setGuardando] = useState(false);
   const alternarGuardado = async () => {
     await requireAuth('auth.reasonSave', async () => {
-      const { guardada, ok } = await toggleSave(post.id);
+      // El icono cambia YA —lo pinta el store en este mismo toque— y la mano
+      // lo nota. Lo que tarda es el servidor, no la respuesta.
+      haptics.light();
+      setGuardando(true);
+      const { guardada, ok, absorbida } = await toggleSave(post.id);
+      // Un toque dentro de una rafaga que ya estaba en marcha: quien la
+      // empezo cuenta como acabo. Asi diez toques dan UN aviso.
+      if (absorbida) return;
+      setGuardando(false);
       if (!ok) {
-        notify(t('post.saveFailed'), t('common.tryAgain'));
+        toastDeError(t('post.saveFailed'));
         return;
       }
       if (guardada) {
@@ -154,46 +174,61 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           'bookmark',
         );
       } else {
-        toast(t('post.unsavedToast'));
+        // Quitar se puede deshacer: es volver a guardar, que el servidor ya
+        // admite las veces que haga falta.
+        toastConAccion(t('post.unsavedToast'), {
+          etiqueta: t('common.undo'),
+          alPulsar: () => void alternarGuardado(),
+        });
       }
     });
   };
 
+  /*
+    REPUBLICAR SIN CONGELAR EL BOTON.
+
+    Antes el boton se apagaba hasta que el servidor contestaba: un segundo
+    toque se perdia y parecia que la aplicacion no escuchaba. Ahora responde a
+    cada toque y al servidor va la intencion final, de una en una (el mismo
+    consolidador que guardar y reaccionar).
+  */
   const alternarRepost = async () => {
     await requireAuth('auth.reasonRepost', async () => {
-      if (republicando) return;
       const siguiente = !republicado;
-      setRepublicando(true);
-      setRepublicado(siguiente);
-      setRepostsCount((n) => Math.max(0, n + (siguiente ? 1 : -1)));
       haptics.light();
-      try {
-        /*
-          SIEMPRE el id de la publicacion ORIGINAL. `post.id` ya lo es incluso
-          en una tarjeta republicada, porque una republicacion no tiene id de
-          publicacion propio: por ahi no puede entrar una cadena.
-        */
-        if (siguiente) await PostRepository.repost(post.id);
-        else await PostRepository.unrepost(post.id);
-        /*
-          El aviso va AQUI, no junto al cambio optimista: se dice «republicada»
-          cuando el servidor ya lo acepto. Anunciarlo antes seria prometer algo
-          que el `catch` de abajo puede estar a punto de deshacer.
+      /*
+        SIEMPRE el id de la publicacion ORIGINAL. `post.id` ya lo es incluso
+        en una tarjeta republicada, porque una republicacion no tiene id de
+        publicacion propio: por ahi no puede entrar una cadena.
+      */
+      const peticion = republicaciones.pedir(post.id, siguiente, () => ({
+        confirmado: republicado,
+        contexto: { contador: repostsCount, confirmado: republicado },
+      }));
+      const { contador, confirmado } = peticion.contexto;
+      setRepublicado(siguiente);
+      setRepostsCount(contadorOptimista(contador, confirmado, siguiente));
+      if (peticion.absorbida) return;
 
-          Antes no habia ninguna señal: la unica forma de saber que habia
-          funcionado era recargar o salir y volver a entrar.
-        */
-        toast(
-          siguiente ? t('post.repostedToast') : t('post.unrepostedToast'),
-          siguiente ? 'repeat' : 'check-circle',
-        );
-      } catch {
-        setRepublicado(!siguiente);
-        setRepostsCount((n) => Math.max(0, n + (siguiente ? -1 : 1)));
-        notify(t('post.repostFailed'), t('common.tryAgain'));
-      } finally {
-        setRepublicando(false);
+      setRepublicando(true);
+      const final = await peticion.asentada;
+      setRepublicando(false);
+      if (!final.ok) {
+        // Vuelve a lo que el servidor confirmo, y se dice.
+        setRepublicado(final.valor);
+        setRepostsCount(contadorOptimista(contador, confirmado, final.valor));
+        toastDeError(t('post.repostFailed'));
+        return;
       }
+      /*
+        El aviso va AQUI, no junto al cambio optimista: se dice «republicada»
+        cuando el servidor ya lo acepto. Anunciarlo antes seria prometer algo
+        que el fallo de arriba puede estar a punto de deshacer.
+      */
+      toast(
+        final.valor ? t('post.repostedToast') : t('post.unrepostedToast'),
+        final.valor ? 'repeat' : 'check-circle',
+      );
     });
   };
 
@@ -607,6 +642,8 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
         */}
         <AccionDePublicacion
           icono="heart"
+          // Relleno al reaccionar: cambia la forma, no solo el color.
+          iconoRelleno="heart"
           etiqueta={t('post.actionLike')}
           contador={post.likes}
           activo={liked}
@@ -640,7 +677,8 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           activo={republicado}
           colorActivo={colors.primary}
           onPress={() => void alternarRepost()}
-          disabled={republicando}
+          // No se apaga mientras espera: se atenua y sigue respondiendo.
+          pendiente={republicando}
           accessibilityRole="switch"
           accessibilityState={{ checked: republicado }}
           accessibilityLabel={republicado ? t('post.undoRepost') : t('post.repost')}
@@ -666,6 +704,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           activo={saved}
           colorActivo={colors.primary}
           onPress={() => void alternarGuardado()}
+          pendiente={guardando}
           accessibilityLabel={saved ? t('post.unsave') : t('common.save')}
           accessibilityRole="switch"
           accessibilityState={{ checked: saved }}

@@ -277,6 +277,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'common.delete': 'Delete',
   'common.publish': 'Publish',
   'common.retry': 'Retry',
+  'common.undo': 'Undo',
   'common.loadMore': 'Load more',
   'common.loadMoreFailed': "We couldn't load more. Tap to retry.",
   'common.loading': 'Loading…',

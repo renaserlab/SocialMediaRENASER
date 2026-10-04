@@ -21,6 +21,7 @@ import {
   migraIdiomaGuardado,
   type IdiomaElegido,
 } from '@/lib/idioma';
+import { contadorOptimista, crearConsolidador } from '@/lib/intencionFinal';
 import { mezclarReacciones } from '@/lib/reacciones';
 import { invalidar } from '@/lib/sincronizacion';
 import type { Tramo } from '@/lib/historias';
@@ -29,6 +30,25 @@ import { Conversation, Post, QuizArea, StoryGroup, ThemeMode, UserProfile } from
 
 /** Con Supabase configurado usamos el backend real; si no, modo demo local. */
 const backendEnabled = AuthRepository.enabled;
+
+/**
+ * Guardar y reaccionar son interruptores contra el servidor, y la gente los
+ * pulsa varias veces seguidas. Cada uno tiene su consolidador: el icono cambia
+ * en cada toque, pero al servidor solo viaja una petición a la vez por
+ * publicación, y la última manda (ver `lib/intencionFinal`).
+ *
+ * Lo que se recuerda al empezar una ráfaga —el contador y el estado que el
+ * servidor tenía— es lo que permite deshacerla tal cual si algo falla.
+ */
+type PartidaDeRafaga = { contador: number; confirmado: boolean };
+
+const guardados = crearConsolidador<void, PartidaDeRafaga>((postId, guardar) =>
+  guardar ? PostRepository.save(postId) : PostRepository.unsave(postId),
+);
+
+const meGustas = crearConsolidador<number, PartidaDeRafaga>((postId, gustar) =>
+  gustar ? PostRepository.like(postId) : PostRepository.unlike(postId),
+);
 const FEED_PAGE = 20;
 
 /*
@@ -235,7 +255,13 @@ type AppState = {
    * `guardada` es lo que se pidio; `ok` si el servidor lo acepto. La peticion
    * se hace UNA vez, aqui: quien llama solo lee el resultado.
    */
-  toggleSavePost: (postId: string) => Promise<{ guardada: boolean; ok: boolean }>;
+  /**
+   * `absorbida`: este toque se sumó a una ráfaga que ya estaba en marcha. Quien
+   * la empezó recibe cómo acabó; los demás no tienen nada que anunciar.
+   */
+  toggleSavePost: (
+    postId: string,
+  ) => Promise<{ guardada: boolean; ok: boolean; absorbida: boolean }>;
   addComment: (postId: string, text: string) => Promise<void>;
   toggleReservation: (eventId: string) => void;
   sendMessage: (conversationId: string, text: string) => void;
@@ -529,7 +555,9 @@ export const useAppStore = create<AppState>()(
         }
       },
       toggleLikePost: (postId) => {
-        const wasLiked = get().likedPostIds.includes(postId);
+        const estado = get();
+        const wasLiked = estado.likedPostIds.includes(postId);
+        const gusta = !wasLiked;
         /*
           El contador vive en DOS sitios y los dos se mueven a la vez.
 
@@ -538,54 +566,57 @@ export const useAppStore = create<AppState>()(
           lleva su propia cola de elementos—. Antes solo existia el primero, y
           por eso Inicio se guardaba el numero en un `useState` suyo que no se
           enteraba de nada.
-
-          `contadorActual` sale de donde haya: del mapa si ya se conoce, y si
-          no de la publicacion del muro.
         */
-        const estado = get();
-        const enElMuro = estado.posts.find((post) => post.id === postId);
-        const contadorActual = estado.likeCounts[postId] ?? enElMuro?.likes ?? 0;
-        const contadorOptimista = Math.max(0, contadorActual + (wasLiked ? -1 : 1));
+        const pintar = (valor: boolean, contador: number) =>
+          set((state) => ({
+            likedPostIds: valor
+              ? state.likedPostIds.includes(postId)
+                ? state.likedPostIds
+                : [...state.likedPostIds, postId]
+              : state.likedPostIds.filter((id) => id !== postId),
+            likeCounts: { ...state.likeCounts, [postId]: contador },
+            posts: state.posts.map((post) =>
+              post.id === postId ? { ...post, likes: contador } : post,
+            ),
+          }));
+        // Sale de donde haya: del mapa si ya se conoce, y si no del muro.
+        const partida = (): PartidaDeRafaga => ({
+          contador:
+            estado.likeCounts[postId] ??
+            estado.posts.find((post) => post.id === postId)?.likes ??
+            0,
+          confirmado: wasLiked,
+        });
 
-        // Actualización optimista.
-        set((state) => ({
-          likedPostIds: wasLiked
-            ? state.likedPostIds.filter((id) => id !== postId)
-            : [...state.likedPostIds, postId],
-          likeCounts: { ...state.likeCounts, [postId]: contadorOptimista },
-          posts: state.posts.map((post) =>
-            post.id === postId
-              ? { ...post, likes: Math.max(0, post.likes + (wasLiked ? -1 : 1)) }
-              : post,
-          ),
-        }));
+        if (!backendEnabled) {
+          pintar(gusta, contadorOptimista(partida().contador, wasLiked, gusta));
+          return;
+        }
 
-        if (!backendEnabled) return;
-        const op = wasLiked ? PostRepository.unlike(postId) : PostRepository.like(postId);
-        op
-          .then((likesCount) =>
+        /*
+          VARIOS TOQUES SEGUIDOS SON UNA INTENCION. Antes cada toque mandaba su
+          peticion y dos podian cruzarse: el corazon acababa encendido y el
+          servidor sin la reaccion. Ahora solo viaja una a la vez y la ultima
+          manda; el corazon cambia en cada toque igual.
+        */
+        const peticion = meGustas.pedir(postId, gusta, () => {
+          const contexto = partida();
+          return { confirmado: wasLiked, contexto };
+        });
+        const { contador, confirmado } = peticion.contexto;
+        // Actualización optimista, SIEMPRE desde el contador de partida.
+        pintar(gusta, contadorOptimista(contador, confirmado, gusta));
+        if (peticion.absorbida) return;
+
+        void peticion.asentada.then((final) => {
+          if (final.respuesta !== undefined) {
             // La cuenta REAL del servidor manda sobre la optimista.
-            set((state) => ({
-              likeCounts: { ...state.likeCounts, [postId]: likesCount },
-              posts: state.posts.map((post) =>
-                post.id === postId ? { ...post, likes: likesCount } : post,
-              ),
-            })),
-          )
-          .catch(() =>
-            // Revertir ante fallo de red.
-            set((state) => ({
-              likedPostIds: wasLiked
-                ? [...state.likedPostIds, postId]
-                : state.likedPostIds.filter((id) => id !== postId),
-              likeCounts: { ...state.likeCounts, [postId]: contadorActual },
-              posts: state.posts.map((post) =>
-                post.id === postId
-                  ? { ...post, likes: Math.max(0, post.likes + (wasLiked ? 1 : -1)) }
-                  : post,
-              ),
-            })),
-          );
+            pintar(final.valor, final.respuesta);
+          } else if (!final.ok) {
+            // Revertir ante fallo de red: al estado y al numero de partida.
+            pintar(final.valor, contador);
+          }
+        });
       },
 
       aplicarLikesDelServidor: (idsDeLaTanda, idsConMeGusta, contadores) => {
@@ -606,52 +637,69 @@ export const useAppStore = create<AppState>()(
         /*
           EL CONTADOR, EN EL MISMO CAMINO QUE EL ESTADO.
 
-          Sale de `wasSaved`, igual que `guardada`: guardar dos veces seguidas
-          no puede sumar dos porque la segunda vez ya estaba en la lista y lo
-          que toca entonces es restar. Y nunca baja de cero.
+          Se pinta siempre desde el contador DE PARTIDA de la rafaga y de la
+          diferencia entre lo que el servidor tiene y lo que se quiere: diez
+          toques seguidos no pueden sumar diez. Y nunca baja de cero.
 
           El valor de partida es el del muro cuando lo hay (`posts`), y si no
           el que trajo la publicacion; se recuerda para poder DESHACERLO tal
           cual si el servidor rechaza.
         */
-        const enElMuro = estado.posts.find((post) => post.id === postId);
-        const contadorActual = estado.saveCounts[postId] ?? enElMuro?.savesCount ?? 0;
-        const contadorOptimista = Math.max(0, contadorActual + (guardada ? 1 : -1));
-        set((state) => ({
-          savedPostIds: wasSaved
-            ? state.savedPostIds.filter((id) => id !== postId)
-            : [...state.savedPostIds, postId],
-          saveCounts: { ...state.saveCounts, [postId]: contadorOptimista },
-          posts: state.posts.map((post) =>
-            post.id === postId ? { ...post, savesCount: contadorOptimista } : post,
-          ),
-        }));
+        const pintar = (valor: boolean, contador: number) =>
+          set((state) => ({
+            savedPostIds: valor
+              ? state.savedPostIds.includes(postId)
+                ? state.savedPostIds
+                : [...state.savedPostIds, postId]
+              : state.savedPostIds.filter((id) => id !== postId),
+            saveCounts: { ...state.saveCounts, [postId]: contador },
+            posts: state.posts.map((post) =>
+              post.id === postId ? { ...post, savesCount: contador } : post,
+            ),
+          }));
+        const partida = (): PartidaDeRafaga => ({
+          contador:
+            estado.saveCounts[postId] ??
+            estado.posts.find((post) => post.id === postId)?.savesCount ??
+            0,
+          confirmado: wasSaved,
+        });
 
         // En modo demo no hay servidor al que preguntar: el cambio local ES el
         // resultado, y decir que fallo seria mentir.
-        if (!backendEnabled) return { guardada, ok: true };
-
-        try {
-          await (wasSaved ? PostRepository.unsave(postId) : PostRepository.save(postId));
-          return { guardada, ok: true };
-        } catch {
-          // Se deshace exactamente igual que antes. Lo nuevo es avisar de que
-          // paso, para que quien llama pueda decirlo en vez de dejar el icono
-          // volviendo solo a su sitio.
-          set((state) => ({
-            savedPostIds: wasSaved
-              ? [...state.savedPostIds, postId]
-              : state.savedPostIds.filter((id) => id !== postId),
-            // El contador vuelve al valor exacto de antes, no a «uno menos»:
-            // restar a ciegas dejaria un numero inventado si entre medias
-            // llego uno nuevo del servidor.
-            saveCounts: { ...state.saveCounts, [postId]: contadorActual },
-            posts: state.posts.map((post) =>
-              post.id === postId ? { ...post, savesCount: contadorActual } : post,
-            ),
-          }));
-          return { guardada, ok: false };
+        if (!backendEnabled) {
+          pintar(guardada, contadorOptimista(partida().contador, wasSaved, guardada));
+          return { guardada, ok: true, absorbida: false };
         }
+
+        /*
+          EL ICONO CAMBIA YA; AL SERVIDOR VA LA INTENCION FINAL.
+
+          Se reporto que «se demora un poco en procesar y luego recien puedo
+          volver a desmarcar». Cada toque mandaba su propia peticion, podian
+          cruzarse, y lo que quedaba en el servidor no era lo que se veia.
+          Ahora solo viaja una a la vez por publicacion; al volver se mira que
+          quiere la persona AHORA y, si hace falta, se manda eso. Nunca hay
+          peticiones ilimitadas ni respuestas fuera de orden.
+        */
+        const peticion = guardados.pedir(postId, guardada, () => {
+          const contexto = partida();
+          return { confirmado: wasSaved, contexto };
+        });
+        const { contador, confirmado } = peticion.contexto;
+        pintar(guardada, contadorOptimista(contador, confirmado, guardada));
+        // Este toque se sumo a una rafaga en marcha: quien la empezo cuenta
+        // como acabo. Asi diez toques dan UN aviso.
+        if (peticion.absorbida) return { guardada, ok: true, absorbida: true };
+
+        const final = await peticion.asentada;
+        if (!final.ok) {
+          // Se deshace al estado que el servidor confirmo y al contador
+          // exacto de partida, no a «uno menos»: restar a ciegas dejaria un
+          // numero inventado. Quien llama lo dice en voz alta.
+          pintar(final.valor, contadorOptimista(contador, confirmado, final.valor));
+        }
+        return { guardada: final.valor, ok: final.ok, absorbida: false };
       },
       addComment: async (postId, text) => {
         const trimmed = text.trim();
