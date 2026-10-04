@@ -523,6 +523,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'live.reactionClap',
     'live.end',
     'live.hide',
+    // «Aplicando…» y «Automática» se escriben igual en portugués.
+    'live.effectApplying',
+    'live.qualityAuto',
     'catalog.eventPublished',
     'catalog.editEvent',
     'catalog.editCourse',

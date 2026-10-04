@@ -272,6 +272,21 @@ const NATIVO_POR_VERSION: Record<string, { dependencias: string[]; plugins: stri
 // boton Atras, abajo), que solo llega a los telefonos con un binario nuevo.
 NATIVO_POR_VERSION['1.1.1'] = NATIVO_POR_VERSION['1.1.0'];
 
+// 1.2.0: entra `@100mslive/react-native-video-plugin`, el complemento con el
+// que 100ms aplica el desenfoque y el fondo virtual a la camara de quien
+// emite. Trae un modulo nativo en Android (`ReactNativeVideoPlugin`); en iOS
+// lo sirve el propio SDK, que ya estaba. Plugins y permisos no cambian: el
+// complemento no pide ninguno. Una actualizacion sobre un binario 1.1.x no
+// encontraria el modulo —la aplicacion lo detecta y no ofrece los efectos—,
+// pero la version sube igualmente: es la regla, y evita depender de esa red.
+NATIVO_POR_VERSION['1.2.0'] = {
+  ...(NATIVO_POR_VERSION['1.1.0'] as (typeof NATIVO_POR_VERSION)[string]),
+  dependencias: [
+    ...(NATIVO_POR_VERSION['1.1.0'] as (typeof NATIVO_POR_VERSION)[string]).dependencias,
+    '@100mslive/react-native-video-plugin@1.1.4',
+  ],
+};
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];
