@@ -60,6 +60,14 @@ export const MUELLE_DE_PANEL = { damping: 20, stiffness: 210, mass: 0.9 } as con
 export const DESPLAZAMIENTO_DE_ENTRADA = 8;
 
 /**
+ * Lo que se mueve a los lados un campo cuando rechaza lo escrito.
+ *
+ * Poco: es un «no» con la cabeza, no un susto. Lleva la vista al campo que hay
+ * que corregir; el motivo lo dice el texto de debajo.
+ */
+export const AMPLITUD_DE_SACUDIDA = 6;
+
+/**
  * La salida dura menos que la entrada.
  *
  * Lo que entra se está presentando; lo que sale ya se ha leído y solo estorba.
