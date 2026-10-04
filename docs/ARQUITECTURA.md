@@ -19,6 +19,14 @@ App Expo (móvil y web)
         +--> 100ms                  vídeo de los directos (apagado)
 ```
 
+**Supabase Realtime** no sale en el dibujo porque no es un sitio más: es cómo
+llegan a los teléfonos, sin que pregunten, los mensajes privados y lo que pasa
+en un directo. En un directo cada cosa va por un camino distinto —el vídeo por
+100ms, el chat por la base (`postgres_changes`), las reacciones por Broadcast
+entre clientes— y cada camino se queda pequeño a un tamaño distinto. Hasta
+dónde llega cada uno, y qué haría falta para audiencias grandes, está en
+[`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md). Hoy: emisiones pequeñas.
+
 ### Las capas, y qué decide cada una
 
 | Capa | De qué responde |
