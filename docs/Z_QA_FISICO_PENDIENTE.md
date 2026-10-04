@@ -2166,3 +2166,141 @@ Sustituye a «Las tareas sin planificador» de la sección anterior: con el
 planificador encendido ya no hace falta lanzarlas a mano (se puede seguir
 haciendo). Y a la nota sobre el formulario de precios: ya no ofrece los
 cuatro.
+
+---
+
+## Mejora integral de vistas, audio y notificaciones (03/10/2026, noche)
+
+Nada de esto se ha visto en un teléfono. Las pruebas automáticas ejecutan las
+reglas —la cola de avisos, las pulsaciones rápidas, el mapa de destinos del
+push, el nivel del micrófono— y la exportación web arranca, pero cómo se
+SIENTE una animación, si vibra lo justo y si un aviso suena solo se comprueba
+con el aparato en la mano. Android e iOS, tema claro y oscuro.
+
+**Antes de empezar.** El push con la aplicación cerrada necesita una
+compilación nueva con las credenciales de Firebase (Android) y de Apple (iOS).
+Sin ellas, lo de «Push» de abajo no se puede probar; lo demás sí.
+
+**Lo que se pulsa.**
+
+- [ ] Botones, chips, filas y tarjetas se hunden un poco bajo el dedo y
+      vuelven. No rebotan como un juguete ni se quedan encogidos.
+- [ ] El control de dos opciones (Para ti / Siguiendo, Mis cursos / Mis audios)
+      desliza su pastilla; las pestañas deslizan su raya.
+- [ ] Con «Reducir movimiento» activado en los ajustes del teléfono: nada se
+      desliza ni salta, pero todo sigue cambiando de estado y se entiende.
+- [ ] En un Android de gama media, desplazar el muro y el feed de Inicio no va
+      a tirones.
+
+**Inicio y Explorar.**
+
+- [ ] El corazón se rellena y salta al reaccionar; el número entra desde abajo
+      al subir y desde arriba al bajar.
+- [ ] GUARDAR, muchas veces seguidas y rápido: el marcador cambia en cada
+      toque, no hay pausa, y al parar queda como en el último toque. Al volver
+      a entrar en la aplicación sigue igual.
+- [ ] Sale UN aviso por ráfaga, no uno por toque. «Publicación guardada» ofrece
+      «Ver lista»; «eliminada de guardados» ofrece «Deshacer», y deshace.
+- [ ] Sin conexión, guardar: el marcador vuelve a su sitio y sale un aviso de
+      error (no un diálogo).
+- [ ] Republicar varias veces seguidas: el botón no se queda apagado.
+- [ ] El aviso de arriba se puede quitar arrastrándolo hacia arriba, no tapa la
+      muesca y se lee en los dos temas.
+- [ ] El `+` de Inicio se ve sobre un vídeo claro y sobre uno oscuro.
+- [ ] El menú de una publicación y la hoja de comentarios suben con el fondo
+      fundiéndose, no como una persiana.
+
+**Comentarios.**
+
+- [ ] Las respuestas cuelgan de su comentario con una raya a la izquierda.
+- [ ] El botón redondo de enviar crece al escribir y enseña la espera dentro.
+- [ ] Sin conexión, enviar un comentario: el texto sigue en el campo.
+
+**Búsqueda (Explorar y Mensajes).**
+
+- [ ] Al tocar el campo se marca el borde y aparece «Cancelar»; al pulsarlo se
+      borra lo escrito y se cierra el teclado.
+- [ ] La X aparece al escribir y vacía el campo.
+- [ ] Mientras busca, la lupa es un indicador.
+- [ ] Escribir rápido «mar» → «martinez»: no se quedan resultados de «mar».
+
+**Crear.**
+
+- [ ] Sin permiso de cámara: se entiende qué pasa, «Abrir ajustes» abre los
+      ajustes y «Elegir del carrete» funciona.
+- [ ] Publicación solo de texto, con el campo vacío: «Publicar» está apagado y
+      debajo dice por qué.
+- [ ] Subiendo un vídeo, la barra avanza sin saltos.
+
+**Mensajes y conversación.**
+
+- [ ] El globo de no leídos aparece en la fila y en la barra inferior, y salta
+      al llegar otro mensaje.
+- [ ] En la conversación, lo recién enviado sube a su sitio; el historial no se
+      anima al desplazar.
+- [ ] La hora se lee sobre la burbuja negra. Mis mensajes llevan reloj mientras
+      salen, una marca al enviarse y aviso si fallan. Nunca dos marcas.
+- [ ] El `+` abre la hoja de Fotos y vídeos / Cámara / Archivo y se cierra al
+      elegir.
+
+**Nota de voz.** Es lo más importante de comprobar en Android.
+
+- [ ] Al empezar vibra, la barra cambia entera (borde, «Grabando», reloj) y el
+      botón de detener late.
+- [ ] LA ONDA RESPONDE A LA VOZ: hablando se mueve, en silencio se queda plana,
+      con el micrófono tapado también. Si en algún teléfono salen tres puntos
+      en vez de barras, es que ese aparato no mide: anotarlo.
+- [ ] El reloj cuenta bien (no arranca en una cifra absurda ni se para solo).
+- [ ] Detener vibra; se puede escuchar, eliminar y enviar.
+- [ ] Salir del chat o pasar la aplicación a segundo plano mientras graba: la
+      grabación se corta, no sigue por detrás.
+- [ ] Una llamada entrante mientras graba.
+- [ ] Con TalkBack / VoiceOver: se anuncia «Grabando» al empezar.
+
+**Perfil.**
+
+- [ ] «Publicaciones» es el primer círculo y está encendido al entrar.
+- [ ] Tocar Podcast, Cursos o Reseñas y volver a Publicaciones con UN toque.
+- [ ] Tocar dos veces el mismo círculo no cambia nada.
+- [ ] Los cinco círculos caben en un teléfono estrecho sin cortarse.
+- [ ] «Lo que puedo aportar» se abre y se cierra con la altura creciendo y la
+      flecha girando; lo de debajo no da un salto.
+
+**Eventos y formularios.**
+
+- [ ] La zona horaria se lee como una ciudad («Buenos Aires») y, tras guardar y
+      volver a entrar, sigue elegida la misma.
+- [ ] «Eventos por revisar» con una cuenta que no es de curaduría: no hay
+      botones debajo del aviso.
+- [ ] «Mis eventos»: las cuatro bandejas son filas con flecha.
+
+**Notificaciones con la aplicación ABIERTA.** No necesitan la compilación
+nueva.
+
+- [ ] Con dos cuentas en dos teléfonos: A escribe a B. A B le sale el aviso
+      flotante con el nombre de A en un par de segundos, y sube el globo de
+      Mensajes.
+- [ ] Si B tiene abierta ESA conversación: no sale aviso; el mensaje aparece en
+      la conversación.
+- [ ] Tres mensajes seguidos de A: un aviso que se renueva, no tres apilados.
+- [ ] A reacciona a una publicación de B, o le pide una sesión: en menos de un
+      minuto a B le sale el aviso y se enciende la campana.
+- [ ] Tocar el aviso lleva a la conversación, a la publicación o a la agenda.
+- [ ] En la bandeja, lo nuevo sale resaltado (círculo relleno, negrita, punto).
+      Al volver a entrar ya no.
+- [ ] Con más de cincuenta avisos, bajar carga los siguientes.
+
+**Push con la aplicación cerrada.** Con la compilación nueva.
+
+- [ ] Llega con SONIDO y con el icono de Z. En Android, en los ajustes de
+      notificaciones de la aplicación hay tres canales (Mensajes,
+      Interacciones, Contenido) y ninguno duplicado.
+- [ ] El texto dice quién escribe y NO lo que escribió.
+- [ ] Tocarlo con la aplicación cerrada del todo abre la conversación, la
+      publicación o la agenda correspondiente.
+- [ ] Un aviso de Servicios, Eventos o Productos abre la bandeja.
+- [ ] B bloquea a A; A escribe en la conversación que ya tenían: a B no le
+      suena nada.
+- [ ] Cerrar sesión en un teléfono: deja de recibir los avisos de esa cuenta.
+- [ ] El icono de la aplicación lleva el número de lo no leído y se limpia al
+      abrir la bandeja.
