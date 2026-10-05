@@ -17,6 +17,7 @@ import {
   rutaDelPush,
 } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
+import { hayMensajeNuevoEn } from '@/services/contadores';
 
 /**
  * El push que llega CON LA APLICACIÓN ABIERTA.
@@ -52,6 +53,10 @@ export function useAvisosDelPush(): void {
       const { title, body, data } = notificacion.request.content;
 
       const conversacion = conversacionDelPush(data);
+      // El chat de esa conversación, si está abierto, pregunta lo que le falta:
+      // su canal de tiempo real puede estar caído y este push es el único que
+      // sabe que ha entrado algo (`services/contadores`).
+      if (conversacion) hayMensajeNuevoEn(conversacion);
 
       // Lo que ya se está leyendo no se anuncia.
       if (seEstaViendoLaConversacion(conversacion)) {
@@ -67,7 +72,12 @@ export function useAvisosDelPush(): void {
         el nombre y el resumen de la conversación. Solo si nadie escucha allí
         se enseña el del push, que es mejor que nada.
       */
-      if (conversacion && alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data))) return;
+      if (
+        conversacion &&
+        alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data), (body ?? '').trim() || null)
+      ) {
+        return;
+      }
 
       /*
         EL DE UNA SESIÓN TAMPOCO, y por lo mismo. Una sesión deja además un

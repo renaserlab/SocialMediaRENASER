@@ -58,6 +58,12 @@ async def sesiones():
         yield hacer
     finally:
         esquema.olvidar()
+        # SE CIERRA AQUI, con el bucle de la prueba todavia vivo. Sin esto la
+        # conexion queda a merced del recolector, que la cierra desde su hilo
+        # cuando ese bucle ya no existe: «Event loop is closed» apuntado a la
+        # prueba que este corriendo en ese momento, que no tiene nada que ver
+        # (visto en el despliegue del 05/10/2026, diez anotaciones en rojo).
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -581,7 +587,8 @@ COLUMNAS_DE_LA_0050 = (
 )
 
 
-async def _base_sin_la_0050():
+@pytest_asyncio.fixture
+async def sin_la_0050():
     """Un esquema como el de PRODUCCION antes de pegar la 0050.
 
     NO BASTA CON OMITIR LAS TABLAS NUEVAS. Lo que de verdad rompe un despliegue
@@ -590,6 +597,9 @@ async def _base_sin_la_0050():
     `select(Order)` las pide y la base contesta que no existen. Una prueba que
     solo quitara las tablas se quedaria verde mientras el comercio entero se
     cae, que es exactamente el fallo que hay que poder ver.
+
+    Es una fixture y no una funcion suelta para que el motor se cierre al
+    terminar la prueba, igual que el de `sesiones`.
     """
     import sqlalchemy as sa
 
@@ -610,11 +620,16 @@ async def _base_sin_la_0050():
         sa.Table(nombre, antiguo, *columnas)
     async with engine.begin() as conn:
         await conn.run_sync(antiguo.create_all)
-    return async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_sin_la_0050_el_comercio_SE_CAE_y_hay_que_saberlo(sesiones) -> None:
+async def test_sin_la_0050_el_comercio_SE_CAE_y_hay_que_saberlo(
+    sesiones, sin_la_0050
+) -> None:
     """LA 0050 SE APLICA ANTES QUE EL CODIGO. No al reves.
 
     Esta prueba no comprueba que algo funcione: comprueba que NO funciona, y lo
@@ -630,25 +645,25 @@ async def test_sin_la_0050_el_comercio_SE_CAE_y_hay_que_saberlo(sesiones) -> Non
     """
     from app.modules.commerce.models import Order
 
-    hacer = await _base_sin_la_0050()
-    async with hacer() as db:
+    async with sin_la_0050() as db:
         with pytest.raises(Exception) as fallo:
             await db.execute(select(Order).limit(1))
         assert "course_version_id" in str(fallo.value)
 
 
 @pytest.mark.asyncio
-async def test_sin_la_0050_la_gobernanza_si_degrada_con_educacion(sesiones) -> None:
+async def test_sin_la_0050_la_gobernanza_si_degrada_con_educacion(
+    sesiones, sin_la_0050
+) -> None:
     """Lo que SI aguanta: politicas, consentimientos y auditoria.
 
     Estos modulos preguntan por su esquema antes de tocarlo, igual que
     `refunds` y `catalog` con las suyas. Sin las tablas devuelven `None` y la
     aplicacion sigue: lo que NO puede pasar es un 500.
     """
-    hacer = await _base_sin_la_0050()
     esquema.olvidar()
     try:
-        async with hacer() as db:
+        async with sin_la_0050() as db:
             assert await auditoria.anotar(
                 db, action="x", entity_type="course", entity_id=CURSO
             ) is None

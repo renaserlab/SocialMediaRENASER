@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Image,
   Linking,
   Pressable,
@@ -35,8 +36,13 @@ import { afterSheetClose } from '@/lib/afterSheetClose';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { retirarAvisosDe } from '@/lib/toast';
-import { refrescarMensajes } from '@/services/contadores';
+import {
+  alSaberDeUnMensaje,
+  marcarConversacionLeida,
+  refrescarMensajes,
+} from '@/services/contadores';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
+import { unaALaVez } from '@/lib/unaALaVez';
 import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
@@ -147,6 +153,12 @@ function mismaRafaga(actual: Message, anterior?: Message): boolean {
   return b - a < MINUTOS_DE_RAFAGA * 60 * 1000;
 }
 
+/**
+ * Cada cuánto pregunta el chat por mensajes nuevos MIENTRAS SU CANAL DE TIEMPO
+ * REAL ESTÁ CAÍDO. Con el canal enganchado no se pregunta: llegan solos.
+ */
+const SONDEO_SIN_TIEMPO_REAL_MS = 4_000;
+
 export function ChatScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -255,21 +267,44 @@ export function ChatScreen() {
     setRemoteMessages(siguiente);
   }, []);
 
+  /*
+    Si esta pantalla es la que se está mirando. Empieza en `true`: una pantalla
+    que se monta es una a la que se está entrando.
+
+    Hace falta para dos cosas que antes se hacían sin mirar: marcar como leído
+    lo que llega —una conversación enterrada bajo otra pantalla, o con la
+    aplicación en segundo plano, marcaba como leído lo que nadie había visto— y
+    no preguntar al servidor desde un chat que no está delante.
+  */
+  const aLaVista = useRef(true);
+  /** «Ponte al día», para el efecto del foco. `null` sin conversación cargando. */
+  const ponerseAlDia = useRef<(() => void) | null>(null);
+
   // Carga inicial + suscripción Realtime a los mensajes de la conversación.
   useEffect(() => {
     if (!supabaseEnabled || !params.id) return;
     let montado = true;
     const conversationId = params.id;
+    /** La primera página llegó: hay desde dónde pedir «lo que ha entrado después». */
+    let cargada = false;
+
+    /** Leído solo si de verdad se está mirando. */
+    const leerSiSeVe = () => {
+      if (aLaVista.current && AppState.currentState === 'active') {
+        marcarConversacionLeida(conversationId);
+      }
+    };
 
     // Cada carga —la primera y cada reintento— empieza limpia: «cargando» a la
     // vista y sin el error del intento anterior.
     setCargandoMensajes(true);
     setLoadError(null);
 
-    MessageRepository.listMessages(conversationId, currentUserId)
+    const cargaInicial = MessageRepository.listMessages(conversationId, currentUserId)
       .then((msgs) => {
         if (!montado) return;
         aplicar(msgs);
+        cargada = true;
         // Si vino una página entera, es que probablemente hay más arriba.
         setHayMasHistorial(msgs.length >= MENSAJES_POR_PAGINA);
       })
@@ -281,7 +316,52 @@ export function ChatScreen() {
       .finally(() => {
         if (montado) setCargandoMensajes(false);
       });
-    MessageRepository.markRead(conversationId).catch(() => {});
+    marcarConversacionLeida(conversationId);
+
+    /*
+      PONERSE AL DÍA: pedir lo que haya entrado desde lo último que se tiene.
+
+      LO REPORTADO (05/10/2026). «A pesar de que me aparezca en la bandeja que
+      tengo mensajes, estos no llegaban hasta que volvía a entrar al chat», y
+      «los mensajes no llegan instantáneamente». La pantalla cargaba UNA vez,
+      al montarse, y después dependía por entero de su canal de tiempo real.
+      Ese canal no repone lo que se pierde: mientras se engancha, y cada vez
+      que se cae —la red cambia, el teléfono duerme, la aplicación pasa a
+      segundo plano— y vuelve, lo que entró en medio no llega nunca. Y con el
+      chat delante no hay otro camino, porque el aviso flotante y el push se
+      callan a propósito. El mensaje estaba en el servidor, la bandeja lo
+      contaba y aquí no aparecía hasta desmontar la pantalla.
+
+      AHORA LO PIDEN TODAS LAS SEÑALES QUE SABEN ALGO, y todas hacen lo mismo:
+
+        - el canal, cada vez que se engancha o se reengancha;
+        - la aplicación, al volver del segundo plano;
+        - la pantalla, al recuperar el foco;
+        - el push de un mensaje de esta conversación (`alSaberDeUnMensaje`);
+        - y, mientras el canal esté caído y el chat delante, un reloj corto.
+
+      Es una petición pequeña —«después de tal instante»— y nunca dos a la vez
+      (`unaALaVez`). Con el canal sano no hay reloj: no se sondea por sondear.
+    */
+    const ponerAlDia = unaALaVez(async () => {
+      await cargaInicial;
+      // Sin primera página no hay desde dónde: la pantalla ofrece «Reintentar».
+      if (!montado || !cargada) return;
+      const desde = instanteMasReciente(mensajesRef.current);
+      const recibidos = await (desde
+        ? MessageRepository.listMessagesSince(conversationId, desde, currentUserId)
+        : MessageRepository.listMessages(conversationId, currentUserId));
+      if (!montado) return;
+      // El corte tiene la precisión del teléfono y la base guarda más: puede
+      // volver el último que ya se tenía. Solo cuenta lo que no estaba.
+      const conocidos = new Set(mensajesRef.current.map((m) => m.id));
+      if (!recibidos.some((m) => !conocidos.has(m.id))) return;
+      aplicar(fusionar(mensajesRef.current, recibidos));
+      leerSiSeVe();
+    });
+
+    /** Si el canal de tiempo real de esta conversación está enganchado ahora. */
+    let canalEnganchado = false;
 
     const unsubscribe = subscribeToConversation(conversationId, (row) => {
       if (!montado) return;
@@ -325,11 +405,42 @@ export function ChatScreen() {
           // La burbuja de texto ya está puesta; sin esto solo faltaría el
           // adjunto, y volverá con el siguiente mensaje o al reabrir.
         });
-      MessageRepository.markRead(conversationId).catch(() => {});
+      leerSiSeVe();
+    }, (enganchado) => {
+      canalEnganchado = enganchado;
+      // La primera vez cubre el hueco entre la carga y el enganche; las demás,
+      // lo que entró con el canal caído.
+      if (enganchado) void ponerAlDia();
     });
+
+    const sondeo = setInterval(() => {
+      if (!canalEnganchado && aLaVista.current && AppState.currentState === 'active') {
+        void ponerAlDia();
+      }
+    }, SONDEO_SIN_TIEMPO_REAL_MS);
+
+    const alVolver = AppState.addEventListener('change', (estado) => {
+      if (estado !== 'active') return;
+      void ponerAlDia();
+      // Lo que el canal pintó con la aplicación en segundo plano no se marcó.
+      leerSiSeVe();
+    });
+
+    const dejarDeOir = alSaberDeUnMensaje((conversacion) => {
+      if (conversacion === conversationId) void ponerAlDia();
+    });
+
+    ponerseAlDia.current = () => {
+      void ponerAlDia();
+      leerSiSeVe();
+    };
 
     return () => {
       montado = false;
+      ponerseAlDia.current = null;
+      clearInterval(sondeo);
+      alVolver.remove();
+      dejarDeOir();
       unsubscribe();
     };
     // `intentoDeCarga` no se lee dentro: está para que «Reintentar» vuelva a
@@ -969,12 +1080,19 @@ export function ChatScreen() {
     marcado sus mensajes como leídos.
   */
   const conversacionALaVista = typeof params.id === 'string' ? params.id : null;
+  const vistaAntes = useRef(false);
   useFocusEffect(
     useCallback(() => {
       if (!conversacionALaVista) return undefined;
+      aLaVista.current = true;
       marcarConversacionALaVista(conversacionALaVista);
       retirarAvisosDe((clave) => clave === claveDeConversacion(conversacionALaVista));
+      // AL VOLVER a esta pantalla —la primera vez ya carga el montaje—: lo que
+      // entró mientras había otra encima se pide ahora, y se da por leído.
+      if (vistaAntes.current) ponerseAlDia.current?.();
+      vistaAntes.current = true;
       return () => {
+        aLaVista.current = false;
         dejarDeVerConversacion(conversacionALaVista);
         void refrescarMensajes();
       };

@@ -28,7 +28,6 @@ import {
 } from '@/components/resultadosDeBusqueda';
 import { assets } from '@/data/assets';
 import { useTranslation } from '@/i18n/useTranslation';
-import { DARREN_NOTICE_ID } from '@/lib/guides';
 import { AuthRepository } from '@/repositories/AuthRepository';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useContadoresStore } from '@/store/useContadoresStore';
@@ -197,15 +196,6 @@ export function ExploreScreen() {
       irAlPerfil(router, catalogProfileId, section);
     },
     [router, catalogProfileId],
-  );
-
-  /**
-   * El aviso de contenido gratuito de Darren vive en Notificaciones. Aqui solo
-   * se consulta si sigue pendiente para pintar el punto en la campana; no tiene
-   * sentido para el propio Darren.
-   */
-  const darrenNoticePending = useAppStore(
-    (state) => !state.dismissedGuides.includes(DARREN_NOTICE_ID) && state.user?.isAdmin !== true,
   );
 
   /*
@@ -753,7 +743,7 @@ export function ExploreScreen() {
         // sigue esperando dentro.
         // `enVivo` es el contador común: se mueve cuando llega un aviso con
         // la aplicación abierta, sin tener que salir de Explorar y volver.
-        rightBadge={avisosSinLeer > 0 || avisosEnVivo > 0 || darrenNoticePending}
+        rightBadge={avisosSinLeer > 0 || avisosEnVivo > 0}
         onRightPress={() => router.push('/notifications')}
       />
 

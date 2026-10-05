@@ -48,12 +48,33 @@ export type ToastRequest = {
 let present: ((request: ToastRequest) => void) | null = null;
 let retirar: ((esDeLaClave: (clave: string) => boolean) => void) | null = null;
 
+/*
+  LAS NOTIFICACIONES PEDIDAS ANTES DE QUE EXISTA EL HOST SE GUARDAN.
+
+  El host se monta cuando la aplicación termina de arrancar (sesión leída,
+  fuentes cargadas). Lo que se pide al abrir —«tienes 3 mensajes sin leer»—
+  sale de una petición que puede contestar ANTES de eso, y entonces `present`
+  todavía es `null`: el aviso se descartaba sin dejar rastro. Visto el
+  05/10/2026 al comprobar el aviso de «sin leer» del arranque: las tres
+  peticiones salían y en pantalla no aparecía nada.
+
+  SOLO LAS NOTIFICACIONES, y pocas. Una confirmación de éxito que llega sin
+  host sigue sin merecer nada: no es crítica y enseñarla tarde sería peor. Y
+  con tope, para que un arranque atascado no acumule una cola.
+*/
+const EN_ESPERA_COMO_MUCHO = 4;
+let enEspera: ToastRequest[] = [];
+
 export function registerToastHost(
   fn: ((request: ToastRequest) => void) | null,
   quitar: ((esDeLaClave: (clave: string) => boolean) => void) | null = null,
 ): void {
   present = fn;
   retirar = quitar;
+  if (!fn || enEspera.length === 0) return;
+  const guardadas = enEspera;
+  enEspera = [];
+  for (const peticion of guardadas) fn(peticion);
 }
 
 /**
@@ -106,7 +127,16 @@ export function toastConAccion(
  * solo le quitaria la explicacion antes de que termine de arreglarlo.
  */
 export function avisar(peticion: ToastRequest): void {
-  present?.(peticion);
+  if (present) {
+    present(peticion);
+    return;
+  }
+  if (peticion.tipo !== 'notificacion') return;
+  // La misma clave es el mismo aviso: se queda la versión más reciente.
+  enEspera = [
+    ...enEspera.filter((otra) => !peticion.clave || otra.clave !== peticion.clave),
+    peticion,
+  ].slice(-EN_ESPERA_COMO_MUCHO);
 }
 
 /** Algo no salio, y no hay un campo donde decirlo: la red, el servidor. */
@@ -121,5 +151,7 @@ export function toastDeError(message: string): void {
  * antes de que se vaya. Dejarlo encima seria anunciarle lo que ya esta leyendo.
  */
 export function retirarAvisosDe(esDeLaClave: (clave: string) => boolean): void {
+  // También lo que aún espera al host: abrir la conversación lo deja sin sentido.
+  enEspera = enEspera.filter((peticion) => !peticion.clave || !esDeLaClave(peticion.clave));
   retirar?.(esDeLaClave);
 }

@@ -502,7 +502,7 @@ describe('los estados de la conversación al abrirla', () => {
   it('reintentar vuelve a lanzar la carga, limpia', () => {
     assert.match(
       CHAT,
-      /setCargandoMensajes\(true\);\s*setLoadError\(null\);\s*MessageRepository\.listMessages\(conversationId, currentUserId\)/,
+      /setCargandoMensajes\(true\);\s*setLoadError\(null\);\s*const cargaInicial = MessageRepository\.listMessages\(conversationId, currentUserId\)/,
     );
     assert.match(
       CHAT,

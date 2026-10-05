@@ -6,6 +6,7 @@ import {
   claveDeConversacion,
   claveDelPush,
   conversacionDelPush,
+  destinoDelToque,
   directoDelPush,
   mensajeDelPush,
   rutaDelPush,
@@ -166,4 +167,59 @@ test('el identificador del mensaje sirve para no avisar dos veces, y solo si es 
   assert.equal(mensajeDelPush(null), null);
   // No cambia a dónde lleva el aviso.
   assert.equal(rutaDelPush({ type: 'message', conversationId: ID, messageId: OTRO }), `/chat/${ID}`);
+});
+
+/*
+  ABRIR LA APLICACIÓN NO ES TOCAR UN AVISO (05/10/2026).
+
+  Reportado con la compilación 46, en un Xiaomi: «cada que entro a la
+  aplicación me redirige a notificaciones». En Android la biblioteca de avisos
+  entrega como «han tocado un aviso» cualquier dato con que el sistema abra la
+  aplicación, y ese lanzador la abre con datos suyos.
+*/
+
+test('lo que no trae identificador no es un aviso: la aplicación se queda en Inicio', () => {
+  // Lo que deja el lanzador: sin identificador y con datos que no son nuestros.
+  const delLanzador = { profile: 0, 'android.intent.extra.REFERRER': 'launcher' };
+  for (const identificador of [null, undefined, '', '   ', 0, {}]) {
+    assert.equal(destinoDelToque({ identificador, datos: delLanzador }), null);
+    // Ni aunque los datos PAREZCAN un aviso: sin identificador no lo es.
+    assert.equal(
+      destinoDelToque({ identificador, datos: { type: 'message', conversationId: ID } }),
+      null,
+    );
+  }
+});
+
+test('un toque de verdad lleva a lo que anuncia', () => {
+  const identificador = '0:1759683633526098%a1b2c3d4';
+  assert.equal(
+    destinoDelToque({ identificador, datos: { type: 'message', conversationId: ID } }),
+    `/chat/${ID}`,
+  );
+  assert.equal(destinoDelToque({ identificador, datos: { type: 'follow', profileId: ID } }), `/profile/${ID}`);
+  assert.equal(destinoDelToque({ identificador, datos: { type: 'session_booked' } }), '/agenda');
+  assert.equal(destinoDelToque({ identificador, datos: { type: 'live_started', liveId: ID } }), `/live/${ID}`);
+  // Y las decisiones sobre lo del creador, por el mapa que se le pasa.
+  assert.equal(
+    destinoDelToque(
+      { identificador, datos: { type: 'event_published', entityId: OTRO } },
+      { rutaDeDecision: (tipo, entidad) => (tipo === 'event_published' ? `/eventos/${entidad}` : null) },
+    ),
+    `/eventos/${OTRO}`,
+  );
+});
+
+test('un aviso sin destino propio ya no abre la bandeja: se entra por Inicio', () => {
+  const identificador = '0:1759683633526098%a1b2c3d4';
+  // Los de la cola (servicios, eventos, productos) llegan sin datos.
+  assert.equal(destinoDelToque({ identificador, datos: {} }), null);
+  assert.equal(destinoDelToque({ identificador, datos: null }), null);
+  assert.equal(destinoDelToque({ identificador, datos: undefined }), null);
+  // Un tipo que esta versión no conoce, o uno conocido con el identificador roto.
+  assert.equal(destinoDelToque({ identificador, datos: { type: 'algo_nuevo' } }), null);
+  assert.equal(destinoDelToque({ identificador, datos: { type: 'like', postId: 'no-es-un-uuid' } }), null);
+  // `rutaDelPush` sigue diciendo «bandeja» para quien pinta un aviso con la
+  // aplicación abierta: lo que cambia es que ARRANCAR no acaba allí.
+  assert.equal(rutaDelPush({ type: 'algo_nuevo' }), RUTA_DE_LA_BANDEJA);
 });

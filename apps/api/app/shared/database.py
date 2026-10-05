@@ -70,6 +70,14 @@ class Base(DeclarativeBase):
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with SessionLocal() as session:
         yield session
+        # LA PETICIÓN TERMINÓ BIEN. Si dejó avisos en la cola de entregas, se
+        # envían ahora y no cuando alguien se acuerde de vaciarla (ver
+        # `notifications/despacho.py`). No espera a nada ni puede lanzar. Si la
+        # petición falló, aquí no se llega: no hay nada confirmado que enviar.
+        # Se importa aquí porque ese módulo depende de este.
+        from app.modules.notifications import despacho
+
+        despacho.tras_la_peticion(session)
 
 
 async def create_all_dev() -> None:

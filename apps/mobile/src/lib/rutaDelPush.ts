@@ -99,6 +99,34 @@ export function rutaDelPush(datos: unknown, opciones: Opciones = {}): string | n
   return RUTA_DE_LA_BANDEJA;
 }
 
+/**
+ * A dónde lleva TOCAR un aviso del sistema, o `null` si la aplicación se queda
+ * donde arranca, que es Inicio.
+ *
+ * DOS COSAS QUE NO SON UN DESTINO, y las dos salieron de un fallo real
+ * (05/10/2026: «cada que entro a la aplicación me redirige a notificaciones»):
+ *
+ *  - LO QUE NO ES UN TOQUE. En Android la biblioteca de avisos toma por «han
+ *    tocado un aviso» CUALQUIER dato con que el sistema abra la aplicación:
+ *    `ExpoNotificationLifecycleListener.onCreate` no mira de quién son. Hay
+ *    lanzadores —el de Xiaomi— que abren las aplicaciones con datos suyos, y
+ *    esa «respuesta» llegaba en cada arranque, sin identificador y con datos
+ *    que no son de ningún aviso: tipo desconocido, a la bandeja. Un aviso de
+ *    verdad trae SIEMPRE su identificador (el del mensaje de Firebase, o el
+ *    que le pone la biblioteca al pintarlo); lo que no lo trae no es un aviso.
+ *  - LA BANDEJA. Un aviso sin destino propio ya no la abre. La aplicación
+ *    empieza en Inicio y lo que haya sin leer lo dice un aviso flotante
+ *    (`useAvisosEnVivo`), que es desde donde se entra a la bandeja.
+ */
+export function destinoDelToque(
+  toque: { identificador: unknown; datos: unknown },
+  opciones: Opciones = {},
+): string | null {
+  if (typeof toque.identificador !== 'string' || toque.identificador.trim() === '') return null;
+  const ruta = rutaDelPush(toque.datos, opciones);
+  return ruta === RUTA_DE_LA_BANDEJA ? null : ruta;
+}
+
 export function directoDelPush(datos: unknown): string | null {
   const ruta = rutaDelPush(datos);
   return ruta?.startsWith('/live/') ? ruta.slice('/live/'.length) : null;

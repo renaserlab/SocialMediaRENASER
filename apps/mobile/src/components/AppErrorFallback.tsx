@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { detalleDelFallo } from '@/lib/dondeFallo';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -25,8 +26,21 @@ import { useTranslation } from '@/i18n/useTranslation';
  */
 const colores = palette('light');
 
-export function AppErrorFallback({ error, retry }: { error: Error; retry: () => void }) {
+export function AppErrorFallback({
+  error,
+  retry,
+  detalle,
+}: {
+  error: Error;
+  retry: () => void;
+  /**
+   * Dónde ocurrió, si quien pinta esta pantalla lo sabe (`LimiteDeErrores`).
+   * Sin ello se saca lo que se pueda del propio error.
+   */
+  detalle?: string;
+}) {
   const { t } = useTranslation();
+  const donde = detalle || detalleDelFallo({ pila: error?.stack });
   return (
     <View style={[styles.root, { backgroundColor: colores.background }]}>
       <Feather name="alert-triangle" size={44} color={colores.text} />
@@ -52,6 +66,16 @@ export function AppErrorFallback({ error, retry }: { error: Error; retry: () => 
         <Text style={[styles.detalleTexto, { color: colores.textMuted }]} selectable>
           {error?.message ?? t('crash.noDetail')}
         </Text>
+        {/*
+          DÓNDE. El mensaje solo no basta: «Maximum update depth exceeded» es
+          el mismo falle lo que falle. Con el componente y la pantalla, una
+          captura de esta pantalla es suficiente para encontrarlo.
+        */}
+        {donde ? (
+          <Text style={[styles.detalleTexto, styles.donde, { color: colores.textMuted }]} selectable>
+            {donde}
+          </Text>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -69,6 +93,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   botonTexto: { fontSize: 15, fontWeight: '700' },
-  detalle: { maxHeight: 120, alignSelf: 'stretch', marginTop: spacing.md },
+  // Alto de sobra para las tres líneas de «dónde»: tienen que caber en una captura.
+  detalle: { maxHeight: 340, alignSelf: 'stretch', marginTop: spacing.md },
   detalleTexto: { fontSize: 11, lineHeight: 16, textAlign: 'center' },
+  donde: { marginTop: spacing.sm },
 });

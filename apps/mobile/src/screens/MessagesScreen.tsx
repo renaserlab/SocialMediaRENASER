@@ -16,12 +16,14 @@ import { StateView } from '@/components/StateView';
 import { useTranslation } from '@/i18n/useTranslation';
 import {
   CONSULTA_VACIA,
+  bandejaAlDia,
   esperandoAlServidor,
   esVigente,
   filasVisibles,
   fusionarPaginas,
   hayConsulta,
   hayQueRecargar,
+  sinLeerEn,
   type ConsultaDeBandeja,
   type FiltroDeBandeja,
 } from '@/lib/bandeja';
@@ -35,7 +37,7 @@ import {
 } from '@/repositories/EtiquetasRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { anotarMensajes } from '@/services/contadores';
+import { alLeerUnaConversacion, alLlegarLaBandeja, anotarMensajes } from '@/services/contadores';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Conversation } from '@/types';
@@ -220,6 +222,31 @@ export function MessagesScreen() {
     },
     [supabaseEnabled, signedIn],
   );
+
+  /*
+    LO QUE PASA FUERA DE ESTA PANTALLA, sin volver a pedir nada.
+
+    Con la validez de treinta segundos, volver de un chat dejaba su fila con el
+    globo de «sin leer» aunque se acabara de leer —y entrando desde una
+    notificación, siempre—. Dos avisos lo corrigen en el acto: que se ha leído
+    una conversación, y la lectura fresca que el contador común hace al salir
+    de un chat y al llegar un mensaje. Ver `lib/bandeja.ts`.
+  */
+  useEffect(() => {
+    const dejarLasLeidas = alLeerUnaConversacion((conversacionId) => {
+      setRemote((actuales) => sinLeerEn(actuales, conversacionId) as Conversation[]);
+    });
+    const dejarLaBandeja = alLlegarLaBandeja((frescas) => {
+      const portada = !hayConsulta(consultaRef.current);
+      setRemote((actuales) => bandejaAlDia(actuales, frescas, portada) as Conversation[]);
+      // Lo fresco es la portada entera: cuenta como recién cargada.
+      if (portada) ultimaCarga.current = Date.now();
+    });
+    return () => {
+      dejarLasLeidas();
+      dejarLaBandeja();
+    };
+  }, []);
 
   /**
    * La pagina siguiente, al llegar al final de la lista.

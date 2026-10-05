@@ -162,3 +162,96 @@ export function destinoDelAviso(
   if (aviso.actorId) return `/profile/${aviso.actorId}`;
   return null;
 }
+
+/*
+  EL AVISO DE UN MENSAJE, AL MOMENTO (05/10/2026).
+
+  Reportado: «el sistema de notificaciones por lo general es bastante lento».
+  El mensaje llegaba al instante por tiempo real, pero su aviso flotante no:
+  esperaba medio segundo de respiro, luego a la lista de conversaciones y,
+  además, hasta dos segundos y medio a la bandeja de avisos, para saber si aquel
+  mensaje era el registro de una sesión y no anunciarlo dos veces.
+
+  Ahora se anuncia en cuanto llega si la conversación ya se conoce —casi
+  siempre—, y el «un hecho, un aviso» se resuelve al revés: quien llega segundo
+  es el que calla.
+*/
+
+export type QueHacerConUnMensaje = 'callar' | 'anunciar-ya' | 'esperar-a-la-lista';
+
+/**
+ * Qué se hace con un mensaje que acaba de llegar de otra persona.
+ *
+ * - Con su conversación delante, o si esa persona acaba de dar un aviso de
+ *   sesión (el mensaje es su registro en el chat): se calla.
+ * - Si la conversación ya se conoce: se anuncia YA, sin pedir nada.
+ * - Si no (una conversación nueva): hay que pedir la lista para saber de quién
+ *   es, y se anuncia al volver.
+ */
+export function queHacerConUnMensaje(estado: {
+  aLaVista: boolean;
+  conAvisoDeSesionReciente: boolean;
+  conversacionConocida: boolean;
+}): QueHacerConUnMensaje {
+  if (estado.aLaVista || estado.conAvisoDeSesionReciente) return 'callar';
+  return estado.conversacionConocida ? 'anunciar-ya' : 'esperar-a-la-lista';
+}
+
+/**
+ * Si un aviso de la bandeja se calla porque su mensaje del chat ya se anunció.
+ *
+ * Solo los de SESIÓN: son los únicos que dejan además un mensaje en el chat.
+ * Un «le gustó tu publicación» de la misma persona, diez segundos después de
+ * escribirte, es otra cosa y sí se anuncia.
+ */
+export function elMensajeYaLoDijo(
+  aviso: { entityType?: string | null; actorId?: string | null },
+  conMensajeAnunciado: ReadonlyMap<string, number>,
+  ahora: number,
+): boolean {
+  if (aviso.entityType !== 'booking' || !aviso.actorId) return false;
+  return (conMensajeAnunciado.get(aviso.actorId) ?? 0) > ahora;
+}
+
+/*
+  AL ENTRAR SE DICE LO QUE HAY SIN LEER (05/10/2026).
+
+  Pedido tal cual: la aplicación empieza en Inicio y «mediante ventanas
+  flotantes» indica que hay notificaciones sin leer. Hasta ahora, al arrancar y
+  al volver del segundo plano no se anunciaba nada —«ya lo avisó el sistema»—,
+  y quien no había visto el aviso del sistema entraba sin enterarse.
+
+  NO ES UN AVISO POR CADA COSA: es UNO que dice cuánto hay, y solo cuando hay
+  MÁS que la última vez que se miró. Volver a la aplicación diez veces con los
+  mismos tres mensajes pendientes no lo repite diez veces.
+*/
+
+/**
+ * Si hay que decir «tienes N sin leer».
+ *
+ * @param cuenta lo que hay sin leer ahora.
+ * @param dicho lo que había la última vez que se miró, por cualquier camino
+ *   (0 al arrancar). Quien llama lo pone al día en CADA lectura, se diga o no:
+ *   así, cuando la cuenta baja porque se leyó algo, la siguiente subida vuelve
+ *   a contar como novedad.
+ */
+export function hayPendientesQueDecir(cuenta: number, dicho: number): boolean {
+  return cuenta > 0 && cuenta > dicho;
+}
+
+/**
+ * Las conversaciones con mensajes sin leer, sin la que se tiene delante: esa
+ * se está leyendo, y anunciarla sería decirle a alguien lo que está mirando.
+ */
+export function conversacionesPendientes<T extends { id: string; unread?: number }>(
+  conversaciones: readonly T[],
+  seEstaViendo: (conversacionId: string) => boolean,
+): { pendientes: T[]; total: number } {
+  const pendientes = conversaciones.filter(
+    (conversacion) => (conversacion.unread || 0) > 0 && !seEstaViendo(conversacion.id),
+  );
+  return {
+    pendientes,
+    total: pendientes.reduce((suma, conversacion) => suma + (conversacion.unread || 0), 0),
+  };
+}

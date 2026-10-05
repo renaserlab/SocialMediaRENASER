@@ -32,6 +32,10 @@ estrecha:
   * LAS BANDERAS, DESPUÉS Y SOLO PARA EL PLANIFICADOR: reconocido, con la
     contratación apagada recibe el 503 que le toca y no corre nada.
   * NO MUEVE DINERO y no escribe nada que los barridos no escribieran ya.
+  * Y AL TERMINAR DEJA PROGRAMADA UNA PASADA POR LA COLA DE AVISOS
+    (`notifications/despacho.py`), sin esperarla: EventBridge corta la llamada
+    a los cinco segundos y hablar con Expo puede tardar más. Es lo que recoge
+    los reintentos; el aviso recién creado ya salió al guardarse.
 """
 
 from __future__ import annotations
@@ -44,6 +48,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.modules.notifications import despacho
 from app.modules.services import atencion, esquema, reserva
 from app.shared.database import get_db
 
@@ -121,6 +126,9 @@ async def correr(
         "servicios.procesos expired=%s reminded=%s closed=%s unverified=%s skipped=%s",
         vencidas, hecho.recordadas, hecho.cerradas, hecho.sin_verificar, hecho.saltadas,
     )
+    # Los avisos que toca reintentar, y los que hayan quedado sin salir. No se
+    # espera: se programa y se contesta.
+    despacho.despachar()
     return ProcesosRead(
         expired=vencidas,
         reminded=hecho.recordadas,

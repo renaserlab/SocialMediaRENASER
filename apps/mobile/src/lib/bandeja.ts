@@ -247,3 +247,51 @@ export function filasVisibles<T extends { name: string; subtitle?: string }>(
   if (tecleado === '') return filas;
   return estrecharBandeja(filas, tecleado);
 }
+
+/*
+  LO LEÍDO SE VE LEÍDO AL VOLVER (05/10/2026).
+
+  Reportado: «alguien me envió mensaje y entré directamente a su chat; cuando
+  salí seguía apareciendo como si no lo hubiese visto». El servidor lo tenía
+  leído y el globo de la barra lo decía bien; lo que seguía viejo era la fila de
+  la bandeja, que con la validez de arriba no se vuelve a pedir en treinta
+  segundos. Entrando desde la propia bandeja no se notaba tanto; entrando desde
+  una notificación, siempre.
+
+  No se arregla recargando en cada foco —eso es lo que la validez quitó, con
+  razón—: se arregla diciéndole a la bandeja lo que ya se sabe, sin pedir nada.
+*/
+
+/**
+ * La bandeja con una conversación recién leída: su fila, sin nada pendiente.
+ *
+ * Devuelve LA MISMA lista si no hay nada que cambiar, para no repintar.
+ */
+export function sinLeerEn<T extends { id: string; unread?: number }>(
+  lista: readonly T[],
+  conversacionId: string,
+): readonly T[] {
+  if (!lista.some((c) => c.id === conversacionId && (c.unread ?? 0) > 0)) return lista;
+  return lista.map((c) => (c.id === conversacionId ? { ...c, unread: 0 } : c));
+}
+
+/**
+ * La bandeja puesta al día con una lectura fresca que hizo otro (el contador
+ * común la pide al salir de un chat y al llegar un mensaje).
+ *
+ * - En la PORTADA (sin búsqueda ni filtro) lo fresco ES la primera página: se
+ *   adopta entera, con su orden, y detrás se conserva lo que ya se había bajado
+ *   de páginas siguientes.
+ * - Con una búsqueda o un filtro puestos lo fresco es otra lista: solo se
+ *   actualizan las filas que coinciden, sin tocar el orden ni añadir ninguna.
+ */
+export function bandejaAlDia<T extends { id: string }>(
+  actuales: readonly T[],
+  frescas: readonly T[],
+  esLaPortada: boolean,
+): readonly T[] {
+  if (frescas.length === 0) return actuales;
+  const porId = new Map(frescas.map((c) => [c.id, c] as const));
+  if (!esLaPortada) return actuales.map((c) => porId.get(c.id) ?? c);
+  return [...frescas, ...actuales.filter((c) => !porId.has(c.id))];
+}

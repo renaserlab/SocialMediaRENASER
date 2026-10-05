@@ -9,10 +9,18 @@ let channelSeq = 0;
 /**
  * Suscribe a los mensajes nuevos de una conversación vía Supabase Realtime.
  * Devuelve una función para cancelar la suscripción.
+ *
+ * `alCambiar` DICE SI EL CANAL ESTÁ ENGANCHADO, y no es un detalle. El canal
+ * no avisa de lo que se pierde: mientras se engancha, y cada vez que se cae
+ * —la red cambia, el teléfono duerme— y vuelve, lo que entró en medio NO llega
+ * por aquí ni llegará después. Quien pinta un chat necesita saberlo para
+ * preguntar al servidor lo que falta (`true`, cada vez que se engancha o se
+ * reengancha) y para no fiarse del canal mientras está caído (`false`).
  */
 export function subscribeToConversation(
   conversationId: string,
   onInsert: (row: MessageRow) => void,
+  alCambiar?: (enganchado: boolean) => void,
 ): () => void {
   const client = supabase;
   if (!client) return () => {};
@@ -30,7 +38,7 @@ export function subscribeToConversation(
       },
       (payload: { new: MessageRow }) => onInsert(payload.new),
     )
-    .subscribe();
+    .subscribe((estado) => alCambiar?.(estado === 'SUBSCRIBED'));
 
   return () => {
     void client.removeChannel(channel);
