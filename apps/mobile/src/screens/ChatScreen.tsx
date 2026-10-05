@@ -399,10 +399,17 @@ export function ChatScreen() {
   */
   const [sesionesDelChat, setSesionesDelChat] = useState<Sesion[]>([]);
   const conversacionDeSesiones = supabaseEnabled ? params.id : undefined;
+  // La conversación que hay AHORA en pantalla: una respuesta que llega tarde,
+  // de la conversación anterior, no puede pintarse en esta.
+  const conversacionEnPantalla = useRef(conversacionDeSesiones);
+  conversacionEnPantalla.current = conversacionDeSesiones;
   const leerSesiones = useCallback(() => {
-    if (!conversacionDeSesiones) return;
-    BookingRepository.deLaConversacion(conversacionDeSesiones)
-      .then(setSesionesDelChat)
+    const deCual = conversacionDeSesiones;
+    if (!deCual) return;
+    BookingRepository.deLaConversacion(deCual)
+      .then((sesiones) => {
+        if (conversacionEnPantalla.current === deCual) setSesionesDelChat(sesiones);
+      })
       .catch(() => {
         // Sin esto solo falta el atajo: la agenda sigue teniendo los botones.
       });
@@ -424,16 +431,38 @@ export function ChatScreen() {
     }
     return null;
   }, [messages]);
-  const primeraVezDelAjeno = useRef(true);
+  /*
+    Lo último ajeno que había AL TERMINAR la carga inicial. `undefined` hasta
+    entonces: lo que trae esa carga no es una novedad —las sesiones ya se han
+    pedido— y lo que llegue después, sí. Aunque sea el primer mensaje que esa
+    persona escribe en la conversación.
+  */
+  const ajenoYaVisto = useRef<string | null | undefined>(undefined);
+  const respiroDeSesiones = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    // El primero es el de la carga inicial: las sesiones ya se han pedido.
-    if (primeraVezDelAjeno.current) {
-      if (ultimoAjeno !== null) primeraVezDelAjeno.current = false;
-      return undefined;
+    // Mientras dura la carga inicial no hay novedad que mirar. (Es la salida
+    // de este efecto, no de la pantalla: el redactor sigue pintándose.)
+    const cargado = !cargandoMensajes;
+    if (!cargado) return;
+    if (ajenoYaVisto.current === undefined) {
+      ajenoYaVisto.current = ultimoAjeno;
+      return;
     }
-    const respiro = setTimeout(leerSesiones, 800);
-    return () => clearTimeout(respiro);
-  }, [ultimoAjeno, leerSesiones]);
+    if (ajenoYaVisto.current === ultimoAjeno) return;
+    ajenoYaVisto.current = ultimoAjeno;
+    if (respiroDeSesiones.current) clearTimeout(respiroDeSesiones.current);
+    respiroDeSesiones.current = setTimeout(() => {
+      respiroDeSesiones.current = null;
+      leerSesiones();
+    }, 800);
+  }, [ultimoAjeno, cargandoMensajes, leerSesiones]);
+  // El respiro no sobrevive a la pantalla.
+  useEffect(
+    () => () => {
+      if (respiroDeSesiones.current) clearTimeout(respiroDeSesiones.current);
+    },
+    [],
+  );
 
   /*
     Cómo está HOY cada sesión de la que habla esta conversación. La tarjeta de

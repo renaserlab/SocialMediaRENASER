@@ -2539,9 +2539,16 @@ ningún aviso al pedirle una sesión; no se podía aceptar desde Mensajes ni
 quedaba registrado; «Aceptar» seguía ahí después de aceptar; los avisos solo
 llegan con la aplicación abierta; y la navegación iba a tirones.
 
-Nada de lo que sigue está visto en un teléfono. Hace falta: la API desplegada,
-la migración **0097** aplicada y la API reiniciada después, y una compilación
-nueva. Dos cuentas, **A** (pide) y **B** (recibe), en dos teléfonos.
+Nada de lo que sigue está visto en un teléfono. Hace falta la API desplegada y
+una compilación nueva. Dos cuentas, **A** (pide) y **B** (recibe), en dos
+teléfonos.
+
+**La migración 0097 no es imprescindible.** Se aplica desde el panel de
+Supabase y hoy no hay acceso a él. Sin ella la solicitud llega al chat como
+texto y la tarjeta con los botones se pinta **al final de la conversación**;
+con ella (y la API reiniciada después) la tarjeta es el propio mensaje y cada
+respuesta queda como una línea. Las tablas de abajo valen para los dos casos
+salvo donde se dice.
 
 ### Fluidez
 
@@ -2562,10 +2569,13 @@ la causa encontrada leyendo el código, no una medida hecha en el teléfono.
 
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
-| A pide una sesión a B: en el chat de los dos aparece una tarjeta, no un texto | | | |
+| A pide una sesión a B: en el chat de los dos aparece una tarjeta con la sesión | | | |
+| Sin la 0097: la solicitud es un texto y la tarjeta está al final del chat. Con la 0097: la tarjeta es el mensaje | | | |
+| No salen dos tarjetas de la misma sesión | | | |
 | La tarjeta de B tiene «Aceptar» y «Rechazar»; la de A, «Cancelar sesión» | | | |
 | B acepta desde el chat: los botones cambian en el acto | | | |
-| Debajo queda una línea: «Aceptaste la sesión» (B) / «B aceptó la sesión» (A) | | | |
+| Queda escrito en el chat que se aceptó: con la 0097, «Aceptaste la sesión» (B) / «B aceptó la sesión» (A); sin ella, un mensaje «Sesión aceptada: …» | | | |
+| A tiene el chat abierto cuando B le pide OTRA sesión: la tarjeta aparece sin salir | | | |
 | A ve cambiar su tarjeta sin salir ni recargar | | | |
 | La tarjeta aceptada ofrece «Ya la hicimos» y «Cancelar sesión», no «Aceptar» | | | |
 | «Cancelar sesión» pregunta antes de cancelar | | | |
