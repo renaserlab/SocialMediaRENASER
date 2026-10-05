@@ -62,6 +62,8 @@ export type Sesion = {
   conversacionId: string | null;
   completadaIso: string | null;
   creadaIso: string;
+  /** Cuándo cambió por última vez, según el servidor. */
+  actualizadaIso: string;
   quienPide: PersonaDeSesion;
   quienDa: PersonaDeSesion;
   /** 'provider' = me la piden a mi; 'requester' = la pedi yo. */
@@ -88,6 +90,7 @@ function aSesion(dto: SesionDto): Sesion {
     conversacionId: dto.conversation_id,
     completadaIso: dto.completed_at,
     creadaIso: dto.created_at,
+    actualizadaIso: dto.updated_at,
     quienPide: aPersona(dto.requester),
     quienDa: aPersona(dto.provider),
     miRol: dto.my_role,

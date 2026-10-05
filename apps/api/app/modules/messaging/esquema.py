@@ -250,6 +250,27 @@ async def hay_busqueda_en_mensajes(db: AsyncSession) -> bool:
     return _cache["indice_busqueda_mensajes"]
 
 
+async def hay_sesiones_en_el_chat(db: AsyncSession) -> bool:
+    """Si existe `message_booking_context` (migracion 0097).
+
+    SIN LA 0097: pedir una sesion sigue dejando su mensaje en el chat, y
+    responderla tambien, pero como texto normal: no hay tarjeta ni botones
+    porque no hay donde guardar de que sesion habla cada mensaje. La agenda y
+    los avisos funcionan igual. Se degrada el adorno, nunca la sesion.
+    """
+    if "message_booking_context" not in _cache:
+        conexion = await db.connection()
+        _cache["message_booking_context"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("message_booking_context")
+        )
+        if not _cache["message_booking_context"]:
+            logger.warning(
+                "La migracion 0097 no esta aplicada: las sesiones salen en el "
+                "chat como texto, sin tarjeta ni botones."
+            )
+    return _cache["message_booking_context"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 

@@ -26,8 +26,10 @@ import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
 import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
+import { SesionEnElChat } from '@/components/SesionEnElChat';
 import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
+import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { useTranslation } from '@/i18n/useTranslation';
 import { afterSheetClose } from '@/lib/afterSheetClose';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
@@ -44,8 +46,14 @@ import {
   nuevoIdTemporal,
   reconciliarEnvio,
 } from '@/lib/mensajesEnVivo';
+import {
+  estadosVigentes,
+  loQueSigueHaciendoFalta,
+  type LoSabidoDeUnaSesion,
+} from '@/lib/sesionesDelChat';
 import { toMessageFromRow } from '@/mappers/messageMapper';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
+import { BookingRepository } from '@/repositories/BookingRepository';
 import {
   MessageRepository,
   MENSAJES_POR_PAGINA,
@@ -128,6 +136,8 @@ function diaDe(mensaje?: Message): string | null {
 function mismaRafaga(actual: Message, anterior?: Message): boolean {
   if (!anterior || anterior.sender !== actual.sender) return false;
   if (anterior.eliminado || actual.eliminado) return false;
+  // La tarjeta de una sesión no es una burbuja: nada se pega a ella.
+  if (anterior.sesion || actual.sesion) return false;
   if (!anterior.createdAtIso || !actual.createdAtIso) return false;
   const a = new Date(anterior.createdAtIso).getTime();
   const b = new Date(actual.createdAtIso).getTime();
@@ -369,6 +379,66 @@ export function ChatScreen() {
 
   const headerName = params.name ?? demoConversation?.name ?? t('chat.conversation');
   const messages = supabaseEnabled ? remoteMessages : demoConversation?.messages ?? [];
+
+  // -------------------------------------------------------------------------
+  // Sesiones 1:1 dentro de la conversación
+  // -------------------------------------------------------------------------
+
+  /*
+    Lo que se sabe de una sesión ANTES de que llegue el mensaje que lo
+    registra: lo que respondió el servidor al pulsar un botón. Con ello la
+    tarjeta deja de ofrecer «Aceptar» en el acto, sin esperar a Realtime.
+  */
+  const [sabidas, setSabidas] = useState<LoSabidoDeUnaSesion[]>([]);
+  /*
+    Cómo está HOY cada sesión de la que habla esta conversación. La tarjeta de
+    la solicitud pinta esto, no lo que traía su mensaje cuando se cargó: una
+    respuesta posterior lo deja viejo. Ver `lib/sesionesDelChat.ts`.
+  */
+  const estadosDeSesion = useMemo(() => estadosVigentes(messages, sabidas), [messages, sabidas]);
+
+  // En cuanto un mensaje trae esa versión, deja de hacer falta recordarla.
+  useEffect(() => {
+    setSabidas((previas) => {
+      if (previas.length === 0) return previas;
+      const quedan = loQueSigueHaciendoFalta(messages, previas);
+      return quedan.length === previas.length ? previas : quedan;
+    });
+  }, [messages]);
+
+  const { ocupada: sesionOcupada, responder: responderSesion } = useResponderSesion({
+    alCambiar: (sesion) =>
+      setSabidas((previas) => [
+        ...previas.filter((dato) => dato.sesionId !== sesion.id),
+        { sesionId: sesion.id, estado: sesion.estado, actualizadaIso: sesion.actualizadaIso },
+      ]),
+    /*
+      El servidor dijo «eso ya no se puede»: la sesión cambió por otro lado —se
+      respondió desde la agenda, o respondió la otra persona— y lo que hay en
+      pantalla es viejo. Se le pregunta a la agenda cómo están, que es quien lo
+      sabe aunque el mensaje que lo registra no haya llegado.
+    */
+    alDesfasar: () => {
+      BookingRepository.list('all')
+        .then((sesiones) =>
+          setSabidas(
+            sesiones.map((sesion) => ({
+              sesionId: sesion.id,
+              estado: sesion.estado,
+              actualizadaIso: sesion.actualizadaIso,
+            })),
+          ),
+        )
+        .catch(() => {
+          // Se queda como estaba; el siguiente mensaje lo pondrá al día.
+        });
+    },
+  });
+  // Lo que la lista tiene que mirar, además de los mensajes, para repintar.
+  const extraDeSesiones = useMemo(
+    () => ({ estadosDeSesion, sesionOcupada }),
+    [estadosDeSesion, sesionOcupada],
+  );
 
   // -------------------------------------------------------------------------
   // Elegir archivos
@@ -1052,6 +1122,7 @@ export function ChatScreen() {
       <SinTecladoDelante>
         <FlashList
           data={messages}
+          extraData={extraDeSesiones}
           keyExtractor={(item: Message) => item.id}
           contentContainerStyle={styles.messages}
           showsVerticalScrollIndicator={false}
@@ -1184,6 +1255,30 @@ export function ChatScreen() {
                       </Text>
                     </View>
                   </View>
+                </View>
+              );
+            }
+
+            /*
+              UNA SESIÓN 1:1. La solicitud es una tarjeta con los botones que le
+              tocan a quien mira; cada respuesta, una línea que la deja
+              registrada. El estado es el de HOY, no el que traía el mensaje.
+              Sin menú de acciones: el registro de una sesión no se borra.
+            */
+            if (item.sesion) {
+              const sesion = item.sesion;
+              return (
+                <View>
+                  {cabecera}
+                  <SesionEnElChat
+                    sesion={sesion}
+                    estado={estadosDeSesion.get(sesion.sesionId) ?? sesion.estado}
+                    mio={mine}
+                    nombre={headerName}
+                    hora={item.createdAt}
+                    ocupada={sesionOcupada === sesion.sesionId}
+                    alElegir={(accion) => void responderSesion(sesion.sesionId, accion)}
+                  />
                 </View>
               );
             }

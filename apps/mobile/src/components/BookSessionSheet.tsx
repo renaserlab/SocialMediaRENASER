@@ -171,7 +171,7 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     setSaving(true);
     setError(null);
     try {
-      await BookingRepository.create({
+      const sesion = await BookingRepository.create({
         proveedorId: targetUser.id,
         // El tema es lo que la agenda enseña como titulo: sin nota se usa el
         // generico, que sigue siendo mas util que una fila sin asunto.
@@ -180,13 +180,25 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         cuandoIso: cuandoIso(date, time),
       });
 
-      // Si la sesión se crea pero el mensaje falla, la reserva sigue siendo
-      // válida: no se deshace nada ni se avisa de un error que no impide nada.
-      try {
-        const conv = await MessageRepository.getOrCreateDirect(targetUser.id);
-        await MessageRepository.sendMessage(conv.id, redactarMensaje());
-      } catch {
-        // El aviso ya salió; el chat se puede abrir después.
+      /*
+        LA SOLICITUD YA ESTÁ EN EL CHAT: la escribe el servidor al crear la
+        sesión, como un mensaje que sabe de qué sesión habla —es lo que deja a
+        la otra persona aceptar o rechazar sin salir de Mensajes—. La sesión
+        vuelve entonces con su conversación.
+
+        Solo si vuelve SIN ella —una API anterior a ese cambio— se manda el
+        texto de antes, para que la propuesta no deje de llegar al chat. Mandar
+        los dos dejaría la misma solicitud dos veces.
+      */
+      if (!sesion.conversacionId) {
+        // Si el mensaje falla, la sesión sigue siendo válida: no se deshace
+        // nada ni se avisa de un error que no impide nada.
+        try {
+          const conv = await MessageRepository.getOrCreateDirect(targetUser.id);
+          await MessageRepository.sendMessage(conv.id, redactarMensaje());
+        } catch {
+          // El aviso ya salió; el chat se puede abrir después.
+        }
       }
 
       toast(`Sesión propuesta a ${targetUser.fullName}`);

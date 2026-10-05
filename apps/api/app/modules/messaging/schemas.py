@@ -222,7 +222,41 @@ class MessageRead(BaseModel):
     #: que saber para escribir «Historia no disponible».
     story_context: StoryContextRead | None = None
 
+    #: De qué sesión 1:1 habla este mensaje, si habla de alguna.
+    #:
+    #: `None` en la inmensa mayoría, y también mientras la 0097 espere: sin la
+    #: tabla el mensaje sale como texto normal. Ver `BookingContextRead`.
+    booking_context: "BookingContextRead | None" = None
+
     model_config = ConfigDict(from_attributes=True)
+
+
+class BookingContextRead(BaseModel):
+    """La sesión de la que habla un mensaje, con su estado de HOY.
+
+    `event` ES LO QUE PASÓ EN ESTE MENSAJE (se pidió, se aceptó, se canceló…) y
+    no cambia nunca. `status` ES CÓMO ESTÁ LA SESIÓN AHORA y sí cambia: por eso
+    la tarjeta de una solicitud ya aceptada deja de ofrecer «Aceptar» aunque el
+    mensaje sea el mismo. El estado sale de `bookings` en cada lectura; aquí no
+    se guarda copia que pueda quedarse vieja.
+
+    `my_role` evita que el móvil compare identificadores para saber qué botones
+    le tocan a quien mira.
+    """
+
+    booking_id: str
+    event: str
+    status: str
+    topic: str
+    note: str = ""
+    scheduled_at: datetime | None = None
+    timezone: str | None = None
+    #: "provider" si a quien mira se la pidieron; "requester" si la pidió.
+    my_role: str
+    updated_at: datetime | None = None
+
+
+MessageRead.model_rebuild()
 
 
 class MessagingAvailability(BaseModel):

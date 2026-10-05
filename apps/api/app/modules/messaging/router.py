@@ -30,7 +30,7 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import audio, avisos, esquema, historias
+from app.modules.messaging import audio, avisos, esquema, historias, sesiones
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
@@ -664,6 +664,22 @@ async def _crear_directa(db: AsyncSession, uid: str, otro_id: str) -> str:
     return conv.id
 
 
+async def conversacion_directa(db: AsyncSession, uid: str, otro_id: str) -> str:
+    """El chat directo entre dos personas: el que hay, o uno nuevo.
+
+    Para quien necesita la conversacion SIN ser la pantalla de chat —la agenda,
+    que deja en ella la solicitud de una sesion—. Es exactamente lo que hace
+    `POST /conversations/direct`, sin la respuesta.
+
+    OJO: SI LA CREA, CONFIRMA SU PROPIA TRANSACCION (`_crear_directa`). Hay que
+    llamarla ANTES de empezar a escribir lo propio, no en medio.
+    """
+    existente = await _buscar_directa(db, uid, otro_id)
+    if existente is not None:
+        return existente
+    return await _crear_directa(db, uid, otro_id)
+
+
 @router.post("/direct", response_model=ConversationRead)
 async def get_or_create_direct(
     payload: DirectConversationCreate,
@@ -798,6 +814,10 @@ async def list_messages(
     # acaba de retirar.
     contextos = await historias.contextos_por_mensaje(db, vivos)
 
+    # Y la sesion 1:1 de la que hable cada mensaje, con su estado de AHORA.
+    # Tambien una consulta para toda la pagina; sin la 0097, `{}`.
+    de_sesion = await sesiones.contextos_por_mensaje(db, vivos, current_user.id)
+
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
         MessageRead(
@@ -815,6 +835,7 @@ async def list_messages(
             deleted_at=borrado_en,
             attachments=adjuntos.get(msg_id, []),
             story_context=contextos.get(msg_id),
+            booking_context=de_sesion.get(msg_id),
         )
         for (
             msg_id,
@@ -1065,6 +1086,17 @@ async def borrar_mensaje(
         # Ya estaba. No se vuelve a marcar: la fecha tiene que seguir siendo la
         # del borrado real, no la del último toque en un botón.
         return
+
+    # EL REGISTRO DE UNA SESIÓN NO SE BORRA. Es lo que deja constancia de que
+    # se pidió, se aceptó o se canceló: quitarlo dejaría una sesión aceptada
+    # sin rastro de quién la aceptó. Lo que se puede hacer es cancelar la
+    # sesión, y eso deja su propio registro. 409 y no 403: no es que no sea
+    # suyo, es que este mensaje no admite esa acción.
+    if await sesiones.es_registro_de_sesion(db, message_id):
+        raise ConflictError(
+            "Este mensaje es el registro de una sesión y no se puede borrar.",
+            code="message_is_booking_record",
+        )
 
     await db.execute(
         update(Message)

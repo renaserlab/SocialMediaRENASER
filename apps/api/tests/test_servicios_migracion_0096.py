@@ -82,10 +82,11 @@ def _anterior(perfil: str, servicio: str, version: str) -> str:
 # =========================================================================== #
 # 1. Estática
 # =========================================================================== #
-def test_es_la_ultima_y_sigue_a_la_0095() -> None:
+def test_sigue_a_la_0095_y_la_sigue_la_0097() -> None:
     nombres = sorted(p.name for p in MIGRACIONES.glob("*.sql"))
-    assert nombres[-1] == ARCHIVO.name
-    assert nombres[-2].startswith("0095_")
+    posicion = nombres.index(ARCHIVO.name)
+    assert nombres[posicion - 1].startswith("0095_")
+    assert nombres[posicion + 1].startswith("0097_")
 
 
 def test_consta_como_aplicada_y_ya_no_se_edita() -> None:

@@ -4,6 +4,7 @@ Seguridad: quien pide sale SIEMPRE del token (`current_user.id`), nunca del
 cuerpo. Y ninguna peticion puede tocar una sesion en la que no participe.
 """
 
+import logging
 from datetime import datetime, timezone as tz
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
@@ -20,6 +21,8 @@ from app.modules.bookings.schemas import (
     es_momento_futuro,
     transicion_permitida,
 )
+from app.modules.messaging import sesiones
+from app.modules.messaging.router import conversacion_directa
 from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
@@ -29,6 +32,8 @@ from app.modules.social_graph.models import UserBlock
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -70,6 +75,48 @@ async def _nombre_del_actor(db: AsyncSession, uid: str) -> str | None:
         )
     ).first()
     return nombre_visible(fila[0], fila[1]) if fila else None
+
+
+async def _conversacion_de(db: AsyncSession, quien_pide: str, quien_da: str) -> str | None:
+    """El chat directo de las dos partes, donde queda escrita la sesion.
+
+    SE LLAMA ANTES DE ESCRIBIR NADA DE LA SESION, porque si la conversacion no
+    existia la crea y confirma su propia transaccion.
+
+    DEVUELVE None SIN LANZAR si no se puede. La sesion es lo que la persona ha
+    pedido; que quede ademas escrita en el chat es lo que la hace comoda. Perder
+    lo segundo no puede costar lo primero: la agenda y el aviso siguen saliendo.
+    """
+    try:
+        return await conversacion_directa(db, quien_pide, quien_da)
+    except Exception:  # noqa: BLE001 - el chat nunca tumba la agenda
+        logger.warning("[agenda] no se pudo abrir el chat de la sesion", exc_info=True)
+        await db.rollback()
+        return None
+
+
+async def _dejar_en_el_chat(
+    db: AsyncSession, *, conversacion_id: str | None, quien: str, reserva: Booking
+) -> None:
+    """Escribe en el chat lo que acaba de pasar con la sesion. No hace commit.
+
+    DENTRO DE UN PUNTO DE GUARDADO: si escribir el mensaje falla, se deshace el
+    mensaje y nada mas. Sin el, un fallo aqui dejaria la transaccion inservible
+    y se llevaria por delante la sesion que se estaba guardando.
+    """
+    if conversacion_id is None:
+        return
+    try:
+        async with db.begin_nested():
+            await sesiones.anotar(
+                db,
+                conversation_id=conversacion_id,
+                sender_id=quien,
+                reserva=reserva,
+                evento=sesiones.EVENTO_DEL_ESTADO[reserva.status],
+            )
+    except Exception:  # noqa: BLE001 - el chat nunca tumba la agenda
+        logger.warning("[agenda] no se pudo dejar la sesion en el chat", exc_info=True)
 
 
 def _exigir_momento_futuro(scheduled_at: datetime | None) -> None:
@@ -259,6 +306,9 @@ async def create_booking(
     if existente is not None:
         return await _cargar(db, existente, current_user.id)
 
+    # El chat de las dos partes, ANTES de escribir la sesion (puede confirmar).
+    conversacion_id = await _conversacion_de(db, current_user.id, payload.provider_id)
+
     reserva = Booking(
         requester_id=current_user.id,
         provider_id=payload.provider_id,
@@ -267,9 +317,21 @@ async def create_booking(
         scheduled_at=payload.scheduled_at,
         timezone=payload.timezone,
         status="pending",
+        # La sesion sabe en que conversacion vive: es lo que deja a la agenda
+        # abrir el chat, y al movil saber que el mensaje ya lo escribio el
+        # servidor (y no mandar otro encima).
+        conversation_id=conversacion_id,
     )
     db.add(reserva)
     await db.flush()
+
+    # LA SOLICITUD QUEDA EN EL CHAT, escrita por el servidor y en esta misma
+    # transaccion. Antes la escribia el movil despues, como un mensaje de texto
+    # que no sabia de que sesion hablaba: por eso en Mensajes no se podia
+    # aceptar nada. Ver `messaging/sesiones.py`.
+    await _dejar_en_el_chat(
+        db, conversacion_id=conversacion_id, quien=current_user.id, reserva=reserva
+    )
 
     # El aviso lo crea el SERVIDOR, no el movil.
     #
@@ -345,7 +407,10 @@ async def update_booking(
 
     if not transicion_permitida(reserva.status, payload.status, rol):
         raise ValidationAppError(
-            "Esa acción ya no es posible sobre esta sesión."
+            "Esa acción ya no es posible sobre esta sesión.",
+            # Con codigo: el movil lo distingue de un fallo cualquiera y, en vez
+            # de quedarse con un boton que ya no vale, vuelve a leer la sesion.
+            code="booking_transition_not_allowed",
         )
 
     # Reprogramar tampoco vale hacia atras. Sin esto, la comprobacion de crear
@@ -357,6 +422,18 @@ async def update_booking(
     # justamente lo que da el sello a una resena.
     if payload.scheduled_at is not None:
         _exigir_momento_futuro(payload.scheduled_at)
+
+    # Donde queda escrito. Las sesiones de antes de este cambio no tienen
+    # conversacion apuntada: se busca —o se crea— AHORA, antes de tocar nada,
+    # porque crearla confirma su propia transaccion. Por eso la reserva se
+    # vuelve a leer despues.
+    conversacion_id = reserva.conversation_id
+    if conversacion_id is None:
+        conversacion_id = await _conversacion_de(
+            db, reserva.requester_id, reserva.provider_id
+        )
+        await db.refresh(reserva)
+        reserva.conversation_id = conversacion_id
 
     reserva.status = payload.status
     if payload.status == "completed":
@@ -396,6 +473,12 @@ async def update_booking(
         entity_type="booking",
         entity_id=reserva.id,
         payload={"topic": reserva.topic, "status": reserva.status},
+    )
+    # Y EL REGISTRO EN EL CHAT: quien respondio, que respondio y cuando. Es lo
+    # que hace que la tarjeta de la solicitud y la agenda cuenten lo mismo.
+    await db.flush()
+    await _dejar_en_el_chat(
+        db, conversacion_id=conversacion_id, quien=current_user.id, reserva=reserva
     )
     await db.commit()
     await db.refresh(reserva)
