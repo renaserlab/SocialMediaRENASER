@@ -58,6 +58,9 @@ export async function refrescarMensajes(): Promise<Conversation[] | null> {
   try {
     const conversaciones = await MessageRepository.listConversations();
     anotarMensajes(conversaciones);
+    // Y se le da a quien tenga la bandeja pintada: ya está pedida, no hace
+    // falta que la vuelva a pedir para enterarse.
+    for (const oyente of oyentesDeLaBandeja) oyente(conversaciones);
     return conversaciones;
   } catch {
     return null;
@@ -69,4 +72,45 @@ export function anotarMensajes(conversaciones: readonly Conversation[]): void {
   const total = conversaciones.reduce((suma, conversacion) => suma + (conversacion.unread || 0), 0);
   useContadoresStore.getState().ponerMensajes(total);
   ponerInsignia();
+}
+
+/*
+  LA BANDEJA SE ENTERA SIN PREGUNTAR.
+
+  La pantalla de mensajes guarda su propia lista y no la vuelve a pedir en
+  treinta segundos (`lib/bandeja.ts`). Dos cosas que pasan fuera de ella la
+  dejaban vieja: leer una conversación y la lectura fresca que este mismo
+  fichero hace para el contador. Aquí se le avisan las dos.
+*/
+type OyenteDeLaBandeja = (frescas: readonly Conversation[]) => void;
+type OyenteDeLeida = (conversacionId: string) => void;
+
+const oyentesDeLaBandeja = new Set<OyenteDeLaBandeja>();
+const oyentesDeLeida = new Set<OyenteDeLeida>();
+
+/** Cada vez que el contador trae la primera página de la bandeja. */
+export function alLlegarLaBandeja(oyente: OyenteDeLaBandeja): () => void {
+  oyentesDeLaBandeja.add(oyente);
+  return () => {
+    oyentesDeLaBandeja.delete(oyente);
+  };
+}
+
+/** Cada vez que se lee una conversación (se abrió su chat, o llegó algo con él delante). */
+export function alLeerUnaConversacion(oyente: OyenteDeLeida): () => void {
+  oyentesDeLeida.add(oyente);
+  return () => {
+    oyentesDeLeida.delete(oyente);
+  };
+}
+
+/**
+ * Marca una conversación como leída: en el servidor y, YA, en la bandeja.
+ *
+ * No lanza. Si el servidor falla, la bandeja se corrige sola en su siguiente
+ * lectura, que es lo que pasaba antes con todo.
+ */
+export function marcarConversacionLeida(conversacionId: string): void {
+  MessageRepository.markRead(conversacionId).catch(() => {});
+  for (const oyente of oyentesDeLeida) oyente(conversacionId);
 }

@@ -35,7 +35,7 @@ import { afterSheetClose } from '@/lib/afterSheetClose';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { retirarAvisosDe } from '@/lib/toast';
-import { refrescarMensajes } from '@/services/contadores';
+import { marcarConversacionLeida, refrescarMensajes } from '@/services/contadores';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { confirm, notify } from '@/lib/confirm';
 import {
@@ -281,7 +281,7 @@ export function ChatScreen() {
       .finally(() => {
         if (montado) setCargandoMensajes(false);
       });
-    MessageRepository.markRead(conversationId).catch(() => {});
+    marcarConversacionLeida(conversationId);
 
     const unsubscribe = subscribeToConversation(conversationId, (row) => {
       if (!montado) return;
@@ -325,7 +325,7 @@ export function ChatScreen() {
           // La burbuja de texto ya está puesta; sin esto solo faltaría el
           // adjunto, y volverá con el siguiente mensaje o al reabrir.
         });
-      MessageRepository.markRead(conversationId).catch(() => {});
+      marcarConversacionLeida(conversationId);
     });
 
     return () => {

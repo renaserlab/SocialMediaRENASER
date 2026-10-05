@@ -402,7 +402,7 @@ describe('el motor del chat no se ha reescrito', () => {
       'reconciliarEnvio', // interfaz optimista
       'descartarEnvio', // descartar un envío fallido
       'nuevoIdTemporal', // burbuja provisional
-      'markRead', // leídos
+      'marcarConversacionLeida', // leídos (y la bandeja se entera: `lib/bandeja.ts`)
       'hayMasHistorial', // fin del historial
       'ultimoEnvio', // reintento con lo mismo
     ]) {
