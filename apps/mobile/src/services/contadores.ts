@@ -41,6 +41,17 @@ export async function refrescarNotificaciones(
 export function notificacionesLeidas(): void {
   useContadoresStore.getState().ponerNotificaciones(0);
   ponerInsignia();
+  for (const oyente of oyentesDeAvisosLeidos) oyente();
+}
+
+const oyentesDeAvisosLeidos = new Set<() => void>();
+
+/** Cada vez que se abre la bandeja de notificaciones y queda todo leído. */
+export function alLeerLasNotificaciones(oyente: () => void): () => void {
+  oyentesDeAvisosLeidos.add(oyente);
+  return () => {
+    oyentesDeAvisosLeidos.delete(oyente);
+  };
 }
 
 /**
@@ -102,6 +113,33 @@ export function alLeerUnaConversacion(oyente: OyenteDeLeida): () => void {
   return () => {
     oyentesDeLeida.delete(oyente);
   };
+}
+
+/*
+  EL CHAT ABIERTO SE ENTERA POR MÁS DE UN CAMINO.
+
+  Con una conversación delante, un mensaje nuevo solo podía aparecer por el
+  canal de tiempo real de ESA pantalla; el aviso flotante y el push se callan a
+  propósito —«ya lo está leyendo»—. Si ese canal estaba caído, el mensaje no
+  aparecía por ningún lado hasta salir del chat y volver a entrar (reportado el
+  05/10/2026). Ahora el push de un mensaje se lo dice también al chat, que
+  pregunta al servidor lo que le falta.
+*/
+type OyenteDeMensaje = (conversacionId: string) => void;
+
+const oyentesDeMensaje = new Set<OyenteDeMensaje>();
+
+/** Cada vez que se sabe, por un camino que no es el canal del chat, que entró un mensaje. */
+export function alSaberDeUnMensaje(oyente: OyenteDeMensaje): () => void {
+  oyentesDeMensaje.add(oyente);
+  return () => {
+    oyentesDeMensaje.delete(oyente);
+  };
+}
+
+/** Ha entrado un mensaje en esa conversación: que quien la tenga abierta se ponga al día. */
+export function hayMensajeNuevoEn(conversacionId: string): void {
+  for (const oyente of oyentesDeMensaje) oyente(conversacionId);
 }
 
 /**

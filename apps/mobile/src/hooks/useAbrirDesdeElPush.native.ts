@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 
 import { marcarDirectoComoAvisado } from '@/components/AvisoDeDirectoSeguido';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
-import { RUTA_DE_LA_BANDEJA, directoDelPush, rutaDelPush } from '@/lib/rutaDelPush';
+import { destinoDelToque, directoDelPush } from '@/lib/rutaDelPush';
 import { anotarToqueAtendido, reservarToque, soltarToque } from '@/services/pushAtendido';
 
 /** Que la biblioteca no vuelva a devolver este toque. Si no sabe, no pasa nada. */
@@ -41,6 +41,14 @@ function olvidarEnLaBiblioteca(): void {
  *    toque en cada arranque (`services/pushAtendido`).
  *  - AL ATENDERLO SE LE DICE A LA BIBLIOTECA QUE LO OLVIDE, para que no lo
  *    vuelva a devolver.
+ *
+ * Y UN CUARTO, del mismo dia y ya con la aplicacion abriendo (compilacion 46):
+ * «cada que entro a la aplicacion me redirige a notificaciones».
+ *
+ *  - NO TODO LO QUE LA BIBLIOTECA ENTREGA ES UN TOQUE, NI TODO TOQUE MUEVE DE
+ *    INICIO. Lo decide `destinoDelToque`: sin identificador no es un aviso
+ *    (es el lanzador del telefono abriendo la aplicacion con sus datos), y un
+ *    aviso sin destino concreto ya no abre la bandeja.
  */
 export function useAbrirDesdeElPush(navegadorMontado: boolean): void {
   const router = useRouter();
@@ -55,6 +63,14 @@ export function useAbrirDesdeElPush(navegadorMontado: boolean): void {
     if (respuesta.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return undefined;
     const identificador = respuesta.notification.request.identifier;
     const datos = respuesta.notification.request.content.data;
+    // El destino sale del MAPA CERRADO, nunca de una ruta que traiga el aviso.
+    const ruta = destinoDelToque({ identificador, datos }, { rutaDeDecision: rutaDelAviso });
+    if (ruta === null) {
+      // No es un toque en un aviso nuestro, o el aviso no lleva a ningun sitio
+      // concreto: la aplicacion se queda en Inicio (ver `destinoDelToque`).
+      olvidarEnLaBiblioteca();
+      return undefined;
+    }
 
     let vivo = true;
     let atendido = false;
@@ -69,11 +85,6 @@ export function useAbrirDesdeElPush(navegadorMontado: boolean): void {
         return;
       }
       atendido = true;
-      // El destino sale del MAPA CERRADO, nunca de una ruta que traiga el aviso.
-      // Lo que no se reconoce lleva a la bandeja; lo que ni es un aviso, a nada.
-      // Un aviso sin datos (los de la cola de servicios, eventos y productos no
-      // los mandan) lleva a la bandeja, que es donde esta su fila y su destino.
-      const ruta = rutaDelPush(datos, { rutaDeDecision: rutaDelAviso }) ?? RUTA_DE_LA_BANDEJA;
       // Quien entra por el push de un directo ya va a verlo: el aviso de
       // «está transmitiendo» no tiene que salirle encima del mismo directo.
       const directo = directoDelPush(datos);

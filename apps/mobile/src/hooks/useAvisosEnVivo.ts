@@ -7,9 +7,11 @@ import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import {
   SILENCIO_TRAS_UN_AVISO_DE_SESION_MS,
   actoresDeSesionNuevos,
+  conversacionesPendientes,
   desdeCuandoPreguntar,
   destinoDelAviso,
   elMensajeYaLoDijo,
+  hayPendientesQueDecir,
   hayQueLeerLaBandeja,
   queAnunciar,
   queHacerConUnMensaje,
@@ -17,8 +19,14 @@ import {
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
+import type { NotificationItem } from '@/mappers/notificationMapper';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
-import { refrescarMensajes, refrescarNotificaciones } from '@/services/contadores';
+import {
+  alLeerLasNotificaciones,
+  alLlegarLaBandeja,
+  refrescarMensajes,
+  refrescarNotificaciones,
+} from '@/services/contadores';
 import { asegurarRegistroDePush } from '@/services/notifications';
 import { supabase } from '@/services/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -47,6 +55,18 @@ const CADA_MS = 30_000;
 const RESPIRO_DE_MENSAJES_MS = 500;
 /** Cuántos mensajes ya anunciados se recuerdan para no repetirlos. */
 const MENSAJES_RECORDADOS = 200;
+
+/**
+ * Cómo se mira la bandeja.
+ *
+ * - `anunciar`: lo nuevo sale en pantalla, aviso por aviso. La vuelta periódica.
+ * - `callado`: solo ponerse al día. Lo nuevo acaba de anunciarse por otro lado
+ *   (el aviso de un push, con la aplicación abierta).
+ * - `entrar`: se acaba de abrir la aplicación o de volver a ella. No se repasa
+ *   aviso por aviso lo que llegó estando fuera: se dice UNA vez cuánto hay sin
+ *   leer, si hay más que la última vez (`hayPendientesQueDecir`).
+ */
+type Modo = 'anunciar' | 'callado' | 'entrar';
 
 type FilaDeMensaje = {
   id?: string;
@@ -135,9 +155,10 @@ export function alRecibirUnMensajePorPush(
  *
  *   - Un mensaje llega por dos caminos —tiempo real y push— y los dos acaban
  *     aquí con el identificador del mensaje: el segundo se descarta.
- *   - Lo que llegó mientras la aplicación estaba en segundo plano ya lo avisó
- *     el sistema. Al volver se ponen al día los contadores y la marca SIN
- *     anunciar nada.
+ *   - Lo que llegó mientras la aplicación estaba cerrada o en segundo plano
+ *     no se repasa aviso por aviso. AL ENTRAR se dice UNA vez cuánto hay sin
+ *     leer —mensajes por un lado, notificaciones por otro—, y solo si hay más
+ *     que la última vez que se miró.
  *   - La marca se fija con las fechas del SERVIDOR, nunca con el reloj del
  *     teléfono, que puede ir adelantado o atrasado.
  *
@@ -181,7 +202,40 @@ export function useAvisosEnVivo(): void {
      */
     const conMensajeAnunciado = new Map<string, number>();
 
-    const leerAvisos = async (callado: boolean) => {
+    /** Lo que había sin leer la última vez que se miró, por cualquier camino. */
+    let avisosDichos = 0;
+    let mensajesDichos = 0;
+
+    /** Al entrar: UN aviso con lo que hay en la bandeja sin leer. */
+    const decirAvisosPendientes = (avisos: readonly NotificationItem[], cuenta: number) => {
+      // Si es uno solo, se dice cuál: es más útil que «tienes una notificación».
+      const unico = cuenta === 1 ? avisos.find((aviso) => !aviso.read) : undefined;
+      if (unico) {
+        const destino = destinoDelAviso(unico, rutaDelAviso);
+        avisar({
+          tipo: 'notificacion',
+          titulo: unico.title,
+          message: unico.subtitle,
+          icon: unico.icon,
+          clave: 'pendientes:avisos',
+          alTocar: () => abrir(destino ?? '/notifications'),
+        });
+        return;
+      }
+      avisar({
+        tipo: 'notificacion',
+        titulo: traduceEnElIdiomaActual(
+          cuenta === 1 ? 'notif.pendingNoticesOne' : 'notif.pendingNoticesMany',
+          { cuenta },
+        ),
+        message: traduceEnElIdiomaActual('notif.pendingNoticesTap'),
+        icon: 'bell',
+        clave: 'pendientes:avisos',
+        alTocar: () => abrir('/notifications'),
+      });
+    };
+
+    const leerAvisos = async (modo: Modo) => {
       /*
         SI HAY ALGO NUEVO LO DICE EL SERVIDOR, no una resta hecha aquí. Antes
         se comparaba la cuenta de ahora con la del contador común, que también
@@ -191,6 +245,12 @@ export function useAvisosEnVivo(): void {
       const lectura = await refrescarNotificaciones(desdeCuandoPreguntar(marca));
       if (!vivo || lectura === null) return;
       const primera = marca === null;
+      // La primera lectura ES entrar, la pida quien la pida: si la del
+      // arranque falló, la siguiente vuelta es la que abre.
+      const entrando = modo === 'entrar' || primera;
+      const callado = modo !== 'anunciar';
+      const decirPendientes = entrando && hayPendientesQueDecir(lectura.cuenta, avisosDichos);
+      avisosDichos = lectura.cuenta;
       // La lista solo se pide cuando hace falta: al empezar, para fijar la
       // marca; cuando hay algo posterior a ella; o para ponerse al día sin
       // anunciar. Una vuelta tras otra sin novedad es una consulta de dos
@@ -212,6 +272,7 @@ export function useAvisosEnVivo(): void {
         // Callado es lo mismo que la primera vez: solo se fija la marca.
         const resultado = queAnunciar(avisos, callado ? null : marca);
         marca = Math.max(marca ?? 0, resultado.marca);
+        if (decirPendientes) decirAvisosPendientes(avisos, lectura.cuenta);
         for (const aviso of resultado.anunciar) {
           // Un hecho, un aviso: su mensaje del chat ya lo anunció. Calla UN
           // aviso, no a la persona: el silencio se gasta aquí.
@@ -240,14 +301,8 @@ export function useAvisosEnVivo(): void {
       anunciarían lo mismo. La segunda espera a la primera y luego mira.
     */
     let lecturaEnCurso: Promise<void> = Promise.resolve();
-    /**
-     * @param callado pone al día los contadores y la marca SIN anunciar. Es lo
-     *   que toca cuando lo nuevo ya se avisó por otro lado: el sistema lo hizo
-     *   mientras la aplicación estaba en segundo plano, o acaba de salir el
-     *   aviso de un push.
-     */
-    const mirarAvisos = (callado = false): Promise<void> => {
-      lecturaEnCurso = lecturaEnCurso.then(() => leerAvisos(callado)).catch(() => {});
+    const mirarAvisos = (modo: Modo = 'anunciar'): Promise<void> => {
+      lecturaEnCurso = lecturaEnCurso.then(() => leerAvisos(modo)).catch(() => {});
       return lecturaEnCurso;
     };
 
@@ -268,6 +323,49 @@ export function useAvisosEnVivo(): void {
     const recordar = (lista: readonly Conversation[] | null) => {
       if (!lista) return;
       for (const conversacion of lista) conocidas.set(conversacion.id, conversacion);
+    };
+
+    /**
+     * Lo que se hace con la lista de conversaciones cada vez que se lee: se
+     * recuerda, y AL ENTRAR se dice lo que haya sin leer —una vez, y solo si
+     * hay más que la última vez que se miró—.
+     */
+    const alDiaConLaLista = (lista: readonly Conversation[] | null, entrando: boolean) => {
+      if (!vivo || !lista) return;
+      recordar(lista);
+      const { pendientes: sinLeer, total } = conversacionesPendientes(
+        lista,
+        seEstaViendoLaConversacion,
+      );
+      const decir = entrando && hayPendientesQueDecir(total, mensajesDichos);
+      mensajesDichos = total;
+      if (!decir) return;
+      const varios = traduceEnElIdiomaActual(
+        total === 1 ? 'notif.pendingMessagesOne' : 'notif.pendingMessagesMany',
+        { cuenta: total },
+      );
+      // De una sola persona: se dice de quién, con su foto, y se abre su chat.
+      const unica = sinLeer.length === 1 ? sinLeer[0] : undefined;
+      if (unica) {
+        avisar({
+          tipo: 'notificacion',
+          titulo: unica.name,
+          message: unica.subtitle || varios,
+          avatarUrl: unica.avatarUrl ?? null,
+          icon: 'message-square',
+          clave: claveDeConversacion(unica.id),
+          alTocar: () => abrir(`/chat/${unica.id}`),
+        });
+        return;
+      }
+      avisar({
+        tipo: 'notificacion',
+        titulo: varios,
+        message: traduceEnElIdiomaActual('notif.pendingMessagesTap'),
+        icon: 'message-square',
+        clave: 'pendientes:mensajes',
+        alTocar: () => abrir('/messages'),
+      });
     };
 
     /**
@@ -309,7 +407,8 @@ export function useAvisosEnVivo(): void {
       void mirarAvisos();
       const conversaciones = await refrescarMensajes();
       if (!vivo || !conversaciones) return;
-      recordar(conversaciones);
+      // Sin decir nada: cada uno de estos mensajes ya dio su aviso al llegar.
+      alDiaConLaLista(conversaciones, false);
       for (const [id, pendiente] of deQuien) {
         if (pendiente.anunciado) continue;
         // Mientras se pedía la lista pudo abrir esa conversación.
@@ -378,6 +477,28 @@ export function useAvisosEnVivo(): void {
       anotarMensaje(fila.conversation_id, fila.id ?? null, fila.sender_id ?? null, fila.body ?? null);
     };
 
+    /*
+      LEER BAJA LA CUENTA DE «LO DICHO», LO LEA QUIEN LO LEA. Abrir la bandeja
+      o leer un chat no pasa por este hook: sin esto la cuenta se quedaba en lo
+      de antes, y lo siguiente que llegara estando fuera —un mensaje, cuando ya
+      se habían leído los tres de antes— no era «más que la última vez» y no se
+      decía. Solo BAJA: subirla desde aquí callaría lo que aún no se ha dicho.
+    */
+    const dejarDeOirLaBandeja = alLlegarLaBandeja((frescas) => {
+      const { total } = conversacionesPendientes(frescas, seEstaViendoLaConversacion);
+      if (total < mensajesDichos) mensajesDichos = total;
+    });
+    const dejarDeOirLoLeido = alLeerLasNotificaciones(() => {
+      avisosDichos = 0;
+    });
+
+    /** Mirar todo como quien acaba de llegar: contadores al día y lo pendiente, dicho. */
+    const entrar = () => {
+      void mirarAvisos('entrar');
+      void refrescarMensajes().then((lista) => alDiaConLaLista(lista, true));
+    };
+
+    let yaSuscrito = false;
     const cliente = supabase;
     const canal = cliente
       ?.channel(`avisos-de-mensajes:${Date.now()}`)
@@ -386,7 +507,14 @@ export function useAvisosEnVivo(): void {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload: { new: FilaDeMensaje }) => alLlegarMensaje(payload.new),
       )
-      .subscribe();
+      .subscribe((estado) => {
+        if (estado !== 'SUBSCRIBED') return;
+        // La primera vez ya se está leyendo todo en el arranque. Las demás son
+        // REENGANCHES —se cayó la red, el teléfono durmió—, y lo que entró con
+        // el canal caído no llegó por aquí ni va a llegar: hay que preguntarlo.
+        if (yaSuscrito) entrar();
+        yaSuscrito = true;
+      });
 
     /* --------------------------------------------------------- arranque */
     cliente?.auth
@@ -397,27 +525,35 @@ export function useAvisosEnVivo(): void {
       .catch(() => {
         /* Sin saber quién soy no se anuncian mensajes; lo demás sigue. */
       });
-    void mirarAvisos();
-    void refrescarMensajes().then(recordar);
+    entrar();
 
     const reloj = setInterval(() => {
       // Con la aplicación en segundo plano no se pregunta: para eso está el push.
-      if (AppState.currentState === 'active') void mirarAvisos();
+      if (AppState.currentState !== 'active') return;
+      void mirarAvisos();
+      /*
+        Y SI ESTE TELÉFONO AÚN NO DEJÓ SU TOKEN, SE INTENTA EN CADA VUELTA. Solo
+        se reintentaba al volver del segundo plano: quien concedía el permiso
+        y seguía usando la aplicación —o arrancó sin que Firebase hubiera dado
+        aún el token, que pasa recién instalada— se quedaba sin avisos con la
+        aplicación cerrada hasta salir y volver a entrar. Reportado el
+        05/10/2026: «no me llegaban hasta que entraba a la app; luego recién
+        comenzó a funcionarme». Una vez registrado no hace nada.
+      */
+      void asegurarRegistroDePush();
     }, CADA_MS);
 
     const alVolver = AppState.addEventListener('change', (estado) => {
       if (estado !== 'active') return;
-      // Lo que llegó estando fuera ya lo avisó el sistema: al día, sin anunciar.
-      void mirarAvisos(true);
-      void refrescarMensajes().then(recordar);
-      // Y si este teléfono aún no dejó su token (sin red al entrar, permiso
-      // concedido después), se intenta ahora.
+      // Lo que llegó estando fuera no se repasa aviso por aviso: se dice
+      // cuánto hay sin leer, si hay más que al salir.
+      entrar();
       void asegurarRegistroDePush();
     });
 
     ponerseAlDia = () => {
-      void mirarAvisos(true);
-      void refrescarMensajes().then(recordar);
+      void mirarAvisos('callado');
+      void refrescarMensajes().then((lista) => alDiaConLaLista(lista, false));
     };
     // El push de un mensaje lo manda otra persona: no hace falta saber quién soy.
     mensajeDelPush = anotarMensaje;
@@ -426,7 +562,7 @@ export function useAvisosEnVivo(): void {
     // mensaje que la sesión deja en el chat.
     sesionDelPush = () => {
       void mirarAvisos();
-      void refrescarMensajes().then(recordar);
+      void refrescarMensajes().then((lista) => alDiaConLaLista(lista, false));
     };
 
     return () => {
@@ -437,6 +573,8 @@ export function useAvisosEnVivo(): void {
       clearInterval(reloj);
       if (respiro !== null) clearTimeout(respiro);
       alVolver.remove();
+      dejarDeOirLaBandeja();
+      dejarDeOirLoLeido();
       if (cliente && canal) void cliente.removeChannel(canal);
     };
   }, [supabaseEnabled, conSesion]);

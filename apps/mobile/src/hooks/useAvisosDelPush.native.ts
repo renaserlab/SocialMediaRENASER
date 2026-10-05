@@ -17,6 +17,7 @@ import {
   rutaDelPush,
 } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
+import { hayMensajeNuevoEn } from '@/services/contadores';
 
 /**
  * El push que llega CON LA APLICACIÓN ABIERTA.
@@ -52,6 +53,10 @@ export function useAvisosDelPush(): void {
       const { title, body, data } = notificacion.request.content;
 
       const conversacion = conversacionDelPush(data);
+      // El chat de esa conversación, si está abierto, pregunta lo que le falta:
+      // su canal de tiempo real puede estar caído y este push es el único que
+      // sabe que ha entrado algo (`services/contadores`).
+      if (conversacion) hayMensajeNuevoEn(conversacion);
 
       // Lo que ya se está leyendo no se anuncia.
       if (seEstaViendoLaConversacion(conversacion)) {

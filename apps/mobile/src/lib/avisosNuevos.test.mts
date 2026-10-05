@@ -231,13 +231,54 @@ describe('un solo sistema de avisos, enchufado', () => {
     assert.match(VIVO, /\.catch\(\(\) => \{/, 'averiguar la sesión no puede reventar el hook');
   });
 
-  it('al volver a la aplicación se pone al día SIN anunciar: eso ya lo avisó el sistema', () => {
+  it('al entrar no se repasa aviso por aviso: se dice UNA vez lo que hay sin leer', () => {
+    /*
+      Pedido el 05/10/2026: la aplicación empieza en Inicio y «mediante
+      ventanas flotantes» dice que hay notificaciones sin leer. Antes, al
+      arrancar y al volver del segundo plano, no se decía nada.
+    */
+    assert.match(
+      VIVO,
+      /const entrar = \(\) => \{\s*void mirarAvisos\('entrar'\);\s*void refrescarMensajes\(\)\.then\(\(lista\) => alDiaConLaLista\(lista, true\)\);\s*\};/,
+    );
+    // Al arrancar y al volver del segundo plano.
     const alVolver = VIVO.slice(VIVO.indexOf("AppState.addEventListener('change'"));
-    assert.match(alVolver.slice(0, 300), /void mirarAvisos\(true\);/);
-    // Y lo mismo tras un push recibido con la aplicación abierta.
-    assert.match(VIVO, /ponerseAlDia = \(\) => \{\s*void mirarAvisos\(true\);/);
-    // Callado solo fija la marca.
+    assert.match(alVolver.slice(0, 300), /entrar\(\);/);
+    assert.match(VIVO.slice(0, VIVO.indexOf('const reloj = setInterval')), /\n\s*entrar\(\);\s*$/);
+    // Y al reengancharse el canal: lo que entró con él caído no llegó por ahí.
+    assert.match(VIVO, /if \(yaSuscrito\) entrar\(\);\s*yaSuscrito = true;/);
+    // Entrando no se anuncia aviso por aviso (solo se fija la marca)…
+    assert.match(VIVO, /const callado = modo !== 'anunciar';/);
     assert.match(VIVO, /queAnunciar\(avisos, callado \? null : marca\)/);
+    // …se dice lo pendiente, si hay más que la última vez, y la cuenta se
+    // anota SIEMPRE, se diga o no.
+    assert.match(
+      VIVO,
+      /const decirPendientes = entrando && hayPendientesQueDecir\(lectura\.cuenta, avisosDichos\);\s*avisosDichos = lectura\.cuenta;/,
+    );
+    assert.match(
+      VIVO,
+      /const decir = entrando && hayPendientesQueDecir\(total, mensajesDichos\);\s*mensajesDichos = total;/,
+    );
+    // La primera lectura es entrar, la pida quien la pida.
+    assert.match(VIVO, /const entrando = modo === 'entrar' \|\| primera;/);
+    // Tras un push que YA se enseñó con la aplicación abierta, ni una cosa ni otra.
+    assert.match(VIVO, /ponerseAlDia = \(\) => \{\s*void mirarAvisos\('callado'\);/);
+    // Leer baja la cuenta de lo dicho, lo lea quien lo lea —y solo la baja—:
+    // sin esto, lo que llegara después de leer no era «más que la última vez».
+    assert.match(
+      VIVO,
+      /alLlegarLaBandeja\(\(frescas\) => \{\s*const \{ total \} = conversacionesPendientes\(frescas, seEstaViendoLaConversacion\);\s*if \(total < mensajesDichos\) mensajesDichos = total;\s*\}\);/,
+    );
+    assert.match(VIVO, /alLeerLasNotificaciones\(\(\) => \{\s*avisosDichos = 0;\s*\}\);/);
+    assert.match(
+      sinComentarios(fuente('services/contadores.ts')),
+      /export function notificacionesLeidas\(\): void \{[^}]*for \(const oyente of oyentesDeAvisosLeidos\) oyente\(\);/,
+    );
+    assert.match(VIVO.slice(VIVO.lastIndexOf('return () => {')), /dejarDeOirLaBandeja\(\);\s*dejarDeOirLoLeido\(\);/);
+    // Y lo que se abre desde el aviso de «sin leer» es su sitio, no otra cosa.
+    assert.match(VIVO, /clave: 'pendientes:avisos',\s*alTocar: \(\) => abrir\('\/notifications'\),/);
+    assert.match(VIVO, /clave: 'pendientes:mensajes',\s*alTocar: \(\) => abrir\('\/messages'\),/);
   });
 
   it('si hay algo nuevo lo dice el servidor, no una resta con un contador que escriben otros', () => {
@@ -258,7 +299,7 @@ describe('un solo sistema de avisos, enchufado', () => {
   it('las lecturas no se solapan: dos a la vez anunciarían lo mismo', () => {
     assert.match(
       VIVO,
-      /lecturaEnCurso = lecturaEnCurso\.then\(\(\) => leerAvisos\(callado\)\)\.catch\(\(\) => \{\}\);/,
+      /lecturaEnCurso = lecturaEnCurso\.then\(\(\) => leerAvisos\(modo\)\)\.catch\(\(\) => \{\}\);/,
     );
   });
 
@@ -280,8 +321,12 @@ describe('un solo sistema de avisos, enchufado', () => {
     // Ni rastro de la espera a la bandeja.
     assert.ok(!/ESPERA_POR_LOS_AVISOS_MS|Promise\.race/.test(VIVO));
     // La lista se recuerda cada vez que se lee, que es lo que lo hace posible.
-    assert.equal(VIVO.match(/refrescarMensajes\(\)\.then\(recordar\)/g)?.length, 4);
-    assert.match(VIVO, /recordar\(conversaciones\);/);
+    assert.equal(
+      VIVO.match(/refrescarMensajes\(\)\.then\(\(lista\) => alDiaConLaLista\(lista, (true|false)\)\)/g)?.length,
+      3,
+    );
+    assert.match(VIVO, /alDiaConLaLista\(conversaciones, false\);/);
+    assert.match(VIVO, /if \(!vivo \|\| !lista\) return;\s*recordar\(lista\);/);
     // Y el texto es el del mensaje: el resumen guardado es del anterior.
     assert.match(anotar, /anunciarMensaje\(conversacionId, conocida, texto, remitenteId, false\);/);
   });
@@ -324,7 +369,7 @@ describe('un solo sistema de avisos, enchufado', () => {
   });
 
   it('en segundo plano no se pregunta: para eso está el push', () => {
-    assert.match(VIVO, /if \(AppState\.currentState === 'active'\) void mirarAvisos\(\);/);
+    assert.match(VIVO, /if \(AppState\.currentState !== 'active'\) return;\s*void mirarAvisos\(\);/);
     assert.ok(!/setInterval\([^)]*,\s*\d{1,4}\)/.test(VIVO), 'nada de sondeos de menos de 10 s');
   });
 
@@ -332,7 +377,7 @@ describe('un solo sistema de avisos, enchufado', () => {
     assert.match(PUSH, /rutaDelPush\(data, \{ rutaDeDecision: rutaDelAviso \}\)/);
     assert.match(
       sinComentarios(fuente('hooks/useAbrirDesdeElPush.native.ts')),
-      /rutaDelPush\(datos, \{ rutaDeDecision: rutaDelAviso \}\)/,
+      /destinoDelToque\(\{ identificador, datos \}, \{ rutaDeDecision: rutaDelAviso \}\)/,
     );
     // Ninguno de los dos navega a algo leído del aviso.
     for (const codigo of [PUSH, sinComentarios(fuente('hooks/useAbrirDesdeElPush.native.ts'))]) {
@@ -390,8 +435,24 @@ describe('los contadores de no leídos', () => {
   it('la campana se mueve sin tener que salir de Explorar y volver', () => {
     assert.match(
       sinComentarios(fuente('screens/ExploreScreen.tsx')),
-      /rightBadge=\{avisosSinLeer > 0 \|\| avisosEnVivo > 0 \|\| darrenNoticePending\}/,
+      /rightBadge=\{avisosSinLeer > 0 \|\| avisosEnVivo > 0\}/,
     );
+  });
+
+  it('en Notificaciones solo hay notificaciones: sin recuadros de promoción', () => {
+    /*
+      Pedido el 05/10/2026: «quita esa bandeja negra que dice que vayamos a ver
+      al contenido de Darren, no debe estar eso ahí». Era un recuadro fijo
+      encima de la lista, y además encendía el punto de la campana aunque no
+      hubiera ninguna notificación.
+    */
+    const bandeja = fuente('screens/NotificationsScreen.tsx');
+    assert.ok(!/ListHeaderComponent/.test(bandeja), 'vuelve a haber algo fijo encima de la lista');
+    assert.ok(!/freeContent|pedirDestacados|dismissGuide/.test(bandeja));
+    assert.ok(!/darren/i.test(sinComentarios(fuente('screens/ExploreScreen.tsx')).match(/rightBadge=\{[^}]*\}/)?.[0] ?? ''));
+    for (const idioma of ['es', 'en', 'pt']) {
+      assert.ok(!/notif\.freeContent/.test(fuente(`i18n/${idioma}.ts`)), `sobra el texto en ${idioma}`);
+    }
   });
 
   it('abrir la bandeja apaga la campana y el icono de la aplicación', () => {
@@ -473,7 +534,21 @@ describe('que el teléfono quede registrado para el push', () => {
     // esta pregunta mientras no llegue el push: en web, siempre.
     assert.match(EN_VIVO, /const CADA_MS = 30_000;/);
     // Y solo en primer plano: en segundo plano no se pregunta.
-    assert.match(EN_VIVO, /if \(AppState\.currentState === 'active'\) void mirarAvisos\(\);/);
+    assert.match(EN_VIVO, /if \(AppState\.currentState !== 'active'\) return;\s*void mirarAvisos\(\);/);
+  });
+
+  it('el registro del teléfono se reintenta en cada vuelta, no solo al volver', () => {
+    /*
+      Reportado el 05/10/2026: «no me llegaban hasta que entraba a la app;
+      luego recién comenzó a funcionarme». Si el primer intento fallaba —recién
+      instalada, Firebase aún no ha dado el token; o el permiso se concede
+      después—, solo se repetía al volver del segundo plano.
+    */
+    const reloj = EN_VIVO.slice(EN_VIVO.indexOf('const reloj = setInterval'), EN_VIVO.indexOf('const alVolver'));
+    assert.match(reloj, /void mirarAvisos\(\);\s*void asegurarRegistroDePush\(\);/);
+    // Y no cuesta nada una vez hecho, ni vuelve a pedir el permiso.
+    assert.match(SERVICIO, /if \(registrado \|\| Platform\.OS === 'web' \|\| !Device\.isDevice\) return;/);
+    assert.match(SERVICIO, /if \(!permiso\.granted\) return;/);
   });
 });
 
@@ -599,7 +674,7 @@ describe('el push de una sesión, con la aplicación abierta, no da un segundo a
   it('y allí se ANUNCIA (no callado): cada aviso sale una vez, llegue antes quien llegue', () => {
     assert.match(
       VIVO,
-      /sesionDelPush = \(\) => \{\s*void mirarAvisos\(\);\s*void refrescarMensajes\(\)\.then\(recordar\);\s*\};/,
+      /sesionDelPush = \(\) => \{\s*void mirarAvisos\(\);\s*void refrescarMensajes\(\)\.then\(\(lista\) => alDiaConLaLista\(lista, false\)\);\s*\};/,
     );
     // Sin nadie escuchando, el oyente del push lo enseña por su cuenta.
     assert.match(VIVO, /if \(!sesionDelPush\) return false;/);
@@ -653,5 +728,54 @@ describe('qué se hace con un mensaje que acaba de llegar', () => {
     // publicación» de la misma persona es otro hecho.
     assert.equal(elMensajeYaLoDijo({ entityType: 'post', actorId: 'ana' }, anunciados, ahora), false);
     assert.equal(elMensajeYaLoDijo({ entityType: null, actorId: 'ana' }, anunciados, ahora), false);
+  });
+});
+
+describe('al entrar se dice lo que hay sin leer', () => {
+  it('al arrancar, con algo pendiente, se dice', async () => {
+    const { hayPendientesQueDecir } = await import('./avisosNuevos.ts');
+    assert.equal(hayPendientesQueDecir(3, 0), true);
+    assert.equal(hayPendientesQueDecir(1, 0), true);
+  });
+
+  it('sin nada pendiente no se dice nada', async () => {
+    const { hayPendientesQueDecir } = await import('./avisosNuevos.ts');
+    assert.equal(hayPendientesQueDecir(0, 0), false);
+    assert.equal(hayPendientesQueDecir(0, 4), false);
+  });
+
+  it('volver con lo mismo que había, o con menos, no lo repite', async () => {
+    const { hayPendientesQueDecir } = await import('./avisosNuevos.ts');
+    assert.equal(hayPendientesQueDecir(3, 3), false);
+    assert.equal(hayPendientesQueDecir(2, 3), false);
+  });
+
+  it('si mientras estaba fuera llegó algo más, se vuelve a decir', async () => {
+    const { hayPendientesQueDecir } = await import('./avisosNuevos.ts');
+    assert.equal(hayPendientesQueDecir(4, 3), true);
+    // Y después de leer (la cuenta bajó a 1 y así se anotó), la siguiente subida cuenta.
+    assert.equal(hayPendientesQueDecir(2, 1), true);
+  });
+
+  it('los mensajes pendientes no cuentan la conversación que se tiene delante', async () => {
+    const { conversacionesPendientes } = await import('./avisosNuevos.ts');
+    const lista = [
+      { id: 'ana', unread: 2 },
+      { id: 'luis', unread: 0 },
+      { id: 'katy', unread: 3 },
+      { id: 'sin-campo' },
+    ];
+    const todas = conversacionesPendientes(lista, () => false);
+    assert.deepEqual(todas.pendientes.map((c) => c.id), ['ana', 'katy']);
+    assert.equal(todas.total, 5);
+    // Con el chat de Katy abierto, lo suyo se está leyendo: no se anuncia.
+    const sinKaty = conversacionesPendientes(lista, (id) => id === 'katy');
+    assert.deepEqual(sinKaty.pendientes.map((c) => c.id), ['ana']);
+    assert.equal(sinKaty.total, 2);
+    // Nada pendiente.
+    assert.deepEqual(conversacionesPendientes([{ id: 'luis', unread: 0 }], () => false), {
+      pendientes: [],
+      total: 0,
+    });
   });
 });

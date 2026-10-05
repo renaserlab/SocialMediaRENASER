@@ -212,3 +212,46 @@ export function elMensajeYaLoDijo(
   if (aviso.entityType !== 'booking' || !aviso.actorId) return false;
   return (conMensajeAnunciado.get(aviso.actorId) ?? 0) > ahora;
 }
+
+/*
+  AL ENTRAR SE DICE LO QUE HAY SIN LEER (05/10/2026).
+
+  Pedido tal cual: la aplicación empieza en Inicio y «mediante ventanas
+  flotantes» indica que hay notificaciones sin leer. Hasta ahora, al arrancar y
+  al volver del segundo plano no se anunciaba nada —«ya lo avisó el sistema»—,
+  y quien no había visto el aviso del sistema entraba sin enterarse.
+
+  NO ES UN AVISO POR CADA COSA: es UNO que dice cuánto hay, y solo cuando hay
+  MÁS que la última vez que se miró. Volver a la aplicación diez veces con los
+  mismos tres mensajes pendientes no lo repite diez veces.
+*/
+
+/**
+ * Si hay que decir «tienes N sin leer».
+ *
+ * @param cuenta lo que hay sin leer ahora.
+ * @param dicho lo que había la última vez que se miró, por cualquier camino
+ *   (0 al arrancar). Quien llama lo pone al día en CADA lectura, se diga o no:
+ *   así, cuando la cuenta baja porque se leyó algo, la siguiente subida vuelve
+ *   a contar como novedad.
+ */
+export function hayPendientesQueDecir(cuenta: number, dicho: number): boolean {
+  return cuenta > 0 && cuenta > dicho;
+}
+
+/**
+ * Las conversaciones con mensajes sin leer, sin la que se tiene delante: esa
+ * se está leyendo, y anunciarla sería decirle a alguien lo que está mirando.
+ */
+export function conversacionesPendientes<T extends { id: string; unread?: number }>(
+  conversaciones: readonly T[],
+  seEstaViendo: (conversacionId: string) => boolean,
+): { pendientes: T[]; total: number } {
+  const pendientes = conversaciones.filter(
+    (conversacion) => (conversacion.unread || 0) > 0 && !seEstaViendo(conversacion.id),
+  );
+  return {
+    pendientes,
+    total: pendientes.reduce((suma, conversacion) => suma + (conversacion.unread || 0), 0),
+  };
+}
