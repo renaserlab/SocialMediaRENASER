@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Appearance, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
-import { Stack, type ErrorBoundaryProps } from 'expo-router';
+import { Stack, usePathname, type ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -19,6 +19,7 @@ import {
 import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { AvisoDeDirectoSeguido } from '@/components/AvisoDeDirectoSeguido';
 import { DialogHost } from '@/components/DialogHost';
+import { LimiteDeErrores } from '@/components/LimiteDeErrores';
 import { ToastHost } from '@/components/ToastHost';
 import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
 import { useAbrirDesdeElPush } from '@/hooks/useAbrirDesdeElPush';
@@ -47,6 +48,8 @@ SplashScreen.setOptions({ duration: 450, fade: true });
 export default function RootLayout() {
   const hydrated = useAppStore((state) => state.hydrated);
   const mode = useAppStore((state) => state.themeMode);
+  // Para decir en qué pantalla ocurrió un fallo (`LimiteDeErrores`).
+  const ruta = usePathname();
 
   // Inicializa la sesion de Supabase (restaura usuario autenticado si lo hay).
   useEffect(() => {
@@ -152,18 +155,25 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
-        <Stack
-          screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }}
-        />
         {/*
-          «Juan está transmitiendo en vivo» al entrar, como en TikTok. Antes que
-          el dialogo y el toast para quedar por debajo de ellos.
+          Lo que falle en cualquier pantalla —o en los avisos de abajo, que
+          están siempre montados— se recoge AQUÍ, antes que en la red de
+          expo-router de arriba: este límite sabe en qué componente ocurrió.
         */}
-        <AvisoDeDirectoSeguido />
-        {/* Dialogo de confirmaciones y avisos: uno solo para toda la app. */}
-        <DialogHost />
-        {/* Toast de exito. Va despues para quedar por encima del dialogo. */}
-        <ToastHost />
+        <LimiteDeErrores ruta={ruta}>
+          <Stack
+            screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }}
+          />
+          {/*
+            «Juan está transmitiendo en vivo» al entrar, como en TikTok. Antes que
+            el dialogo y el toast para quedar por debajo de ellos.
+          */}
+          <AvisoDeDirectoSeguido />
+          {/* Dialogo de confirmaciones y avisos: uno solo para toda la app. */}
+          <DialogHost />
+          {/* Toast de exito. Va despues para quedar por encima del dialogo. */}
+          <ToastHost />
+        </LimiteDeErrores>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
