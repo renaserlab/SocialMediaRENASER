@@ -88,6 +88,14 @@ APLICADAS = {
     # «SIN APLICAR» a propósito, como las anteriores: cambiarla sería editar
     # lo aplicado. No se deshace: se corrige hacia delante, con otra.
     "0096_servicios_rutas_opacas.sql": "f1abca52f0a48c0d92e346666fff7dfb763661c7",
+    # NO ES DE SERVICIOS (son las sesiones 1:1 en el chat), pero el registro de
+    # lo aplicado es este y no hay otro. Ejecutada a mano en Supabase y
+    # comprobada en solo lectura el 05/10/2026: la tabla existe con RLS, su
+    # única política es la de lectura, están sus dos índices y no tiene filas.
+    # De las columnas y de las restricciones la captura del resultado deja ver
+    # el principio, que coincide; el final quedó cortado en pantalla. Desde
+    # entonces tampoco se edita: se corrige hacia delante, con otra.
+    "0097_sesiones_en_el_chat.sql": "6bff20e6bd058c0007fe6c669eaf4ce635481618",
 }
 
 

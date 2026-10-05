@@ -2543,12 +2543,14 @@ Nada de lo que sigue está visto en un teléfono. Hace falta la API desplegada y
 una compilación nueva. Dos cuentas, **A** (pide) y **B** (recibe), en dos
 teléfonos.
 
-**La migración 0097 no es imprescindible.** Se aplica desde el panel de
-Supabase y hoy no hay acceso a él. Sin ella la solicitud llega al chat como
-texto y la tarjeta con los botones se pinta **al final de la conversación**;
-con ella (y la API reiniciada después) la tarjeta es el propio mensaje y cada
-respuesta queda como una línea. Las tablas de abajo valen para los dos casos
-salvo donde se dice.
+**La migración 0097 está aplicada en Supabase desde el 05/10/2026** (comprobada
+en solo lectura: tabla, RLS, una sola política de lectura, dos índices, cero
+filas). Con ella, y con la API reiniciada después —el despliegue renueva las
+máquinas—, la tarjeta es el propio mensaje y cada respuesta queda como una
+línea. El camino sin ella (la solicitud como texto y la tarjeta **al final de
+la conversación**) sigue en el código y es el que se verá hasta que la API
+nueva esté desplegada, y en las sesiones pedidas antes. Las tablas de abajo
+valen para los dos casos salvo donde se dice.
 
 ### Fluidez
 
