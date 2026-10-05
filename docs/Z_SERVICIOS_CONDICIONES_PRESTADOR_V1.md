@@ -1,7 +1,13 @@
 # Z Servicios · Condiciones del prestador — Piloto gratuito v1
 
-> **Estado (03/10/2026): LISTAS PARA PUBLICAR, TODAVÍA NO PUBLICADAS.** Es
-> una **versión operativa provisional del piloto**: lo dice en su primer
+> **Estado (05/10/2026): PUBLICADAS.** Versión 1, con la huella de este
+> documento (`6ce1f1cd…67dd`), publicada en producción el 05/10/2026 hacia las
+> 15:15 UTC con la cuenta de administración de Z (`ADMIN`), mediante
+> `publicar_condiciones.py`: el ensayo previo dio la misma huella. Una
+> condición publicada no se edita ni se retira: se sustituye publicando otra
+> versión.
+>
+> Es una **versión operativa provisional del piloto**: lo dice en su primer
 > párrafo y no presume de una revisión legal que no ha tenido. La revisión
 > legal queda anotada como posterior y no impide el piloto cerrado y gratuito.
 >
@@ -9,8 +15,8 @@
 > describe ninguna función que la aplicación no tenga.
 >
 > **Sin estas condiciones publicadas nadie puede postular** como prestador:
-> la postulación no se puede enviar. Por qué no están publicadas todavía y
-> cómo se publican: `Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`, apartado 4.
+> la postulación no se puede enviar. Cómo se publican:
+> `Z_SERVICIOS_CONDICIONES_PILOTO_V1.md`, apartado 4.
 
 ## 1. Qué hay
 

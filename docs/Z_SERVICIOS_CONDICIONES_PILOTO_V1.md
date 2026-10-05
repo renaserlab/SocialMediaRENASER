@@ -1,7 +1,13 @@
 # Z Servicios · Condiciones piloto v1
 
-> **Estado (03/10/2026): LISTAS PARA PUBLICAR, TODAVÍA NO PUBLICADAS.** El
-> texto ya no lleva marcadores. Es una **versión operativa provisional del
+> **Estado (05/10/2026): PUBLICADAS.** Versión 1, con la huella de este
+> documento (`a35cd55d…375e`), publicada en producción el 05/10/2026 hacia las
+> 15:15 UTC con la cuenta de administración de Z (`ADMIN`), mediante
+> `publicar_condiciones.py`: el ensayo previo dio la misma huella. Las del
+> prestador se publicaron en el mismo acto. Una condición publicada no se
+> edita ni se retira: se sustituye publicando otra versión.
+>
+> El texto no lleva marcadores. Es una **versión operativa provisional del
 > piloto**: lo dice en su primer párrafo y no presume de una revisión legal
 > que no ha tenido. La revisión legal queda anotada como posterior y no
 > impide el piloto cerrado y gratuito.
@@ -10,10 +16,10 @@
 > obligación legal: son las políticas provisionales de la primera versión
 > (`Z_REQUISITOS_Y_DECISIONES.md`).
 >
-> **Por qué no están publicadas todavía:** se publican con las rutas de
-> administración de la API, y la API de producción aún no tiene este código
-> (`Edson` sin desplegar). Hace falta desplegar, encender `FEATURE_SERVICES`
-> y una sesión de administración (apartado 4).
+> **Cómo se publicaron:** con las rutas de administración de la API, con
+> `FEATURE_SERVICES` encendida y una sesión de administración (apartado 4).
+> Hasta el 05/10/2026 no había una cuenta de Z con ese rol a la que se pudiera
+> entrar.
 
 Este documento es de las condiciones que acepta **quien contrata**. Las que
 acepta **quien presta** están en `Z_SERVICIOS_CONDICIONES_PRESTADOR_V1.md`.
