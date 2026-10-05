@@ -6,24 +6,10 @@ import {
   StyleProp,
   ViewStyle,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
+import { useReducedMotion } from 'react-native-reanimated';
 
 import { haptics } from '@/lib/haptics';
-import {
-  DURACION,
-  ESCALA_AL_PULSAR,
-  MUELLE,
-  escalaPulsada,
-  opacidadPulsada,
-} from '@/lib/movimiento';
-
-const PressableAnimado = Animated.createAnimatedComponent(Pressable);
+import { ESCALA_AL_PULSAR, estiloPulsado } from '@/lib/movimiento';
 
 export type PulsableProps = Omit<PressableProps, 'style'> & {
   /**
@@ -38,7 +24,7 @@ export type PulsableProps = Omit<PressableProps, 'style'> & {
   atenuar?: number;
   /**
    * La opacidad en reposo. Va aquí y no en `style` porque la opacidad la
-   * anima este componente: una escrita en el estilo quedaría pisada, y un
+   * pinta este componente: una escrita en el estilo quedaría pisada, y un
    * botón apagado dejaría de verse apagado.
    */
   opacidad?: number;
@@ -54,9 +40,16 @@ export type PulsableProps = Omit<PressableProps, 'style'> & {
  * Lo que se puede pulsar, con respuesta.
  *
  * Es el `Pressable` de siempre —mismas propiedades, misma accesibilidad— que
- * además se hunde un poco bajo el dedo y vuelve con un muelle corto. La
- * animación corre en el hilo de la interfaz: no espera a que JavaScript esté
- * libre, que es justo cuando un toque parece perdido.
+ * además se hunde un poco y se atenúa mientras tiene el dedo encima.
+ *
+ * NO ES UN COMPONENTE ANIMADO, Y ESO ES A PROPÓSITO (04/10/2026). Lo fue: cada
+ * `Pulsable` montaba una vista animada con su valor compartido, y hay cientos
+ * —cada botón, cada fila, cada icono de cada publicación—. Solo por estar
+ * montados hacían ir a tirones el desplazamiento y la navegación de toda la
+ * aplicación. Ver la nota de `lib/movimiento.ts`.
+ *
+ * Ahora en reposo es una vista normal y no cuesta nada. Al pulsarlo cambia de
+ * estilo en el acto: la respuesta se ve igual de pronto, sin muelle.
  *
  * CON «REDUCIR MOVIMIENTO» no encoge; solo se atenúa. El toque se sigue
  * viendo, que es lo que importa.
@@ -68,41 +61,30 @@ export function Pulsable({
   opacidad = 1,
   haptica = false,
   onPressIn,
-  onPressOut,
-  disabled,
   children,
   ...resto
 }: PulsableProps) {
-  const presion = useSharedValue(0);
+  // Una constante leída al arrancar, no una suscripción por botón.
   const reducir = useReducedMotion();
 
-  const animado = useAnimatedStyle(() => ({
-    opacity: opacidad * opacidadPulsada(presion.value, atenuar),
-    transform: [{ scale: escalaPulsada(presion.value, escala, reducir) }],
-  }));
-
-  const alBajar = (evento: GestureResponderEvent) => {
-    // Baja rápido y sin muelle: el dedo ya está encima, no hay nada que anunciar.
-    presion.value = withTiming(1, { duration: DURACION.toque });
-    if (haptica === 'ligera') haptics.light();
-    else if (haptica === 'media') haptics.medium();
-    onPressIn?.(evento);
-  };
-
-  const alSubir = (evento: GestureResponderEvent) => {
-    presion.value = withSpring(0, MUELLE);
-    onPressOut?.(evento);
-  };
+  const alBajar = haptica
+    ? (evento: GestureResponderEvent) => {
+        if (haptica === 'ligera') haptics.light();
+        else haptics.medium();
+        onPressIn?.(evento);
+      }
+    : onPressIn;
 
   return (
-    <PressableAnimado
+    <Pressable
       {...resto}
-      disabled={disabled}
       onPressIn={alBajar}
-      onPressOut={alSubir}
-      style={[style, animado]}
+      style={({ pressed }) => {
+        const pulsado = estiloPulsado(pressed, { escala, atenuar, opacidad, reducir });
+        return pulsado ? [style, pulsado] : style;
+      }}
     >
       {children}
-    </PressableAnimado>
+    </Pressable>
   );
 }

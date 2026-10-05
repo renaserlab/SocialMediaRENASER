@@ -72,11 +72,17 @@ test('la cascada tiene tope: una lista larga no tarda segundos en aparecer', () 
 const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const fuente = (rel: string) => readFileSync(join(SRC, rel), 'utf8').replace(/\r\n/g, '\n');
 
-test('`Pulsable` anima en el hilo de la interfaz y respeta la reducción', () => {
+test('`Pulsable` responde al toque sin ser un componente animado, y respeta la reducción', () => {
+  /*
+    Fue un componente animado (04/10/2026) y, con cientos montados, hacía ir a
+    tirones toda la aplicación. Lo que se fija ahora es lo contrario: que
+    responda con un estilo normal. El detalle, en
+    `movimientoSoloMientrasDura.test.mts`.
+  */
   const pulsable = fuente('components/Pulsable.tsx');
-  assert.match(pulsable, /from 'react-native-reanimated'/);
+  assert.ok(!/useSharedValue|useAnimatedStyle|createAnimatedComponent/.test(pulsable));
   assert.match(pulsable, /useReducedMotion\(\)/);
-  assert.match(pulsable, /escalaPulsada\(presion\.value, escala, reducir\)/);
+  assert.match(pulsable, /estiloPulsado\(pressed, \{ escala, atenuar, opacidad, reducir \}\)/);
   // La háptica es opcional y nace apagada: vibrar en cada botón es ruido.
   assert.match(pulsable, /haptica = false/);
 });

@@ -114,3 +114,100 @@ export function retrasoEnCascada(indice: number, paso = 40, tope = 6): number {
   if (indice <= 0) return 0;
   return Math.min(indice, tope) * paso;
 }
+
+// ---------------------------------------------------------------------------
+// El movimiento solo existe MIENTRAS DURA
+// ---------------------------------------------------------------------------
+/*
+  LO REPORTADO (04/10/2026). «La velocidad de la navegación ha empeorado
+  considerablemente… está demasiado lenta, con movimientos acartonados. Se
+  nota especialmente en Inicio y Explorar, pero toda la aplicación está así».
+
+  LA CAUSA. Este sistema de movimiento convirtió cada cosa pulsable —y cada
+  icono y cada contador de cada publicación— en un componente animado SIEMPRE
+  MONTADO. En Inicio eran más de cien, donde antes había uno. La biblioteca de
+  animación guarda una entrada por cada uno y las vuelve a aplicar todas cada
+  vez que React confirma un cambio; en Android, desplazar una lista confirma
+  uno por fotograma. Montar cada uno, además, para el hilo de JavaScript.
+
+  LA REGLA NUEVA. En reposo no hay nada animado: una vista normal. Lo animado
+  se monta cuando algo cambia, dura lo que dura el gesto y se desmonta. Lo que
+  deciden estas funciones es CUÁNDO hay algo que animar.
+*/
+
+/**
+ * El estilo de algo pulsable según esté o no bajo el dedo.
+ *
+ * Sin animación: encoge y atenúa en el acto, y vuelve en el acto. Es lo que
+ * hace que mil botones no cuesten nada mientras nadie los toca.
+ *
+ * `null` cuando no hay nada que pintar: en reposo y sin atenuar, que es el
+ * caso de casi todos casi siempre, ni siquiera se crea un objeto de estilo.
+ */
+export function estiloPulsado(
+  pulsado: boolean,
+  opciones: { escala: number; atenuar: number; opacidad: number; reducir: boolean },
+): { opacity: number; transform?: { scale: number }[] } | null {
+  const opacity = opciones.opacidad * (pulsado ? opciones.atenuar : 1);
+  const encoge = pulsado && !opciones.reducir && opciones.escala !== 1;
+  if (!encoge && opacity === 1) return null;
+  return encoge ? { opacity, transform: [{ scale: opciones.escala }] } : { opacity };
+}
+
+/**
+ * Si un icono tiene que dar el salto: cambió de estado SIENDO EL MISMO
+ * elemento. Una celda reciclada que pasa a pintar otra publicación —ya
+ * guardada— no acaba de guardarse: no salta.
+ */
+export function daElSalto(
+  antes: { activo: boolean; clave?: string },
+  ahora: { activo: boolean; clave?: string },
+): boolean {
+  return antes.clave === ahora.clave && antes.activo !== ahora.activo;
+}
+
+/**
+ * Hacia dónde entra una cifra que cambia: 1 si sube, -1 si baja, 0 si no hay
+ * nada que mover (no cambió, o es la cifra de otro elemento).
+ */
+export function sentidoDelCambio(
+  antes: { valor: number; clave?: string },
+  ahora: { valor: number; clave?: string },
+): 1 | -1 | 0 {
+  if (antes.clave !== ahora.clave || antes.valor === ahora.valor) return 0;
+  return ahora.valor > antes.valor ? 1 : -1;
+}
+
+/**
+ * Qué hace el globo de no leídos al cambiar la cuenta: aparece, crece o nada.
+ * Que baje no se celebra, y al montarse con su cuenta tampoco se mueve.
+ */
+export function saltoDelGlobo(antes: number, ahora: number): 'aparece' | 'crece' | null {
+  if (ahora <= 0) return null;
+  if (antes <= 0) return 'aparece';
+  return ahora > antes ? 'crece' : null;
+}
+
+export type ModoDeEntrada = { clave?: string; animada: boolean };
+
+/**
+ * Si algo que «entra» (`Aparecer`) se monta animado o como una vista normal.
+ *
+ *   - Lo que ya está en su sitio —el historial de un chat— es una vista
+ *     normal. Son casi todas las filas, y no llegan a montar nada animado.
+ *   - Lo que entra de verdad se monta animado.
+ *   - UNA VEZ ANIMADA, LA FILA SIGUE SIÉNDOLO, pinte lo que pinte después.
+ *     Cambiar de componente remonta lo que lleva dentro, y el mensaje que se
+ *     acaba de enviar no puede parpadear cuando el servidor lo confirma —que
+ *     es justo cuando deja de ser «nuevo» y, además, cambia de identificador—.
+ *     Son las pocas filas por las que pasó un mensaje recién enviado.
+ */
+export function modoDeEntrada(
+  previo: ModoDeEntrada | null,
+  clave: string | undefined,
+  quieta: boolean,
+): ModoDeEntrada {
+  const animada = (previo?.animada ?? false) || !quieta;
+  if (previo && previo.clave === clave && previo.animada === animada) return previo;
+  return { clave, animada };
+}

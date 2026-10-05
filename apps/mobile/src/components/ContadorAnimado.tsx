@@ -1,14 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { StyleProp, TextStyle } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleProp, TextStyle, View } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
+import { EntradaBreve } from '@/components/movimientoBreve';
 import { Text } from '@/components/Text';
-import { DURACION } from '@/lib/movimiento';
+import { DURACION, sentidoDelCambio } from '@/lib/movimiento';
 
 type Props = {
   valor: number;
@@ -36,43 +32,48 @@ const RECORRIDO = 6;
  */
 export function ContadorAnimado({ valor, clave, style, color, variant, weight }: Props) {
   const reducir = useReducedMotion();
-  const desplazamiento = useSharedValue(0);
-  const opacidad = useSharedValue(1);
-  const anterior = useRef(valor);
-  const claveAnterior = useRef(clave);
+  const anterior = useRef({ valor, clave });
+  const veces = useRef(0);
+  /** La cifra que está entrando. `null` en reposo, que es casi siempre. */
+  const [entrada, setEntrada] = useState<{ sentido: 1 | -1; n: number } | null>(null);
 
   useEffect(() => {
-    if (claveAnterior.current !== clave) {
-      // Otro elemento en la misma celda: su número no «cambia», es otro.
-      claveAnterior.current = clave;
-      anterior.current = valor;
+    const antes = anterior.current;
+    anterior.current = { valor, clave };
+    const sentido = sentidoDelCambio(antes, { valor, clave });
+    if (sentido === 0) {
+      // La celda pasó a otro elemento: una entrada a medias era del anterior.
+      if (antes.clave !== clave) setEntrada(null);
       return;
     }
-    if (anterior.current === valor) return;
-    const sube = valor > anterior.current;
-    anterior.current = valor;
     if (reducir) return;
-    desplazamiento.value = sube ? RECORRIDO : -RECORRIDO;
-    opacidad.value = 0;
-    desplazamiento.value = withTiming(0, { duration: DURACION.breve });
-    opacidad.value = withTiming(1, { duration: DURACION.breve });
-  }, [valor, clave, desplazamiento, opacidad, reducir]);
+    veces.current += 1;
+    setEntrada({ sentido, n: veces.current });
+  }, [valor, clave, reducir]);
 
-  const animado = useAnimatedStyle(() => ({
-    opacity: opacidad.value,
-    transform: [{ translateY: desplazamiento.value }],
-  }));
+  const cifra = (
+    <Text
+      variant={variant}
+      weight={weight}
+      color={color}
+      style={[{ fontVariant: ['tabular-nums'] }, style]}
+    >
+      {valor}
+    </Text>
+  );
 
+  // EN REPOSO, UNA VISTA NORMAL: hay un contador por acción de cada publicación.
+  if (!entrada) return <View>{cifra}</View>;
+
+  const { n } = entrada;
   return (
-    <Animated.View style={animado}>
-      <Text
-        variant={variant}
-        weight={weight}
-        color={color}
-        style={[{ fontVariant: ['tabular-nums'] }, style]}
-      >
-        {valor}
-      </Text>
-    </Animated.View>
+    <EntradaBreve
+      key={n}
+      desde={entrada.sentido * RECORRIDO}
+      duracion={DURACION.breve}
+      alTerminar={() => setEntrada((actual) => (actual && actual.n === n ? null : actual))}
+    >
+      {cifra}
+    </EntradaBreve>
   );
 }

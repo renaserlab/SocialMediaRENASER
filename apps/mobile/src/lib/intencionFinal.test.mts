@@ -308,11 +308,19 @@ test('lo que vuelve de una espera no se aplica a otra publicación', () => {
 
 test('el icono y el contador no animan cuando la celda cambia de publicación', () => {
   assert.equal(TARJETA.match(/<AccionDePublicacion\s+clave=\{post\.id\}/g)?.length, 5);
-  for (const componente of ['IconoQueSeEnciende', 'ContadorAnimado']) {
+  /*
+    La regla ya no vive escrita dentro de cada componente: es una función pura
+    (`daElSalto`, `sentidoDelCambio`) que se prueba ejecutándola en
+    `movimientoSoloMientrasDura.test.mts`. Aquí se fija que los dos la usan, y
+    que al cambiar de elemento se corta lo que estuviera a medias.
+  */
+  const REGLA: Record<string, RegExp> = {
+    IconoQueSeEnciende: /daElSalto\(antes, \{ activo, clave \}\)/,
+    ContadorAnimado: /sentidoDelCambio\(antes, \{ valor, clave \}\)/,
+  };
+  for (const [componente, regla] of Object.entries(REGLA)) {
     const codigo = readFileSync(join(SRC, 'components', `${componente}.tsx`), 'utf8').replace(/\r\n/g, '\n');
-    assert.match(codigo, /if \(claveAnterior\.current !== clave\) \{/, componente);
-    // Al cambiar de elemento se toma su estado y se SALE: no hay animación.
-    const rama = codigo.slice(codigo.indexOf('if (claveAnterior.current !== clave) {'));
-    assert.match(rama.slice(0, 260), /return;/, componente);
+    assert.match(codigo, regla, componente);
+    assert.match(codigo, /if \(antes\.clave !== clave\) set\w+\(null\);/, componente);
   }
 });

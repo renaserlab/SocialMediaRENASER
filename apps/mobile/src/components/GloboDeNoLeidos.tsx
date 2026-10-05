@@ -1,16 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { StyleProp, StyleSheet, ViewStyle } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSequence,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
+import { SaltoBreve } from '@/components/movimientoBreve';
 import { Text } from '@/components/Text';
-import { DURACION, MUELLE } from '@/lib/movimiento';
+import { saltoDelGlobo } from '@/lib/movimiento';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type Props = {
@@ -46,63 +40,74 @@ export function textoDelGlobo(cuenta: number): string {
 export function GloboDeNoLeidos({ cuenta, tamano = 20, soloPunto = false, style }: Props) {
   const { colors } = useAppTheme();
   const reducir = useReducedMotion();
-  const visible = cuenta > 0;
-  const escala = useSharedValue(visible ? 1 : 0);
   const anterior = useRef(cuenta);
+  const veces = useRef(0);
+  /** El salto en curso. `null` en reposo, que es casi siempre. */
+  const [salto, setSalto] = useState<{ tipo: 'aparece' | 'crece'; n: number } | null>(null);
 
   useEffect(() => {
     const antes = anterior.current;
     anterior.current = cuenta;
-    if (reducir) {
-      escala.value = visible ? 1 : 0;
-      return;
-    }
-    if (!visible) {
-      escala.value = withTiming(0, { duration: DURACION.toque });
-    } else if (antes <= 0) {
-      escala.value = withSpring(1, MUELLE);
-    } else if (cuenta > antes) {
-      escala.value = withSequence(withTiming(1.25, { duration: DURACION.toque }), withSpring(1, MUELLE));
-    }
-  }, [cuenta, visible, escala, reducir]);
+    const tipo = saltoDelGlobo(antes, cuenta);
+    if (!tipo || reducir) return;
+    veces.current += 1;
+    setSalto({ tipo, n: veces.current });
+  }, [cuenta, reducir]);
 
-  const animado = useAnimatedStyle(() => ({
-    opacity: escala.value > 0.05 ? 1 : 0,
-    transform: [{ scale: escala.value }],
-  }));
-
-  if (!visible) return null;
+  if (cuenta <= 0) return null;
 
   const lado = soloPunto ? Math.round(tamano / 2) : tamano;
+  const estilo = [
+    styles.globo,
+    {
+      minWidth: lado,
+      height: lado,
+      borderRadius: lado / 2,
+      backgroundColor: colors.primary,
+      paddingHorizontal: soloPunto ? 0 : 5,
+    },
+    style,
+  ];
+  const cifra = soloPunto ? null : (
+    <Text
+      variant="caption"
+      weight="700"
+      color={colors.onPrimary}
+      style={{ fontSize: Math.max(9, Math.round(tamano * 0.5)), fontVariant: ['tabular-nums'] }}
+    >
+      {textoDelGlobo(cuenta)}
+    </Text>
+  );
+
+  // EN REPOSO, UNA VISTA NORMAL: hay un globo por conversación de la bandeja.
+  if (!salto) {
+    return (
+      <View
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={estilo}
+      >
+        {cifra}
+      </View>
+    );
+  }
+
+  const { n } = salto;
   return (
-    <Animated.View
+    <SaltoBreve
+      key={n}
       pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[
-        styles.globo,
-        {
-          minWidth: lado,
-          height: lado,
-          borderRadius: lado / 2,
-          backgroundColor: colors.primary,
-          paddingHorizontal: soloPunto ? 0 : 5,
-        },
-        style,
-        animado,
-      ]}
+      // Lo que aparece llega desde pequeño; lo que ya estaba, da un bote.
+      desde={salto.tipo === 'aparece' ? 0.4 : 1}
+      pico={salto.tipo === 'aparece' ? 1.12 : 1.25}
+      style={estilo}
+      alTerminar={() => setSalto((actual) => (actual && actual.n === n ? null : actual))}
     >
-      {soloPunto ? null : (
-        <Text
-          variant="caption"
-          weight="700"
-          color={colors.onPrimary}
-          style={{ fontSize: Math.max(9, Math.round(tamano * 0.5)), fontVariant: ['tabular-nums'] }}
-        >
-          {textoDelGlobo(cuenta)}
-        </Text>
-      )}
-    </Animated.View>
+      {cifra}
+    </SaltoBreve>
   );
 }
 

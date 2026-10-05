@@ -1,15 +1,9 @@
-import React, { useEffect, useRef } from 'react';
-import { StyleProp, ViewStyle } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withSequence,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
-import { DURACION, ESCALA_AL_ENCENDER, MUELLE } from '@/lib/movimiento';
+import { SaltoBreve } from '@/components/movimientoBreve';
+import { ESCALA_AL_ENCENDER, daElSalto } from '@/lib/movimiento';
 
 type Props = {
   /** El estado: gustado, guardado, republicado. */
@@ -44,36 +38,48 @@ type Props = {
  * CON «REDUCIR MOVIMIENTO» no salta: el cambio de dibujo sigue diciéndolo.
  */
 export function IconoQueSeEnciende({ activo, pendiente = false, clave, children, style }: Props) {
+  /*
+    EN REPOSO ES UNA VISTA NORMAL. La vista animada se monta solo mientras dura
+    el salto: hay cinco de estos en cada publicación, y tenerlos siempre
+    animados era parte de lo que frenaba las listas (`lib/movimiento.ts`).
+  */
   const reducir = useReducedMotion();
-  const escala = useSharedValue(1);
-  const tinta = useSharedValue(pendiente ? 0.55 : 1);
-  const anterior = useRef(activo);
-  const claveAnterior = useRef(clave);
+  const anterior = useRef({ activo, clave });
+  const veces = useRef(0);
+  /** El salto en curso. `null` en reposo, que es casi siempre. */
+  const [salto, setSalto] = useState<{ pico: number; n: number } | null>(null);
 
   useEffect(() => {
-    if (claveAnterior.current !== clave) {
-      // Otro elemento en la misma celda: se toma su estado tal cual.
-      claveAnterior.current = clave;
-      anterior.current = activo;
+    const antes = anterior.current;
+    anterior.current = { activo, clave };
+    if (!daElSalto(antes, { activo, clave })) {
+      // La celda pasó a otro elemento: un salto a medias era del anterior.
+      if (antes.clave !== clave) setSalto(null);
       return;
     }
-    if (anterior.current === activo) return;
-    anterior.current = activo;
     if (reducir) return;
-    escala.value = withSequence(
-      withTiming(activo ? ESCALA_AL_ENCENDER : 0.86, { duration: DURACION.toque }),
-      withSpring(1, MUELLE),
-    );
-  }, [activo, clave, escala, reducir]);
+    veces.current += 1;
+    setSalto({ pico: activo ? ESCALA_AL_ENCENDER : 0.86, n: veces.current });
+  }, [activo, clave, reducir]);
 
-  useEffect(() => {
-    tinta.value = withTiming(pendiente ? 0.55 : 1, { duration: reducir ? 0 : DURACION.breve });
-  }, [pendiente, tinta, reducir]);
+  const estilo = pendiente ? [style, styles.pendiente] : style;
+  if (!salto) return <View style={estilo}>{children}</View>;
 
-  const animado = useAnimatedStyle(() => ({
-    opacity: tinta.value,
-    transform: [{ scale: escala.value }],
-  }));
-
-  return <Animated.View style={[style, animado]}>{children}</Animated.View>;
+  const { n } = salto;
+  return (
+    <SaltoBreve
+      key={n}
+      pico={salto.pico}
+      style={estilo}
+      // Solo lo apaga su propio salto: uno nuevo ya empezó con otra cuenta.
+      alTerminar={() => setSalto((actual) => (actual && actual.n === n ? null : actual))}
+    >
+      {children}
+    </SaltoBreve>
+  );
 }
+
+const styles = StyleSheet.create({
+  // Mientras el servidor no confirma, el icono va a media tinta.
+  pendiente: { opacity: 0.55 },
+});

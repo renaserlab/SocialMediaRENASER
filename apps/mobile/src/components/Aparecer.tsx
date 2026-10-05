@@ -1,15 +1,14 @@
-import React, { useEffect } from 'react';
-import { StyleProp, ViewStyle } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
+import React, { useRef } from 'react';
+import { StyleProp, View, ViewStyle } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
-import { DESPLAZAMIENTO_DE_ENTRADA, DURACION } from '@/lib/movimiento';
+import { EntradaBreve } from '@/components/movimientoBreve';
+import {
+  DESPLAZAMIENTO_DE_ENTRADA,
+  DURACION,
+  modoDeEntrada,
+  type ModoDeEntrada,
+} from '@/lib/movimiento';
 
 type Props = {
   children: React.ReactNode;
@@ -42,6 +41,10 @@ type Props = {
  * mensajes nuevos. Solo anima opacidad y traslación, que no obligan a
  * recalcular la disposición.
  *
+ * LO QUE NO ENTRA ES UNA VISTA NORMAL. Con `inmediato` —el historial de un
+ * chat, que son casi todas las filas— no se monta nada animado. Antes cada
+ * fila llevaba su vista animada aunque no fuera a moverse nunca.
+ *
  * CON «REDUCIR MOVIMIENTO» el contenido está en su sitio desde el primer
  * fotograma: no se pierde nada, solo no se mueve.
  */
@@ -54,29 +57,27 @@ export function Aparecer({
   style,
 }: Props) {
   const reducir = useReducedMotion();
-  const quieto = reducir || inmediato;
-  const avance = useSharedValue(quieto ? 1 : 0);
+  /*
+    Si este elemento se monta animado o no. Vive en una referencia porque no
+    tiene que repintar nada: se decide al pintar, y decidir dos veces con lo
+    mismo da lo mismo.
+  */
+  const modo = useRef<ModoDeEntrada | null>(null);
+  const quieta = reducir || inmediato;
+  modo.current = modoDeEntrada(modo.current, clave, quieta);
 
-  useEffect(() => {
-    if (quieto) {
-      // Una celda reciclada puede venir de un elemento que estaba entrando.
-      avance.value = 1;
-      return;
-    }
-    avance.value = 0;
-    avance.value = withDelay(
-      retraso,
-      withTiming(1, { duration: DURACION.normal, easing: Easing.out(Easing.cubic) }),
-    );
-    // Al montar y al cambiar de elemento, no cuando el mismo elemento deja de
-    // ser «nuevo»: ese ya entró.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clave]);
+  if (!modo.current.animada) return <View style={style}>{children}</View>;
 
-  const animado = useAnimatedStyle(() => ({
-    opacity: avance.value,
-    transform: [{ translateY: (1 - avance.value) * desde }],
-  }));
-
-  return <Animated.View style={[style, animado]}>{children}</Animated.View>;
+  return (
+    <EntradaBreve
+      clave={clave}
+      quieta={quieta}
+      desde={desde}
+      retraso={retraso}
+      duracion={DURACION.normal}
+      style={style}
+    >
+      {children}
+    </EntradaBreve>
+  );
 }
