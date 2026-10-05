@@ -75,7 +75,7 @@ test('se va solo, se puede cerrar y tocarlo abre el directo', () => {
 });
 
 test('el layout raiz monta el aviso y escucha el toque en el push', () => {
-  assert.match(RAIZ_LAYOUT, /useAbrirDesdeElPush\(\);/);
+  assert.match(RAIZ_LAYOUT, /useAbrirDesdeElPush\(navegadorMontado\);/);
   const aviso = RAIZ_LAYOUT.indexOf('<AvisoDeDirectoSeguido />');
   const dialogo = RAIZ_LAYOUT.indexOf('<DialogHost />');
   assert.ok(aviso > 0 && aviso < dialogo, 'el aviso tiene que quedar por debajo de los dialogos');
@@ -83,8 +83,11 @@ test('el layout raiz monta el aviso y escucha el toque en el push', () => {
 
 test('tocar el push abre el directo, una vez y con la navegacion ya montada', () => {
   assert.match(PUSH_NATIVO, /Notifications\.useLastNotificationResponse\(\)/);
-  assert.match(PUSH_NATIVO, /if \(!lista \|\| !respuesta\) return;/);
-  assert.match(PUSH_NATIVO, /if \(atendidas\.current\.has\(identificador\)\) return;/);
+  // QUE la guarda guarde, y que «una vez» lo sea tambien entre aperturas, se
+  // comprueba EJECUTANDO en `lib/navegadorMontado.test.mts`: lo que habia
+  // aqui fijaba el texto de una guarda que era siempre cierta.
+  assert.match(PUSH_NATIVO, /if \(!navegadorMontado \|\| !respuesta\) return undefined;/);
+  assert.match(PUSH_NATIVO, /void reservarToque\(identificador\)\.then/);
   // El destino sale del mapa cerrado; lo que no trae datos, a la bandeja.
   assert.match(
     PUSH_NATIVO,
@@ -94,7 +97,7 @@ test('tocar el push abre el directo, una vez y con la navegacion ya montada', ()
   assert.match(PUSH_NATIVO, /if \(directo\) marcarDirectoComoAvisado\(directo\);/);
   // La web no escucha push nativos: ni siquiera importa la libreria.
   assert.doesNotMatch(PUSH_WEB, /expo-notifications/);
-  assert.match(PUSH_WEB, /export function useAbrirDesdeElPush\(\): void/);
+  assert.match(PUSH_WEB, /export function useAbrirDesdeElPush\(_navegadorMontado: boolean\): void/);
 });
 
 test('la bandeja dice quien esta en directo', () => {

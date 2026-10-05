@@ -25,6 +25,7 @@ import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
 import { useAbrirDesdeElPush } from '@/hooks/useAbrirDesdeElPush';
 import { useAvisosDelPush } from '@/hooks/useAvisosDelPush';
 import { useAvisosEnVivo } from '@/hooks/useAvisosEnVivo';
+import { useNavegadorMontado } from '@/hooks/useNavegadorMontado';
 import { useSalidaConDoblePulsacion } from '@/hooks/useSalidaConDoblePulsacion';
 import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
@@ -80,20 +81,11 @@ export default function RootLayout() {
     Appearance.setColorScheme?.(mode);
   }, [mode]);
 
-  // Atiende los enlaces del correo (recuperar contrasena) en movil. Va en la
-  // raiz porque el enlace puede llegar con cualquier pantalla delante, o con la
-  // aplicacion cerrada.
-  useAuthDeepLink();
-
   // Boton fisico Atras de Android: primero retrocede de verdad y, ya en la
   // raiz, avisa antes de cerrar en vez de salir de golpe. Va en la raiz porque
   // el boton existe en toda la aplicacion, no solo en las pestañas.
   useSalidaConDoblePulsacion();
 
-  // Tocar un push lleva a lo que anuncia (hoy, el directo de «Juan está
-  // transmitiendo en vivo»). En la raiz porque el push puede abrir la
-  // aplicacion desde cerrada, con cualquier pantalla por debajo.
-  useAbrirDesdeElPush();
   // Los avisos con la aplicacion ABIERTA: el push que llega en primer plano y,
   // sin depender de el, los mensajes en vivo y la lectura periodica de la
   // bandeja. Los dos acaban en el mismo aviso flotante.
@@ -135,6 +127,25 @@ export default function RootLayout() {
 
   const fontsReady = fontsLoaded || !!fontError;
   const ready = (hydrated && fontsReady) || bootTimedOut;
+
+  /*
+    LOS DOS GANCHOS QUE NAVEGAN POR SU CUENTA, Y CUÁNDO PUEDEN HACERLO.
+
+    Mientras `ready` es falso este layout devuelve `null`: no hay `<Stack>`.
+    Navegar en ese hueco volvía a montar el layout entero y, con un toque de
+    notificación pendiente, lo hacía en bucle: la aplicación dejaba de abrirse
+    (05/10/2026). La señal de que se puede es que el navegador de la aplicación
+    esté montado DE VERDAD, y es una sola para los dos.
+    Ver `lib/navegadorMontado.ts`.
+  */
+  const navegadorMontado = useNavegadorMontado(ready);
+  // Atiende los enlaces del correo (recuperar contrasena) en movil. Va en la
+  // raiz porque el enlace puede llegar con cualquier pantalla delante, o con la
+  // aplicacion cerrada.
+  useAuthDeepLink(navegadorMontado);
+  // Tocar un push lleva a lo que anuncia. En la raiz porque el push puede abrir
+  // la aplicacion desde cerrada, con cualquier pantalla por debajo.
+  useAbrirDesdeElPush(navegadorMontado);
 
   useEffect(() => {
     if (hydrated) perfMark('STORE_HYDRATED');

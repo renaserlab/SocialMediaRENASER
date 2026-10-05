@@ -6,6 +6,6 @@
  * —como `live/registro100ms`— para que el navegador no tenga que cargar la
  * escucha de respuestas de `expo-notifications`.
  */
-export function useAbrirDesdeElPush(): void {
+export function useAbrirDesdeElPush(_navegadorMontado: boolean): void {
   // Nada que escuchar.
 }

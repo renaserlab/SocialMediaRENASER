@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
-import { useRootNavigationState, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 import { mensajeDeAuth } from '@/lib/authErrors';
 import { esEnlaceDeRecuperacion, leerEnlaceAuth, mensajeDeEnlace } from '@/lib/authLink';
@@ -28,15 +28,24 @@ import { traduceEnElIdiomaActual } from '@/i18n';
  * En web no hace nada: alli la sesion la resuelve supabase-js al arrancar y el
  * motivo del fallo lo recoge `enlaceAuthInicial`.
  */
-export function useAuthDeepLink(): void {
+export function useAuthDeepLink(navegadorMontado: boolean): void {
   const router = useRouter();
   /*
-    Mientras esto sea `undefined` el navegador todavia no existe y cualquier
-    `router.replace` se perderia. Importa porque el caso normal es justo ese:
-    el enlace ABRE la aplicacion, asi que llega antes de que haya nada montado.
-    Lo pendiente se guarda y se resuelve en cuanto el navegador esta listo.
+    Mientras el navegador de la aplicacion no este montado no se navega. Importa
+    porque el caso normal es justo ese: el enlace ABRE la aplicacion, asi que
+    llega antes de que haya nada montado. Lo pendiente se guarda y se resuelve
+    en cuanto lo esta.
+
+    La senal la da quien llama (`useNavegadorMontado`). Antes se miraba aqui
+    `useRootNavigationState()?.key`, que es cierto desde el primer instante:
+    no esperaba a nada. Ver `lib/navegadorMontado.ts`.
+
+    En una referencia y no como dependencia del efecto de abajo: ese efecto lee
+    el enlace con el que se abrio la aplicacion, y repetirlo al montarse el
+    navegador intentaria abrir DOS veces la misma sesion de recuperacion.
   */
-  const navegacionLista = !!useRootNavigationState()?.key;
+  const montado = useRef(navegadorMontado);
+  montado.current = navegadorMontado;
   const destinoPendiente = useRef(false);
 
   useEffect(() => {
@@ -46,7 +55,7 @@ export function useAuthDeepLink(): void {
 
     /** Lleva a la pantalla de contrasena, ahora o en cuanto se pueda. */
     const irAReset = () => {
-      if (navegacionLista) router.replace('/reset-password');
+      if (montado.current) router.replace('/reset-password');
       else destinoPendiente.current = true;
     };
 
@@ -96,14 +105,14 @@ export function useAuthDeepLink(): void {
       vivo = false;
       suscripcion.remove();
     };
-  }, [router, navegacionLista]);
+  }, [router]);
 
   // El enlace llego con la aplicacion aun arrancando: se navega en cuanto hay
   // navegador. Sin esto la sesion de recuperacion quedaba abierta pero el
   // usuario se encontraba en el feed, sin la pantalla para cambiar la clave.
   useEffect(() => {
-    if (!navegacionLista || !destinoPendiente.current) return;
+    if (!navegadorMontado || !destinoPendiente.current) return;
     destinoPendiente.current = false;
     router.replace('/reset-password');
-  }, [navegacionLista, router]);
+  }, [navegadorMontado, router]);
 }
