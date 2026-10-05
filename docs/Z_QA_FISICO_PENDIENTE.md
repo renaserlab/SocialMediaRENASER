@@ -2769,3 +2769,20 @@ servidor desplegado con ese cambio.
 | El prestador tiene la app cerrada; un cliente reserva: le llega «Tienes una reserva nueva» | | | |
 | Tocar ese aviso abre la app en Inicio, y el aviso flotante dice que hay una notificación sin leer | | | |
 | Ningún aviso de estos llega dos veces | | | |
+
+### Vistas de Cursos, Eventos y Servicios (05/10/2026)
+
+Revisadas con datos de prueba en la copia web local; en el teléfono falta
+verlas con datos reales, en claro y en oscuro.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Cursos: un curso sin imagen enseña un recuadro gris con un libro, no un hueco en blanco (rejilla, «Guardados», «Continúa aprendiendo») | | | |
+| Cursos: «Continúa aprendiendo», «Guardados» y «Todo el catálogo» empiezan a la misma altura del borde que las tarjetas | | | |
+| Cursos y Eventos: el filtro elegido se rellena igual en las dos (negro en claro, blanco en oscuro) | | | |
+| Eventos: todas las filas de la lista miden parecido aunque el título sea largo | | | |
+| Ficha de un evento presencial: la modalidad NO lleva el dibujo de una cámara | | | |
+| Servicios: una tarjeta sin foto enseña un recuadro gris con un maletín | | | |
+| En las tres: tocar una tarjeta o un filtro se nota (se encoge un poco) y hace lo mismo que antes | | | |
+| En el inicio (vídeo, fondo negro), el aviso flotante se ve como una caja con borde | | | |
+| Todo lo anterior, también en modo oscuro | | | |
