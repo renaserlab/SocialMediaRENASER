@@ -143,6 +143,9 @@ async def entorno():
     providers.PROVEEDORES.clear()
     providers.PROVEEDORES.update(anteriores)
     (ajustes.hms_webhook_secret,) = previos
+    # Con el bucle de la prueba todavía vivo: si la cierra el recolector, lo
+    # hace cuando ya no existe y el «Event loop is closed» le cae a otra prueba.
+    await engine.dispose()
 
 
 async def _emision(http, *, estado: str = "live") -> str:

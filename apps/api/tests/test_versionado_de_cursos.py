@@ -99,6 +99,9 @@ async def entorno():
     finally:
         app.dependency_overrides.clear()
         esquema_gobernanza.olvidar()
+        # Con el bucle de la prueba todavia vivo: si la cierra el recolector, lo
+        # hace cuando ya no existe y el «Event loop is closed» le cae a otra prueba.
+        await engine.dispose()
 
 
 async def _publicar(http) -> None:
