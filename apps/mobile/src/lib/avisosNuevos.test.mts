@@ -202,11 +202,14 @@ describe('un solo sistema de avisos, enchufado', () => {
     // vivo, que ya puede haber anunciado ese mismo mensaje.
     assert.match(
       PUSH,
-      /if \(conversacion && alRecibirUnMensajePorPush\(conversacion, mensajeDelPush\(data\)\)\) return;/,
+      /conversacion &&\s*alRecibirUnMensajePorPush\(conversacion, mensajeDelPush\(data\), \(body \?\? ''\)\.trim\(\) \|\| null\)\s*\) \{\s*return;/,
     );
     // Y allí el segundo se descarta por su identificador.
     assert.match(VIVO, /if \(anunciados\.has\(mensajeId\)\) return;/);
-    assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null, fila\.sender_id \?\? null\);/);
+    assert.match(
+      VIVO,
+      /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null, fila\.sender_id \?\? null, fila\.body \?\? null\);/,
+    );
     assert.match(VIVO, /mensajeDelPush = anotarMensaje;/);
     // La memoria de lo anunciado tiene tope.
     assert.match(VIVO, /if \(anunciados\.size > MENSAJES_RECORDADOS\)/);
@@ -259,21 +262,54 @@ describe('un solo sistema de avisos, enchufado', () => {
     );
   });
 
-  it('un mensaje adelanta la pregunta por los avisos, y el de una sesión no se anuncia dos veces', () => {
-    const mensajes = VIVO.slice(VIVO.indexOf('const mirarMensajes'), VIVO.indexOf('const anotarMensaje'));
-    // Los avisos se miran A LA VEZ que los mensajes, y con tope: si la bandeja
-    // tarda, el mensaje se anuncia igual.
-    assert.match(mensajes, /await Promise\.all\(\[\s*Promise\.race\(\[\s*mirarAvisos\(\),/);
-    assert.match(mensajes, /setTimeout\(listo, ESPERA_POR_LOS_AVISOS_MS\)/);
-    assert.match(mensajes, /refrescarMensajes\(\),\s*\]\);/);
-    // El silencio CALLA UN MENSAJE, no a la persona: se gasta al usarlo, y lo
-    // siguiente que escriba —«nos vemos el martes»— sí da su aviso.
+  it('el aviso de un mensaje sale AL LLEGAR: no espera al respiro, ni a la lista, ni a la bandeja', () => {
+    /*
+      Reportado el 05/10/2026: «el sistema de notificaciones por lo general es
+      bastante lento». El aviso esperaba medio segundo, luego a la lista de
+      conversaciones y hasta dos segundos y medio más a la bandeja.
+    */
+    const anotar = VIVO.slice(VIVO.indexOf('const anotarMensaje'), VIVO.indexOf('const alLlegarMensaje'));
+    const decide = anotar.indexOf('const decision = queHacerConUnMensaje({');
+    const anuncia = anotar.indexOf("if (decision === 'anunciar-ya' && conocida) {");
+    const respiro = anotar.indexOf('respiro = setTimeout(');
+    assert.ok(decide !== -1 && anuncia > decide, 'no se decide al llegar');
+    assert.ok(respiro > anuncia, 'el aviso vuelve a ir detrás del respiro');
+    // Con lo que ya se sabe de la conversación: sin pedir nada.
+    assert.match(anotar, /const conocida = conocidas\.get\(conversacionId\);/);
+    assert.ok(!/await /.test(anotar), 'anunciar vuelve a esperar a algo');
+    // Ni rastro de la espera a la bandeja.
+    assert.ok(!/ESPERA_POR_LOS_AVISOS_MS|Promise\.race/.test(VIVO));
+    // La lista se recuerda cada vez que se lee, que es lo que lo hace posible.
+    assert.equal(VIVO.match(/refrescarMensajes\(\)\.then\(recordar\)/g)?.length, 4);
+    assert.match(VIVO, /recordar\(conversaciones\);/);
+    // Y el texto es el del mensaje: el resumen guardado es del anterior.
+    assert.match(anotar, /anunciarMensaje\(conversacionId, conocida, texto, remitenteId, false\);/);
+  });
+
+  it('una conversación nueva, que no se conoce, se anuncia al volver la lista', () => {
+    const alDia = VIVO.slice(VIVO.indexOf('const ponerAlDiaLosMensajes'), VIVO.indexOf('const anotarMensaje'));
+    assert.match(alDia, /if \(pendiente\.anunciado\) continue;/);
+    assert.match(alDia, /if \(seEstaViendoLaConversacion\(id\)\) continue;/);
+    assert.match(alDia, /anunciarMensaje\(id, conversacion, pendiente\.texto, pendiente\.remitente, true\);/);
+    // La bandeja de avisos se mira a la vez, sin que el mensaje la espere.
+    const avisos = alDia.indexOf('void mirarAvisos();');
+    const lista = alDia.indexOf('await refrescarMensajes();');
+    assert.ok(avisos !== -1 && lista > avisos);
+  });
+
+  it('un hecho, un aviso, llegue antes quien llegue: el segundo calla, y calla UNO', () => {
+    const anotar = VIVO.slice(VIVO.indexOf('const anotarMensaje'), VIVO.indexOf('const alLlegarMensaje'));
+    // El aviso de sesión llegó antes: su mensaje del chat no se anuncia, y el
+    // silencio se gasta —lo siguiente que escriba sí da su aviso—.
+    assert.match(anotar, /if \(decision === 'callar' && remitenteId\) conAvisoDeSesion\.delete\(remitenteId\);/);
+    // El mensaje llegó antes (lo normal): el que calla es el aviso de sesión.
+    assert.match(VIVO, /conMensajeAnunciado\.set\(remitente, Date\.now\(\) \+ SILENCIO_TRAS_UN_AVISO_DE_SESION_MS\);/);
     assert.match(
-      mensajes,
-      /if \(remitente && \(conAvisoDeSesion\.get\(remitente\) \?\? 0\) > ahora\) \{\s*conAvisoDeSesion\.delete\(remitente\);\s*continue;\s*\}/,
+      VIVO,
+      /if \(elMensajeYaLoDijo\(aviso, conMensajeAnunciado, ahora\)\) \{\s*if \(aviso\.actorId\) conMensajeAnunciado\.delete\(aviso\.actorId\);\s*continue;\s*\}/,
     );
-    // El remitente sale de la fila que entrega el tiempo real.
-    assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null, fila\.sender_id \?\? null\);/);
+    // Y entonces no deja además callado al SIGUIENTE mensaje de esa persona.
+    assert.match(VIVO, /if \(\(conMensajeAnunciado\.get\(actor\) \?\? 0\) > ahora\) continue;\s*conAvisoDeSesion\.set\(actor, hasta\);/);
   });
 
   it('nada se queda escuchando al cerrar sesión o desmontar', () => {
@@ -561,10 +597,61 @@ describe('el push de una sesión, con la aplicación abierta, no da un segundo a
   });
 
   it('y allí se ANUNCIA (no callado): cada aviso sale una vez, llegue antes quien llegue', () => {
-    assert.match(VIVO, /sesionDelPush = \(\) => \{\s*void mirarAvisos\(\);\s*void refrescarMensajes\(\);\s*\};/);
+    assert.match(
+      VIVO,
+      /sesionDelPush = \(\) => \{\s*void mirarAvisos\(\);\s*void refrescarMensajes\(\)\.then\(recordar\);\s*\};/,
+    );
     // Sin nadie escuchando, el oyente del push lo enseña por su cuenta.
     assert.match(VIVO, /if \(!sesionDelPush\) return false;/);
     // Y se suelta al desmontar.
     assert.match(VIVO.slice(VIVO.lastIndexOf('return () => {')), /sesionDelPush = null;/);
+  });
+});
+
+describe('qué se hace con un mensaje que acaba de llegar', () => {
+  it('con la conversación conocida se anuncia ya', async () => {
+    const { queHacerConUnMensaje } = await import('./avisosNuevos.ts');
+    assert.equal(
+      queHacerConUnMensaje({ aLaVista: false, conAvisoDeSesionReciente: false, conversacionConocida: true }),
+      'anunciar-ya',
+    );
+  });
+
+  it('una conversación nueva espera a la lista: no se sabe de quién es', async () => {
+    const { queHacerConUnMensaje } = await import('./avisosNuevos.ts');
+    assert.equal(
+      queHacerConUnMensaje({ aLaVista: false, conAvisoDeSesionReciente: false, conversacionConocida: false }),
+      'esperar-a-la-lista',
+    );
+  });
+
+  it('con el chat delante, o si es el registro de una sesión ya anunciada, se calla', async () => {
+    const { queHacerConUnMensaje } = await import('./avisosNuevos.ts');
+    for (const conversacionConocida of [true, false]) {
+      assert.equal(
+        queHacerConUnMensaje({ aLaVista: true, conAvisoDeSesionReciente: false, conversacionConocida }),
+        'callar',
+      );
+      assert.equal(
+        queHacerConUnMensaje({ aLaVista: false, conAvisoDeSesionReciente: true, conversacionConocida }),
+        'callar',
+      );
+    }
+  });
+
+  it('el aviso de sesión calla si el mensaje de esa persona ya se anunció, y solo ese', async () => {
+    const { elMensajeYaLoDijo } = await import('./avisosNuevos.ts');
+    const ahora = 1_000_000;
+    const anunciados = new Map([['ana', ahora + 5_000]]);
+    assert.equal(elMensajeYaLoDijo({ entityType: 'booking', actorId: 'ana' }, anunciados, ahora), true);
+    // Pasado el silencio, ya no.
+    assert.equal(elMensajeYaLoDijo({ entityType: 'booking', actorId: 'ana' }, anunciados, ahora + 5_001), false);
+    // De otra persona, o sin saber de quién.
+    assert.equal(elMensajeYaLoDijo({ entityType: 'booking', actorId: 'luis' }, anunciados, ahora), false);
+    assert.equal(elMensajeYaLoDijo({ entityType: 'booking', actorId: null }, anunciados, ahora), false);
+    // Lo que no deja mensaje en el chat se anuncia siempre: «le gustó tu
+    // publicación» de la misma persona es otro hecho.
+    assert.equal(elMensajeYaLoDijo({ entityType: 'post', actorId: 'ana' }, anunciados, ahora), false);
+    assert.equal(elMensajeYaLoDijo({ entityType: null, actorId: 'ana' }, anunciados, ahora), false);
   });
 });

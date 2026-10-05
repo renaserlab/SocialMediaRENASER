@@ -67,7 +67,12 @@ export function useAvisosDelPush(): void {
         el nombre y el resumen de la conversación. Solo si nadie escucha allí
         se enseña el del push, que es mejor que nada.
       */
-      if (conversacion && alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data))) return;
+      if (
+        conversacion &&
+        alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data), (body ?? '').trim() || null)
+      ) {
+        return;
+      }
 
       /*
         EL DE UNA SESIÓN TAMPOCO, y por lo mismo. Una sesión deja además un
