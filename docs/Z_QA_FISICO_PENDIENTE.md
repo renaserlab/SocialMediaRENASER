@@ -2624,3 +2624,45 @@ paso esta tabla no puede salir bien.
 | Llegan el de un seguidor nuevo, una reacción y un comentario | | | |
 | Tocar cada aviso abre lo que anuncia | | | |
 | Suena y vibra | | | |
+
+---
+
+## Abrir desde una notificación (05/10/2026)
+
+**Lo que pasó.** Con la compilación 44 —la primera con Firebase— la aplicación
+dejaba de abrirse después de tocar una notificación: «Algo no ha salido bien ·
+Maximum update depth exceeded» en cada arranque, también cerrándola del todo.
+Solo se salía reinstalando. Le pasó a todas las cuentas.
+
+**La causa**, en `apps/mobile/src/lib/navegadorMontado.ts`: el código que abre
+la aplicación desde un push navegaba antes de que el layout raíz hubiera
+montado su navegador, el enrutador volvía a montar el layout entero, y el
+layout nuevo leía el mismo toque. No eran las animaciones del 04/10. Estaba
+desde el 25/09 y no se había visto porque el push no llegaba en Android.
+
+**Nada de esto se puede probar sin un teléfono**: en web no hay push. La regla
+está ejecutada en pruebas y la forma del estado de navegación se comprobó en
+la copia web, pero el toque de verdad solo existe en el aparato. Dos cuentas,
+**A** y **B**, en dos teléfonos con la compilación nueva.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| B con la app cerrada del todo. A le escribe. B toca la notificación: se abre el chat de A | | | |
+| B cierra la app del todo y la abre DESDE EL ICONO: abre en Inicio, sin error | | | |
+| Otra vez, y otra: sigue abriendo, y NO vuelve a meterse sola en aquel chat | | | |
+| B con la app en segundo plano. A le escribe. B toca la notificación: se abre el chat | | | |
+| B toca una notificación que no es de mensaje (seguidor, reacción): lleva a lo que anuncia o a la bandeja | | | |
+| Dos notificaciones seguidas de dos personas: cada una abre su chat, una sola vez | | | |
+| Si aun así sale «Algo no ha salido bien»: captura con las líneas «Pantalla», «En» y «Por» | | | |
+
+### La bandeja y el aviso dentro de la aplicación
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Entrar a un chat con mensajes sin leer y volver a Mensajes enseguida: su fila ya no lleva el globo | | | |
+| Lo mismo entrando al chat desde una notificación | | | |
+| B con la app abierta en cualquier pantalla. A le escribe: el aviso flotante sale casi al instante, con el nombre, la foto y el texto | | | |
+| Tocar el aviso flotante abre ese chat; arrastrarlo hacia arriba lo quita | | | |
+| A le pide una sesión a B: sale UN aviso, no dos | | | |
+| Con el chat de A delante, A escribe: NO sale aviso flotante | | | |
+| Captura del aviso flotante en claro y en oscuro, para valorar su diseño | | | |
