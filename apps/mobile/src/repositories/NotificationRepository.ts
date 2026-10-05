@@ -28,6 +28,24 @@ export const NotificationRepository = {
     return res.count;
   },
 
+  /**
+   * Lo que hay sin leer y cuántos de esos son POSTERIORES a `desdeIso`.
+   *
+   * `nuevos` es `null` cuando el servidor no lo dice: una API anterior a este
+   * cambio ignora `since` y responde solo la cuenta. Quien llama no puede
+   * tomar ese silencio por un cero.
+   */
+  async novedades(desdeIso: string | null): Promise<{ cuenta: number; nuevos: number | null }> {
+    const consulta = desdeIso ? `?since=${encodeURIComponent(desdeIso)}` : '';
+    const res = await apiRequest<{ count: number; new_count?: number }>(
+      `${API_V1}/notifications/unread-count${consulta}`,
+    );
+    return {
+      cuenta: res.count,
+      nuevos: desdeIso && typeof res.new_count === 'number' ? res.new_count : null,
+    };
+  },
+
   async markAllRead(): Promise<void> {
     await apiRequest<void>(`${API_V1}/notifications/read-all`, { method: 'POST' });
   },

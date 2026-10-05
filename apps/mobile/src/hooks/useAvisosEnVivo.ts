@@ -4,7 +4,14 @@ import { useRouter } from 'expo-router';
 
 import { traduceEnElIdiomaActual } from '@/i18n';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
-import { destinoDelAviso, queAnunciar } from '@/lib/avisosNuevos';
+import {
+  SILENCIO_TRAS_UN_AVISO_DE_SESION_MS,
+  actoresDeSesionNuevos,
+  desdeCuandoPreguntar,
+  destinoDelAviso,
+  hayQueLeerLaBandeja,
+  queAnunciar,
+} from '@/lib/avisosNuevos';
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
@@ -27,6 +34,10 @@ import { useContadoresStore } from '@/store/useContadoresStore';
  * Es una cuenta, no la bandeja: una consulta con índice. Lo que dejaría esto
  * en instantáneo es publicar `notifications` en tiempo real, y eso es una
  * migración que no se ha hecho.
+ *
+ * Los avisos de SESIÓN no esperan a esta vuelta: cada uno deja además un
+ * mensaje en el chat, que sí llega al momento, y ese mensaje adelanta la
+ * pregunta (ver `mirarMensajes`).
  */
 const CADA_MS = 30_000;
 /** Varios mensajes seguidos son una sola consulta, pasado este respiro. */
@@ -49,7 +60,9 @@ type FilaDeMensaje = { id?: string; conversation_id?: string; sender_id?: string
  * Son `null` cuando el hook no está escuchando (sin sesión).
  */
 let ponerseAlDia: (() => void) | null = null;
-let mensajeDelPush: ((conversacionId: string, mensajeId: string | null) => void) | null = null;
+let mensajeDelPush:
+  | ((conversacionId: string, mensajeId: string | null, remitenteId?: string | null) => void)
+  | null = null;
 
 export function alRecibirUnPush(): void {
   ponerseAlDia?.();
@@ -126,29 +139,35 @@ export function useAvisosEnVivo(): void {
 
     /* ------------------------------------------------ avisos de la bandeja */
     /**
-     * @param callado pone al día los contadores y la marca SIN anunciar. Es lo
-     *   que toca cuando lo nuevo ya se avisó por otro lado: el sistema lo hizo
-     *   mientras la aplicación estaba en segundo plano, o acaba de salir el
-     *   aviso de un push.
+     * De quién llegó un aviso de sesión hace un momento, y hasta cuándo calla
+     * al «mensaje nuevo» de esa misma persona. Un hecho, un aviso.
      */
-    const mirarAvisos = async (callado = false) => {
+    const conAvisoDeSesion = new Map<string, number>();
+
+    const leerAvisos = async (callado: boolean) => {
       /*
-        LA CUENTA DE ANTES SE LEE DEL CONTADOR COMÚN, no de una variable de
-        aquí. Abrir la bandeja lo pone a cero; con una copia propia, tener 3,
-        abrir la bandeja y recibir 1 daba «1 no es más que 3» y ese aviso no
-        se anunciaba nunca.
+        SI HAY ALGO NUEVO LO DICE EL SERVIDOR, no una resta hecha aquí. Antes
+        se comparaba la cuenta de ahora con la del contador común, que también
+        escriben otras pantallas: si una lo refrescaba primero, la cuenta ya no
+        «subía» y el aviso no se anunciaba nunca. Ver `hayQueLeerLaBandeja`.
       */
-      const antes = useContadoresStore.getState().notificaciones;
-      const cuenta = await refrescarNotificaciones();
-      if (!vivo || cuenta === null) return;
+      const lectura = await refrescarNotificaciones(desdeCuandoPreguntar(marca));
+      if (!vivo || lectura === null) return;
       const primera = marca === null;
       // La lista solo se pide cuando hace falta: al empezar, para fijar la
-      // marca; cuando la cuenta sube; o para ponerse al día sin anunciar. Un
-      // minuto tras otro sin novedad es una consulta de un número, nada más.
-      if (!primera && !callado && cuenta <= antes) return;
+      // marca; cuando hay algo posterior a ella; o para ponerse al día sin
+      // anunciar. Una vuelta tras otra sin novedad es una consulta de dos
+      // números, nada más.
+      if (!hayQueLeerLaBandeja({ primera, callado, ...lectura })) return;
       try {
         const avisos = await NotificationRepository.list();
         if (!vivo) return;
+        // Se anuncie o no, se anota de quién acaba de llegar un aviso de
+        // sesión: su mensaje del chat no tiene que dar un segundo aviso.
+        const hasta = Date.now() + SILENCIO_TRAS_UN_AVISO_DE_SESION_MS;
+        for (const actor of actoresDeSesionNuevos(avisos, marca)) {
+          conAvisoDeSesion.set(actor, hasta);
+        }
         // Callado es lo mismo que la primera vez: solo se fija la marca.
         const resultado = queAnunciar(avisos, callado ? null : marca);
         marca = Math.max(marca ?? 0, resultado.marca);
@@ -168,9 +187,27 @@ export function useAvisosEnVivo(): void {
       }
     };
 
+    /*
+      UNA LECTURA A LA VEZ. La vuelta periódica, un push y un mensaje pueden
+      pedirla casi juntos; dos lecturas solapadas leerían la misma marca y
+      anunciarían lo mismo. La segunda espera a la primera y luego mira.
+    */
+    let lecturaEnCurso: Promise<void> = Promise.resolve();
+    /**
+     * @param callado pone al día los contadores y la marca SIN anunciar. Es lo
+     *   que toca cuando lo nuevo ya se avisó por otro lado: el sistema lo hizo
+     *   mientras la aplicación estaba en segundo plano, o acaba de salir el
+     *   aviso de un push.
+     */
+    const mirarAvisos = (callado = false): Promise<void> => {
+      lecturaEnCurso = lecturaEnCurso.then(() => leerAvisos(callado)).catch(() => {});
+      return lecturaEnCurso;
+    };
+
     /* --------------------------------------------------------- mensajes */
     let respiro: ReturnType<typeof setTimeout> | null = null;
-    const pendientes = new Set<string>();
+    /** Conversación → quién escribió lo último que llegó (si se sabe). */
+    const pendientes = new Map<string, string | null>();
     /** Los mensajes ya anunciados, por identificador. Con tope. */
     const anunciados = new Set<string>();
 
@@ -178,11 +215,22 @@ export function useAvisosEnVivo(): void {
       respiro = null;
       const deQuien = Array.from(pendientes);
       pendientes.clear();
+      /*
+        PRIMERO LOS AVISOS. Un mensaje puede ser el registro de una sesión —se
+        pidió, se aceptó, se canceló—, y su aviso está en la bandeja desde la
+        misma transacción. Preguntar ahora hace dos cosas: el aviso de la
+        sesión sale AL MOMENTO, sin esperar a la vuelta periódica, y se sabe a
+        qué mensajes no hay que darles un segundo aviso.
+      */
+      await mirarAvisos();
       const conversaciones = await refrescarMensajes();
       if (!vivo || !conversaciones) return;
-      for (const id of deQuien) {
+      const ahora = Date.now();
+      for (const [id, remitente] of deQuien) {
         // El mensaje ya está a la vista: lo pinta la conversación.
         if (seEstaViendoLaConversacion(id)) continue;
+        // Ya se anunció como lo que es: un aviso de sesión de esta persona.
+        if (remitente && (conAvisoDeSesion.get(remitente) ?? 0) > ahora) continue;
         const conversacion = conversaciones.find((c) => c.id === id);
         if (!conversacion) continue;
         avisar({
@@ -201,7 +249,11 @@ export function useAvisosEnVivo(): void {
      * Un mensaje nuevo, venga del tiempo real o del push. El identificador es
      * lo que hace que los dos caminos den un solo aviso.
      */
-    const anotarMensaje = (conversacionId: string, mensajeId: string | null) => {
+    const anotarMensaje = (
+      conversacionId: string,
+      mensajeId: string | null,
+      remitenteId: string | null = null,
+    ) => {
       if (mensajeId) {
         if (anunciados.has(mensajeId)) return;
         anunciados.add(mensajeId);
@@ -211,7 +263,7 @@ export function useAvisosEnVivo(): void {
           if (primero !== undefined) anunciados.delete(primero);
         }
       }
-      pendientes.add(conversacionId);
+      pendientes.set(conversacionId, remitenteId ?? pendientes.get(conversacionId) ?? null);
       if (respiro === null) respiro = setTimeout(() => void mirarMensajes(), RESPIRO_DE_MENSAJES_MS);
     };
 
@@ -219,7 +271,7 @@ export function useAvisosEnVivo(): void {
       // Sin saber quién soy no se puede distinguir mi propio mensaje —enviado
       // desde este u otro aparato— del de otra persona: no se anuncia.
       if (!fila.conversation_id || yo === null || fila.sender_id === yo) return;
-      anotarMensaje(fila.conversation_id, fila.id ?? null);
+      anotarMensaje(fila.conversation_id, fila.id ?? null, fila.sender_id ?? null);
     };
 
     const cliente = supabase;

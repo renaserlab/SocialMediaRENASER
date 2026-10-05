@@ -60,6 +60,76 @@ export function queAnunciar<T extends AvisoFechado>(
   return { anunciar: nuevos.slice(-maximo), marca: masReciente };
 }
 
+/**
+ * Desde cuándo preguntar al servidor por avisos nuevos: justo después de lo
+ * último que ya se vio. `null` la primera vez, cuando todavía no hay marca.
+ *
+ * UN MILISEGUNDO DESPUÉS, y no la marca tal cual. El servidor guarda
+ * microsegundos y aquí la marca tiene milisegundos: preguntar «posteriores a
+ * 21:41:00.123» devolvería como nuevo el aviso de las 21:41:00.123456, que es
+ * justo el que fijó la marca, y se leería la bandeja entera en cada vuelta.
+ */
+export function desdeCuandoPreguntar(marca: number | null): string | null {
+  if (marca === null || !Number.isFinite(marca) || marca <= 0) return null;
+  return new Date(marca + 1).toISOString();
+}
+
+/**
+ * Si hay que pedir la bandeja para anunciar algo.
+ *
+ * LO QUE HABÍA. Se pedía «si la cuenta de ahora es mayor que la de antes», y
+ * la de antes se leía de un contador que también escriben otras pantallas:
+ * bastaba con que una lo refrescara primero para que la cuenta ya no «subiera»
+ * y el aviso —«te han pedido una sesión»— no se anunciara nunca. Fue lo
+ * reportado el 04/10/2026.
+ *
+ * AHORA LO DICE EL SERVIDOR: cuántos sin leer son posteriores a lo último que
+ * se vio (`nuevos`). No depende de ningún número guardado en el teléfono.
+ *
+ * @param nuevos `null` si el servidor no lo dice (una API anterior). Entonces
+ *   se pide la bandeja siempre que haya algo sin leer: una lectura de más es
+ *   mejor que un aviso de menos.
+ */
+export function hayQueLeerLaBandeja(datos: {
+  /** Todavía no hay marca: hay que fijarla. */
+  primera: boolean;
+  /** Solo ponerse al día, sin anunciar. */
+  callado: boolean;
+  cuenta: number;
+  nuevos: number | null;
+}): boolean {
+  if (datos.primera || datos.callado) return true;
+  if (datos.nuevos === null) return datos.cuenta > 0;
+  return datos.nuevos > 0;
+}
+
+/**
+ * De quién son los avisos de SESIÓN que acaban de llegar.
+ *
+ * UN HECHO, UN AVISO. Pedir una sesión, aceptarla o cancelarla deja un aviso
+ * en la bandeja Y un mensaje en el chat de las dos personas (es su registro).
+ * Sin esto, con la aplicación abierta saldrían dos avisos flotantes por lo
+ * mismo: el de la sesión y el de «mensaje nuevo». Se anuncia el de la sesión,
+ * que dice qué ha pasado, y el del mensaje de esa misma persona se calla.
+ *
+ * @param marcaPrevia hasta cuándo se había visto ANTES de esta lectura.
+ */
+export function actoresDeSesionNuevos(
+  avisos: readonly (AvisoFechado & { entityType?: string | null; actorId?: string })[],
+  marcaPrevia: number | null,
+): string[] {
+  if (marcaPrevia === null) return [];
+  const actores = new Set<string>();
+  for (const aviso of avisos) {
+    if (aviso.entityType !== 'booking' || !aviso.actorId) continue;
+    if (instante(aviso) > marcaPrevia) actores.add(aviso.actorId);
+  }
+  return Array.from(actores);
+}
+
+/** Cuánto tiempo calla un aviso de sesión al mensaje de la misma persona. */
+export const SILENCIO_TRAS_UN_AVISO_DE_SESION_MS = 15_000;
+
 /** Lo que hace falta de un aviso de la bandeja para saber a dónde lleva. */
 export type AvisoConDestino = {
   type?: string;

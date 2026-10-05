@@ -18,13 +18,20 @@ function ponerInsignia(): void {
   void setBadgeCount(notificaciones + mensajes);
 }
 
-/** Cuántos avisos hay sin leer. Devuelve la cuenta, o `null` si no se pudo. */
-export async function refrescarNotificaciones(): Promise<number | null> {
+/**
+ * Cuántos avisos hay sin leer y cuántos son posteriores a `desdeIso`.
+ *
+ * Deja la cuenta en el contador común y devuelve las dos cosas, o `null` si no
+ * se pudo. `nuevos` es `null` si el servidor no lo dice (ver el repositorio).
+ */
+export async function refrescarNotificaciones(
+  desdeIso: string | null = null,
+): Promise<{ cuenta: number; nuevos: number | null } | null> {
   try {
-    const cuenta = await NotificationRepository.unreadCount();
-    useContadoresStore.getState().ponerNotificaciones(cuenta);
+    const lectura = await NotificationRepository.novedades(desdeIso);
+    useContadoresStore.getState().ponerNotificaciones(lectura.cuenta);
     ponerInsignia();
-    return cuenta;
+    return lectura;
   } catch {
     return null;
   }

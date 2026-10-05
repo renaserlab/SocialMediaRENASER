@@ -1,6 +1,8 @@
 """Endpoints de notificaciones in-app."""
 
-from fastapi import APIRouter, Depends, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,15 +103,49 @@ async def list_notifications(
 
 @router.get("/unread-count")
 async def unread_count(
+    since: datetime | None = Query(
+        default=None,
+        description="Con esto, la respuesta dice ademas cuantos son posteriores a ese instante.",
+    ),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    value = await db.scalar(
-        select(func.count())
-        .select_from(Notification)
-        .where(Notification.user_id == current_user.id, Notification.read_at.is_(None))
-    )
-    return {"count": value or 0}
+    """Cuantos avisos hay sin leer y, si se pregunta, cuantos son NUEVOS.
+
+    POR QUE `since` (04/10/2026). La aplicacion, abierta, pregunta de vez en
+    cuando si hay algo nuevo que anunciar. Lo decidia comparando la cuenta de
+    ahora con la de antes: «si subio, hay algo». Pero la cuenta de antes la
+    escribian tambien otras pantallas, y abrir la bandeja la pone a cero: bastaba
+    con que alguien la refrescara primero para que «te han pedido una sesion» no
+    se anunciara nunca. Una cuenta no dice si lo que hay es nuevo.
+
+    Con `since` —el instante del ultimo aviso que la aplicacion ya vio— el
+    servidor responde exactamente eso: cuantos sin leer son posteriores. Es la
+    misma consulta con indice; no se piden filas.
+
+    SIN `since` responde lo de siempre, y solo `count`: una aplicacion anterior
+    no se entera de nada.
+    """
+    sin_leer = (Notification.user_id == current_user.id) & Notification.read_at.is_(None)
+    if since is None:
+        value = await db.scalar(select(func.count()).select_from(Notification).where(sin_leer))
+        return {"count": value or 0}
+
+    if since.tzinfo is None:
+        # Sin zona se toma como UTC: comparar con una columna con zona un
+        # instante que no la tiene revienta en el driver.
+        since = since.replace(tzinfo=timezone.utc)
+    total, nuevos = (
+        await db.execute(
+            select(
+                func.count(),
+                func.count().filter(Notification.created_at > since),
+            )
+            .select_from(Notification)
+            .where(sin_leer)
+        )
+    ).one()
+    return {"count": total or 0, "new_count": nuevos or 0}
 
 
 @router.post("/{notification_id}/read", status_code=status.HTTP_204_NO_CONTENT)
