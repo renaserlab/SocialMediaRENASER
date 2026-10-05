@@ -262,6 +262,17 @@ Dos cosas sin las que el piloto encendido no sirve:
   el panel (Servicios → Catálogo → Categorías). **Cuáles son es una decisión
   de la empresa**; no deben ser de las que el piloto excluye (médicas,
   legales, financieras, de emergencia).
+
+  **Creadas el 05/10/2026** con la cuenta de administración de Z, las seis
+  activas: `diseno-y-creatividad`, `marketing-y-contenido-digital`,
+  `tecnologia-y-soporte-digital`, `fotografia-y-produccion-audiovisual`,
+  `idiomas` y `tutoria-academica`, con nombre en los tres idiomas. El
+  identificador de una categoría no se cambia; el nombre, la descripción y
+  el orden sí. No se borran: se desactivan, y dejan de admitir servicios
+  nuevos. Lo que cada una excluye (promesas de rentabilidad, acceso no
+  autorizado a cuentas o sistemas, trabajos académicos fraudulentos, y
+  orientar idiomas y tutoría a personas adultas) es criterio de quien
+  revisa cada servicio: no está escrito en la descripción pública.
 - **La actualización de la aplicación.** Todo Servicios y las vistas de este
   bloque son JavaScript que la build instalada no trae: llegan con una
   actualización, sin build nueva (`app.json` y las dependencias no cambian).
