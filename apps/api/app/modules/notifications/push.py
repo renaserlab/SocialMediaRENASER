@@ -282,7 +282,18 @@ async def _enviar_a(
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(EXPO_PUSH_URL, json=batch)
                 response.raise_for_status()
-                muertos.extend(tokens_muertos(batch, _cuerpo(response)))
+                cuerpo = _cuerpo(response)
+                muertos.extend(tokens_muertos(batch, cuerpo))
+                rechazos = motivos_de_rechazo(cuerpo)
+                if rechazos:
+                    # Cuántos y por qué, NUNCA a quién: un token es una
+                    # credencial de envío y no va a los registros.
+                    logger.warning(
+                        "[push] Expo rechazó %s de %s mensaje(s): %s",
+                        sum(rechazos.values()),
+                        len(batch),
+                        ", ".join(f"{motivo}×{veces}" for motivo, veces in sorted(rechazos.items())),
+                    )
         except Exception:  # noqa: BLE001
             logger.warning("[push] fallo al enviar un lote", exc_info=True)
 
@@ -330,6 +341,38 @@ def tokens_muertos(lote: list[dict], cuerpo: object) -> list[str]:
             if isinstance(token, str):
                 muertos.append(token)
     return muertos
+
+
+def motivos_de_rechazo(cuerpo: object) -> dict[str, int]:
+    """Por qué rechazó Expo los mensajes de un lote, contado por motivo.
+
+    EL HUECO QUE HABÍA (05/10/2026). «A mí sí me llegan los avisos con la
+    aplicación cerrada, a otro usuario no», y en los registros no había nada
+    con qué distinguir un teléfono sin registrar de un envío rechazado: Expo
+    contesta 200 y mete el rechazo dentro, y de ahí solo se miraba
+    `DeviceNotRegistered` para borrar el token. Unas credenciales de Firebase
+    mal subidas (`InvalidCredentials`, `MismatchSenderId`) fallaban en silencio
+    para todo el mundo.
+
+    SOLO EL CÓDIGO DEL MOTIVO. El texto que acompaña al error trae el token
+    dentro, y un token no se escribe en un registro. Sin código, «desconocido».
+
+    Función pura, para poder probarla sin red.
+    """
+    if not isinstance(cuerpo, dict):
+        return {}
+    recibos = cuerpo.get("data")
+    if not isinstance(recibos, list):
+        return {}
+    motivos: dict[str, int] = {}
+    for recibo in recibos:
+        if not isinstance(recibo, dict) or recibo.get("status") != "error":
+            continue
+        detalles = recibo.get("details")
+        motivo = detalles.get("error") if isinstance(detalles, dict) else None
+        clave = motivo if isinstance(motivo, str) and motivo else "desconocido"
+        motivos[clave] = motivos.get(clave, 0) + 1
+    return motivos
 
 
 async def olvidar_tokens(tokens: list[str]) -> None:
@@ -380,6 +423,16 @@ async def _enviar_con_sesion_propia(
 
     async with SessionLocal() as db:
         tokens = await _leer_tokens(db, user_ids)
+
+    if not tokens:
+        # NO ES UN ERROR, pero es lo primero que hay que saber cuando alguien
+        # dice «no me llegan»: su teléfono no ha dejado ningún token. Cuántas
+        # personas, nunca quiénes.
+        logger.info(
+            "[push] %s: %s destinatario(s) sin ningún aparato registrado",
+            notification_type,
+            len(user_ids),
+        )
 
     await _enviar_a(
         tokens,

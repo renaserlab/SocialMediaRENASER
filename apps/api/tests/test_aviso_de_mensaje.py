@@ -387,3 +387,89 @@ async def test_sin_aparatos_registrados_no_se_llama_a_expo(monkeypatch):
 
     monkeypatch.setattr(push.httpx, "AsyncClient", _Cliente)
     await push._enviar_a([], title="t", body="b", channel="mensajes", data=None)
+
+
+# --------------------------------------------------------------------------- #
+# 6. Un aviso que no sale deja rastro de por qué
+# --------------------------------------------------------------------------- #
+async def test_los_rechazos_de_expo_se_cuentan_por_motivo_y_sin_el_token():
+    """Reportado el 05/10/2026: «a mí sí me llegan, a otro usuario no».
+
+    Sin esto no había forma de saber, mirando los registros, si Expo estaba
+    rechazando los envíos. El texto del error trae el token dentro: no se usa.
+    """
+    cuerpo = {
+        "data": [
+            {"status": "ok", "id": "1"},
+            {
+                "status": "error",
+                "message": '"ExponentPushToken[secreto]" is not a registered push notification recipient',
+                "details": {"error": "DeviceNotRegistered"},
+            },
+            {"status": "error", "details": {"error": "InvalidCredentials"}},
+            {"status": "error", "details": {"error": "InvalidCredentials"}},
+            {"status": "error", "message": "algo que no trae código"},
+        ]
+    }
+    motivos = push.motivos_de_rechazo(cuerpo)
+    assert motivos == {"DeviceNotRegistered": 1, "InvalidCredentials": 2, "desconocido": 1}
+    assert "secreto" not in repr(motivos)
+
+
+@pytest.mark.parametrize(
+    "cuerpo", [None, [], "no es json", {"errors": []}, {"data": "x"}, {"data": [{"status": "ok"}]}]
+)
+async def test_sin_rechazos_no_hay_nada_que_contar(cuerpo):
+    assert push.motivos_de_rechazo(cuerpo) == {}
+
+
+async def test_un_envio_rechazado_se_registra_con_el_motivo_y_sin_el_token(monkeypatch, caplog):
+    class _Respuesta:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"status": "error", "details": {"error": "InvalidCredentials"}}]}
+
+    class _Cliente:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json):
+            return _Respuesta()
+
+    monkeypatch.setattr(push.httpx, "AsyncClient", _Cliente)
+    with caplog.at_level("WARNING", logger=push.logger.name):
+        await push._enviar_a(
+            ["ExponentPushToken[secreto]"], title="t", body="b", channel="mensajes", data=None
+        )
+    registro = " ".join(r.getMessage() for r in caplog.records)
+    assert "InvalidCredentials×1" in registro
+    assert "rechazó 1 de 1" in registro
+    assert "secreto" not in registro
+
+
+async def test_sin_aparato_registrado_se_dice_cuantos_y_no_quienes(monkeypatch, caplog):
+    class _Sesion:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    async def _sin_tokens(db, user_ids):
+        return []
+
+    monkeypatch.setattr(push, "SessionLocal", _Sesion)
+    monkeypatch.setattr(push, "_leer_tokens", _sin_tokens)
+    with caplog.at_level("INFO", logger=push.logger.name):
+        await push._enviar_con_sesion_propia([BRUNO], "message", "Ana", {"type": "message"})
+    registro = " ".join(r.getMessage() for r in caplog.records)
+    assert "message: 1 destinatario(s) sin ningún aparato registrado" in registro
+    assert BRUNO not in registro
