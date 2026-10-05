@@ -93,7 +93,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   botonTexto: { fontSize: 15, fontWeight: '700' },
-  detalle: { maxHeight: 220, alignSelf: 'stretch', marginTop: spacing.md },
+  // Alto de sobra para las tres líneas de «dónde»: tienen que caber en una captura.
+  detalle: { maxHeight: 340, alignSelf: 'stretch', marginTop: spacing.md },
   detalleTexto: { fontSize: 11, lineHeight: 16, textAlign: 'center' },
   donde: { marginTop: spacing.sm },
 });

@@ -89,12 +89,40 @@ describe('dónde falló', () => {
   });
 
   it('las llamadas, sin anónimas ni repetidas seguidas', () => {
-    assert.deepEqual(llamadasDelFallo(PILA), [
-      'throwIfInfiniteUpdateLoopDetected',
-      'scheduleUpdateOnFiber',
+    // Del recorrido de React solo queda qué clase de cambio fue.
+    assert.deepEqual(llamadasDelFallo(PILA), ['dispatchSetState']);
+  });
+
+  it('sin el recorrido interno de React cabe quién lo pidió y desde dónde', () => {
+    // Un aviso de «animación terminada» que llega en mitad de un repintado.
+    const pila = `Error: Maximum update depth exceeded.
+    at throwIfInfiniteUpdateLoopDetected (address at index.android.bundle:1:10)
+    at scheduleUpdateOnFiber (address at index.android.bundle:1:11)
+    at dispatchSetState (address at index.android.bundle:1:12)
+    at alTerminar (address at index.android.bundle:1:13)
+    at anonymous (address at index.android.bundle:1:14)
+    at __notifyAnimationEnd (address at index.android.bundle:1:15)
+    at stop (address at index.android.bundle:1:16)
+    at stopAnimation (address at index.android.bundle:1:17)
+    at __detach (address at index.android.bundle:1:18)
+    at __removeChild (address at index.android.bundle:1:19)
+    at __detach (address at index.android.bundle:1:20)
+    at commitHookEffectListUnmount (address at index.android.bundle:1:21)
+    at recursivelyTraverseDeletionEffects (address at index.android.bundle:1:22)
+    at commitDeletionEffectsOnFiber (address at index.android.bundle:1:23)
+    at recursivelyTraverseDeletionEffects (address at index.android.bundle:1:22)
+    at commitMutationEffectsOnFiber (address at index.android.bundle:1:24)
+    at flushMutationEffects (address at index.android.bundle:1:25)
+    at performSyncWorkOnRoot (address at index.android.bundle:1:26)`;
+    assert.deepEqual(llamadasDelFallo(pila), [
       'dispatchSetState',
-      'commitHookEffectListMount',
-      'commitLayoutEffects',
+      'alTerminar',
+      '__notifyAnimationEnd',
+      'stop',
+      'stopAnimation',
+      '__detach',
+      '__removeChild',
+      '__detach',
     ]);
   });
 
@@ -113,7 +141,7 @@ describe('dónde falló', () => {
     const [pantalla, en, por] = detalle.split('\n');
     assert.equal(pantalla, 'Pantalla: /home');
     assert.match(en ?? '', /^En: GloboDeNoLeidos < Pulsable < BarraInferior/);
-    assert.match(por ?? '', /^Por: throwIfInfiniteUpdateLoopDetected < scheduleUpdateOnFiber/);
+    assert.equal(por, 'Por: dispatchSetState');
 
     const largo = detalleDelFallo({ pila: Array.from({ length: 400 }, (_, i) => `    at funcionLarguisima${i} (x)`).join('\n') });
     assert.ok(largo.length <= TOPE_DEL_DETALLE);

@@ -15,9 +15,9 @@
 /** Cuántos componentes se nombran: el que falló y los que lo contienen. */
 const COMPONENTES = 8;
 /** Cuántas llamadas del motor se nombran. */
-const LLAMADAS = 8;
+const LLAMADAS = 14;
 /** Tope del texto: tiene que caber bajo el botón sin tapar la salida. */
-export const TOPE_DEL_DETALLE = 900;
+export const TOPE_DEL_DETALLE = 1400;
 
 /**
  * Los envoltorios que no dicen nada de dónde está el fallo: los pone la
@@ -25,6 +25,16 @@ export const TOPE_DEL_DETALLE = 900;
  */
 const SIN_INTERES =
   /^(View|RCTView|Text|RCTText|ScrollView|RCTScrollView|Pressable|Animated\(.*\)|Unknown|anonymous|Fragment|Suspense|Try|Route|RenderErrorBoundary|ThemeProvider|.*Provider|.*Context|.*Navigator.*|Screen.*|SceneView|StaticContainer|EnsureSingleNavigator|PreventRemoveProvider|NavigationContent|NavigationContainer.*|ContextNavigator|ExpoRoot|App|AppContainer|main|withDevTools.*|FrameSizeProvider.*|GestureHandlerRootView|RNGestureHandlerRootView|SafeArea.*|RNC.*|RNS.*|Freeze|DelayedFreeze|MaybeScreen.*|InnerScreen|Group|Background|CardContainer.*|CardSheet|Card|CardStack|StackView|NativeStack.*|DebugContainer|Layout.*|Slot|.*Inner)$/;
+
+/**
+ * El recorrido interno de React al repintar: decenas de líneas iguales en
+ * cualquier fallo, que no dicen de quién es. Se quitan para que quepa lo que
+ * sí: quién pidió el cambio de estado y desde dónde. Se conservan las tres que
+ * dicen QUÉ clase de cambio fue (`dispatchSetState`, `dispatchReducerAction`,
+ * `forceStoreRerender`).
+ */
+const RECORRIDO_DE_REACT =
+  /^(recursivelyTraverse\w*|commit\w+|flush\w+|perform\w+|workLoop\w*|beginWork\w*|completeWork\w*|completeUnitOfWork|renderRoot\w*|renderWithHooks\w*|update\w+Component|mount\w+|reconcile\w+|processRootSchedule\w*|scheduleUpdateOnFiber|throwIfInfiniteUpdateLoopDetected|ensureRootIsScheduled|scheduleImmediate\w*|runWithFiberInDEV|safelyCall\w*|callCallback\w*|invokeGuardedCallback\w*|batchedUpdates\w*|flushSync\w*|unstable_\w+|react-stack-\w+|apply|call)$/;
 
 /** El nombre de cada línea de una pila de componentes o de llamadas. */
 function nombres(pila: string): string[] {
@@ -66,9 +76,9 @@ export function componentesDelFallo(pilaDeComponentes: string | null | undefined
 /** Las llamadas más cercanas al fallo, como las da el motor. */
 export function llamadasDelFallo(pila: string | null | undefined): string[] {
   if (!pila) return [];
-  return sinSeguidos(nombres(pila))
-    .filter((nombre) => nombre !== 'anonymous' && nombre !== '?anon_0_')
-    .slice(0, LLAMADAS);
+  return sinSeguidos(
+    nombres(pila).filter((nombre) => nombre !== 'anonymous' && !nombre.startsWith('?anon') && !RECORRIDO_DE_REACT.test(nombre)),
+  ).slice(0, LLAMADAS);
 }
 
 /**
