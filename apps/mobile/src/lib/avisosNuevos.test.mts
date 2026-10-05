@@ -4,7 +4,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { MAXIMO_A_ANUNCIAR, destinoDelAviso, queAnunciar } from './avisosNuevos.ts';
+import {
+  MAXIMO_A_ANUNCIAR,
+  SILENCIO_TRAS_UN_AVISO_DE_SESION_MS,
+  actoresDeSesionNuevos,
+  desdeCuandoPreguntar,
+  destinoDelAviso,
+  hayQueLeerLaBandeja,
+  queAnunciar,
+} from './avisosNuevos.ts';
 import {
   dejarDeVerConversacion,
   marcarConversacionALaVista,
@@ -198,7 +206,7 @@ describe('un solo sistema de avisos, enchufado', () => {
     );
     // Y allí el segundo se descarta por su identificador.
     assert.match(VIVO, /if \(anunciados\.has\(mensajeId\)\) return;/);
-    assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null\);/);
+    assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null, fila\.sender_id \?\? null\);/);
     assert.match(VIVO, /mensajeDelPush = anotarMensaje;/);
     // La memoria de lo anunciado tiene tope.
     assert.match(VIVO, /if \(anunciados\.size > MENSAJES_RECORDADOS\)/);
@@ -229,15 +237,43 @@ describe('un solo sistema de avisos, enchufado', () => {
     assert.match(VIVO, /queAnunciar\(avisos, callado \? null : marca\)/);
   });
 
-  it('la cuenta de antes se lee del contador común: abrir la bandeja no esconde el siguiente aviso', () => {
-    // Tenía 3, abre la bandeja (queda en 0) y llega 1. Con una copia propia de
-    // la cuenta, «1 no es más que 3» y ese aviso no se anunciaba nunca.
-    const mirar = VIVO.slice(VIVO.indexOf('const mirarAvisos'), VIVO.indexOf('const mirarMensajes'));
-    const antes = mirar.indexOf('const antes = useContadoresStore.getState().notificaciones;');
-    const refresco = mirar.indexOf('await refrescarNotificaciones()');
-    assert.ok(antes !== -1 && refresco !== -1 && antes < refresco, 'se lee ANTES de refrescar');
-    assert.match(mirar, /if \(!primera && !callado && cuenta <= antes\) return;/);
+  it('si hay algo nuevo lo dice el servidor, no una resta con un contador que escriben otros', () => {
+    /*
+      LO REPORTADO (04/10/2026): «no llegó ninguna notificación cuando un
+      usuario me agendó una sesión». Se decidía con «la cuenta de ahora es
+      mayor que la de antes», y la de antes se leía del contador común, que
+      también refrescan otras pantallas. Ya no se lee ninguna cuenta anterior.
+    */
+    const leer = VIVO.slice(VIVO.indexOf('const leerAvisos'), VIVO.indexOf('const mirarMensajes'));
+    assert.ok(!/getState\(\)\.notificaciones/.test(leer), 'se sigue comparando con el contador común');
+    assert.ok(!/cuenta <= antes/.test(leer));
+    assert.match(leer, /await refrescarNotificaciones\(desdeCuandoPreguntar\(marca\)\)/);
+    assert.match(leer, /if \(!hayQueLeerLaBandeja\(\{ primera, callado, \.\.\.lectura \}\)\) return;/);
     assert.ok(!/cuentaAnterior/.test(VIVO));
+  });
+
+  it('las lecturas no se solapan: dos a la vez anunciarían lo mismo', () => {
+    assert.match(
+      VIVO,
+      /lecturaEnCurso = lecturaEnCurso\.then\(\(\) => leerAvisos\(callado\)\)\.catch\(\(\) => \{\}\);/,
+    );
+  });
+
+  it('un mensaje adelanta la pregunta por los avisos, y el de una sesión no se anuncia dos veces', () => {
+    const mensajes = VIVO.slice(VIVO.indexOf('const mirarMensajes'), VIVO.indexOf('const anotarMensaje'));
+    // Los avisos se miran A LA VEZ que los mensajes, y con tope: si la bandeja
+    // tarda, el mensaje se anuncia igual.
+    assert.match(mensajes, /await Promise\.all\(\[\s*Promise\.race\(\[\s*mirarAvisos\(\),/);
+    assert.match(mensajes, /setTimeout\(listo, ESPERA_POR_LOS_AVISOS_MS\)/);
+    assert.match(mensajes, /refrescarMensajes\(\),\s*\]\);/);
+    // El silencio CALLA UN MENSAJE, no a la persona: se gasta al usarlo, y lo
+    // siguiente que escriba —«nos vemos el martes»— sí da su aviso.
+    assert.match(
+      mensajes,
+      /if \(remitente && \(conAvisoDeSesion\.get\(remitente\) \?\? 0\) > ahora\) \{\s*conAvisoDeSesion\.delete\(remitente\);\s*continue;\s*\}/,
+    );
+    // El remitente sale de la fila que entrega el tiempo real.
+    assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null, fila\.sender_id \?\? null\);/);
   });
 
   it('nada se queda escuchando al cerrar sesión o desmontar', () => {
@@ -402,5 +438,133 @@ describe('que el teléfono quede registrado para el push', () => {
     assert.match(EN_VIVO, /const CADA_MS = 30_000;/);
     // Y solo en primer plano: en segundo plano no se pregunta.
     assert.match(EN_VIVO, /if \(AppState\.currentState === 'active'\) void mirarAvisos\(\);/);
+  });
+});
+
+describe('si hay algo nuevo que anunciar lo dice el servidor', () => {
+  it('lo reportado: había avisos sin leer, llega uno más y OTRA pantalla refresca antes', () => {
+    // Con la resta de cuentas, aquí «2 no es más que 2» y no se anunciaba.
+    // Ahora no entra ninguna cuenta anterior: hay 1 posterior a la marca.
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: false, cuenta: 2, nuevos: 1 }), true);
+  });
+
+  it('abrir la bandeja (cuenta a cero) y que llegue uno: también se anuncia', () => {
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: false, cuenta: 1, nuevos: 1 }), true);
+  });
+
+  it('sin nada posterior a la marca no se pide la bandeja, haya lo que haya sin leer', () => {
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: false, cuenta: 7, nuevos: 0 }), false);
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: false, cuenta: 0, nuevos: 0 }), false);
+  });
+
+  it('la primera vez y al ponerse al día se pide siempre: hay que fijar la marca', () => {
+    assert.equal(hayQueLeerLaBandeja({ primera: true, callado: false, cuenta: 0, nuevos: null }), true);
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: true, cuenta: 0, nuevos: 0 }), true);
+  });
+
+  it('un servidor que todavía no dice cuántos son nuevos no se toma por «ninguno»', () => {
+    // Una lectura de más es mejor que un aviso de menos.
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: false, cuenta: 3, nuevos: null }), true);
+    assert.equal(hayQueLeerLaBandeja({ primera: false, callado: false, cuenta: 0, nuevos: null }), false);
+  });
+
+  it('se pregunta desde un milisegundo después de lo último visto', () => {
+    assert.equal(desdeCuandoPreguntar(null), null);
+    assert.equal(desdeCuandoPreguntar(0), null);
+    assert.equal(desdeCuandoPreguntar(Number.NaN), null);
+    const marca = Date.parse('2026-10-04T21:41:00.123Z');
+    // El aviso de las …00.123456 fijó la marca en …00.123: preguntar desde
+    // …00.123 lo devolvería como nuevo en cada vuelta.
+    assert.equal(desdeCuandoPreguntar(marca), '2026-10-04T21:41:00.124Z');
+  });
+
+  it('con la marca que deja `queAnunciar`, el aviso que la fijó ya no cuenta como nuevo', () => {
+    const avisos = [{ id: 'a1', createdAtIso: '2026-10-04T21:41:00.123456+00:00', read: false }];
+    const { marca } = queAnunciar(avisos, null);
+    const desde = Date.parse(desdeCuandoPreguntar(marca)!);
+    // El servidor compara con microsegundos: …00.123456 no es posterior a …00.124.
+    assert.ok(Date.parse('2026-10-04T21:41:00.123Z') < desde);
+  });
+});
+
+describe('un hecho, un aviso: la sesión que también deja un mensaje', () => {
+  const T0 = Date.parse('2026-10-04T21:40:00.000Z');
+  const sesion = (id: string, actorId: string, iso: string) => ({
+    id,
+    createdAtIso: iso,
+    read: false,
+    entityType: 'booking',
+    actorId,
+  });
+
+  it('quien acaba de pedir una sesión queda anotado: su mensaje no da otro aviso', () => {
+    const avisos = [sesion('a1', 'katy', '2026-10-04T21:41:00.000Z')];
+    assert.deepEqual(actoresDeSesionNuevos(avisos, T0), ['katy']);
+  });
+
+  it('un aviso de sesión de antes de la marca no calla nada', () => {
+    const avisos = [sesion('a1', 'katy', '2026-10-04T21:30:00.000Z')];
+    assert.deepEqual(actoresDeSesionNuevos(avisos, T0), []);
+  });
+
+  it('lo que no es de la agenda no calla mensajes', () => {
+    const avisos = [
+      { id: 'a1', createdAtIso: '2026-10-04T21:41:00.000Z', read: false, entityType: 'post', actorId: 'katy' },
+      { id: 'a2', createdAtIso: '2026-10-04T21:41:00.000Z', read: false, entityType: 'booking' },
+    ];
+    assert.deepEqual(actoresDeSesionNuevos(avisos, T0), []);
+  });
+
+  it('al arrancar, sin marca, no se calla nada', () => {
+    assert.deepEqual(actoresDeSesionNuevos([sesion('a1', 'katy', '2026-10-04T21:41:00.000Z')], null), []);
+  });
+
+  it('cada persona una vez, aunque haya pedido y cancelado seguido', () => {
+    const avisos = [
+      sesion('a1', 'katy', '2026-10-04T21:41:00.000Z'),
+      sesion('a2', 'katy', '2026-10-04T21:41:30.000Z'),
+      sesion('a3', 'luis', '2026-10-04T21:42:00.000Z'),
+    ];
+    assert.deepEqual(actoresDeSesionNuevos(avisos, T0).sort(), ['katy', 'luis']);
+  });
+
+  it('el silencio dura lo justo: cubre la llegada del mensaje, no la conversación que siga', () => {
+    assert.ok(SILENCIO_TRAS_UN_AVISO_DE_SESION_MS >= 5_000);
+    assert.ok(SILENCIO_TRAS_UN_AVISO_DE_SESION_MS <= 30_000);
+  });
+});
+
+describe('el push de una sesión, con la aplicación abierta, no da un segundo aviso', () => {
+  /*
+    Encontrado en la revisión independiente (04/10/2026): el mensaje que la
+    sesión deja en el chat adelanta la lectura de la bandeja y anuncia; el push
+    llegaba un instante después y se pintaba otra vez, con otra clave.
+  */
+  const VIVO = fuente('hooks/useAvisosEnVivo.ts');
+  const PUSH = fuente('hooks/useAvisosDelPush.native.ts');
+
+  it('se reconoce por su tipo', async () => {
+    const { esPushDeSesion } = await import('./rutaDelPush.ts');
+    assert.equal(esPushDeSesion({ type: 'booking', id: 'x' }), true);
+    assert.equal(esPushDeSesion({ type: 'message', conversationId: 'x' }), false);
+    assert.equal(esPushDeSesion({ type: 'follow' }), false);
+    assert.equal(esPushDeSesion(null), false);
+    assert.equal(esPushDeSesion('booking'), false);
+    assert.equal(esPushDeSesion(undefined), false);
+  });
+
+  it('el oyente del push no lo pinta: lo entrega a la lectura de la bandeja', () => {
+    const entrega = PUSH.indexOf('if (esPushDeSesion(data) && alRecibirUnPushDeSesion()) return;');
+    const pintado = PUSH.indexOf('avisar({');
+    assert.ok(entrega !== -1, 'el push de una sesión no se entrega');
+    assert.ok(entrega < pintado, 'se pinta antes de entregarlo');
+  });
+
+  it('y allí se ANUNCIA (no callado): cada aviso sale una vez, llegue antes quien llegue', () => {
+    assert.match(VIVO, /sesionDelPush = \(\) => \{\s*void mirarAvisos\(\);\s*void refrescarMensajes\(\);\s*\};/);
+    // Sin nadie escuchando, el oyente del push lo enseña por su cuenta.
+    assert.match(VIVO, /if \(!sesionDelPush\) return false;/);
+    // Y se suelta al desmontar.
+    assert.match(VIVO.slice(VIVO.lastIndexOf('return () => {')), /sesionDelPush = null;/);
   });
 });

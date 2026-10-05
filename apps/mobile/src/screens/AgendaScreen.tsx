@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -6,12 +6,13 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
-import { Button } from '@/components/Button';
+import { BotonesDeSesion } from '@/components/BotonesDeSesion';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
+import { useResponderSesion } from '@/hooks/useResponderSesion';
+import { seccionDeLaSesion, sigueViva } from '@/lib/accionesDeSesion';
 import { describeError } from '@/lib/describeError';
-import { toast } from '@/lib/toast';
 import {
   BookingRepository,
   type EstadoDeSesion,
@@ -34,9 +35,6 @@ const NOMBRE_DE_ESTADO: Record<EstadoDeSesion, TranslationKey> = {
   expired: 'agenda.stateExpired',
 };
 
-/** Estados que siguen vivos: se ensenan arriba, separados del historial. */
-const VIVOS: EstadoDeSesion[] = ['pending', 'accepted', 'reschedule_requested'];
-
 function fechaLegible(iso: string | null): string {
   const sinFecha = () => traduceEnElIdiomaActual('agenda.dateTbd');
   if (!iso) return sinFecha();
@@ -54,12 +52,16 @@ function fechaLegible(iso: string | null): string {
  * Agenda: las sesiones 1:1, en sus dos lecturas.
  *
  * SOLICITUDES es la bandeja: lo que otras personas te piden y sigue esperando
- * respuesta. Se parece a las solicitudes de amistad a proposito —aceptar o
+ * TU respuesta. Se parece a las solicitudes de amistad a proposito —aceptar o
  * rechazar, ahi mismo— porque es el gesto que la gente ya conoce.
  *
- * SESIONES es tu calendario: lo que has pedido tu y lo ya confirmado, con el
- * historial debajo. Son dos lecturas distintas de la misma tabla, y mezclarlas
- * obliga a averiguar en cada fila de que lado estas.
+ * SESIONES es tu calendario: lo que has pedido tu y lo ya confirmado —lo
+ * pidiera quien lo pidiera—, con el historial debajo.
+ *
+ * EN QUE SECCION VA CADA UNA Y QUE BOTONES LLEVA lo decide
+ * `lib/accionesDeSesion.ts`, no esta pantalla. Antes lo decidia la pestana: una
+ * sesion que te habian pedido se quedaba en «Solicitudes» despues de aceptarla,
+ * con «Aceptar» y «Rechazar» todavia puestos, y no llegaba nunca al calendario.
  */
 export function AgendaScreen() {
   const { t } = useTranslation();
@@ -73,16 +75,6 @@ export function AgendaScreen() {
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'error'>('cargando');
   const [error, setError] = useState<string | null>(null);
   const [refrescando, setRefrescando] = useState(false);
-  /** Sesion sobre la que hay una accion en curso: apaga sus botones. */
-  const [ocupada, setOcupada] = useState<string | null>(null);
-  /*
-    El cerrojo de verdad va en una referencia. Con estado, dos toques en el
-    mismo instante leen el valor viejo y salen los dos: el segundo falla con
-    «esa acción ya no es posible», que se lee como un error cuando en realidad
-    ya se hizo. Es el mismo motivo por el que `usePublicacion` usa `ocupadoRef`.
-  */
-  const ocupadaRef = useRef<string | null>(null);
-
   const cargar = useCallback(async () => {
     if (supabaseEnabled && !signedIn) {
       setEstado('listo');
@@ -119,49 +111,29 @@ export function AgendaScreen() {
     }
   }, [cargar]);
 
-  const responder = useCallback(
-    async (sesion: Sesion, nuevo: Exclude<EstadoDeSesion, 'pending' | 'expired'>) => {
-      if (ocupadaRef.current) return;
-      ocupadaRef.current = sesion.id;
-      setOcupada(sesion.id);
-      try {
-        const actualizada = await BookingRepository.update(sesion.id, nuevo);
-        setSesiones((previas) =>
-          previas.map((s) => (s.id === actualizada.id ? actualizada : s)),
-        );
-        toast(
-          nuevo === 'accepted'
-            ? t('notif.sessionAcceptedTitle')
-            : nuevo === 'rejected'
-            ? t('notif.sessionRejectedTitle')
-            : nuevo === 'completed'
-            ? t('agenda.markedDone')
-            : t('notif.sessionCancelledTitle'),
-        );
-      } catch (e) {
-        toast(describeError(e, t('agenda.updateFailed')));
-      } finally {
-        ocupadaRef.current = null;
-        setOcupada(null);
-      }
-    },
-    [],
-  );
+  /*
+    Responder es lo mismo aqui y en la tarjeta del chat (`useResponderSesion`):
+    un toque, una peticion; cancelar se confirma; y un «eso ya no se puede» del
+    servidor no es un error, es que la sesion cambio por otro lado: se vuelve a
+    leer la agenda.
+  */
+  const { ocupada, responder } = useResponderSesion({
+    alCambiar: (actualizada) =>
+      setSesiones((previas) => previas.map((s) => (s.id === actualizada.id ? actualizada : s))),
+    alDesfasar: () => void cargar(),
+  });
 
-  const solicitudes = useMemo(
-    () => sesiones.filter((s) => s.miRol === 'provider' && VIVOS.includes(s.estado)),
-    [sesiones],
-  );
-  const mias = useMemo(
-    () =>
-      sesiones.filter(
-        (s) => s.miRol === 'requester' || (s.miRol === 'provider' && !VIVOS.includes(s.estado)),
-      ),
-    [sesiones],
-  );
-
-  const proximas = useMemo(() => mias.filter((s) => VIVOS.includes(s.estado)), [mias]);
-  const historial = useMemo(() => mias.filter((s) => !VIVOS.includes(s.estado)), [mias]);
+  const { solicitudes, proximas, historial } = useMemo(() => {
+    const salida = {
+      solicitudes: [] as Sesion[],
+      proximas: [] as Sesion[],
+      historial: [] as Sesion[],
+    };
+    for (const sesion of sesiones) {
+      salida[seccionDeLaSesion(sesion.estado, sesion.miRol)].push(sesion);
+    }
+    return salida;
+  }, [sesiones]);
 
   if (supabaseEnabled && !signedIn) {
     return (
@@ -237,21 +209,11 @@ export function AgendaScreen() {
                     encabezado={t('agenda.wantsToBook', { nombre: s.quienPide.nombre })}
                     ocupada={ocupada === s.id}
                     acciones={
-                      <View style={styles.acciones}>
-                        <Button
-                          label={t('agenda.accept')}
-                          onPress={() => void responder(s, 'accepted')}
-                          disabled={ocupada === s.id}
-                          style={styles.accion}
-                        />
-                        <Button
-                          label={t('agenda.reject')}
-                          variant="secondary"
-                          onPress={() => void responder(s, 'rejected')}
-                          disabled={ocupada === s.id}
-                          style={styles.accion}
-                        />
-                      </View>
+                      <BotonesDeSesion
+                        estado={s.estado}
+                        papel={s.miRol}
+                        alElegir={(accion) => void responder(s.id, accion)}
+                      />
                     }
                     alAbrirChat={
                       s.conversacionId
@@ -296,23 +258,11 @@ export function AgendaScreen() {
                     }
                     ocupada={ocupada === s.id}
                     acciones={
-                      <View style={styles.acciones}>
-                        {s.estado === 'accepted' ? (
-                          <Button
-                            label={t('agenda.weDidIt')}
-                            onPress={() => void responder(s, 'completed')}
-                            disabled={ocupada === s.id}
-                            style={styles.accion}
-                          />
-                        ) : null}
-                        <Button
-                          label={t('common.cancel')}
-                          variant="secondary"
-                          onPress={() => void responder(s, 'cancelled')}
-                          disabled={ocupada === s.id}
-                          style={styles.accion}
-                        />
-                      </View>
+                      <BotonesDeSesion
+                        estado={s.estado}
+                        papel={s.miRol}
+                        alElegir={(accion) => void responder(s.id, accion)}
+                      />
                     }
                     alAbrirChat={
                       s.conversacionId
@@ -369,7 +319,7 @@ function Tarjeta({
 }) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
-  const vivo = VIVOS.includes(sesion.estado);
+  const vivo = sigueViva(sesion.estado);
 
   return (
     <View style={[styles.tarjeta, { borderColor: colors.border, backgroundColor: colors.surface }]}>
@@ -413,7 +363,7 @@ function Tarjeta({
 
       {ocupada ? (
         <Text variant="caption" color={colors.textMuted}>
-          Guardando…
+          {t('agenda.saving')}
         </Text>
       ) : (
         acciones
@@ -449,6 +399,4 @@ const styles = StyleSheet.create({
   chat: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   detalle: { gap: 4 },
   fila: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  acciones: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
-  accion: { flex: 1 },
 });

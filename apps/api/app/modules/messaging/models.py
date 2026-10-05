@@ -238,3 +238,40 @@ class MessageStoryContext(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class MessageBookingContext(Base):
+    """De que sesion 1:1 habla un mensaje, y que paso en ella (migracion 0097).
+
+    TABLA APARTE Y NINGUNA COLUMNA NUEVA EN `messages`, por lo mismo que
+    `MessageStoryContext`. Quien comprueba que existe es
+    `esquema.hay_sesiones_en_el_chat`.
+
+    UNA FILA POR HECHO, no por sesion: pedirla, aceptarla, rechazarla,
+    cancelarla… cada uno es un mensaje del chat con su fila aqui. Asi la
+    conversacion cuenta lo que paso en orden, y la tarjeta de la solicitud —que
+    es el mensaje con `event = 'requested'`— pinta el estado de HOY leyendolo de
+    `bookings`, que sigue siendo la unica fuente de verdad.
+
+    SOLO ESCRIBE EL SERVIDOR. La politica de la tabla no deja insertar desde el
+    cliente: si no, cualquiera podria dejar escrito en un chat «sesion aceptada»
+    sin que nadie hubiera aceptado nada.
+    """
+
+    __tablename__ = "message_booking_context"
+
+    message_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    booking_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("bookings.id", ondelete="CASCADE"),
+        index=True,
+    )
+    #: requested | accepted | rejected | cancelled | reschedule_requested | completed
+    event: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

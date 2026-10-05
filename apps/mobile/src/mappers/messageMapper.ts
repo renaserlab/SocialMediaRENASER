@@ -3,6 +3,7 @@ import type {
   Conversation,
   Message,
   MessageAttachment,
+  MensajeDeSesion,
   MessageStoryContext,
 } from '@/types';
 
@@ -90,7 +91,40 @@ export type MessageDto = {
    * entero en blanco por una función que todavía no está desplegada.
    */
   story_context?: StoryContextDto | null;
+  /**
+   * De qué sesión 1:1 habla, si habla de alguna.
+   *
+   * Opcional por lo mismo que los de arriba: una API anterior a la 0097 no
+   * manda el campo y el mensaje se pinta como texto, que es lo que es.
+   */
+  booking_context?: BookingContextDto | null;
 };
+
+/** La sesión de la que habla un mensaje, tal y como la manda la API. */
+export type BookingContextDto = {
+  booking_id: string;
+  event: MensajeDeSesion['hecho'];
+  status: MensajeDeSesion['estado'];
+  topic: string;
+  note?: string | null;
+  scheduled_at?: string | null;
+  timezone?: string | null;
+  my_role: 'provider' | 'requester';
+  updated_at?: string | null;
+};
+
+export function toSesionDelMensaje(dto: BookingContextDto): MensajeDeSesion {
+  return {
+    sesionId: dto.booking_id,
+    hecho: dto.event,
+    estado: dto.status,
+    tema: dto.topic,
+    nota: dto.note ?? '',
+    cuandoIso: dto.scheduled_at ?? null,
+    miPapel: dto.my_role === 'provider' ? 'provider' : 'requester',
+    actualizadaIso: dto.updated_at ?? null,
+  };
+}
 
 /** Fila cruda de la tabla messages que entrega Supabase Realtime. */
 export type MessageRow = {
@@ -192,6 +226,7 @@ export function toMessage(dto: MessageDto, currentUserId?: string | null): Messa
     // El servidor ya NO manda contexto en un mensaje borrado: una lápida no
     // enseña a qué respondía. Aquí no hay nada que esconder.
     storyContext: dto.story_context ? toStoryContext(dto.story_context) : undefined,
+    sesion: dto.booking_context ? toSesionDelMensaje(dto.booking_context) : undefined,
   };
 }
 

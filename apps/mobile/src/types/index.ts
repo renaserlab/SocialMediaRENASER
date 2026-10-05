@@ -232,6 +232,43 @@ export type Message = {
   progreso?: number;
   /** A qué historia respondía, si respondía a alguna. */
   storyContext?: MessageStoryContext;
+  /** De qué sesión 1:1 habla, si habla de alguna. Ver `MensajeDeSesion`. */
+  sesion?: MensajeDeSesion;
+};
+
+/**
+ * La sesión 1:1 de la que habla un mensaje.
+ *
+ * `hecho` es lo que pasó EN ESTE MENSAJE —se pidió, se aceptó, se canceló— y
+ * no cambia nunca. `estado` es cómo estaba la sesión cuando se leyó el
+ * mensaje: el vigente se calcula entre todos los mensajes de la conversación
+ * (`lib/sesionesDelChat.ts`), porque una respuesta posterior lo deja viejo.
+ */
+export type MensajeDeSesion = {
+  sesionId: string;
+  hecho:
+    | 'requested'
+    | 'accepted'
+    | 'rejected'
+    | 'cancelled'
+    | 'reschedule_requested'
+    | 'completed';
+  estado:
+    | 'pending'
+    | 'accepted'
+    | 'rejected'
+    | 'cancelled'
+    | 'reschedule_requested'
+    | 'completed'
+    | 'expired';
+  tema: string;
+  nota: string;
+  /** Momento propuesto, en ISO. Nulo mientras se acuerda por chat. */
+  cuandoIso: string | null;
+  /** 'provider' = me la piden a mí; 'requester' = la pedí yo. */
+  miPapel: 'provider' | 'requester';
+  /** Cuándo cambió la sesión por última vez, según el servidor. */
+  actualizadaIso: string | null;
 };
 
 /**

@@ -26,8 +26,10 @@ import { ImageViewer } from '@/components/ImageViewer';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
 import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
+import { SesionEnElChat } from '@/components/SesionEnElChat';
 import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
+import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { useTranslation } from '@/i18n/useTranslation';
 import { afterSheetClose } from '@/lib/afterSheetClose';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
@@ -44,8 +46,16 @@ import {
   nuevoIdTemporal,
   reconciliarEnvio,
 } from '@/lib/mensajesEnVivo';
-import { toMessageFromRow } from '@/mappers/messageMapper';
+import {
+  comoSolicitud,
+  estadosVigentes,
+  loQueSigueHaciendoFalta,
+  sesionesSinTarjeta,
+  type LoSabidoDeUnaSesion,
+} from '@/lib/sesionesDelChat';
+import { formatTime, toMessageFromRow } from '@/mappers/messageMapper';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
+import { BookingRepository, type Sesion } from '@/repositories/BookingRepository';
 import {
   MessageRepository,
   MENSAJES_POR_PAGINA,
@@ -128,6 +138,8 @@ function diaDe(mensaje?: Message): string | null {
 function mismaRafaga(actual: Message, anterior?: Message): boolean {
   if (!anterior || anterior.sender !== actual.sender) return false;
   if (anterior.eliminado || actual.eliminado) return false;
+  // La tarjeta de una sesión no es una burbuja: nada se pega a ella.
+  if (anterior.sesion || actual.sesion) return false;
   if (!anterior.createdAtIso || !actual.createdAtIso) return false;
   const a = new Date(anterior.createdAtIso).getTime();
   const b = new Date(actual.createdAtIso).getTime();
@@ -369,6 +381,179 @@ export function ChatScreen() {
 
   const headerName = params.name ?? demoConversation?.name ?? t('chat.conversation');
   const messages = supabaseEnabled ? remoteMessages : demoConversation?.messages ?? [];
+
+  // -------------------------------------------------------------------------
+  // Sesiones 1:1 dentro de la conversación
+  // -------------------------------------------------------------------------
+
+  /*
+    Lo que se sabe de una sesión ANTES de que llegue el mensaje que lo
+    registra: lo que respondió el servidor al pulsar un botón. Con ello la
+    tarjeta deja de ofrecer «Aceptar» en el acto, sin esperar a Realtime.
+  */
+  const [sabidas, setSabidas] = useState<LoSabidoDeUnaSesion[]>([]);
+  /*
+    Las sesiones que viven en esta conversación, según la agenda. Sirven para
+    dos cosas: poner al día una tarjeta vieja, y poder responder una sesión
+    cuya tarjeta no está a la vista (ver `sesionesSinTarjeta`).
+  */
+  const [sesionesDelChat, setSesionesDelChat] = useState<Sesion[]>([]);
+  const conversacionDeSesiones = supabaseEnabled ? params.id : undefined;
+  // La conversación que hay AHORA en pantalla: una respuesta que llega tarde,
+  // de la conversación anterior, no puede pintarse en esta.
+  const conversacionEnPantalla = useRef(conversacionDeSesiones);
+  conversacionEnPantalla.current = conversacionDeSesiones;
+  const leerSesiones = useCallback(() => {
+    const deCual = conversacionDeSesiones;
+    if (!deCual) return;
+    BookingRepository.deLaConversacion(deCual)
+      .then((sesiones) => {
+        if (conversacionEnPantalla.current === deCual) setSesionesDelChat(sesiones);
+      })
+      .catch(() => {
+        // Sin esto solo falta el atajo: la agenda sigue teniendo los botones.
+      });
+  }, [conversacionDeSesiones]);
+  useEffect(() => {
+    setSesionesDelChat([]);
+    leerSesiones();
+  }, [leerSesiones]);
+
+  /*
+    Y se vuelven a leer cuando llega un mensaje de la otra persona: puede ser
+    que acabe de pedir una sesión, o de responder a una. Con un respiro, para
+    que una ráfaga de mensajes sea una sola pregunta.
+  */
+  const ultimoAjeno = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const mensaje = messages[i];
+      if (mensaje && mensaje.sender === 'them') return mensaje.id;
+    }
+    return null;
+  }, [messages]);
+  /*
+    Lo último ajeno que había AL TERMINAR la carga inicial. `undefined` hasta
+    entonces: lo que trae esa carga no es una novedad —las sesiones ya se han
+    pedido— y lo que llegue después, sí. Aunque sea el primer mensaje que esa
+    persona escribe en la conversación.
+  */
+  const ajenoYaVisto = useRef<string | null | undefined>(undefined);
+  const respiroDeSesiones = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Mientras dura la carga inicial no hay novedad que mirar. (Es la salida
+    // de este efecto, no de la pantalla: el redactor sigue pintándose.)
+    const cargado = !cargandoMensajes;
+    if (!cargado) return;
+    if (ajenoYaVisto.current === undefined) {
+      ajenoYaVisto.current = ultimoAjeno;
+      return;
+    }
+    if (ajenoYaVisto.current === ultimoAjeno) return;
+    ajenoYaVisto.current = ultimoAjeno;
+    if (respiroDeSesiones.current) clearTimeout(respiroDeSesiones.current);
+    respiroDeSesiones.current = setTimeout(() => {
+      respiroDeSesiones.current = null;
+      leerSesiones();
+    }, 800);
+  }, [ultimoAjeno, cargandoMensajes, leerSesiones]);
+  /*
+    Y AL VOLVER A ESTA PANTALLA. Aceptar en la agenda y volver al chat tiene
+    que encontrar la tarjeta al día: sin esto seguía ofreciendo «Aceptar», que
+    es justo el fallo reportado, por otro camino. (El registro de esa respuesta
+    es un mensaje propio, así que la relectura de arriba no lo ve.)
+  */
+  const enfocadaAntes = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      // La primera vez ya las pide el montaje.
+      if (enfocadaAntes.current) leerSesiones();
+      enfocadaAntes.current = true;
+    }, [leerSesiones]),
+  );
+  // El respiro no sobrevive a la pantalla.
+  useEffect(
+    () => () => {
+      if (respiroDeSesiones.current) clearTimeout(respiroDeSesiones.current);
+    },
+    [],
+  );
+
+  /*
+    Cómo está HOY cada sesión de la que habla esta conversación. La tarjeta de
+    la solicitud pinta esto, no lo que traía su mensaje cuando se cargó: una
+    respuesta posterior lo deja viejo. Ver `lib/sesionesDelChat.ts`.
+  */
+  const estadosDeSesion = useMemo(
+    () =>
+      estadosVigentes(messages, [
+        ...sesionesDelChat.map((sesion) => ({
+          sesionId: sesion.id,
+          estado: sesion.estado,
+          actualizadaIso: sesion.actualizadaIso,
+        })),
+        ...sabidas,
+      ]),
+    [messages, sesionesDelChat, sabidas],
+  );
+  /** Las vivas cuya tarjeta no está en pantalla: se pintan al final. */
+  const sesionesAlFinal = useMemo(
+    () => sesionesSinTarjeta(sesionesDelChat, messages, estadosDeSesion),
+    [sesionesDelChat, messages, estadosDeSesion],
+  );
+  /*
+    Lo que pinta la lista: los mensajes y, al final, esas tarjetas COMO
+    ELEMENTOS, no como un pie. La lista solo se desplaza sola hasta abajo
+    cuando cambian sus elementos: en un pie, la tarjeta —que llega un instante
+    después del mensaje— se quedaba por debajo del borde y había que
+    desplazar para encontrar los botones.
+  */
+  const elementos = useMemo<Message[]>(
+    () =>
+      sesionesAlFinal.length === 0
+        ? messages
+        : [
+            ...messages,
+            ...sesionesAlFinal.map((sesion) => ({
+              id: `sesion:${sesion.id}`,
+              text: '',
+              sender: sesion.miRol === 'requester' ? ('me' as const) : ('them' as const),
+              createdAt: formatTime(sesion.creadaIso),
+              sesion: comoSolicitud(sesion),
+            })),
+          ],
+    [messages, sesionesAlFinal],
+  );
+
+  // En cuanto un mensaje trae esa versión, deja de hacer falta recordarla.
+  useEffect(() => {
+    setSabidas((previas) => {
+      if (previas.length === 0) return previas;
+      const quedan = loQueSigueHaciendoFalta(messages, previas);
+      return quedan.length === previas.length ? previas : quedan;
+    });
+  }, [messages]);
+
+  const { ocupada: sesionOcupada, responder: responderSesion } = useResponderSesion({
+    alCambiar: (sesion) => {
+      setSabidas((previas) => [
+        ...previas.filter((dato) => dato.sesionId !== sesion.id),
+        { sesionId: sesion.id, estado: sesion.estado, actualizadaIso: sesion.actualizadaIso },
+      ]);
+      setSesionesDelChat((previas) => previas.map((s) => (s.id === sesion.id ? sesion : s)));
+    },
+    /*
+      El servidor dijo «eso ya no se puede»: la sesión cambió por otro lado —se
+      respondió desde la agenda, o respondió la otra persona— y lo que hay en
+      pantalla es viejo. Se le pregunta a la agenda cómo están, que es quien lo
+      sabe aunque el mensaje que lo registra no haya llegado.
+    */
+    alDesfasar: leerSesiones,
+  });
+  // Lo que la lista tiene que mirar, además de los mensajes, para repintar.
+  const extraDeSesiones = useMemo(
+    () => ({ estadosDeSesion, sesionOcupada }),
+    [estadosDeSesion, sesionOcupada],
+  );
 
   // -------------------------------------------------------------------------
   // Elegir archivos
@@ -1051,7 +1236,8 @@ export function ChatScreen() {
       ) : null}
       <SinTecladoDelante>
         <FlashList
-          data={messages}
+          data={elementos}
+          extraData={extraDeSesiones}
           keyExtractor={(item: Message) => item.id}
           contentContainerStyle={styles.messages}
           showsVerticalScrollIndicator={false}
@@ -1184,6 +1370,30 @@ export function ChatScreen() {
                       </Text>
                     </View>
                   </View>
+                </View>
+              );
+            }
+
+            /*
+              UNA SESIÓN 1:1. La solicitud es una tarjeta con los botones que le
+              tocan a quien mira; cada respuesta, una línea que la deja
+              registrada. El estado es el de HOY, no el que traía el mensaje.
+              Sin menú de acciones: el registro de una sesión no se borra.
+            */
+            if (item.sesion) {
+              const sesion = item.sesion;
+              return (
+                <View>
+                  {cabecera}
+                  <SesionEnElChat
+                    sesion={sesion}
+                    estado={estadosDeSesion.get(sesion.sesionId) ?? sesion.estado}
+                    mio={mine}
+                    nombre={headerName}
+                    hora={item.createdAt}
+                    ocupada={sesionOcupada === sesion.sesionId}
+                    alElegir={(accion) => void responderSesion(sesion.sesionId, accion)}
+                  />
                 </View>
               );
             }

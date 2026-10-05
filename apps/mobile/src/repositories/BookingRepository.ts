@@ -62,6 +62,8 @@ export type Sesion = {
   conversacionId: string | null;
   completadaIso: string | null;
   creadaIso: string;
+  /** Cuándo cambió por última vez, según el servidor. */
+  actualizadaIso: string;
   quienPide: PersonaDeSesion;
   quienDa: PersonaDeSesion;
   /** 'provider' = me la piden a mi; 'requester' = la pedi yo. */
@@ -88,6 +90,7 @@ function aSesion(dto: SesionDto): Sesion {
     conversacionId: dto.conversation_id,
     completadaIso: dto.completed_at,
     creadaIso: dto.created_at,
+    actualizadaIso: dto.updated_at,
     quienPide: aPersona(dto.requester),
     quienDa: aPersona(dto.provider),
     miRol: dto.my_role,
@@ -104,6 +107,28 @@ export const BookingRepository = {
    */
   async list(rol: 'received' | 'sent' | 'all' = 'all'): Promise<Sesion[]> {
     const dtos = await apiRequest<SesionDto[]>(`${API_V1}/bookings?role=${rol}&limit=50`);
+    return dtos.map(aSesion);
+  },
+
+  /**
+   * Las sesiones que viven en UNA conversacion, con su estado de ahora.
+   *
+   * Es lo que deja al chat ofrecer los botones de una sesion aunque el mensaje
+   * que la pidio no este a la vista, y lo que pone al dia una tarjeta vieja.
+   */
+  async deLaConversacion(conversacionId: string): Promise<Sesion[]> {
+    /*
+      UNA RUTA PROPIA Y NO UN FILTRO DEL LISTADO, a proposito: una API anterior
+      a este cambio responde 404 y quien llama se queda sin atajo, que es lo
+      correcto. Un filtro que esa API ignorase devolveria TODAS las sesiones de
+      la persona, y saldrian en este chat las que tiene con otros.
+
+      El servidor las busca por las dos personas del chat, asi que tambien
+      salen las de antes, que no tienen conversacion apuntada.
+    */
+    const dtos = await apiRequest<SesionDto[]>(
+      `${API_V1}/bookings/conversation/${encodeURIComponent(conversacionId)}`,
+    );
     return dtos.map(aSesion);
   },
 
@@ -130,6 +155,11 @@ export const BookingRepository = {
         // La zona del dispositivo: sin ella «5:00 PM» no significa lo mismo
         // para las dos partes.
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+        // «Deja tu la solicitud escrita en el chat»: esta version ya no manda
+        // su propio mensaje despues (ver `BookSessionSheet`). Una API anterior
+        // ignora el campo y devuelve la sesion sin conversacion; entonces si
+        // se manda el texto.
+        announce_in_chat: true,
       }),
     });
     return aSesion(dto);

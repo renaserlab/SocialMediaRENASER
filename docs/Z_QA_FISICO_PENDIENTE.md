@@ -2529,3 +2529,98 @@ Y una emisión de ensayo con todos los teléfonos que se puedan juntar (20 o 30)
 reaccionando a la vez, mirando en el panel de Supabase los mensajes por segundo
 y si aparece algún error de límite. Es la medida que falta en
 [`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md) §8.
+
+---
+
+## Sesiones en el chat, avisos y fluidez (04/10/2026, noche)
+
+Reportado desde un teléfono con la compilación 1.2.0 de pruebas: no llegó
+ningún aviso al pedirle una sesión; no se podía aceptar desde Mensajes ni
+quedaba registrado; «Aceptar» seguía ahí después de aceptar; los avisos solo
+llegan con la aplicación abierta; y la navegación iba a tirones.
+
+Nada de lo que sigue está visto en un teléfono. Hace falta la API desplegada y
+una compilación nueva. Dos cuentas, **A** (pide) y **B** (recibe), en dos
+teléfonos.
+
+**La migración 0097 está aplicada en Supabase desde el 05/10/2026** (comprobada
+en solo lectura: tabla, RLS, una sola política de lectura, dos índices, cero
+filas). Con ella, y con la API reiniciada después —el despliegue renueva las
+máquinas—, la tarjeta es el propio mensaje y cada respuesta queda como una
+línea. El camino sin ella (la solicitud como texto y la tarjeta **al final de
+la conversación**) sigue en el código y es el que se verá hasta que la API
+nueva esté desplegada, y en las sesiones pedidas antes. Las tablas de abajo
+valen para los dos casos salvo donde se dice.
+
+### Fluidez
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Desplazar Inicio y Explorar: sin tirones | | | |
+| Cambiar de pestaña con la barra inferior: inmediato | | | |
+| Abrir y cerrar una pantalla (perfil, chat, publicación) | | | |
+| Pulsar un botón, una fila o un icono: se hunde y se atenúa al tocar | | | |
+| Dar «me gusta» y guardar: el icono da un salto y el número cambia | | | |
+| Llega un mensaje: el globo de la barra da un bote | | | |
+| Comparar con la compilación anterior a la mejora de vistas, si se conserva | | | |
+
+Si sigue yendo lento, decir en qué pantalla y con qué gesto: lo que se quitó es
+la causa encontrada leyendo el código, no una medida hecha en el teléfono.
+
+### La sesión, en Mensajes
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A pide una sesión a B: en el chat de los dos aparece una tarjeta con la sesión | | | |
+| Sin la 0097: la solicitud es un texto y la tarjeta está al final del chat. Con la 0097: la tarjeta es el mensaje | | | |
+| No salen dos tarjetas de la misma sesión | | | |
+| La tarjeta de B tiene «Aceptar» y «Rechazar»; la de A, «Cancelar sesión» | | | |
+| B acepta desde el chat: los botones cambian en el acto | | | |
+| Queda escrito en el chat que se aceptó: con la 0097, «Aceptaste la sesión» (B) / «B aceptó la sesión» (A); sin ella, un mensaje «Sesión aceptada: …» | | | |
+| A tiene el chat abierto cuando B le pide OTRA sesión: la tarjeta aparece sin salir | | | |
+| La tarjeta del final queda a la vista sin tener que desplazar | | | |
+| Pulsar dos veces muy seguidas «Confirmar reserva»: sale UNA solicitud | | | |
+| Pedir la sesión desde un teléfono con la aplicación SIN actualizar: en el chat sale una sola vez | | | |
+| A ve cambiar su tarjeta sin salir ni recargar | | | |
+| La tarjeta aceptada ofrece «Ya la hicimos» y «Cancelar sesión», no «Aceptar» | | | |
+| «Cancelar sesión» pregunta antes de cancelar | | | |
+| Mantener pulsada la tarjeta o la línea no ofrece borrarla | | | |
+| «Ver en la agenda» abre la agenda | | | |
+| La conversación sale en la bandeja de B con «Solicitud de sesión 1:1…» | | | |
+
+### La agenda
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Lo que le piden a B y no ha respondido está en «Solicitudes» | | | |
+| Al aceptar, sale de «Solicitudes» y aparece en «Agenda · sesiones», Próximas | | | |
+| Ahí ofrece «Ya la hicimos» y «Cancelar sesión» | | | |
+| Aceptar en la agenda y volver al chat: la tarjeta ya no ofrece «Aceptar» | | | |
+| Aceptar en el chat con la agenda abierta en otro teléfono de la misma cuenta, y pulsar allí «Aceptar»: dice que ya había cambiado y se pone al día | | | |
+
+### Avisos con la aplicación abierta
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| B tiene la aplicación abierta en cualquier pantalla y A le pide una sesión: sale el aviso «A quiere agendar contigo» en uno o dos segundos | | | |
+| Sale UN aviso, no dos (el de la sesión, no además «mensaje nuevo») | | | |
+| Con Firebase puesto: sigue saliendo UNO (no el de la bandeja y además el del push) | | | |
+| Tras aceptar, si esa persona escribe un mensaje normal a los pocos segundos, ese mensaje SÍ avisa | | | |
+| Lo mismo con avisos antiguos sin leer en la bandeja | | | |
+| Lo mismo después de abrir y cerrar la bandeja de notificaciones | | | |
+| A recibe el aviso cuando B acepta, rechaza o cancela | | | |
+| Tocar el aviso lleva a la agenda | | | |
+
+### Avisos con la aplicación cerrada (necesita Firebase)
+
+Ver «Push con la aplicación cerrada» en `PUBLICAR_EN_GOOGLE_PLAY.md`. Sin ese
+paso esta tabla no puede salir bien.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Aplicación cerrada del todo, pantalla apagada: llega el aviso de un mensaje, con el nombre | | | |
+| Llega el de una solicitud de sesión | | | |
+| Llega el de una sesión aceptada, rechazada o cancelada | | | |
+| Llegan el de un seguidor nuevo, una reacción y un comentario | | | |
+| Tocar cada aviso abre lo que anuncia | | | |
+| Suena y vibra | | | |

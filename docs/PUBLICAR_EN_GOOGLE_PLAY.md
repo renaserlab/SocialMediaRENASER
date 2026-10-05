@@ -221,3 +221,67 @@ en `docs/AWS_MIGRACION_RENASERLAB.md`.
   (babel, metro). Ver el incidente del commit `5a5440e`.
 - **iOS** tiene su propia guía: `docs/PUBLICAR_EN_APP_STORE.md`. La dirección
   de la API de `eas.json` vale para las dos plataformas.
+
+---
+
+## Push con la aplicación cerrada (Firebase)
+
+**Síntoma.** Los avisos solo llegan con la aplicación abierta. Con la pantalla
+apagada o fuera de la aplicación, nada (reportado el 04/10/2026).
+
+**Causa.** En Android un aviso con la aplicación cerrada llega por Firebase
+(FCM), aunque lo mande Expo. La compilación no lleva el fichero de Firebase, así
+que el teléfono no puede pedir su dirección de push y el servidor no tiene a
+dónde mandar nada. **No se arregla desde el código**: hacen falta un proyecto de
+Firebase, dos ficheros y una compilación nueva.
+
+El código ya está preparado: `apps/mobile/app.config.js` recoge el fichero en
+cuanto exista, y sin él la compilación es la de siempre.
+
+### Qué hace falta, una sola vez
+
+1. **Proyecto de Firebase** (consola de Firebase, con la cuenta de la empresa).
+   Crear el proyecto y dar de alta una aplicación **Android** con el paquete
+   `com.renaser.zeta`, exactamente.
+2. **`google-services.json`**: lo ofrece la consola al dar de alta la
+   aplicación. Se guarda como `apps/mobile/google-services.json`. No es un
+   secreto —va dentro de cada APK—, así que puede ir en el repositorio. Si se
+   prefiere que no, se sube a EAS como variable de tipo fichero con el nombre
+   `GOOGLE_SERVICES_JSON` y no se guarda en el repositorio.
+3. **Clave de la cuenta de servicio (FCM V1)**. Esta SÍ es un secreto y **no va
+   al repositorio**. En la consola de Firebase: *Project settings › Service
+   accounts › Generate New Private Key › Generate Key*.
+4. **Subir esa clave a EAS**, desde `apps/mobile`:
+
+   ```bash
+   eas credentials
+   ```
+
+   y elegir, por este orden: `Android` › el perfil › `Google Service Account` ›
+   `Manage your Google Service Account Key for Push Notifications (FCM V1)` ›
+   `Set up a Google Service Account Key for Push Notifications (FCM V1)` ›
+   `Upload a new service account key`. Se sube una vez: la clave va con la
+   aplicación (el paquete `com.renaser.zeta`), no con el perfil de compilación.
+
+   También se puede desde expo.dev: *Project settings › Credentials › Android ›
+   Service Credentials › FCM V1 service account key › Add a service account key*.
+5. **Compilar de nuevo** (Paso 3). Una actualización sin tienda no sirve: el
+   fichero de Firebase entra en la parte nativa.
+
+### Cómo se comprueba
+
+Con la compilación nueva instalada y la sesión iniciada, cerrar la aplicación
+del todo y, desde otra cuenta, mandarle un mensaje y pedirle una sesión. Tienen
+que llegar los dos avisos con la pantalla apagada, cada uno diciendo quién y
+qué. La lista completa está en `Z_QA_FISICO_PENDIENTE.md`.
+
+Si no llega nada, mirar en este orden: que el teléfono concedió el permiso de
+notificaciones; que en la tabla `device_tokens` hay una fila de esa cuenta
+(si no la hay, el teléfono no consiguió su dirección: falta el fichero en la
+compilación); y que la clave de la cuenta de servicio está subida al perfil
+con el que se compiló.
+
+### Lo que no cubre
+
+- **iOS** necesita su propia clave (APNs) en EAS; ver `PUBLICAR_EN_APP_STORE.md`.
+- El texto del aviso sale en español para todos.
