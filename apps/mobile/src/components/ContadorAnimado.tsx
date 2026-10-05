@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { StyleProp, TextStyle, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
@@ -37,7 +37,11 @@ export function ContadorAnimado({ valor, clave, style, color, variant, weight }:
   /** La cifra que está entrando. `null` en reposo, que es casi siempre. */
   const [entrada, setEntrada] = useState<{ sentido: 1 | -1; n: number } | null>(null);
 
-  useEffect(() => {
+  /*
+    ANTES DE PINTAR, no después: decidido en un efecto normal, el cambio se
+    veía un fotograma ya en su sitio y luego daba el salto desde atrás.
+  */
+  useLayoutEffect(() => {
     const antes = anterior.current;
     anterior.current = { valor, clave };
     const sentido = sentidoDelCambio(antes, { valor, clave });

@@ -44,6 +44,12 @@ const CADA_MS = 30_000;
 const RESPIRO_DE_MENSAJES_MS = 500;
 /** Cuántos mensajes ya anunciados se recuerdan para no repetirlos. */
 const MENSAJES_RECORDADOS = 200;
+/**
+ * Cuánto espera el aviso de un mensaje a la lectura de la bandeja. Con el
+ * servidor lento, un mensaje no puede quedarse sin anunciar por esperar a
+ * saber si además había un aviso de sesión.
+ */
+const ESPERA_POR_LOS_AVISOS_MS = 2_500;
 
 type FilaDeMensaje = { id?: string; conversation_id?: string; sender_id?: string };
 
@@ -64,8 +70,21 @@ let mensajeDelPush:
   | ((conversacionId: string, mensajeId: string | null, remitenteId?: string | null) => void)
   | null = null;
 
+let sesionDelPush: (() => void) | null = null;
+
 export function alRecibirUnPush(): void {
   ponerseAlDia?.();
+}
+
+/**
+ * Entrega a la lectura de la bandeja el push de una SESIÓN (se pidió, se
+ * aceptó, se canceló…). Devuelve `false` si nadie escucha: entonces quien
+ * llama enseña el aviso por su cuenta.
+ */
+export function alRecibirUnPushDeSesion(): boolean {
+  if (!sesionDelPush) return false;
+  sesionDelPush();
+  return true;
 }
 
 /**
@@ -222,15 +241,27 @@ export function useAvisosEnVivo(): void {
         sesión sale AL MOMENTO, sin esperar a la vuelta periódica, y se sabe a
         qué mensajes no hay que darles un segundo aviso.
       */
-      await mirarAvisos();
-      const conversaciones = await refrescarMensajes();
+      const [, conversaciones] = await Promise.all([
+        // A LA VEZ que los mensajes, y con tope: si la bandeja tarda, el
+        // mensaje se anuncia igual.
+        Promise.race([
+          mirarAvisos(),
+          new Promise<void>((listo) => setTimeout(listo, ESPERA_POR_LOS_AVISOS_MS)),
+        ]),
+        refrescarMensajes(),
+      ]);
       if (!vivo || !conversaciones) return;
       const ahora = Date.now();
       for (const [id, remitente] of deQuien) {
         // El mensaje ya está a la vista: lo pinta la conversación.
         if (seEstaViendoLaConversacion(id)) continue;
         // Ya se anunció como lo que es: un aviso de sesión de esta persona.
-        if (remitente && (conAvisoDeSesion.get(remitente) ?? 0) > ahora) continue;
+        // CALLA UN MENSAJE, NO A LA PERSONA: el silencio se gasta aquí, y lo
+        // siguiente que escriba —«nos vemos el martes»— sí da su aviso.
+        if (remitente && (conAvisoDeSesion.get(remitente) ?? 0) > ahora) {
+          conAvisoDeSesion.delete(remitente);
+          continue;
+        }
         const conversacion = conversaciones.find((c) => c.id === id);
         if (!conversacion) continue;
         avisar({
@@ -317,11 +348,19 @@ export function useAvisosEnVivo(): void {
     };
     // El push de un mensaje lo manda otra persona: no hace falta saber quién soy.
     mensajeDelPush = anotarMensaje;
+    // El de una sesión se ANUNCIA por aquí (no callado): la bandeja dice qué
+    // ha pasado y cada aviso sale una sola vez, llegue antes el push o el
+    // mensaje que la sesión deja en el chat.
+    sesionDelPush = () => {
+      void mirarAvisos();
+      void refrescarMensajes();
+    };
 
     return () => {
       vivo = false;
       ponerseAlDia = null;
       mensajeDelPush = null;
+      sesionDelPush = null;
       clearInterval(reloj);
       if (respiro !== null) clearTimeout(respiro);
       alVolver.remove();

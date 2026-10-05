@@ -2,10 +2,20 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 
-import { alRecibirUnMensajePorPush, alRecibirUnPush } from '@/hooks/useAvisosEnVivo';
+import {
+  alRecibirUnMensajePorPush,
+  alRecibirUnPush,
+  alRecibirUnPushDeSesion,
+} from '@/hooks/useAvisosEnVivo';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
-import { claveDelPush, conversacionDelPush, mensajeDelPush, rutaDelPush } from '@/lib/rutaDelPush';
+import {
+  claveDelPush,
+  conversacionDelPush,
+  esPushDeSesion,
+  mensajeDelPush,
+  rutaDelPush,
+} from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
 
 /**
@@ -58,6 +68,15 @@ export function useAvisosDelPush(): void {
         se enseña el del push, que es mejor que nada.
       */
       if (conversacion && alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data))) return;
+
+      /*
+        EL DE UNA SESIÓN TAMPOCO, y por lo mismo. Una sesión deja además un
+        mensaje en el chat que llega en tiempo real y adelanta la lectura de la
+        bandeja: el aviso sale por ahí. Pintar también el del push eran dos
+        avisos de «te han pedido una sesión». Se entrega a esa misma lectura,
+        que anuncia cada aviso una sola vez, llegue antes quien llegue.
+      */
+      if (esPushDeSesion(data) && alRecibirUnPushDeSesion()) return;
 
       const texto = (body ?? '').trim();
       const titulo = (title ?? '').trim();

@@ -99,6 +99,11 @@ class BookingCreate(BaseModel):
     scheduled_at: datetime | None = None
     #: Zona horaria IANA de quien propone ("America/Lima").
     timezone: str | None = Field(default=None, max_length=64)
+    #: «Deja tu la solicitud escrita en el chat». Lo manda la aplicacion que ya
+    #: no escribe su propio mensaje despues de pedir la sesion. Apagado por
+    #: defecto: una version anterior no lo manda y sigue escribiendo el suyo,
+    #: y con los dos la solicitud saldria dos veces.
+    announce_in_chat: bool = False
 
 
 class BookingUpdate(BaseModel):

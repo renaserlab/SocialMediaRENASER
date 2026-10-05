@@ -37,22 +37,30 @@ export function useResponderSesion({ alCambiar, alDesfasar }: Opciones) {
   /** La sesión con una respuesta en curso: apaga sus botones. */
   const [ocupada, setOcupada] = useState<string | null>(null);
   const cerrojo = useRef<string | null>(null);
+  /** Hay un «¿seguro?» abierto: un segundo toque no encola otro. */
+  const preguntando = useRef(false);
   // Lo último que pasó quien llama, sin obligarle a memorizarlo.
   const avisos = useRef({ alCambiar, alDesfasar });
   avisos.current = { alCambiar, alDesfasar };
 
   const responder = useCallback(async (sesionId: string, accion: AccionDeSesion) => {
-    if (cerrojo.current) return;
+    if (cerrojo.current || preguntando.current) return;
     const t = traduceEnElIdiomaActual;
 
     if (accion === 'cancelled') {
-      const seguro = await confirm({
-        title: t('agenda.cancelConfirmTitle'),
-        message: t('agenda.cancelConfirmBody'),
-        confirmLabel: t('agenda.cancelSession'),
-        cancelLabel: t('agenda.keepSession'),
-        destructive: true,
-      });
+      preguntando.current = true;
+      let seguro = false;
+      try {
+        seguro = await confirm({
+          title: t('agenda.cancelConfirmTitle'),
+          message: t('agenda.cancelConfirmBody'),
+          confirmLabel: t('agenda.cancelSession'),
+          cancelLabel: t('agenda.keepSession'),
+          destructive: true,
+        });
+      } finally {
+        preguntando.current = false;
+      }
       if (!seguro) return;
       // Mientras el diálogo estaba abierto pudo empezar otra respuesta.
       if (cerrojo.current) return;

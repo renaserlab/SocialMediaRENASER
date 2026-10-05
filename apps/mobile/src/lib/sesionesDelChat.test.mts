@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { accionesDeSesion } from './accionesDeSesion.ts';
 import {
@@ -250,5 +253,52 @@ describe('una sesión cuya tarjeta no está en pantalla se puede responder igual
     assert.equal(solicitud.hecho, 'requested');
     assert.equal(solicitud.sesionId, 's1');
     assert.deepEqual(accionesDeSesion(solicitud.estado, solicitud.miPapel), ['accepted', 'rejected']);
+  });
+});
+
+describe('lo que encontró la revisión independiente, enchufado', () => {
+  const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+  const fuente = (rel: string) => readFileSync(join(SRC, rel), 'utf8').replace(/\r\n/g, '\n');
+  const CHAT = fuente('screens/ChatScreen.tsx');
+  const HOJA = fuente('components/BookSessionSheet.tsx');
+  const REPOSITORIO = fuente('repositories/BookingRepository.ts');
+  const RESPONDER = fuente('hooks/useResponderSesion.ts');
+
+  it('al volver al chat las sesiones se releen: aceptar en la agenda no deja «Aceptar» aquí', () => {
+    assert.match(
+      CHAT,
+      /useFocusEffect\(\s*useCallback\(\(\) => \{[^}]*if \(enfocadaAntes\.current\) leerSesiones\(\);/,
+    );
+  });
+
+  it('las tarjetas del final son elementos de la lista, no un pie que queda bajo el borde', () => {
+    assert.match(CHAT, /data=\{elementos\}/);
+    assert.ok(!/ListFooterComponent/.test(CHAT), 'vuelve a haber un pie');
+    assert.match(CHAT, /id: `sesion:\$\{sesion\.id\}`/);
+    assert.match(CHAT, /sesion: comoSolicitud\(sesion\)/);
+  });
+
+  it('las sesiones del chat se piden por su ruta propia, sin filtrar aquí', () => {
+    // Un filtro que una API anterior ignorase traería a este chat las
+    // sesiones que la persona tiene con otros.
+    assert.match(REPOSITORIO, /\/bookings\/conversation\/\$\{encodeURIComponent\(conversacionId\)\}/);
+    assert.ok(!/conversation_id=\$\{/.test(REPOSITORIO));
+  });
+
+  it('pedir una sesión: un toque es una petición, y la solicitud la escribe el servidor', () => {
+    // El cerrojo se toma ANTES de la primera espera.
+    const pedir = HOJA.slice(HOJA.indexOf('const handleBook'));
+    const cerrojo = pedir.indexOf('ocupado.current = true;');
+    const espera = pedir.indexOf('await requireAuth(');
+    assert.ok(cerrojo !== -1 && espera !== -1 && cerrojo < espera, 'el cerrojo llega tarde');
+    assert.match(pedir, /finally \{\s*ocupado\.current = false;/);
+    assert.match(REPOSITORIO, /announce_in_chat: true,/);
+    // Y el texto de antes solo se manda si el servidor no dejó la solicitud.
+    assert.match(HOJA, /if \(!sesion\.conversacionId\) \{/);
+  });
+
+  it('cancelar: un segundo toque no encola otro «¿seguro?»', () => {
+    assert.match(RESPONDER, /if \(cerrojo\.current \|\| preguntando\.current\) return;/);
+    assert.match(RESPONDER, /finally \{\s*preguntando\.current = false;/);
   });
 });

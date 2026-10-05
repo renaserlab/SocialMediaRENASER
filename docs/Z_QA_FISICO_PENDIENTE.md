@@ -2576,6 +2576,9 @@ la causa encontrada leyendo el código, no una medida hecha en el teléfono.
 | B acepta desde el chat: los botones cambian en el acto | | | |
 | Queda escrito en el chat que se aceptó: con la 0097, «Aceptaste la sesión» (B) / «B aceptó la sesión» (A); sin ella, un mensaje «Sesión aceptada: …» | | | |
 | A tiene el chat abierto cuando B le pide OTRA sesión: la tarjeta aparece sin salir | | | |
+| La tarjeta del final queda a la vista sin tener que desplazar | | | |
+| Pulsar dos veces muy seguidas «Confirmar reserva»: sale UNA solicitud | | | |
+| Pedir la sesión desde un teléfono con la aplicación SIN actualizar: en el chat sale una sola vez | | | |
 | A ve cambiar su tarjeta sin salir ni recargar | | | |
 | La tarjeta aceptada ofrece «Ya la hicimos» y «Cancelar sesión», no «Aceptar» | | | |
 | «Cancelar sesión» pregunta antes de cancelar | | | |
@@ -2599,6 +2602,8 @@ la causa encontrada leyendo el código, no una medida hecha en el teléfono.
 |---|---|---|---|
 | B tiene la aplicación abierta en cualquier pantalla y A le pide una sesión: sale el aviso «A quiere agendar contigo» en uno o dos segundos | | | |
 | Sale UN aviso, no dos (el de la sesión, no además «mensaje nuevo») | | | |
+| Con Firebase puesto: sigue saliendo UNO (no el de la bandeja y además el del push) | | | |
+| Tras aceptar, si esa persona escribe un mensaje normal a los pocos segundos, ese mensaje SÍ avisa | | | |
 | Lo mismo con avisos antiguos sin leer en la bandeja | | | |
 | Lo mismo después de abrir y cerrar la bandeja de notificaciones | | | |
 | A recibe el aviso cuando B acepta, rechaza o cancela | | | |

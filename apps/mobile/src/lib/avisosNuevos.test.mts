@@ -261,10 +261,17 @@ describe('un solo sistema de avisos, enchufado', () => {
 
   it('un mensaje adelanta la pregunta por los avisos, y el de una sesión no se anuncia dos veces', () => {
     const mensajes = VIVO.slice(VIVO.indexOf('const mirarMensajes'), VIVO.indexOf('const anotarMensaje'));
-    const avisos = mensajes.indexOf('await mirarAvisos();');
-    const lista = mensajes.indexOf('await refrescarMensajes();');
-    assert.ok(avisos !== -1 && lista !== -1 && avisos < lista, 'los avisos se miran ANTES que los mensajes');
-    assert.match(mensajes, /if \(remitente && \(conAvisoDeSesion\.get\(remitente\) \?\? 0\) > ahora\) continue;/);
+    // Los avisos se miran A LA VEZ que los mensajes, y con tope: si la bandeja
+    // tarda, el mensaje se anuncia igual.
+    assert.match(mensajes, /await Promise\.all\(\[\s*Promise\.race\(\[\s*mirarAvisos\(\),/);
+    assert.match(mensajes, /setTimeout\(listo, ESPERA_POR_LOS_AVISOS_MS\)/);
+    assert.match(mensajes, /refrescarMensajes\(\),\s*\]\);/);
+    // El silencio CALLA UN MENSAJE, no a la persona: se gasta al usarlo, y lo
+    // siguiente que escriba —«nos vemos el martes»— sí da su aviso.
+    assert.match(
+      mensajes,
+      /if \(remitente && \(conAvisoDeSesion\.get\(remitente\) \?\? 0\) > ahora\) \{\s*conAvisoDeSesion\.delete\(remitente\);\s*continue;\s*\}/,
+    );
     // El remitente sale de la fila que entrega el tiempo real.
     assert.match(VIVO, /anotarMensaje\(fila\.conversation_id, fila\.id \?\? null, fila\.sender_id \?\? null\);/);
   });
@@ -524,5 +531,40 @@ describe('un hecho, un aviso: la sesión que también deja un mensaje', () => {
   it('el silencio dura lo justo: cubre la llegada del mensaje, no la conversación que siga', () => {
     assert.ok(SILENCIO_TRAS_UN_AVISO_DE_SESION_MS >= 5_000);
     assert.ok(SILENCIO_TRAS_UN_AVISO_DE_SESION_MS <= 30_000);
+  });
+});
+
+describe('el push de una sesión, con la aplicación abierta, no da un segundo aviso', () => {
+  /*
+    Encontrado en la revisión independiente (04/10/2026): el mensaje que la
+    sesión deja en el chat adelanta la lectura de la bandeja y anuncia; el push
+    llegaba un instante después y se pintaba otra vez, con otra clave.
+  */
+  const VIVO = fuente('hooks/useAvisosEnVivo.ts');
+  const PUSH = fuente('hooks/useAvisosDelPush.native.ts');
+
+  it('se reconoce por su tipo', async () => {
+    const { esPushDeSesion } = await import('./rutaDelPush.ts');
+    assert.equal(esPushDeSesion({ type: 'booking', id: 'x' }), true);
+    assert.equal(esPushDeSesion({ type: 'message', conversationId: 'x' }), false);
+    assert.equal(esPushDeSesion({ type: 'follow' }), false);
+    assert.equal(esPushDeSesion(null), false);
+    assert.equal(esPushDeSesion('booking'), false);
+    assert.equal(esPushDeSesion(undefined), false);
+  });
+
+  it('el oyente del push no lo pinta: lo entrega a la lectura de la bandeja', () => {
+    const entrega = PUSH.indexOf('if (esPushDeSesion(data) && alRecibirUnPushDeSesion()) return;');
+    const pintado = PUSH.indexOf('avisar({');
+    assert.ok(entrega !== -1, 'el push de una sesión no se entrega');
+    assert.ok(entrega < pintado, 'se pinta antes de entregarlo');
+  });
+
+  it('y allí se ANUNCIA (no callado): cada aviso sale una vez, llegue antes quien llegue', () => {
+    assert.match(VIVO, /sesionDelPush = \(\) => \{\s*void mirarAvisos\(\);\s*void refrescarMensajes\(\);\s*\};/);
+    // Sin nadie escuchando, el oyente del push lo enseña por su cuenta.
+    assert.match(VIVO, /if \(!sesionDelPush\) return false;/);
+    // Y se suelta al desmontar.
+    assert.match(VIVO.slice(VIVO.lastIndexOf('return () => {')), /sesionDelPush = null;/);
   });
 });

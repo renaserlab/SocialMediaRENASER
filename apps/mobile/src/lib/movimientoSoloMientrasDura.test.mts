@@ -175,6 +175,14 @@ describe('nada que se repita por fila deja una vista animada montada', () => {
     assert.match(breve, /return \(\) => animacion\.stop\(\)/);
   });
 
+  it('el salto se decide antes de pintar: no se ve un fotograma en su sitio y luego el salto', () => {
+    for (const componente of ['IconoQueSeEnciende', 'ContadorAnimado', 'GloboDeNoLeidos']) {
+      const codigo = fuente(`components/${componente}.tsx`);
+      assert.match(codigo, /useLayoutEffect\(\(\) => \{/, componente);
+      assert.ok(!/\buseEffect\b/.test(codigo), `${componente} decide el salto después de pintar`);
+    }
+  });
+
   it('el icono, el contador y el globo montan lo animado solo si hay salto', () => {
     assert.match(fuente('components/IconoQueSeEnciende.tsx'), /if \(!salto\) return <View style=\{estilo\}>/);
     assert.match(fuente('components/ContadorAnimado.tsx'), /if \(!entrada\) return <View>\{cifra\}<\/View>;/);

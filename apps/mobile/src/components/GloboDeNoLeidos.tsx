@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
@@ -45,7 +45,11 @@ export function GloboDeNoLeidos({ cuenta, tamano = 20, soloPunto = false, style 
   /** El salto en curso. `null` en reposo, que es casi siempre. */
   const [salto, setSalto] = useState<{ tipo: 'aparece' | 'crece'; n: number } | null>(null);
 
-  useEffect(() => {
+  /*
+    ANTES DE PINTAR, no después: decidido en un efecto normal, el cambio se
+    veía un fotograma ya en su sitio y luego daba el salto desde atrás.
+  */
+  useLayoutEffect(() => {
     const antes = anterior.current;
     anterior.current = cuenta;
     const tipo = saltoDelGlobo(antes, cuenta);

@@ -37,7 +37,12 @@ from app.main import app
 from app.modules.bookings.models import Booking
 from app.modules.messaging import esquema as esquema_de_mensajes
 from app.modules.messaging import sesiones
-from app.modules.messaging.models import Message, MessageBookingContext
+from app.modules.messaging.models import (
+    Conversation,
+    ConversationMember,
+    Message,
+    MessageBookingContext,
+)
 from app.modules.notifications import esquema as esquema_de_avisos
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import cache, esquema
@@ -155,17 +160,20 @@ def pushes(monkeypatch):
     return capturados
 
 
-async def _pedir(http, identidad, tema: str = "Mi portafolio") -> dict:
+async def _pedir(
+    http, identidad, tema: str = "Mi portafolio", anunciar: bool = True
+) -> dict:
+    """Pide una sesión como la aplicación de ahora: «déjala tú en el chat»."""
     identidad["uid"] = LUIS
-    respuesta = await http.post(
-        RESERVAS,
-        json={
-            "provider_id": ANA,
-            "topic": tema,
-            "scheduled_at": _manana(),
-            "timezone": "America/Lima",
-        },
-    )
+    cuerpo = {
+        "provider_id": ANA,
+        "topic": tema,
+        "scheduled_at": _manana(),
+        "timezone": "America/Lima",
+    }
+    if anunciar:
+        cuerpo["announce_in_chat"] = True
+    respuesta = await http.post(RESERVAS, json=cuerpo)
     assert respuesta.status_code == 201, respuesta.text
     return respuesta.json()
 
@@ -397,10 +405,19 @@ async def test_sin_la_0097_queda_el_texto_y_nada_falla(entorno_sin_la_0097, push
 async def test_si_escribir_en_el_chat_falla_la_sesion_se_guarda_igual(
     entorno, pushes, monkeypatch
 ):
-    async def _roto(*args, **kwargs):
-        raise RuntimeError("el chat no está")
+    """El fallo llega DESPUÉS de insertar el mensaje, que es lo que importa.
 
-    monkeypatch.setattr(sesiones, "anotar", _roto)
+    `anotar` escribe el mensaje y luego mira si existe la tabla de contexto. Se
+    rompe ahí, con el mensaje ya escrito dentro de la transacción: si no hubiera
+    punto de guardado, o no se deshiciera, quedaría el mensaje suelto —o se
+    perdería la sesión entera—. Una versión anterior de esta prueba lanzaba el
+    error antes de cualquier escritura y habría pasado igual sin él.
+    """
+
+    async def _roto(db):
+        raise RuntimeError("la base ha fallado a media escritura")
+
+    monkeypatch.setattr(esquema_de_mensajes, "hay_sesiones_en_el_chat", _roto)
     http, fabrica, identidad = entorno
     sesion = await _pedir(http, identidad)
     assert sesion["status"] == "pending"
@@ -477,30 +494,55 @@ async def test_un_hecho_desconocido_no_se_escribe(entorno):
 # --------------------------------------------------------------------------- #
 
 
-async def test_el_chat_puede_pedir_las_sesiones_que_viven_en_el(entorno, pushes):
+def _del_chat(conversacion: str) -> str:
+    return f"{RESERVAS}/conversation/{conversacion}"
+
+
+async def test_el_chat_puede_pedir_las_sesiones_de_sus_dos_personas(entorno, pushes):
     http, fabrica, identidad = entorno
     sesion = await _pedir(http, identidad)
-    # Otra sesión de Ana, con otra persona y en otro chat: no tiene que salir.
+    # Otra sesión de Ana, con otra persona: no tiene que salir en este chat.
     async with fabrica() as db:
         db.add(Booking(requester_id=EVA, provider_id=ANA, topic="Otra", status="pending"))
         await db.commit()
 
     identidad["uid"] = ANA
-    respuesta = await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
+    respuesta = await http.get(_del_chat(sesion["conversation_id"]))
     assert respuesta.status_code == 200, respuesta.text
     assert [s["id"] for s in respuesta.json()] == [sesion["id"]]
     assert respuesta.json()[0]["my_role"] == "provider"
-    # Sin el filtro siguen saliendo las dos.
+    # En su agenda siguen saliendo las dos.
     assert len((await http.get(RESERVAS)).json()) == 2
 
 
-async def test_el_filtro_por_conversacion_no_abre_las_sesiones_de_otros(entorno, pushes):
+async def test_quien_no_esta_en_el_chat_recibe_una_lista_vacia(entorno, pushes):
     http, _, identidad = entorno
     sesion = await _pedir(http, identidad)
     identidad["uid"] = EVA
-    respuesta = await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
+    respuesta = await http.get(_del_chat(sesion["conversation_id"]))
+    # Ni un 404 que confirme que ese chat existe.
     assert respuesta.status_code == 200
     assert respuesta.json() == []
+
+
+async def test_las_sesiones_de_antes_sin_conversacion_apuntada_tambien_salen(entorno, pushes):
+    """Se buscan por las dos personas del chat, no por la columna de la sesión."""
+    http, fabrica, identidad = entorno
+    nueva = await _pedir(http, identidad)
+    async with fabrica() as db:
+        vieja = Booking(requester_id=ANA, provider_id=LUIS, topic="De antes", status="accepted")
+        db.add(vieja)
+        await db.commit()
+        vieja_id = vieja.id
+
+    identidad["uid"] = LUIS
+    del_chat = (await http.get(_del_chat(nueva["conversation_id"]))).json()
+    assert {s["id"] for s in del_chat} == {nueva["id"], vieja_id}
+    # Y cada una con el papel de quien mira.
+    assert {s["id"]: s["my_role"] for s in del_chat} == {
+        nueva["id"]: "requester",
+        vieja_id: "provider",
+    }
 
 
 async def test_sin_la_0097_la_sesion_se_sigue_pudiendo_encontrar_por_su_chat(
@@ -510,16 +552,12 @@ async def test_sin_la_0097_la_sesion_se_sigue_pudiendo_encontrar_por_su_chat(
     http, _, identidad = entorno_sin_la_0097
     sesion = await _pedir(http, identidad)
     identidad["uid"] = ANA
-    del_chat = (
-        await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
-    ).json()
+    del_chat = (await http.get(_del_chat(sesion["conversation_id"]))).json()
     assert [s["status"] for s in del_chat] == ["pending"]
 
     await _responder(http, identidad, ANA, sesion["id"], "accepted")
     identidad["uid"] = LUIS
-    del_chat = (
-        await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
-    ).json()
+    del_chat = (await http.get(_del_chat(sesion["conversation_id"]))).json()
     assert [s["status"] for s in del_chat] == ["accepted"]
     assert del_chat[0]["my_role"] == "requester"
 
@@ -527,5 +565,121 @@ async def test_sin_la_0097_la_sesion_se_sigue_pudiendo_encontrar_por_su_chat(
 async def test_un_identificador_de_conversacion_que_no_lo_es_no_revienta(entorno, pushes):
     http, _, identidad = entorno
     identidad["uid"] = ANA
-    respuesta = await http.get(RESERVAS, params={"conversation_id": "no-es-un-uuid"})
+    respuesta = await http.get(_del_chat("no-es-un-uuid"))
     assert respuesta.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# 7. Lo que encontró la revisión independiente
+# --------------------------------------------------------------------------- #
+
+
+async def _chat_ajeno(fabrica) -> str:
+    """Un chat directo entre Ana y Eva, en el que Luis no está."""
+    async with fabrica() as db:
+        chat = Conversation(kind="direct", created_by=ANA)
+        db.add(chat)
+        await db.flush()
+        db.add_all(
+            [
+                ConversationMember(conversation_id=chat.id, user_id=ANA),
+                ConversationMember(conversation_id=chat.id, user_id=EVA),
+            ]
+        )
+        await db.commit()
+        return chat.id
+
+
+async def test_el_servidor_no_escribe_en_el_chat_que_diga_la_fila_sino_en_el_de_los_dos(
+    entorno, pushes
+):
+    """ALTO. `bookings.conversation_id` lo puede escribir el cliente (0025).
+
+    Con la columna apuntada a un chat ajeno, responder a la sesión hacía que el
+    servidor dejara ahí un mensaje firmado por quien respondía —«Sesión
+    cancelada: <tema libre>»— y que los de ese chat leyeran los datos de una
+    sesión que no era suya.
+    """
+    http, fabrica, identidad = entorno
+    ajeno = await _chat_ajeno(fabrica)
+    async with fabrica() as db:
+        trampa = Booking(
+            requester_id=LUIS,
+            provider_id=ANA,
+            topic="Texto que Eva no tiene por qué leer",
+            status="pending",
+            conversation_id=ajeno,
+        )
+        db.add(trampa)
+        await db.commit()
+        trampa_id = trampa.id
+
+    respuesta = await _responder(http, identidad, LUIS, trampa_id, "cancelled")
+    assert respuesta.status_code == 200, respuesta.text
+
+    # En el chat de Ana y Eva no ha entrado nada.
+    assert await _mensajes(http, identidad, EVA, ajeno) == []
+    # El registro está en el chat de Luis y Ana, que es de quienes es la sesión.
+    suyo = respuesta.json()["conversation_id"]
+    assert suyo and suyo != ajeno
+    registro = await _mensajes(http, identidad, ANA, suyo)
+    assert [m["booking_context"]["event"] for m in registro] == ["cancelled"]
+    assert registro[0]["sender"]["id"] == LUIS
+
+
+async def test_una_respuesta_que_no_vale_no_deja_ni_una_conversacion(entorno, pushes):
+    """Rechazar una petición no puede dejar rastro."""
+    http, fabrica, identidad = entorno
+    async with fabrica() as db:
+        vieja = Booking(requester_id=LUIS, provider_id=ANA, topic="De antes", status="rejected")
+        db.add(vieja)
+        await db.commit()
+        sesion_id = vieja.id
+
+    respuesta = await _responder(http, identidad, ANA, sesion_id, "accepted")
+    assert respuesta.status_code == 422
+    assert codigo(respuesta) == "booking_transition_not_allowed"
+    async with fabrica() as db:
+        assert (await db.scalars(select(Conversation))).all() == []
+        assert (await db.scalars(select(Message))).all() == []
+
+
+async def test_la_aplicacion_anterior_no_recibe_la_solicitud_dos_veces(entorno, pushes):
+    """Sin `announce_in_chat` el servidor NO escribe la solicitud.
+
+    Las versiones instaladas antes de este cambio mandan su propio texto justo
+    después de crear la sesión. Si el servidor escribiera además el suyo, a
+    quien recibe le llegaría lo mismo dos veces.
+    """
+    http, fabrica, identidad = entorno
+    sesion = await _pedir(http, identidad, anunciar=False)
+    # La conversación se apunta igual: es lo que deja pintar la tarjeta al final.
+    assert sesion["conversation_id"]
+    assert await _mensajes(http, identidad, ANA, sesion["conversation_id"]) == []
+    # El aviso sale como siempre.
+    assert [p["notification_type"] for p in pushes] == ["session_booked"]
+
+    # Y la respuesta sí queda escrita: eso la aplicación anterior no lo hacía.
+    await _responder(http, identidad, ANA, sesion["id"], "accepted")
+    mensajes = await _mensajes(http, identidad, LUIS, sesion["conversation_id"])
+    assert [m["booking_context"]["event"] for m in mensajes] == ["accepted"]
+
+
+async def test_la_moderacion_si_puede_retirar_el_registro_de_una_sesion(entorno, pushes):
+    """El tema es texto libre: uno ofensivo no puede quedarse fijo para siempre."""
+    http, fabrica, identidad = entorno
+    sesion = await _pedir(http, identidad, tema="Algo que hay que retirar")
+    conversacion = sesion["conversation_id"]
+    solicitud = (await _mensajes(http, identidad, ANA, conversacion))[0]
+    async with fabrica() as db:
+        ana = await db.get(Profile, ANA)
+        ana.role = "moderator"
+        await db.commit()
+
+    identidad["uid"] = ANA
+    respuesta = await http.delete(f"{CHATS}/{conversacion}/messages/{solicitud['id']}")
+    assert respuesta.status_code == 204, respuesta.text
+    # Borrado suave: en la base sigue habiendo constancia.
+    async with fabrica() as db:
+        fila = await db.get(Message, solicitud["id"])
+        assert fila is not None and fila.deleted_at is not None

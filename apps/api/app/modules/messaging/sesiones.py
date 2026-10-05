@@ -28,8 +28,17 @@ encuentra el buscador y lo unico que pinta una version de la aplicacion que
 todavia no conoce las tarjetas —o esta misma, mientras la 0097 no este
 aplicada—. Por eso se escribe entero y legible, no como una marca.
 
-SOLO ESCRIBE EL SERVIDOR. Si el cliente pudiera insertar estas filas, cualquiera
-dejaria escrito «sesion aceptada» en un chat sin que nadie aceptara nada.
+ESTAS FILAS SOLO LAS ESCRIBE EL SERVIDOR (la 0097 no da politica de escritura
+al cliente). Si el cliente pudiera insertarlas, cualquiera dejaria escrito
+«sesion aceptada» en un chat sin que nadie aceptara nada.
+
+LO QUE ESO NO CUBRE, y conviene no leer de mas: el ESTADO que pinta la tarjeta
+sale de `bookings`, y la politica de esa tabla (0025) todavia deja a las dos
+partes actualizarla desde el cliente, saltandose las reglas de esta API. Esta
+abierto desde la 0025 y cerrarlo es una migracion que quite esas dos politicas;
+no se ha hecho. Por eso mismo quien llama a `anotar` no se fia de
+`bookings.conversation_id`: la conversacion la busca el servidor por las dos
+personas (ver `bookings/router.py`).
 """
 
 from __future__ import annotations

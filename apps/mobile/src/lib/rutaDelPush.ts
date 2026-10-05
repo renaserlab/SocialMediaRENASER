@@ -123,6 +123,19 @@ export function mensajeDelPush(datos: unknown): string | null {
   return d.type === 'message' ? uuid(d.messageId) : null;
 }
 
+/**
+ * Si un push es de la agenda: pedir una sesión, aceptarla, cancelarla…
+ *
+ * Con la aplicación abierta ese aviso no lo pinta el oyente del push: se
+ * entrega a la lectura de la bandeja, que es por donde llega también en vivo.
+ * Así los dos caminos —el push y el mensaje que deja la sesión en el chat— dan
+ * UN aviso, el que salga primero.
+ */
+export function esPushDeSesion(datos: unknown): boolean {
+  if (datos === null || typeof datos !== 'object') return false;
+  return (datos as Record<string, unknown>).type === 'booking';
+}
+
 /** La clave con la que se agrupan los avisos de una conversación. */
 export function claveDeConversacion(conversacionId: string): string {
   return `conversacion:${conversacionId}`;

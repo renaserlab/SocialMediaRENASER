@@ -1087,12 +1087,18 @@ async def borrar_mensaje(
         # del borrado real, no la del último toque en un botón.
         return
 
-    # EL REGISTRO DE UNA SESIÓN NO SE BORRA. Es lo que deja constancia de que
-    # se pidió, se aceptó o se canceló: quitarlo dejaría una sesión aceptada
-    # sin rastro de quién la aceptó. Lo que se puede hacer es cancelar la
-    # sesión, y eso deja su propio registro. 409 y no 403: no es que no sea
-    # suyo, es que este mensaje no admite esa acción.
-    if await sesiones.es_registro_de_sesion(db, message_id):
+    # EL REGISTRO DE UNA SESIÓN NO LO BORRA QUIEN LO ESCRIBIÓ. Es lo que deja
+    # constancia de que se pidió, se aceptó o se canceló: quitarlo dejaría una
+    # sesión aceptada sin rastro de quién la aceptó. Lo que se puede hacer es
+    # cancelar la sesión, y eso deja su propio registro. 409 y no 403: no es
+    # que no sea suyo, es que este mensaje no admite esa acción.
+    #
+    # LA MODERACIÓN SÍ PUEDE. El tema de una sesión es texto libre: uno
+    # ofensivo no puede quedarse fijo para siempre en el chat de quien lo
+    # recibió. El borrado es suave, así que la constancia sigue en la base.
+    if await sesiones.es_registro_de_sesion(db, message_id) and not await is_admin(
+        db, current_user.id
+    ):
         raise ConflictError(
             "Este mensaje es el registro de una sesión y no se puede borrar.",
             code="message_is_booking_record",

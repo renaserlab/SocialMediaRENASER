@@ -260,8 +260,8 @@ cuanto exista, y sin él la compilación es la de siempre.
    y elegir, por este orden: `Android` › el perfil › `Google Service Account` ›
    `Manage your Google Service Account Key for Push Notifications (FCM V1)` ›
    `Set up a Google Service Account Key for Push Notifications (FCM V1)` ›
-   `Upload a new service account key`. Hay que hacerlo para cada perfil con el
-   que se compile (`preview` y `production`).
+   `Upload a new service account key`. Se sube una vez: la clave va con la
+   aplicación (el paquete `com.renaser.zeta`), no con el perfil de compilación.
 
    También se puede desde expo.dev: *Project settings › Credentials › Android ›
    Service Credentials › FCM V1 service account key › Add a service account key*.

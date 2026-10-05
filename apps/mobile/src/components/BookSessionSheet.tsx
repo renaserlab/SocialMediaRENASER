@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -43,6 +43,12 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+    El cerrojo de verdad, en una referencia. `saving` se enciende DESPUÉS de
+    preguntar si hay sesión, que es asíncrono: dos toques muy seguidos pasaban
+    los dos antes de que el botón se apagara, y salían dos solicitudes.
+  */
+  const ocupado = useRef(false);
 
   /** Lo que se enseña y se envía: «12/08/2026 a las 4:00 PM». */
   const propuesta = date && time ? `${date} a las ${toHumanTime(time)}` : '';
@@ -162,12 +168,21 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
       return;
     }
 
-    let autorizado = false;
-    await requireAuth('auth.reasonBook', () => {
-      autorizado = true;
-    });
-    if (!autorizado) return;
+    if (ocupado.current) return;
+    ocupado.current = true;
+    try {
+      let autorizado = false;
+      await requireAuth('auth.reasonBook', () => {
+        autorizado = true;
+      });
+      if (!autorizado) return;
+      await reservar();
+    } finally {
+      ocupado.current = false;
+    }
+  };
 
+  const reservar = async () => {
     setSaving(true);
     setError(null);
     try {

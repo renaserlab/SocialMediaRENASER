@@ -22,6 +22,7 @@ from app.modules.bookings.schemas import (
     transicion_permitida,
 )
 from app.modules.messaging import sesiones
+from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.messaging.router import conversacion_directa
 from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.notifications.service import add_notification
@@ -166,6 +167,29 @@ def _leer(reserva: Booking, quien_pide: Profile, quien_da: Profile, uid: str) ->
     )
 
 
+async def _leer_varias(db: AsyncSession, reservas: list[Booking], uid: str) -> list[BookingRead]:
+    """Varias sesiones con los perfiles de sus dos partes, en UNA consulta.
+
+    No una por fila: con veinte solicitudes eso eran cuarenta viajes a la base.
+    """
+    if not reservas:
+        return []
+    ids = {r.requester_id for r in reservas} | {r.provider_id for r in reservas}
+    perfiles = (
+        (await db.execute(select(Profile).where(Profile.id.in_(ids)))).scalars().all()
+    )
+    por_id = {p.id: p for p in perfiles}
+    salida: list[BookingRead] = []
+    for r in reservas:
+        quien_pide = por_id.get(r.requester_id)
+        quien_da = por_id.get(r.provider_id)
+        if quien_pide is None or quien_da is None:
+            # Un perfil borrado no debe tumbar la agenda entera.
+            continue
+        salida.append(_leer(r, quien_pide, quien_da, uid))
+    return salida
+
+
 async def _cargar(db: AsyncSession, reserva: Booking, uid: str) -> BookingRead:
     """Los dos perfiles de una reserva, en UNA consulta."""
     perfiles = (
@@ -191,21 +215,11 @@ async def _cargar(db: AsyncSession, reserva: Booking, uid: str) -> BookingRead:
 async def list_bookings(
     role: str = Query(default="all", pattern="^(all|received|sent)$"),
     status_filter: str | None = Query(default=None, alias="status"),
-    conversation_id: str | None = Query(
-        default=None,
-        description="Solo las que viven en esta conversacion (las del chat abierto).",
-    ),
     page: Page = Depends(pagination_params),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[BookingRead]:
     """Las sesiones en las que participa quien pregunta.
-
-    `conversation_id` las acota a las de un chat. Es lo que deja a la
-    conversacion ofrecer los botones de una sesion aunque el mensaje que la
-    pidio no este a la vista —o no sea una tarjeta, mientras la 0097 espere—.
-    No abre nada: el filtro de arriba sigue exigiendo que quien pregunta
-    participe, asi que el identificador de un chat ajeno devuelve vacio.
 
     `received` = «me las piden a mi» (la bandeja de solicitudes);
     `sent` = «las he pedido yo». Se separan porque son dos lecturas distintas
@@ -224,9 +238,6 @@ async def list_bookings(
         )
     if status_filter:
         consulta = consulta.where(Booking.status == status_filter)
-    if conversation_id is not None:
-        ensure_uuid(conversation_id, "Conversación no encontrada.")
-        consulta = consulta.where(Booking.conversation_id == conversation_id)
 
     reservas = (
         (
@@ -239,25 +250,70 @@ async def list_bookings(
         .scalars()
         .all()
     )
-    if not reservas:
-        return []
+    return await _leer_varias(db, list(reservas), uid)
 
-    # Los perfiles de las dos partes en UNA consulta, no una por fila: con
-    # veinte solicitudes eso eran cuarenta viajes a la base de datos.
-    ids = {r.requester_id for r in reservas} | {r.provider_id for r in reservas}
-    perfiles = (
-        (await db.execute(select(Profile).where(Profile.id.in_(ids)))).scalars().all()
+
+@router.get("/conversation/{conversation_id}", response_model=list[BookingRead])
+async def bookings_of_conversation(
+    conversation_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[BookingRead]:
+    """Las sesiones entre las dos personas de UN chat directo.
+
+    PARA QUE. Es lo que deja a la conversacion ofrecer los botones de una sesion
+    aunque el mensaje que la pidio no este a la vista —mas arriba en el
+    historial, de antes de este cambio, o texto normal mientras la 0097 espere—
+    y lo que pone al dia una tarjeta vieja.
+
+    SE BUSCAN POR LAS DOS PERSONAS, NO POR `bookings.conversation_id`. Esa
+    columna no sirve para esto por dos motivos: las sesiones de antes la tienen
+    vacia, y la politica de la tabla (0025) deja a las partes escribirla desde
+    el cliente, asi que no se puede dar por buena. Quienes son las dos personas
+    de un chat directo si lo sabe el servidor.
+
+    NO ABRE NADA. Si quien pregunta no es miembro de esa conversacion, o no es
+    un chat directo, la respuesta es una lista vacia: ni un 404 que confirme
+    que el identificador existe.
+    """
+    ensure_uuid(conversation_id, "Conversación no encontrada.")
+    uid = current_user.id
+    miembros = (
+        (
+            await db.execute(
+                select(ConversationMember.user_id)
+                .join(Conversation, Conversation.id == ConversationMember.conversation_id)
+                .where(
+                    ConversationMember.conversation_id == conversation_id,
+                    Conversation.kind == "direct",
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    por_id = {p.id: p for p in perfiles}
-    salida: list[BookingRead] = []
-    for r in reservas:
-        quien_pide = por_id.get(r.requester_id)
-        quien_da = por_id.get(r.provider_id)
-        if quien_pide is None or quien_da is None:
-            # Un perfil borrado no debe tumbar la agenda entera.
-            continue
-        salida.append(_leer(r, quien_pide, quien_da, uid))
-    return salida
+    if uid not in miembros or len(miembros) != 2:
+        return []
+    otro = next(m for m in miembros if m != uid)
+
+    reservas = (
+        (
+            await db.execute(
+                select(Booking)
+                .where(
+                    or_(
+                        (Booking.requester_id == uid) & (Booking.provider_id == otro),
+                        (Booking.requester_id == otro) & (Booking.provider_id == uid),
+                    )
+                )
+                .order_by(Booking.created_at.desc())
+                .limit(50)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return await _leer_varias(db, list(reservas), uid)
 
 
 @router.post("", response_model=BookingRead, status_code=status.HTTP_201_CREATED)
@@ -301,6 +357,21 @@ async def create_booking(
     if bloqueo:
         raise ForbiddenError("No puedes agendar una sesión con esta persona.")
 
+    # El chat de las dos partes, ANTES de escribir nada de la sesion: si no
+    # existia lo crea y confirma su propia transaccion, y eso soltaria el
+    # cerrojo de abajo.
+    conversacion_id = await _conversacion_de(db, current_user.id, payload.provider_id)
+
+    # UNA PETICION A LA VEZ POR QUIEN PIDE. Sin este cerrojo, dos solicitudes
+    # simultaneas —dos toques muy seguidos, o un toque mas el reintento de una
+    # red lenta— leian las dos «no hay ninguna pendiente» y creaban dos
+    # sesiones, dos avisos y dos tarjetas en el chat. La segunda espera aqui a
+    # que la primera confirme y entonces encuentra la suya. (SQLite ignora el
+    # cerrojo; en las pruebas no hay dos conexiones a la vez.)
+    await db.execute(
+        select(Profile.id).where(Profile.id == current_user.id).with_for_update()
+    )
+
     # Una solicitud pendiente a la vez con la misma persona.
     #
     # Sin esto, tocar dos veces «Agendar» —o volver atras y repetir— dejaba dos
@@ -318,9 +389,6 @@ async def create_booking(
     ).scalars().first()
     if existente is not None:
         return await _cargar(db, existente, current_user.id)
-
-    # El chat de las dos partes, ANTES de escribir la sesion (puede confirmar).
-    conversacion_id = await _conversacion_de(db, current_user.id, payload.provider_id)
 
     reserva = Booking(
         requester_id=current_user.id,
@@ -342,9 +410,16 @@ async def create_booking(
     # transaccion. Antes la escribia el movil despues, como un mensaje de texto
     # que no sabia de que sesion hablaba: por eso en Mensajes no se podia
     # aceptar nada. Ver `messaging/sesiones.py`.
-    await _dejar_en_el_chat(
-        db, conversacion_id=conversacion_id, quien=current_user.id, reserva=reserva
-    )
+    #
+    # SOLO SI LA APLICACION LO PIDE (`announce_in_chat`). Las versiones
+    # instaladas antes de este cambio siguen mandando su propio texto despues
+    # de crear la sesion; si el servidor escribiera ademas el suyo, a quien
+    # recibe le llegaria la misma solicitud dos veces. La que lo pide es la que
+    # ya no manda el texto.
+    if payload.announce_in_chat:
+        await _dejar_en_el_chat(
+            db, conversacion_id=conversacion_id, quien=current_user.id, reserva=reserva
+        )
 
     # El aviso lo crea el SERVIDOR, no el movil.
     #
@@ -419,6 +494,15 @@ async def update_booking(
         raise NotFoundError("Sesión no encontrada.")
 
 
+    # Lo que no vale se rechaza YA, antes de buscar o crear nada. La
+    # comprobacion que decide es la de abajo, con cerrojo; esta evita que una
+    # peticion que no va a ninguna parte deje abierta una conversacion.
+    if not transicion_permitida(reserva.status, payload.status, rol):
+        raise ValidationAppError(
+            "Esa acción ya no es posible sobre esta sesión.",
+            code="booking_transition_not_allowed",
+        )
+
     # Reprogramar tampoco vale hacia atras. Sin esto, la comprobacion de crear
     # se saltaba en un paso: se pedia la sesion para manana y acto seguido se
     # «reprogramaba» al mes pasado.
@@ -429,15 +513,18 @@ async def update_booking(
     if payload.scheduled_at is not None:
         _exigir_momento_futuro(payload.scheduled_at)
 
-    # Donde queda escrito. Las sesiones de antes de este cambio no tienen
-    # conversacion apuntada: se busca —o se crea— AHORA, antes de tocar nada,
-    # porque crearla confirma su propia transaccion. Por eso la reserva se
-    # vuelve a leer despues.
-    conversacion_id = reserva.conversation_id
-    if conversacion_id is None:
-        conversacion_id = await _conversacion_de(
-            db, reserva.requester_id, reserva.provider_id
-        )
+    # Donde queda escrito: EL CHAT DIRECTO DE LAS DOS PARTES, buscado ahora.
+    #
+    # NO SE USA `reserva.conversation_id`, aunque este puesto. La politica de la
+    # tabla (0025) deja a las partes escribir esa columna desde el cliente:
+    # quien la apuntara a un chat ajeno haria que el servidor escribiera ahi,
+    # con su firma, «Sesion cancelada: <lo que quiera>», y que los de ese chat
+    # leyeran los datos de una sesion que no es suya. De quien es la sesion si
+    # lo sabe el servidor, y de ahi sale la conversacion.
+    #
+    # Se busca —o se crea— AHORA, antes de tocar nada, porque crearla confirma
+    # su propia transaccion. Por eso la reserva se vuelve a leer despues.
+    conversacion_id = await _conversacion_de(db, reserva.requester_id, reserva.provider_id)
 
     # LA SESION SE VUELVE A LEER CON CERROJO, y lo que vale se decide DESPUES.
     #
@@ -449,7 +536,8 @@ async def update_booking(
     # recibe «eso ya no es posible», que el movil trata como «vuelve a leer».
     # (SQLite ignora el cerrojo; en las pruebas no hay dos conexiones a la vez.)
     await db.refresh(reserva, with_for_update=True)
-    if reserva.conversation_id is None:
+    if conversacion_id is not None and reserva.conversation_id != conversacion_id:
+        # Tambien corrige una apuntada a mano a otro sitio.
         reserva.conversation_id = conversacion_id
 
     if not transicion_permitida(reserva.status, payload.status, rol):

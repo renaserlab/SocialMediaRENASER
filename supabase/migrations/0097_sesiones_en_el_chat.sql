@@ -22,8 +22,11 @@
 --
 -- IDEMPOTENTE: se puede ejecutar dos veces.
 --
--- VUELTA ATRÁS: `drop table public.message_booking_context;`. Los mensajes se
--- quedan, como texto; las sesiones no se enteran.
+-- VUELTA ATRÁS: `drop table public.message_booking_context;` Y REINICIAR LA
+-- API, igual que al aplicarla y por el mismo motivo: recuerda por proceso que
+-- la tabla existe, y si desaparece debajo cada chat que se abra fallará al
+-- pedir sus mensajes hasta el reinicio. Los mensajes se quedan, como texto;
+-- las sesiones no se enteran.
 
 create table if not exists public.message_booking_context (
   -- Clave primaria Y clave ajena a la vez: un mensaje habla de UN hecho de UNA

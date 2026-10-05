@@ -117,11 +117,19 @@ export const BookingRepository = {
    * que la pidio no este a la vista, y lo que pone al dia una tarjeta vieja.
    */
   async deLaConversacion(conversacionId: string): Promise<Sesion[]> {
+    /*
+      UNA RUTA PROPIA Y NO UN FILTRO DEL LISTADO, a proposito: una API anterior
+      a este cambio responde 404 y quien llama se queda sin atajo, que es lo
+      correcto. Un filtro que esa API ignorase devolveria TODAS las sesiones de
+      la persona, y saldrian en este chat las que tiene con otros.
+
+      El servidor las busca por las dos personas del chat, asi que tambien
+      salen las de antes, que no tienen conversacion apuntada.
+    */
     const dtos = await apiRequest<SesionDto[]>(
-      `${API_V1}/bookings?role=all&limit=50&conversation_id=${encodeURIComponent(conversacionId)}`,
+      `${API_V1}/bookings/conversation/${encodeURIComponent(conversacionId)}`,
     );
-    // Una API anterior ignora el filtro y devuelve todas: se acota aqui tambien.
-    return dtos.map(aSesion).filter((sesion) => sesion.conversacionId === conversacionId);
+    return dtos.map(aSesion);
   },
 
   /**
@@ -147,6 +155,11 @@ export const BookingRepository = {
         // La zona del dispositivo: sin ella «5:00 PM» no significa lo mismo
         // para las dos partes.
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+        // «Deja tu la solicitud escrita en el chat»: esta version ya no manda
+        // su propio mensaje despues (ver `BookSessionSheet`). Una API anterior
+        // ignora el campo y devuelve la sesion sin conversacion; entonces si
+        // se manda el texto.
+        announce_in_chat: true,
       }),
     });
     return aSesion(dto);

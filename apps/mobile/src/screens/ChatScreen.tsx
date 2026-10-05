@@ -456,6 +456,20 @@ export function ChatScreen() {
       leerSesiones();
     }, 800);
   }, [ultimoAjeno, cargandoMensajes, leerSesiones]);
+  /*
+    Y AL VOLVER A ESTA PANTALLA. Aceptar en la agenda y volver al chat tiene
+    que encontrar la tarjeta al día: sin esto seguía ofreciendo «Aceptar», que
+    es justo el fallo reportado, por otro camino. (El registro de esa respuesta
+    es un mensaje propio, así que la relectura de arriba no lo ve.)
+  */
+  const enfocadaAntes = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      // La primera vez ya las pide el montaje.
+      if (enfocadaAntes.current) leerSesiones();
+      enfocadaAntes.current = true;
+    }, [leerSesiones]),
+  );
   // El respiro no sobrevive a la pantalla.
   useEffect(
     () => () => {
@@ -485,6 +499,29 @@ export function ChatScreen() {
   const sesionesAlFinal = useMemo(
     () => sesionesSinTarjeta(sesionesDelChat, messages, estadosDeSesion),
     [sesionesDelChat, messages, estadosDeSesion],
+  );
+  /*
+    Lo que pinta la lista: los mensajes y, al final, esas tarjetas COMO
+    ELEMENTOS, no como un pie. La lista solo se desplaza sola hasta abajo
+    cuando cambian sus elementos: en un pie, la tarjeta —que llega un instante
+    después del mensaje— se quedaba por debajo del borde y había que
+    desplazar para encontrar los botones.
+  */
+  const elementos = useMemo<Message[]>(
+    () =>
+      sesionesAlFinal.length === 0
+        ? messages
+        : [
+            ...messages,
+            ...sesionesAlFinal.map((sesion) => ({
+              id: `sesion:${sesion.id}`,
+              text: '',
+              sender: sesion.miRol === 'requester' ? ('me' as const) : ('them' as const),
+              createdAt: formatTime(sesion.creadaIso),
+              sesion: comoSolicitud(sesion),
+            })),
+          ],
+    [messages, sesionesAlFinal],
   );
 
   // En cuanto un mensaje trae esa versión, deja de hacer falta recordarla.
@@ -1199,7 +1236,7 @@ export function ChatScreen() {
       ) : null}
       <SinTecladoDelante>
         <FlashList
-          data={messages}
+          data={elementos}
           extraData={extraDeSesiones}
           keyExtractor={(item: Message) => item.id}
           contentContainerStyle={styles.messages}
@@ -1253,31 +1290,6 @@ export function ChatScreen() {
             if (evento.nativeEvent.contentOffset.y <= 24) cargarMasHistorial();
           }}
           scrollEventThrottle={200}
-          /*
-            LAS SESIONES VIVAS CUYA TARJETA NO ESTÁ ARRIBA, al final de la
-            conversación: es donde se mira, y con los mismos botones. Sin esto,
-            una sesión cuya solicitud no es una tarjeta —está más arriba en el
-            historial, es de antes, o el servidor aún no la marca— no se podría
-            responder desde aquí.
-          */
-          ListFooterComponent={
-            sesionesAlFinal.length > 0 ? (
-              <View>
-                {sesionesAlFinal.map((sesion) => (
-                  <SesionEnElChat
-                    key={sesion.id}
-                    sesion={comoSolicitud(sesion)}
-                    estado={estadosDeSesion.get(sesion.id) ?? sesion.estado}
-                    mio={sesion.miRol === 'requester'}
-                    nombre={headerName}
-                    hora={formatTime(sesion.creadaIso)}
-                    ocupada={sesionOcupada === sesion.id}
-                    alElegir={(accion) => void responderSesion(sesion.id, accion)}
-                  />
-                ))}
-              </View>
-            ) : null
-          }
           ListHeaderComponent={
             cargandoHistorial ? (
               <View style={styles.cargandoHistorial}>
