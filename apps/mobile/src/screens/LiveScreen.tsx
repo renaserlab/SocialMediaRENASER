@@ -1,25 +1,29 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
   View,
+  type TextStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
+import { ScrimDeMedio } from '@/components/CapaDeContraste';
+import { Pulsable } from '@/components/Pulsable';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
-import { Avatar } from '@/components/Avatar';
 import { Text } from '@/components/Text';
+import { ChatDeDirecto, type ChatDeDirectoRef } from '@/components/live/ChatDeDirecto';
+import { HojaDeCalidad } from '@/components/live/HojaDeCalidad';
+import { HojaDeEfectos } from '@/components/live/HojaDeEfectos';
+import { ReaccionesDeDirecto } from '@/components/live/ReaccionesDeDirecto';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { useSesionDeDirecto } from '@/hooks/useSesionDeDirecto';
-import { confirm } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
-import { haptics } from '@/lib/haptics';
 import { abrirAjustes } from '@/lib/permisos';
 import { esperaRestanteMs, puedeEnviarMensaje, registrarEnvio } from '@/lib/ritmoDeChat';
 import {
@@ -28,31 +32,15 @@ import {
   type EstadoDeDirecto,
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
-import {
-  elegirPistaPrincipal,
-  type PistasDeSala,
-  type SalaDeVideo,
-} from '@/live/salaDeVideo';
+import { elegirPistaPrincipal } from '@/live/salaDeVideo';
 import {
   LiveRepository,
-  REACCIONES,
-  reaccionesVacias,
-  type ConteoDeReacciones,
   type Emision,
   type EstadoDeEmision,
   type MensajeDeEmision,
-  type TipoDeReaccion,
 } from '@/repositories/LiveRepository';
 import { ApiError } from '@/services/api';
-import {
-  canalDeReacciones,
-  hayTiempoReal,
-  suscribirseAlChat,
-  suscribirseAlEstado,
-  type CanalDeReacciones,
-  type FilaDeMensaje,
-} from '@/services/directoEnVivo';
-import { useAppStore } from '@/store/useAppStore';
+import { hayTiempoReal, suscribirseAlEstado } from '@/services/directoEnVivo';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -60,91 +48,46 @@ import { useTranslation } from '@/i18n/useTranslation';
 /**
  * La pantalla de una emision en vivo.
  *
- * LO QUE NO HACE, Y ES LO IMPORTANTE: no pinta un reproductor, porque todavia
- * no hay SDK de video instalado. Lo que SI hay desde ahora es todo lo que
- * rodea al video, y esta escrito de forma que enchufar el SDK sea un cambio
- * pequeño y en un solo sitio:
+ * COMO SE VE (desde el 04/10/2026). La imagen ocupa la pantalla entera y todo
+ * lo demas va encima: una cabecera corta arriba, y abajo el chat, las
+ * reacciones y el campo para escribir, sobre un degradado que solo oscurece esa
+ * franja. Los controles de quien emite van en una columna a la derecha, donde
+ * no tapan a nadie. Antes el video era un recuadro de 3:4 con el chat debajo,
+ * y un directo se veia como un formulario con una foto.
  *
- *   - `live/salaDeVideo.ts` fija el contrato de la sala y trae una
- *     implementacion FALSA que rechaza `unirse` con «no hay proveedor». El dia
- *     que se apruebe el paquete se escribe la segunda implementacion y se
- *     registra con una linea.
- *   - `live/maquinaDeDirecto.ts` decide, sin React delante, cual de los catorce
- *     estados se pinta —conectando, reconectando, permiso denegado, proveedor
- *     no configurado, error recuperable, error definitivo…— y cuando se puede
- *     reintentar. Se prueba con `node --test`.
- *   - `hooks/useSesionDeDirecto.ts` es el cable entre las dos cosas y React.
+ * ESTA PANTALLA NO DECIDE CASI NADA, y cada cosa tiene su sitio:
  *
- * Esta pantalla, por tanto, ya no adivina nada sobre el video: pinta
- * `vista.estado`. Con la bandera apagada ese estado es
- * `proveedor_no_configurado` y se dice con todas las letras —todavia no hay
- * video, el chat si funciona— en vez de dejar girando un indicador de carga
- * contra una sala que nadie va a servir. Un spinner eterno miente igual que un
- * video de ejemplo, solo que mas despacio.
+ *   - el estado del video —conectando, reconectando, sin permiso, sin
+ *     proveedor…— lo decide `live/maquinaDeDirecto.ts`, y aqui se pinta su
+ *     cartel. `hooks/useSesionDeDirecto.ts` es el cable;
+ *   - el chat (`components/live/ChatDeDirecto.tsx`) y las reacciones
+ *     (`components/live/ReaccionesDeDirecto.tsx`) llevan su propio estado: un
+ *     mensaje o un corazon ya no repintan la imagen ni los controles;
+ *   - los efectos de camara y la calidad de imagen son de la sala
+ *     (`SalaDeVideo`), y sus hojas solo pintan lo que ella dice.
  *
- * Lo que si es real y funciona hoy: la sala, el chat en tiempo real y las
- * reacciones. Ver `services/directoEnVivo.ts` para el porque de que cada cosa
- * viaje por un camino distinto.
+ * Con la bandera apagada el estado es `proveedor_no_configurado` y se dice con
+ * todas las letras —todavia no hay video, el chat si funciona— en vez de dejar
+ * girando un indicador de carga contra una sala que nadie va a servir.
  */
 
 // Superficie a pantalla completa sobre contexto de media: siempre oscura.
 const media = palette('dark');
 
-/**
- * El simbolo de cada reaccion.
- *
- * Son emoji y no iconos de Feather porque el juego de iconos no tiene aplauso,
- * ni fuego, ni risa: habria que representarlos con otra cosa que no significa
- * lo mismo, y una reaccion que no se reconoce de un vistazo no sirve de nada.
- * Cada clave es exactamente uno de los valores que acepta el servidor.
- */
-const SIMBOLO_DE_REACCION: Record<TipoDeReaccion, string> = {
-  corazon: '❤️',
-  aplauso: '👏',
-  fuego: '🔥',
-  asombro: '😮',
-  risa: '😂',
-};
+/** El velo de los botones que van encima de la imagen. */
+const VELO = 'rgba(0,0,0,0.45)';
 
-/** Como se lee cada reaccion en voz alta. Claves, no textos. */
-const NOMBRE_DE_REACCION: Record<TipoDeReaccion, TranslationKey> = {
-  corazon: 'live.reactionHeart',
-  aplauso: 'live.reactionClap',
-  fuego: 'live.reactionFire',
-  asombro: 'live.reactionWow',
-  risa: 'live.reactionLaugh',
-};
+/** Cuanto de la pantalla puede ocupar el chat, y entre que limites. */
+const PARTE_DEL_CHAT = 0.32;
+const ALTO_MINIMO_DEL_CHAT = 150;
+const ALTO_MAXIMO_DEL_CHAT = 300;
 
 /**
- * Cuantas burbujas de reaccion pueden estar volando a la vez.
- *
- * En un directo animado llegan decenas por segundo, y otras tantas vistas
- * animadas simultaneas tiran los fotogramas al suelo. Pasado el tope se
- * descartan las mas viejas: nadie cuenta las burbujas, y una emision a
- * trompicones si se nota.
+ * En web el campo de texto enfocado lleva el anillo del navegador
+ * (`outline: auto`). Se quita con `outlineStyle`; `outlineWidth: 0` no basta.
  */
-const MAXIMO_DE_BURBUJAS = 24;
-
-/** Lo que tarda una burbuja en subir y desaparecer. */
-const DURACION_DE_BURBUJA_MS = 1_400;
-
-/** Cuanto sube, en puntos. */
-const ALTURA_DE_BURBUJA = 190;
-
-/**
- * Espera antes de volver a pedir la lista de mensajes.
- *
- * La fila que llega por Realtime trae `user_id` pero no el nombre, asi que la
- * primera vez que escribe alguien desconocido hay que preguntarle al servidor.
- * El pequeño retraso agrupa la rafaga inicial de una sala que se llena en una
- * sola peticion en vez de una por persona.
- */
-const ESPERA_ANTES_DE_RECARGAR_MS = 250;
-
-/** Quien escribio un mensaje, para poder pintar las filas de Realtime. */
-type Autor = { nombre: string; avatarUrl?: string };
-
-type Burbuja = { clave: number; tipo: TipoDeReaccion; carril: number };
+const SIN_ANILLO_DEL_NAVEGADOR =
+  Platform.OS === 'web' ? ({ outlineStyle: 'none' } as unknown as TextStyle) : null;
 
 /**
  * Traduce un fallo del servidor a algo que se pueda leer.
@@ -209,70 +152,20 @@ const ESTADOS_CON_IMAGEN: readonly EstadoDeDirecto[] = [
 ];
 
 /**
- * El hueco del video.
+ * El cartel del estado, cuando NO hay imagen que ensenar.
  *
- * CON IMAGEN, LA IMAGEN. En los estados con sala, si hay una pista que ensenar
- * (`elegirPistaPrincipal`: la propia para quien emite, la del anfitrion para
- * quien mira) se dibuja con el componente de la sala. Encima, un aviso pequeno
- * si la conexion va lenta o se esta recuperando: la imagen se congela y sin
- * decirlo parece que el telefono se ha colgado.
- *
- * SIN IMAGEN, EL CARTEL DEL ESTADO, como siempre. Y aqui NO SE DECIDE NADA
- * mas. Antes esta funcion tenia su propia escalera de `if` sobre
- * el estado de la emision y sobre `reproduccionDisponible`, y esa escalera era
- * imposible de comprobar sin abrir la aplicacion. Ahora el estado lo decide
- * `live/maquinaDeDirecto.ts` —catorce estados, probados uno a uno— y aqui solo
- * se pinta el cartel que le corresponde.
+ * AQUI NO SE DECIDE NADA. El estado lo decide `live/maquinaDeDirecto.ts`
+ * —catorce estados, probados uno a uno— y aqui solo se pinta el cartel que le
+ * corresponde.
  *
  * Lo unico que se añade a lo que dice la maquina son los DATOS que ella no
  * puede conocer sin importar medio proyecto: la fecha a la que esta programada
  * y la hora a la que termino. El cartel generico sigue estando debajo por si no
  * hay fecha.
  */
-function PanelDeVideo({
-  emision,
-  estado,
-  pistas,
-  VistaDePista,
-  emito,
-  camaraFrontal,
-}: {
-  emision: Emision;
-  estado: EstadoDeDirecto;
-  pistas: PistasDeSala;
-  VistaDePista: SalaDeVideo['VistaDePista'];
-  /** Esta persona tiene permiso de publicar: ve su propia camara. */
-  emito: boolean;
-  camaraFrontal: boolean;
-}) {
+function CartelDeVideo({ emision, estado }: { emision: Emision; estado: EstadoDeDirecto }) {
   const { t } = useTranslation();
   const cartel = cartelDelEstado(estado, emision.puedeGestionar);
-
-  const pista = ESTADOS_CON_IMAGEN.includes(estado)
-    ? elegirPistaPrincipal(pistas.video, { emito })
-    : null;
-  if (pista && VistaDePista) {
-    const aviso =
-      estado === 'conexion_lenta' || estado === 'reconectando' ? t(cartel.titulo as TranslationKey) : null;
-    return (
-      <View style={[estilos.panelConImagen, { borderColor: media.border }]}>
-        <VistaDePista
-          pistaId={pista.id}
-          // Espejo solo en la camara frontal PROPIA: a los demas se les ve
-          // como son, y la trasera no se refleja.
-          espejo={pista.local && camaraFrontal}
-          estilo={StyleSheet.absoluteFill}
-        />
-        {aviso ? (
-          <View style={estilos.avisoSobreImagen}>
-            <Text variant="caption" weight="700" color={media.text}>
-              {aviso}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-    );
-  }
 
   let detalle = t(cartel.cuerpo as TranslationKey);
   if (estado === 'programado' && emision.programadaParaIso) {
@@ -282,28 +175,10 @@ function PanelDeVideo({
   }
 
   return (
-    <AvisoDeVideo
-      icono={cartel.icono as keyof typeof Feather.glyphMap}
-      titulo={t(cartel.titulo as TranslationKey)}
-      detalle={detalle}
-    />
-  );
-}
-
-function AvisoDeVideo({
-  icono,
-  titulo,
-  detalle,
-}: {
-  icono: keyof typeof Feather.glyphMap;
-  titulo: string;
-  detalle: string;
-}) {
-  return (
-    <View style={[estilos.panelDeVideo, { borderColor: media.border }]}>
-      <Feather name={icono} size={30} color={media.text} />
+    <View style={[estilos.cartel, { borderColor: media.border }]}>
+      <Feather name={cartel.icono as keyof typeof Feather.glyphMap} size={30} color={media.text} />
       <Text variant="titleMedium" weight="800" color={media.text} style={estilos.centrado}>
-        {titulo}
+        {t(cartel.titulo as TranslationKey)}
       </Text>
       <Text variant="secondary" color={media.textMuted} style={estilos.centrado}>
         {detalle}
@@ -313,44 +188,62 @@ function AvisoDeVideo({
 }
 
 /**
- * Los controles de quien emite: microfono, camara, girar y empezar.
+ * Los controles de quien emite: microfono, camara, girar y efectos.
  *
  * SOLO SE PINTAN SI EL SERVIDOR AUTORIZO A PUBLICAR (`can_publish` de la
  * credencial). No basta con `can_manage`: gestionar una emision —terminarla,
  * moderar el chat— y emitir video son dos permisos distintos, y quien decide el
  * segundo es el servidor al firmar la credencial de 100ms, no la pantalla. Sin
- * proveedor configurado `can_publish` no llega en true y esta fila no aparece:
- * un boton de microfono sobre una sala sin video es una maqueta.
+ * proveedor configurado `can_publish` no llega en true y esta columna no
+ * aparece: un boton de microfono sobre una sala sin video es una maqueta.
  *
- * `ocupado` deshabilita los cuatro a la vez. Es el freno de la doble pulsacion,
- * y lo lleva la maquina: aqui solo se obedece.
+ * VAN EN COLUMNA, A LA DERECHA: es donde no tapan la cara de quien emite ni el
+ * chat. `ocupado` deshabilita los de la sala a la vez. Es el freno de la doble
+ * pulsacion, y lo lleva la maquina: aqui solo se obedece.
+ *
+ * EL DE EFECTOS ESTA SIEMPRE, y atenuado si este telefono no los admite: al
+ * pulsarlo, la hoja explica por que (falta actualizar la aplicacion, el
+ * sistema es antiguo). Esconderlo dejaria a quien emite sin saber que la
+ * opcion existe ni por que no la tiene.
  */
 function ControlesDeAnfitrion({
   vista,
-  enDirecto,
+  hayEfectos,
+  efectoPuesto,
   alAlternarCamara,
   alAlternarMicrofono,
   alCambiarCamara,
-  alEmpezar,
+  alAbrirEfectos,
 }: {
   vista: VistaDeDirecto;
-  enDirecto: boolean;
+  hayEfectos: boolean;
+  efectoPuesto: boolean;
   alAlternarCamara: () => void;
   alAlternarMicrofono: () => void;
   alCambiarCamara: () => void;
-  alEmpezar: () => void;
+  alAbrirEfectos: () => void;
 }) {
   const { t } = useTranslation();
   if (!vista.puedePublicar) return null;
 
   return (
-    <View style={estilos.filaDeControles}>
+    <View style={estilos.columnaDeControles}>
       <BotonDeControl
-        icono={vista.microfono ? 'mic' : 'mic-off'}
-        etiqueta={vista.microfono ? t('live.micOff') : t('live.micOn')}
-        activo={vista.microfono}
-        desactivado={vista.ocupado}
-        alPulsar={alAlternarMicrofono}
+        icono="aperture"
+        etiqueta={t('live.effects')}
+        activo={efectoPuesto}
+        // Nunca se deshabilita: el efecto se tiene que poder quitar con la
+        // sala ocupada, y la hoja es donde se explica por que no hay.
+        desactivado={false}
+        atenuado={!hayEfectos}
+        alPulsar={alAbrirEfectos}
+      />
+      <BotonDeControl
+        icono="refresh-cw"
+        etiqueta={t('live.flipCamera')}
+        activo={false}
+        desactivado={vista.ocupado || !vista.camara}
+        alPulsar={alCambiarCamara}
       />
       <BotonDeControl
         icono={vista.camara ? 'video' : 'video-off'}
@@ -360,28 +253,12 @@ function ControlesDeAnfitrion({
         alPulsar={alAlternarCamara}
       />
       <BotonDeControl
-        icono="refresh-cw"
-        etiqueta={t('live.flipCamera')}
-        activo={false}
-        desactivado={vista.ocupado || !vista.camara}
-        alPulsar={alCambiarCamara}
+        icono={vista.microfono ? 'mic' : 'mic-off'}
+        etiqueta={vista.microfono ? t('live.micOff') : t('live.micOn')}
+        activo={vista.microfono}
+        desactivado={vista.ocupado}
+        alPulsar={alAlternarMicrofono}
       />
-      {enDirecto ? null : (
-        <Pressable
-          onPress={alEmpezar}
-          disabled={vista.ocupado}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: vista.ocupado }}
-          style={[
-            estilos.botonDeTexto,
-            { borderColor: media.border, opacity: vista.ocupado ? 0.45 : 1 },
-          ]}
-        >
-          <Text variant="secondary" weight="700" color={media.text}>
-            {t('live.goLive')}
-          </Text>
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -391,81 +268,151 @@ function BotonDeControl({
   etiqueta,
   activo,
   desactivado,
+  atenuado = false,
   alPulsar,
 }: {
   icono: keyof typeof Feather.glyphMap;
   etiqueta: string;
   activo: boolean;
   desactivado: boolean;
+  /** Se puede pulsar, pero se ve apagado: lo que ofrece no esta disponible. */
+  atenuado?: boolean;
   alPulsar: () => void;
 }) {
   return (
-    <Pressable
+    <Pulsable
       onPress={alPulsar}
       disabled={desactivado}
+      opacidad={desactivado || atenuado ? 0.45 : 1}
       accessibilityRole="button"
       accessibilityLabel={etiqueta}
       accessibilityState={{ disabled: desactivado, selected: activo }}
-      style={[
-        estilos.botonRedondo,
-        { borderColor: media.border, borderWidth: 1, opacity: desactivado ? 0.45 : 1 },
-      ]}
+      style={[estilos.botonRedondo, estilos.sobreImagen]}
     >
       <Feather name={icono} size={18} color={media.text} />
-    </Pressable>
+    </Pulsable>
   );
 }
 
-/* ---------------------------------------------------------- Reacciones ----- */
+/** Un boton de texto sobre la imagen. `peligro` para terminar la emision. */
+function BotonDeTexto({
+  texto,
+  alPulsar,
+  desactivado = false,
+  peligro = false,
+}: {
+  texto: string;
+  alPulsar: () => void;
+  desactivado?: boolean;
+  peligro?: boolean;
+}) {
+  return (
+    <Pulsable
+      onPress={alPulsar}
+      disabled={desactivado}
+      opacidad={desactivado ? 0.45 : 1}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: desactivado }}
+      style={[
+        estilos.botonDeTexto,
+        estilos.sobreImagen,
+        { borderColor: peligro ? media.danger : media.border },
+      ]}
+    >
+      <Text variant="secondary" weight="700" color={peligro ? media.danger : media.text}>
+        {texto}
+      </Text>
+    </Pulsable>
+  );
+}
+
+/* -------------------------------------------------------------- Escribir --- */
 
 /**
- * Una reaccion que sube y se apaga.
+ * El campo para escribir en el chat.
  *
- * Se monta y se borra sola: la pantalla solo la mete en la lista. El aviso de
- * que ya termino va por `setTimeout` y no por la animacion, porque lo unico
- * que hace falta es saber CUANDO quitarla del arbol, y para eso el reloj de
- * JavaScript basta y no arrastra ninguna sutileza de hilos.
+ * Lleva su propio estado: cada letra repinta este componente y nada mas. Antes
+ * el texto era estado de la pantalla, y escribir repintaba el video.
  */
-function BurbujaDeReaccion({
-  tipo,
-  carril,
-  reduceMotion,
-  alTerminar,
+function EscribirEnElChat({
+  emisionId,
+  alAvisar,
+  alGuardar,
 }: {
-  tipo: TipoDeReaccion;
-  carril: number;
-  reduceMotion: boolean;
-  alTerminar: () => void;
+  emisionId: string;
+  alAvisar: (texto: string | null) => void;
+  /** El mensaje ya esta en el servidor. */
+  alGuardar: (mensaje: MensajeDeEmision) => void;
 }) {
-  const avance = useSharedValue(0);
-  const duracion = reduceMotion ? 500 : DURACION_DE_BURBUJA_MS;
-  // Con "reducir movimiento" activo la reaccion aparece y se apaga sin viajar:
-  // sigue confirmando el toque, que es para lo que esta.
-  const subida = reduceMotion ? 0 : ALTURA_DE_BURBUJA;
+  const { t } = useTranslation();
+  const [texto, setTexto] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const envios = useRef<number[]>([]);
 
-  useEffect(() => {
-    avance.value = withTiming(1, { duration: duracion });
-    const corte = setTimeout(alTerminar, duracion);
-    return () => clearTimeout(corte);
-    // Solo al montar: cada burbuja vive una vez.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const enviar = useCallback(async () => {
+    const cuerpo = texto.trim();
+    if (!cuerpo || enviando) return;
 
-  const estilo = useAnimatedStyle(() => ({
-    opacity: 1 - avance.value,
-    transform: [
-      { translateY: -avance.value * subida },
-      { scale: 0.85 + avance.value * 0.35 },
-    ],
-  }));
+    const ahora = Date.now();
+    if (!puedeEnviarMensaje(envios.current, ahora)) {
+      const segundos = Math.max(1, Math.ceil(esperaRestanteMs(envios.current, ahora) / 1000));
+      // El freno de verdad esta en el servidor; este solo evita perder el texto
+      // contra un 409 que llega cuando el campo ya se ha vaciado.
+      alAvisar(`Vas demasiado rápido. Espera ${segundos} s.`);
+      return;
+    }
+    envios.current = registrarEnvio(envios.current, ahora);
+
+    setTexto('');
+    alAvisar(null);
+    setEnviando(true);
+    try {
+      /*
+        EL POST SOLO ESCRIBE: el mensaje entra por la suscripcion, igual que el
+        de cualquier otra persona. Quien recibe `alGuardar` decide si hace falta
+        pintarlo desde aqui (solo sin tiempo real).
+      */
+      alGuardar(await LiveRepository.enviarMensaje(emisionId, cuerpo));
+    } catch (error) {
+      // Lo escrito vuelve al campo: perder el texto por un limite de ritmo es
+      // la forma mas rapida de que alguien deje de escribir.
+      setTexto(cuerpo);
+      alAvisar(mensajeDeError(error, t('live.sendFailed')));
+    } finally {
+      setEnviando(false);
+    }
+  }, [texto, enviando, emisionId, alAvisar, alGuardar, t]);
+
+  const puede = Boolean(texto.trim()) && !enviando;
 
   return (
-    <Animated.View
-      pointerEvents="none"
-      style={[estilos.burbuja, { left: `${carril * 70}%` }, estilo]}
-    >
-      <Text style={estilos.simboloGrande}>{SIMBOLO_DE_REACCION[tipo]}</Text>
-    </Animated.View>
+    <View style={estilos.filaDeEscritura}>
+      <TextInput
+        value={texto}
+        onChangeText={setTexto}
+        onSubmitEditing={() => void enviar()}
+        returnKeyType="send"
+        placeholder={t('live.messagePlaceholder')}
+        placeholderTextColor={media.textMuted}
+        accessibilityLabel={t('live.messageLabel')}
+        style={[
+          estilos.campo,
+          { color: media.text, borderColor: media.border },
+          SIN_ANILLO_DEL_NAVEGADOR,
+        ]}
+      />
+      <Pulsable
+        onPress={() => void enviar()}
+        disabled={!puede}
+        opacidad={puede ? 1 : 0.55}
+        accessibilityLabel={t('chat.sendMessage')}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !puede }}
+        style={[estilos.botonRedondo, estilos.sobreImagen]}
+      >
+        <Feather name="send" size={18} color={media.text} />
+      </Pulsable>
+    </View>
   );
 }
 
@@ -477,113 +424,34 @@ export function LiveScreen() {
   const parametros = useLocalSearchParams<{ id: string }>();
   const emisionId = typeof parametros.id === 'string' ? parametros.id : '';
   const reduceMotion = useReduceMotion();
-  const usuario = useAppStore((estado) => estado.user);
+  const { height: altoDeVentana } = useWindowDimensions();
 
   const [emision, setEmision] = useState<Emision | null>(null);
   const [errorDeCarga, setErrorDeCarga] = useState<string | null>(null);
-  const [mensajes, setMensajes] = useState<MensajeDeEmision[]>([]);
-  const [texto, setTexto] = useState('');
   const [aviso, setAviso] = useState<string | null>(null);
-  const [enviando, setEnviando] = useState(false);
-  const [totales, setTotales] = useState<ConteoDeReacciones>(reaccionesVacias);
-  const [burbujas, setBurbujas] = useState<Burbuja[]>([]);
+  const [hojaDeEfectos, setHojaDeEfectos] = useState(false);
+  const [hojaDeCalidad, setHojaDeCalidad] = useState(false);
 
-  /*
-    Quien escribio cada mensaje. La fila que entrega Realtime trae `user_id` y
-    nada mas —el nombre y el avatar viven en otra tabla—, asi que este mapa es
-    lo que permite pintar un mensaje nuevo sin volver a preguntar.
-  */
-  const autores = useRef(new Map<string, Autor>());
-  const envios = useRef<number[]>([]);
-  const recarga = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reacciones = useRef<CanalDeReacciones | null>(null);
-  const contadorDeBurbujas = useRef(0);
   const estadoAnterior = useRef<EstadoDeEmision | null>(null);
-  const listaRef = useRef<ScrollView | null>(null);
+  const chat = useRef<ChatDeDirectoRef | null>(null);
 
   const puedeGestionar = emision?.puedeGestionar ?? false;
   const chatAbierto = emision?.estado === 'live';
 
-  const visibles = useMemo(() => mensajes.filter((mensaje) => !mensaje.oculto), [mensajes]);
-
   /* ------------------------------------------------------------ Cargas ---- */
-
-  const cargarMensajes = useCallback(async () => {
-    const lista = await LiveRepository.listarMensajes(emisionId);
-    lista.forEach((mensaje) => {
-      autores.current.set(mensaje.usuarioId, {
-        nombre: mensaje.usuarioNombre,
-        avatarUrl: mensaje.usuarioAvatarUrl,
-      });
-    });
-    setMensajes(lista);
-  }, [emisionId]);
-
-  const programarRecarga = useCallback(() => {
-    if (recarga.current) return;
-    recarga.current = setTimeout(() => {
-      recarga.current = null;
-      cargarMensajes().catch(() => {
-        // Un fallo aqui solo significa que ese mensaje tarda un poco mas en
-        // aparecer; el siguiente evento vuelve a intentarlo.
-      });
-    }, ESPERA_ANTES_DE_RECARGAR_MS);
-  }, [cargarMensajes]);
 
   const refrescarFicha = useCallback(() => {
     LiveRepository.obtener(emisionId)
       .then((datos) => {
+        // La ficha nueva trae los totales del servidor: `ReaccionesDeDirecto`
+        // los toma como la verdad y deja de lado lo que llevaba contado.
         setEmision(datos);
-        setTotales(datos.reacciones);
       })
       .catch(() => {
         // Lo que ya se sabe de la emision sigue siendo valido: no se borra la
         // pantalla por no haber podido refrescarla.
       });
   }, [emisionId]);
-
-  /* ------------------------------------------------- Mensajes en directo -- */
-
-  const alLlegarFila = useCallback(
-    (fila: FilaDeMensaje) => {
-      const autor = autores.current.get(fila.user_id);
-      if (!autor) {
-        /*
-          No sabemos quien ha escrito. Antes que pintar el mensaje con un
-          nombre inventado o con un hueco, se pide la lista al servidor —que si
-          trae los nombres— y entra completo un cuarto de segundo despues. Solo
-          pasa la primera vez que habla cada persona.
-        */
-        programarRecarga();
-        return;
-      }
-
-      const mensaje: MensajeDeEmision = {
-        id: fila.id,
-        emisionId: fila.session_id,
-        usuarioId: fila.user_id,
-        usuarioNombre: autor.nombre,
-        usuarioAvatarUrl: autor.avatarUrl,
-        cuerpo: fila.body,
-        creadoEnIso: fila.created_at,
-        oculto: Boolean(fila.hidden),
-      };
-
-      setMensajes((previos) => {
-        const posicion = previos.findIndex((otro) => otro.id === mensaje.id);
-        // Si ya estaba es un UPDATE, y en este chat eso significa que alguien lo
-        // ha escondido: se sustituye para que desaparezca en todas las
-        // pantallas, no solo en la de quien modera.
-        if (posicion >= 0) {
-          const copia = previos.slice();
-          copia[posicion] = mensaje;
-          return copia;
-        }
-        return [...previos, mensaje];
-      });
-    },
-    [programarRecarga],
-  );
 
   useEffect(() => {
     if (!emisionId) {
@@ -596,20 +464,12 @@ export function LiveScreen() {
       .then((datos) => {
         if (!vigente) return;
         setEmision(datos);
-        setTotales(datos.reacciones);
         estadoAnterior.current = datos.estado;
       })
       .catch((error) => {
         if (vigente) setErrorDeCarga(mensajeDeError(error, t('live.openFailed')));
       });
 
-    cargarMensajes().catch(() => {
-      // Sin esto un fallo de carga dejaba el chat vacio, como si nadie hubiera
-      // escrito nunca, en vez de avisar de que no se pudo leer.
-      if (vigente) setAviso(t('chat.loadFailed'));
-    });
-
-    const dejarChat = suscribirseAlChat(emisionId, alLlegarFila);
     const dejarEstado = suscribirseAlEstado(emisionId, (fila) => {
       const anterior = estadoAnterior.current;
       estadoAnterior.current = fila.status;
@@ -634,125 +494,27 @@ export function LiveScreen() {
 
     return () => {
       vigente = false;
-      dejarChat();
       dejarEstado();
-      if (recarga.current) {
-        clearTimeout(recarga.current);
-        recarga.current = null;
-      }
     };
-  }, [emisionId, alLlegarFila, cargarMensajes, refrescarFicha]);
+    // `t` no entra: cambiar de idioma no puede volver a abrir la emision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emisionId, refrescarFicha]);
 
-  /*
-    El propio nombre, para que los mensajes de uno aparezcan al instante en vez
-    de esperar a la recarga que dispara un autor desconocido.
-  */
-  useEffect(() => {
-    if (usuario?.id) {
-      autores.current.set(usuario.id, { nombre: usuario.fullName });
-    }
-  }, [usuario?.id, usuario?.fullName]);
+  /* --------------------------------------------------------- El chat ------ */
 
-  /* ---------------------------------------------------------- Burbujas ---- */
-
-  const quitarBurbuja = useCallback((clave: number) => {
-    setBurbujas((previas) => previas.filter((burbuja) => burbuja.clave !== clave));
+  const alFallarElChat = useCallback((error: unknown, respaldo: string) => {
+    setAviso(mensajeDeError(error, respaldo));
   }, []);
 
-  const soltarBurbuja = useCallback((tipo: TipoDeReaccion) => {
-    contadorDeBurbujas.current += 1;
-    const clave = contadorDeBurbujas.current;
-    // Carril al azar: en vertical y todas en la misma columna, una rafaga se ve
-    // como un solo simbolo parpadeando.
-    const carril = Math.random();
-    setBurbujas((previas) => {
-      const sitio = previas.length >= MAXIMO_DE_BURBUJAS ? previas.slice(1) : previas;
-      return [...sitio, { clave, tipo, carril }];
-    });
+  const alGuardarMensaje = useCallback((guardado: MensajeDeEmision) => {
+    /*
+      Con tiempo real el mensaje entra por la suscripcion, como el de cualquier
+      otra persona. La excepcion es no tenerlo (modo demo, sin Supabase
+      configurado), donde nadie lo va a entregar y sin esto el chat se quedaria
+      mudo con lo que uno mismo escribe.
+    */
+    if (!hayTiempoReal) chat.current?.anadirPropio(guardado);
   }, []);
-
-  /* -------------------------------------------------- Canal de reacciones -- */
-
-  useEffect(() => {
-    // Fuera de directo el servidor cierra las reacciones (409
-    // `live_reactions_closed`): no se abre un canal para que nadie lo use.
-    if (!emisionId || emision?.estado !== 'live') return;
-
-    const canal = canalDeReacciones(emisionId);
-    reacciones.current = canal;
-    const dejarDeEscuchar = canal.alRecibir((tipo) => {
-      soltarBurbuja(tipo);
-      setTotales((previos) => ({ ...previos, [tipo]: previos[tipo] + 1 }));
-    });
-
-    return () => {
-      dejarDeEscuchar();
-      canal.cerrar();
-      reacciones.current = null;
-    };
-  }, [emisionId, emision?.estado, soltarBurbuja]);
-
-  const reaccionar = useCallback(
-    (tipo: TipoDeReaccion) => {
-      /*
-        LA ANIMACION NO ESPERA AL SERVIDOR. Va primero, en el mismo gesto: es lo
-        que hace que el boton se sienta conectado. Lo que viaja despues —el
-        Broadcast a quien mira, el resumen al backend— puede tardar o fallar sin
-        que se note aqui.
-      */
-      soltarBurbuja(tipo);
-      haptics.light();
-      setTotales((previos) => ({ ...previos, [tipo]: previos[tipo] + 1 }));
-      reacciones.current?.enviar(tipo);
-    },
-    [soltarBurbuja],
-  );
-
-  /* ------------------------------------------------------------- Enviar --- */
-
-  const enviar = useCallback(async () => {
-    const cuerpo = texto.trim();
-    if (!cuerpo || enviando) return;
-
-    const ahora = Date.now();
-    if (!puedeEnviarMensaje(envios.current, ahora)) {
-      const segundos = Math.max(1, Math.ceil(esperaRestanteMs(envios.current, ahora) / 1000));
-      // El freno de verdad esta en el servidor; este solo evita perder el texto
-      // contra un 409 que llega cuando el campo ya se ha vaciado.
-      setAviso(`Vas demasiado rápido. Espera ${segundos} s.`);
-      return;
-    }
-    envios.current = registrarEnvio(envios.current, ahora);
-
-    setTexto('');
-    setAviso(null);
-    setEnviando(true);
-    try {
-      const guardado = await LiveRepository.enviarMensaje(emisionId, cuerpo);
-      /*
-        EL POST SOLO ESCRIBE: el mensaje entra por la suscripcion, igual que el
-        de cualquier otra persona. La excepcion es no tener tiempo real (modo
-        demo, sin Supabase configurado), donde nadie lo va a entregar y sin esto
-        el chat se quedaria mudo con lo que uno mismo escribe.
-      */
-      if (!hayTiempoReal) {
-        autores.current.set(guardado.usuarioId, {
-          nombre: guardado.usuarioNombre,
-          avatarUrl: guardado.usuarioAvatarUrl,
-        });
-        setMensajes((previos) =>
-          previos.some((otro) => otro.id === guardado.id) ? previos : [...previos, guardado],
-        );
-      }
-    } catch (error) {
-      // Lo escrito vuelve al campo: perder el texto por un limite de ritmo es
-      // la forma mas rapida de que alguien deje de escribir.
-      setTexto(cuerpo);
-      setAviso(mensajeDeError(error, t('live.sendFailed')));
-    } finally {
-      setEnviando(false);
-    }
-  }, [texto, enviando, emisionId]);
 
   /* -------------------------------------------------------- Moderacion ---- */
 
@@ -791,7 +553,7 @@ export function LiveScreen() {
     [emisionId, t],
   );
 
-  const { vista, sesion, pistas, VistaDePista } = useSesionDeDirecto({
+  const { vista, sesion, pistas, VistaDePista, efectos, calidad } = useSesionDeDirecto({
     emisionId,
     estadoDeSesion: emision?.estado ?? null,
     esAnfitrion: puedeGestionar,
@@ -801,29 +563,6 @@ export function LiveScreen() {
 
   const terminar = useCallback(() => void sesion.terminar(), [sesion]);
   const empezar = useCallback(() => void sesion.empezar(), [sesion]);
-
-  const ocultar = useCallback(
-    async (mensaje: MensajeDeEmision) => {
-      const seguro = await confirm({
-        title: t('live.hideConfirmTitle'),
-        message: mensaje.cuerpo,
-        confirmLabel: t('live.hide'),
-        destructive: true,
-      });
-      if (!seguro) return;
-      try {
-        const oculto = await LiveRepository.ocultarMensaje(mensaje.id);
-        // Tambien llegara por Realtime; se aplica ya para que quien modera vea
-        // el efecto en el mismo momento en que lo pide.
-        setMensajes((previos) =>
-          previos.map((otro) => (otro.id === oculto.id ? { ...otro, oculto: true } : otro)),
-        );
-      } catch (error) {
-        setAviso(mensajeDeError(error, t('live.hideFailed')));
-      }
-    },
-    [],
-  );
 
   /* ------------------------------------------------------------ Pintado --- */
 
@@ -884,20 +623,63 @@ export function LiveScreen() {
     );
   }
 
+  /*
+    Que imagen ocupa la pantalla. La propia para quien emite (su vista previa),
+    la del anfitrion para quien mira; `null` = no hay imagen y se pinta el
+    cartel del estado. Lo decide `elegirPistaPrincipal`, no esta pantalla.
+  */
+  const pista = ESTADOS_CON_IMAGEN.includes(vista.estado)
+    ? elegirPistaPrincipal(pistas.video, { emito: vista.puedePublicar })
+    : null;
+  const hayImagen = Boolean(pista && VistaDePista);
+
+  const cartel = cartelDelEstado(vista.estado, emision.puedeGestionar);
+  // Con imagen, el estado de la conexion se dice en una linea: la imagen se
+  // congela, y sin decirlo parece que el telefono se ha colgado.
+  const avisoDeConexion =
+    hayImagen && (vista.estado === 'conexion_lenta' || vista.estado === 'reconectando')
+      ? t(cartel.titulo as TranslationKey)
+      : null;
+
+  const altoDelChat = Math.max(
+    ALTO_MINIMO_DEL_CHAT,
+    Math.min(ALTO_MAXIMO_DEL_CHAT, Math.round(altoDeVentana * PARTE_DEL_CHAT)),
+  );
+  const enDirecto = emision.estado === 'live';
+
   return (
     <View style={estilos.fondo}>
+      {/* La imagen, a pantalla completa y por detras de todo. */}
+      {pista && VistaDePista ? (
+        <View style={StyleSheet.absoluteFill}>
+          <VistaDePista
+            pistaId={pista.id}
+            // Espejo solo en la camara frontal PROPIA: a los demas se les ve
+            // como son, y la trasera no se refleja.
+            espejo={pista.local && vista.camaraFrontal}
+            estilo={StyleSheet.absoluteFill}
+            // Mientras la persona no fije una calidad, la elige el proveedor.
+            capaAutomatica={calidad.estado.elegida === 'automatica'}
+          />
+        </View>
+      ) : null}
+
+      {/* Solo se oscurecen las dos franjas donde hay texto encima. */}
+      {hayImagen ? <ScrimDeMedio borde="arriba" alto={150} /> : null}
+      {hayImagen ? <ScrimDeMedio borde="abajo" alto={altoDelChat + 220} /> : null}
+
       <SafeAreaView style={estilos.seguro}>
         <SinTecladoDelante style={estilos.columna}>
           {/* Cabecera */}
           <View style={estilos.cabecera}>
-            <Pressable
+            <Pulsable
               onPress={salir}
               accessibilityLabel={t('live.leave')}
               accessibilityRole="button"
-              style={estilos.botonRedondo}
+              style={[estilos.botonRedondo, hayImagen ? estilos.sobreImagen : null]}
             >
-              <Feather name="arrow-left" size={24} color={media.text} />
-            </Pressable>
+              <Feather name="arrow-left" size={22} color={media.text} />
+            </Pulsable>
 
             <View style={estilos.tituloDeSala}>
               <Text variant="body" weight="800" color={media.text} numberOfLines={1}>
@@ -912,208 +694,124 @@ export function LiveScreen() {
             </View>
 
             <Insignia estado={emision.estado} />
+
+            {/*
+              La calidad solo se ofrece si hay capas entre las que elegir
+              (Simulcast en la plantilla del proveedor). Sin ellas, no hay
+              boton: uno que no cambia nada seria prometer algo que no existe.
+            */}
+            {calidad.estado.opciones.length > 0 ? (
+              <Pulsable
+                onPress={() => setHojaDeCalidad(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t('live.quality')}
+                style={[estilos.botonRedondo, estilos.sobreImagen]}
+              >
+                <Feather name="sliders" size={18} color={media.text} />
+              </Pulsable>
+            ) : null}
           </View>
 
-          {/* Video (o la verdad sobre por que no lo hay) */}
-          <PanelDeVideo
-            emision={emision}
-            estado={vista.estado}
-            pistas={pistas}
-            VistaDePista={VistaDePista}
-            emito={vista.puedePublicar}
-            camaraFrontal={vista.camaraFrontal}
-          />
-
-          {/*
-            La salida del estado, cuando la hay. Un cartel que solo explica el
-            problema deja a quien lo lee sin nada que hacer: el permiso denegado
-            lleva a los ajustes del telefono —unico sitio donde se arregla— y el
-            error definitivo ofrece volver a intentarlo, que es lo que ya no
-            ocurre solo. El error RECUPERABLE no pinta boton a proposito: se
-            esta reintentando en este momento, y un boton ahi solo consigue
-            reintentos encimados.
-          */}
-          {pideAccionDeLaPersona(vista.estado) ? (
-            <View style={estilos.filaDeGestion}>
-              <Pressable
-                onPress={abrirAjustes}
-                accessibilityRole="button"
-                style={[estilos.botonDeTexto, { borderColor: media.border }]}
-              >
-                <Text variant="secondary" weight="700" color={media.text}>
-                  {t('live.openSettings')}
-                </Text>
-              </Pressable>
-            </View>
-          ) : vista.estado === 'error_definitivo' ? (
-            <View style={estilos.filaDeGestion}>
-              <Pressable
-                onPress={() => sesion.reintentar()}
-                accessibilityRole="button"
-                style={[estilos.botonDeTexto, { borderColor: media.border }]}
-              >
-                <Text variant="secondary" weight="700" color={media.text}>
-                  {t('live.retry')}
-                </Text>
-              </Pressable>
+          {avisoDeConexion ? (
+            <View style={estilos.avisoSobreImagen} accessibilityLiveRegion="polite">
+              <Text variant="caption" weight="700" color={media.text}>
+                {avisoDeConexion}
+              </Text>
             </View>
           ) : null}
 
-          <ControlesDeAnfitrion
-            vista={vista}
-            enDirecto={emision.estado === 'live'}
-            alAlternarCamara={() => void sesion.alternarCamara()}
-            alAlternarMicrofono={() => void sesion.alternarMicrofono()}
-            alCambiarCamara={() => void sesion.cambiarCamara()}
-            alEmpezar={empezar}
-          />
-
+          {/* Gestion de la emision: empezarla o terminarla. */}
           {puedeGestionar && (emision.estado === 'live' || emision.estado === 'scheduled') ? (
             <View style={estilos.filaDeGestion}>
               {emision.estado === 'scheduled' ? (
-                <Pressable
-                  onPress={empezar}
-                  disabled={vista.ocupado}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: vista.ocupado }}
-                  style={[
-                    estilos.botonDeTexto,
-                    { borderColor: media.border, opacity: vista.ocupado ? 0.45 : 1 },
-                  ]}
-                >
-                  <Text variant="secondary" weight="700" color={media.text}>
-                    {t('create.startNow')}
-                  </Text>
-                </Pressable>
+                <BotonDeTexto
+                  texto={t('create.startNow')}
+                  alPulsar={empezar}
+                  desactivado={vista.ocupado}
+                />
               ) : (
-                <Pressable
-                  onPress={terminar}
-                  disabled={vista.ocupado}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: vista.ocupado }}
-                  style={[
-                    estilos.botonDeTexto,
-                    { borderColor: media.danger, opacity: vista.ocupado ? 0.45 : 1 },
-                  ]}
-                >
-                  <Text variant="secondary" weight="700" color={media.danger}>
-                    {t('live.endBroadcast')}
-                  </Text>
-                </Pressable>
+                <BotonDeTexto
+                  texto={t('live.endBroadcast')}
+                  alPulsar={terminar}
+                  desactivado={vista.ocupado}
+                  peligro
+                />
               )}
             </View>
           ) : null}
 
-          {/* Chat */}
-          <View style={estilos.zonaDeChat}>
-            <ScrollView
-              ref={listaRef}
-              contentContainerStyle={estilos.mensajes}
-              showsVerticalScrollIndicator={false}
-              onContentSizeChange={() => listaRef.current?.scrollToEnd({ animated: true })}
-            >
-              {visibles.length === 0 ? (
-                <Text variant="secondary" color={media.textMuted} style={estilos.centrado}>
-                  {chatAbierto ? t('live.chatEmptyOpen') : t('live.chatEmptyClosed')}
-                </Text>
-              ) : (
-                visibles.map((mensaje) => (
-                  <Pressable
-                    key={mensaje.id}
-                    onLongPress={puedeGestionar ? () => void ocultar(mensaje) : undefined}
-                    delayLongPress={400}
-                    accessibilityRole={puedeGestionar ? 'button' : 'text'}
-                    accessibilityHint={
-                      puedeGestionar ? t('live.holdToHide') : undefined
-                    }
-                    style={estilos.mensaje}
-                  >
-                    <Avatar size={26} image={mensaje.usuarioAvatarUrl} name={mensaje.usuarioNombre} />
-                    <View style={estilos.cuerpoDeMensaje}>
-                      <Text variant="caption" weight="800" color={media.textMuted}>
-                        {mensaje.usuarioNombre}
-                        {mensaje.creadoEnIso ? ` · ${hora(mensaje.creadoEnIso)}` : ''}
-                      </Text>
-                      <Text variant="secondary" color={media.text}>
-                        {mensaje.cuerpo}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))
-              )}
-            </ScrollView>
+          {/* El hueco por el que se ve la emision. Sin imagen, aqui va el cartel. */}
+          <View style={estilos.hueco} pointerEvents="box-none">
+            {hayImagen ? null : <CartelDeVideo emision={emision} estado={vista.estado} />}
 
-            {/* Las burbujas vuelan por encima del chat, sin robarle el dedo. */}
-            <View pointerEvents="none" style={estilos.pistaDeBurbujas}>
-              {burbujas.map((burbuja) => (
-                <BurbujaDeReaccion
-                  key={burbuja.clave}
-                  tipo={burbuja.tipo}
-                  carril={burbuja.carril}
-                  reduceMotion={reduceMotion}
-                  alTerminar={() => quitarBurbuja(burbuja.clave)}
-                />
-              ))}
+            {/*
+              La salida del estado, cuando la hay. Un cartel que solo explica el
+              problema deja a quien lo lee sin nada que hacer: el permiso denegado
+              lleva a los ajustes del telefono —unico sitio donde se arregla— y el
+              error definitivo ofrece volver a intentarlo, que es lo que ya no
+              ocurre solo. El error RECUPERABLE no pinta boton a proposito: se
+              esta reintentando en este momento, y un boton ahi solo consigue
+              reintentos encimados.
+            */}
+            {pideAccionDeLaPersona(vista.estado) ? (
+              <BotonDeTexto texto={t('live.openSettings')} alPulsar={abrirAjustes} />
+            ) : vista.estado === 'error_definitivo' ? (
+              <BotonDeTexto texto={t('live.retry')} alPulsar={() => sesion.reintentar()} />
+            ) : null}
+
+            {vista.puedePublicar && !enDirecto ? (
+              <BotonDeTexto
+                texto={t('live.goLive')}
+                alPulsar={empezar}
+                desactivado={vista.ocupado}
+              />
+            ) : null}
+          </View>
+
+          {/* Abajo: el chat a la izquierda y los controles de quien emite a la derecha. */}
+          <View style={estilos.filaInferior} pointerEvents="box-none">
+            <View style={estilos.ladoDelChat}>
+              <ChatDeDirecto
+                ref={chat}
+                emisionId={emision.id}
+                abierto={chatAbierto}
+                puedeModerar={puedeGestionar}
+                alto={altoDelChat}
+                alFallar={alFallarElChat}
+              />
             </View>
+            <ControlesDeAnfitrion
+              vista={vista}
+              hayEfectos={efectos.capacidad.admitidos}
+              efectoPuesto={efectos.estado.efecto.tipo !== 'ninguno'}
+              alAlternarCamara={() => void sesion.alternarCamara()}
+              alAlternarMicrofono={() => void sesion.alternarMicrofono()}
+              alCambiarCamara={() => void sesion.cambiarCamara()}
+              alAbrirEfectos={() => setHojaDeEfectos(true)}
+            />
           </View>
 
           {aviso ? (
-            <Text variant="caption" weight="700" color={media.danger} style={estilos.aviso}>
-              {aviso}
-            </Text>
-          ) : null}
-
-          {/* Reacciones */}
-          {chatAbierto ? (
-            <View style={estilos.filaDeReacciones}>
-              {REACCIONES.map((tipo) => (
-                <Pressable
-                  key={tipo}
-                  onPress={() => reaccionar(tipo)}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('live.reactWith', {
-                    reaccion: t(NOMBRE_DE_REACCION[tipo]),
-                  })}
-                  style={[estilos.botonDeReaccion, { borderColor: media.border }]}
-                >
-                  <Text style={estilos.simbolo}>{SIMBOLO_DE_REACCION[tipo]}</Text>
-                  {totales[tipo] > 0 ? (
-                    <Text variant="caption" weight="700" color={media.textMuted}>
-                      {totales[tipo]}
-                    </Text>
-                  ) : null}
-                </Pressable>
-              ))}
+            <View style={estilos.aviso} accessibilityLiveRegion="polite">
+              <Text variant="caption" weight="700" color={media.danger} style={estilos.centrado}>
+                {aviso}
+              </Text>
             </View>
           ) : null}
 
-          {/* Escribir */}
+          <ReaccionesDeDirecto
+            emisionId={emision.id}
+            abierto={chatAbierto}
+            totalesDelServidor={emision.reacciones}
+            reduceMotion={reduceMotion}
+          />
+
           {chatAbierto ? (
-            <View style={estilos.filaDeEscritura}>
-              <TextInput
-                value={texto}
-                onChangeText={setTexto}
-                onSubmitEditing={() => void enviar()}
-                returnKeyType="send"
-                placeholder={t('live.messagePlaceholder')}
-                placeholderTextColor={media.textMuted}
-                accessibilityLabel={t('live.messageLabel')}
-                style={[estilos.campo, { borderColor: media.border, color: media.text }]}
-              />
-              <Pressable
-                onPress={() => void enviar()}
-                disabled={!texto.trim() || enviando}
-                accessibilityLabel={t('chat.sendMessage')}
-                accessibilityRole="button"
-                style={[estilos.botonRedondo, { borderColor: media.border, borderWidth: 1 }]}
-              >
-                <Feather
-                  name="send"
-                  size={18}
-                  color={texto.trim() && !enviando ? media.text : media.disabled}
-                />
-              </Pressable>
-            </View>
+            <EscribirEnElChat
+              emisionId={emision.id}
+              alAvisar={setAviso}
+              alGuardar={alGuardarMensaje}
+            />
           ) : (
             <Text variant="caption" color={media.textMuted} style={estilos.chatCerrado}>
               {emision.estado === 'scheduled' ? t('live.chatOpensLater') : t('live.chatClosed')}
@@ -1121,6 +819,20 @@ export function LiveScreen() {
           )}
         </SinTecladoDelante>
       </SafeAreaView>
+
+      <HojaDeEfectos
+        visible={hojaDeEfectos}
+        alCerrar={() => setHojaDeEfectos(false)}
+        capacidad={efectos.capacidad}
+        estado={efectos.estado}
+        alElegir={efectos.aplicar}
+      />
+      <HojaDeCalidad
+        visible={hojaDeCalidad && calidad.estado.opciones.length > 0}
+        alCerrar={() => setHojaDeCalidad(false)}
+        estado={calidad.estado}
+        alElegir={calidad.elegir}
+      />
     </View>
   );
 }
@@ -1156,7 +868,7 @@ function Insignia({ estado }: { estado: EstadoDeEmision }) {
 const estilos = StyleSheet.create({
   fondo: { flex: 1, backgroundColor: media.background },
   seguro: { flex: 1 },
-  columna: { flex: 1, paddingHorizontal: spacing.lg },
+  columna: { flex: 1, paddingHorizontal: spacing.md },
   centro: {
     flex: 1,
     alignItems: 'center',
@@ -1169,7 +881,7 @@ const estilos = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   tituloDeSala: { flex: 1 },
   botonRedondo: {
@@ -1179,6 +891,9 @@ const estilos = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Lo que va encima de la imagen lleva su propio velo: se tiene que leer
+  // tambien sobre una camara que apunta a una ventana.
+  sobreImagen: { backgroundColor: VELO },
   insignia: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1188,7 +903,8 @@ const estilos = StyleSheet.create({
     paddingVertical: 5,
   },
   punto: { width: 6, height: 6, borderRadius: 3 },
-  panelDeVideo: {
+  cartel: {
+    alignSelf: 'stretch',
     borderWidth: 1,
     borderRadius: radius.lg,
     paddingVertical: spacing.xl,
@@ -1196,33 +912,26 @@ const estilos = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  // Vertical, como se graba con el telefono en la mano. El alto lo pone la
-  // proporcion y no un numero, para que quepa igual en un telefono pequeno.
-  panelConImagen: {
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    width: '100%',
-    aspectRatio: 3 / 4,
-    backgroundColor: '#000',
-  },
   avisoSobreImagen: {
-    position: 'absolute',
-    top: spacing.sm,
     alignSelf: 'center',
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radius.pill,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
-  filaDeGestion: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.sm },
-  filaDeControles: {
-    flexDirection: 'row',
+  filaDeGestion: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.xs },
+  // `minHeight: 0` deja que el hueco encoja cuando sube el teclado: lo que
+  // tiene que caber siempre es lo de abajo.
+  hueco: {
+    flex: 1,
+    minHeight: 0,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginTop: spacing.sm,
   },
+  filaInferior: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, flexShrink: 1 },
+  ladoDelChat: { flex: 1, minWidth: 0, flexShrink: 1 },
+  columnaDeControles: { gap: spacing.sm, paddingBottom: spacing.xs },
   botonDeTexto: {
     borderWidth: 1,
     borderRadius: radius.pill,
@@ -1231,49 +940,31 @@ const estilos = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  zonaDeChat: { flex: 1, marginTop: spacing.md },
-  mensajes: { gap: spacing.md, paddingVertical: spacing.md },
-  mensaje: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  cuerpoDeMensaje: { flex: 1, gap: 2 },
-  pistaDeBurbujas: {
-    ...StyleSheet.absoluteFillObject,
-    // Deja libre la mitad de arriba: las burbujas nacen abajo, junto a los
-    // botones que las lanzan.
-    justifyContent: 'flex-end',
-  },
-  burbuja: { position: 'absolute', bottom: 0 },
-  simbolo: { fontSize: 20 },
-  simboloGrande: { fontSize: 30 },
-  aviso: { textAlign: 'center', paddingBottom: spacing.xs },
-  filaDeReacciones: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.xs,
-    paddingBottom: spacing.sm,
-  },
-  botonDeReaccion: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    minHeight: 44,
+  aviso: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    marginTop: spacing.xs,
   },
   filaDeEscritura: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.sm,
   },
   campo: {
     flex: 1,
+    minWidth: 0,
     minHeight: 44,
+    // Velo Y borde: el velo lo hace legible sobre la imagen, el borde lo
+    // delimita cuando no hay imagen y el fondo es negro.
     borderWidth: 1,
     borderRadius: radius.pill,
+    backgroundColor: VELO,
     paddingHorizontal: spacing.lg,
     fontSize: 14,
   },
-  chatCerrado: { textAlign: 'center', paddingVertical: spacing.lg },
+  chatCerrado: { textAlign: 'center', paddingVertical: spacing.md },
 });

@@ -1,18 +1,21 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { AppScreen } from '@/components/AppScreen';
 import { AppHeader } from '@/components/AppHeader';
-import { ListRow } from '@/components/ListRow';
+import { Aparecer } from '@/components/Aparecer';
+import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
+import { Pulsable } from '@/components/Pulsable';
 import { SignedOutNotice } from '@/components/SignedOutNotice';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { NotificationItem } from '@/mappers/notificationMapper';
-import { NotificationRepository } from '@/repositories/NotificationRepository';
+import { AVISOS_POR_PAGINA, NotificationRepository } from '@/repositories/NotificationRepository';
+import { notificacionesLeidas } from '@/services/contadores';
 import { DARREN_NOTICE_ID } from '@/lib/guides';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -20,6 +23,8 @@ import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
+import { destinoDelAviso } from '@/lib/avisosNuevos';
+import { retrasoEnCascada } from '@/lib/movimiento';
 import { pedirDestacados } from '@/services/cachePerfil';
 
 export function NotificationsScreen() {
@@ -41,6 +46,8 @@ export function NotificationsScreen() {
 
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  const [hayMas, setHayMas] = useState(false);
+  const [cargandoMas, setCargandoMas] = useState(false);
   /** La lista ya se pinto una vez: refrescarla no vuelve a taparla. */
   const hayListaEnPantalla = useRef(false);
 
@@ -89,14 +96,20 @@ export function NotificationsScreen() {
     NotificationRepository.list()
       .then((data) => {
         hayListaEnPantalla.current = true;
+        // Lo que se pinta es la lista tal como llego: lo que estaba sin leer
+        // sale resaltado, que es lo que permite ver de un vistazo que es nuevo.
         setItems(data);
+        setHayMas(data.length >= AVISOS_POR_PAGINA);
         setStatus('idle');
         // Al abrir, marcamos todas como leídas (limpia el badge). VA DESPUES
         // del listado a proposito, aunque no dependa de el: lanzadas a la vez
         // se corren, y si «marcar» llegara primero el listado volveria con
         // todo en leido y la pantalla no resaltaria nada. Un viaje de mas a
         // cambio de que se vea lo que estaba sin leer.
-        NotificationRepository.markAllRead().catch(() => {});
+        NotificationRepository.markAllRead()
+          // La campana y el icono de la aplicacion se apagan a la vez.
+          .then(notificacionesLeidas)
+          .catch(() => {});
       })
       .catch(() => {
         // Sin lista en pantalla, el reintento vuelve a enseñar la carga.
@@ -110,6 +123,44 @@ export function NotificationsScreen() {
       load();
     }, [load]),
   );
+
+  /*
+    Cada aviso lleva a donde está lo que anuncia: la publicación, la agenda,
+    lo decidido sobre su evento o su curso. La decisión vive en
+    `destinoDelAviso`, que es la MISMA que usa el aviso flotante.
+
+    UNA SOLA FUNCIÓN PARA TODAS LAS FILAS, y estable: una flecha nueva por fila
+    en cada render anulaba el `React.memo` de `FilaDeAviso` y la lista entera
+    se repintaba al cargar una página más.
+
+    Si lo anunciado ya no existe —la publicación se borró—, quien lo dice es
+    la pantalla de destino, con su estado de «no encontrado».
+  */
+  const abrirAviso = useCallback(
+    (aviso: NotificationItem) => {
+      const destino = destinoDelAviso(aviso, rutaDelAviso);
+      if (destino) router.push(destino as never);
+    },
+    [router],
+  );
+
+  const cargarMas = useCallback(() => {
+    if (!supabaseEnabled || !signedIn || !hayMas || cargandoMas || status !== 'idle') return;
+    setCargandoMas(true);
+    NotificationRepository.list(items.length)
+      .then((data) => {
+        // Por id: si entró un aviso nuevo entre página y página, la siguiente
+        // empieza una fila antes y trae uno repetido.
+        setItems((previos) => {
+          const vistos = new Set(previos.map((aviso) => aviso.id));
+          return [...previos, ...data.filter((aviso) => !vistos.has(aviso.id))];
+        });
+        setHayMas(data.length >= AVISOS_POR_PAGINA);
+      })
+      // Un fallo al pedir más no borra lo que ya hay: se puede volver a bajar.
+      .catch(() => {})
+      .finally(() => setCargandoMas(false));
+  }, [supabaseEnabled, signedIn, hayMas, cargandoMas, status, items.length]);
 
   const uiState = supabaseEnabled && status === 'loading'
     ? 'loading'
@@ -183,46 +234,31 @@ export function NotificationsScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item }) => (
-            <ListRow
-              title={item.title}
-              subtitle={`${item.subtitle} • ${item.time}`}
-              leftIcon={item.icon}
+          // Al llegar al final se pide la página siguiente: la bandeja ya no se
+          // queda en los primeros cincuenta para siempre.
+          onEndReached={cargarMas}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            cargandoMas ? (
+              <ActivityIndicator style={styles.masAbajo} color={colors.textMuted} />
+            ) : null
+          }
+          renderItem={({ item, index }) => (
+            <FilaDeAviso
+              aviso={item}
+              indice={index}
               /*
-                Cada aviso lleva a donde esta lo que anuncia. Antes TODOS
-                llevaban al perfil de quien lo provoco, asi que tocar «Sesión
-                confirmada» abria un perfil en vez de la agenda donde esta la
-                sesion.
+                Cada aviso lleva a donde está lo que anuncia: la publicación,
+                la agenda, lo decidido sobre su evento o su curso. La decisión
+                vive en `destinoDelAviso`, que es la MISMA que usa el aviso
+                flotante: una fila y un aviso del mismo hecho no pueden llevar
+                a sitios distintos.
+
+                Si lo anunciado ya no existe —la publicación se borró—, quien
+                lo dice es la pantalla de destino, con su estado de «no
+                encontrado»; aquí no hay nada que comprobar por adelantado.
               */
-              onPress={() =>
-                /*
-                  Un aviso al creador (su evento, curso, postulación o
-                  producto) lleva a donde se ve o se corrige lo decidido.
-                */
-                rutaDelAviso(item.type ?? '', item.entityId) !== null
-                  ? router.push(rutaDelAviso(item.type ?? '', item.entityId) as never)
-                  : item.entityType === 'booking'
-                  ? router.push('/agenda' as never)
-                  : /*
-                      Si el aviso se refiere a una PUBLICACION, se abre la
-                      publicacion. Hace falta para «te etiquetaron» —la etiqueta
-                      esta en la publicacion, y el perfil es justo donde no
-                      esta— y de paso arregla los «me gusta» y los comentarios,
-                      que tambien llevaban al perfil de quien reacciono.
-                    */
-                  item.entityType === 'post' && item.entityId
-                  ? router.push(`/post/${item.entityId}` as never)
-                  : /*
-                      Un corazon a un comentario: `entityId` es el COMENTARIO,
-                      asi que la publicacion viene en el payload. Sin esto el
-                      aviso llevaba al perfil de quien reacciono.
-                    */
-                  item.entityType === 'comment' && item.postId
-                  ? router.push(`/post/${item.postId}` as never)
-                  : item.actorId
-                  ? irAlPerfil(router, item.actorId)
-                  : undefined
-              }
+              alAbrir={abrirAviso}
             />
           )}
         />
@@ -232,7 +268,92 @@ export function NotificationsScreen() {
   );
 }
 
+/**
+ * Una fila de la bandeja.
+ *
+ * LO NO LEÍDO SE VE, Y NO SOLO POR EL COLOR: el icono va en un círculo relleno
+ * en vez de uno hueco, el título pasa a negrita y a la derecha hay un punto.
+ * Tres señales de forma, porque el sistema es en blanco y negro. Y al lector
+ * de pantalla se le dice con palabras: «Sin leer».
+ *
+ * Dice QUÉ pasó (el título) y con quién o sobre qué (el texto), nunca un
+ * genérico «tienes una notificación».
+ */
+const FilaDeAviso = React.memo(function FilaDeAviso({
+  aviso,
+  indice,
+  alAbrir,
+}: {
+  aviso: NotificationItem;
+  indice: number;
+  alAbrir: (aviso: NotificationItem) => void;
+}) {
+  const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  const nuevo = !aviso.read;
+
+  return (
+    // Las primeras entran en cascada; el resto, al desplazar, ya está en su
+    // sitio. `clave` porque la lista recicla celdas.
+    <Aparecer retraso={indice < 6 ? retrasoEnCascada(indice) : 0} inmediato={indice >= 6} clave={aviso.id}>
+      <Pulsable
+        onPress={() => alAbrir(aviso)}
+        escala={0.985}
+        atenuar={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${nuevo ? `${t('notif.unreadA11y')}. ` : ''}${aviso.title}. ${aviso.subtitle}. ${aviso.time}`}
+        style={[styles.fila, { borderBottomColor: colors.border }]}
+      >
+        <View
+          style={[
+            styles.icono,
+            nuevo
+              ? { backgroundColor: colors.primary, borderColor: colors.primary }
+              : { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+          ]}
+        >
+          <Feather name={aviso.icon} size={18} color={nuevo ? colors.onPrimary : colors.text} />
+        </View>
+        <View style={styles.textos}>
+          <Text numberOfLines={1} weight={nuevo ? '800' : '600'} style={styles.titulo}>
+            {aviso.title}
+          </Text>
+          <Text numberOfLines={2} color={colors.textMuted} style={styles.cuerpo}>
+            {aviso.subtitle}
+          </Text>
+          <Text color={colors.textMuted} style={styles.hora}>
+            {aviso.time}
+          </Text>
+        </View>
+        <GloboDeNoLeidos cuenta={nuevo ? 1 : 0} soloPunto />
+      </Pulsable>
+    </Aparecer>
+  );
+});
+
 const styles = StyleSheet.create({
+  masAbajo: { paddingVertical: spacing.lg },
+  fila: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xs,
+    minHeight: 64,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  icono: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textos: { flex: 1, gap: 2 },
+  titulo: { fontSize: 14 },
+  cuerpo: { fontSize: 13, lineHeight: 18 },
+  hora: { fontSize: 11, marginTop: 1 },
   list: {
     paddingHorizontal: spacing.md,
   },

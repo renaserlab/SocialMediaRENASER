@@ -1,12 +1,17 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
+import { Aparecer } from '@/components/Aparecer';
 import { Avatar } from '@/components/Avatar';
-import { Button } from '@/components/Button';
+import { BotonDeEnviar } from '@/components/BotonDeEnviar';
+import { ContadorAnimado } from '@/components/ContadorAnimado';
+import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
 import { Input } from '@/components/Input';
+import { Pulsable } from '@/components/Pulsable';
 import { StateView } from '@/components/StateView';
 import { enHilos } from '@/lib/comentarios';
+import { ESCALA_AL_PULSAR, retrasoEnCascada } from '@/lib/movimiento';
 import { useHaceFaltaCuenta, useRequireAuth } from '@/hooks/useRequireAuth';
 import type { useComentarios } from '@/hooks/useComentarios';
 import type { ComentarioConAvatar } from '@/repositories/PostRepository';
@@ -63,6 +68,8 @@ export function ContenidoDeComentarios({
   } = comentarios;
 
   const hilos = useMemo(() => enHilos(estado.lista), [estado.lista]);
+  /** Los hilos que ya hicieron su entrada. */
+  const yaEntraron = useRef(new Set<string>());
 
   const pedirCuenta = () => void requireAuth('auth.reasonComment', () => {});
 
@@ -76,8 +83,10 @@ export function ContenidoDeComentarios({
         key={item.id}
         style={[
           styles.fila,
-          esRespuesta && styles.filaRespuesta,
-          { borderBottomColor: colors.border },
+          // Una respuesta cuelga de su comentario: sangrada y con una raya a
+          // la izquierda que la ata a el. Sin separadores entre filas: la
+          // jerarquia la dan el sangrado y el aire, no una rejilla de lineas.
+          esRespuesta && [styles.filaRespuesta, { borderLeftColor: colors.border }],
         ]}
       >
         <Pressable
@@ -102,13 +111,15 @@ export function ContenidoDeComentarios({
             >
               <Text style={[styles.autor, { color: colors.text }]}>{item.author}</Text>
             </Pressable>
-            <Text style={[styles.hora, { color: colors.textMuted }]}>{item.createdAt}</Text>
+            <Text style={[styles.hora, { color: colors.textMuted }]}>· {item.createdAt}</Text>
           </View>
           <Text style={[styles.cuerpo, { color: colors.text }]}>{item.text}</Text>
           <View style={styles.acciones}>
-            <Pressable
+            <Pulsable
               onPress={() => void requireAuth('auth.reasonReact', () => reaccionar(item.id))}
               hitSlop={ZONA_TACTIL}
+              escala={ESCALA_AL_PULSAR.icono}
+              haptica="ligera"
               accessibilityRole="switch"
               accessibilityState={{ checked: item.viewerReacted }}
               accessibilityLabel={
@@ -116,34 +127,40 @@ export function ContenidoDeComentarios({
               }
               style={styles.reaccion}
             >
-              <Feather
-                name="heart"
-                size={13}
-                color={item.viewerReacted ? colors.primary : colors.textMuted}
-              />
+              {/*
+                Relleno al reaccionar y de contorno al quitar: cambia la forma,
+                no solo el tono, y salta al encenderse.
+              */}
+              <IconoQueSeEnciende activo={item.viewerReacted}>
+                {item.viewerReacted ? (
+                  <MaterialCommunityIcons name="heart" size={16} color={colors.danger} />
+                ) : (
+                  <Feather name="heart" size={15} color={colors.textMuted} />
+                )}
+              </IconoQueSeEnciende>
               {item.likesCount > 0 ? (
-                <Text
-                  style={[
-                    styles.contador,
-                    { color: item.viewerReacted ? colors.primary : colors.textMuted },
-                  ]}
-                >
-                  {item.likesCount}
-                </Text>
+                <ContadorAnimado
+                  valor={item.likesCount}
+                  color={item.viewerReacted ? colors.text : colors.textMuted}
+                  style={styles.contador}
+                />
               ) : null}
-            </Pressable>
-            <Pressable
+            </Pulsable>
+            <Pulsable
               onPress={() =>
                 void requireAuth('auth.reasonComment', () =>
                   setRespondiendo({ id: item.id, author: item.author }),
                 )
               }
               hitSlop={ZONA_TACTIL}
+              atenuar={0.6}
               accessibilityRole="button"
               accessibilityLabel={t('post.reply')}
+              style={styles.reaccion}
             >
+              <Feather name="corner-down-right" size={13} color={colors.textMuted} />
               <Text style={[styles.responder, { color: colors.textMuted }]}>{t('post.reply')}</Text>
-            </Pressable>
+            </Pulsable>
           </View>
         </View>
       </View>
@@ -157,6 +174,8 @@ export function ContenidoDeComentarios({
         onRetry={load}
         title={uiState === 'empty' ? t('post.beFirstToComment') : undefined}
         description={uiState === 'empty' ? t('post.noCommentsYet') : undefined}
+        // Un globo de conversacion, no la bandeja generica: dice de que va.
+        icon={uiState === 'empty' ? 'message-circle' : undefined}
       >
         <FlatList
           data={hilos}
@@ -170,29 +189,49 @@ export function ContenidoDeComentarios({
               <ActivityIndicator style={styles.masAbajo} color={colors.textMuted} />
             ) : null
           }
-          renderItem={({ item }) => (
-            <View>
-              {fila(item.raiz, false)}
-              {item.respuestas.map((respuesta) => fila(respuesta, true))}
-            </View>
-          )}
+          renderItem={({ item, index }) => {
+            /*
+              Cada hilo entra subiendo unos puntos, en cascada los primeros.
+              Un comentario recien enviado entra igual: se ve llegar.
+
+              UNA VEZ. La lista desmonta las filas que quedan lejos y las
+              vuelve a montar al regresar: sin apuntar las que ya entraron,
+              volver arriba las animaba otra vez.
+            */
+            const yaEntro = yaEntraron.current.has(item.raiz.id);
+            yaEntraron.current.add(item.raiz.id);
+            return (
+              <Aparecer inmediato={yaEntro} retraso={index < 6 ? retrasoEnCascada(index) : 0}>
+                {fila(item.raiz, false)}
+                {item.respuestas.map((respuesta) => fila(respuesta, true))}
+              </Aparecer>
+            );
+          }}
         />
       </StateView>
 
       {respondiendo ? (
-        <View style={[styles.respondiendo, { borderTopColor: colors.border }]}>
+        <Aparecer
+          desde={6}
+          style={[
+            styles.respondiendo,
+            { borderTopColor: colors.border, backgroundColor: colors.backgroundAlt },
+          ]}
+        >
+          <Feather name="corner-down-right" size={14} color={colors.textMuted} />
           <Text style={[styles.respondiendoTexto, { color: colors.textMuted }]} numberOfLines={1}>
             {t('post.replyingTo', { nombre: respondiendo.author })}
           </Text>
-          <Pressable
+          <Pulsable
             onPress={() => setRespondiendo(null)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            escala={ESCALA_AL_PULSAR.icono}
             accessibilityRole="button"
             accessibilityLabel={t('common.cancel')}
           >
-            <Text style={[styles.cancelar, { color: colors.primary }]}>{t('common.cancel')}</Text>
-          </Pressable>
-        </View>
+            <Feather name="x" size={16} color={colors.text} />
+          </Pulsable>
+        </Aparecer>
       ) : null}
 
       <View
@@ -212,13 +251,18 @@ export function ContenidoDeComentarios({
           containerStyle={styles.campo}
           // Sin cuenta el teclado no llega a abrirse: el aviso sale al tocar.
           editable={!haceFaltaCuenta}
+          // Si el envio falla el texto se queda aqui: lo conserva el hook.
+          multiline
         />
-        <Button
-          label={t('common.send')}
-          variant="ghost"
+        {/*
+          Un boton redondo y siempre en su sitio, en vez de la palabra «Enviar»
+          en gris: crece cuando hay algo que mandar y enseña la espera dentro.
+        */}
+        <BotonDeEnviar
           onPress={() => void requireAuth('auth.reasonComment', enviar)}
-          loading={sending}
-          disabled={!inputText.trim()}
+          listo={Boolean(inputText.trim())}
+          enviando={sending}
+          accessibilityLabel={t('common.send')}
         />
         {/*
           Una capa por encima de la barra entera, y no un campo desactivado a
@@ -241,42 +285,47 @@ export function ContenidoDeComentarios({
 
 const styles = StyleSheet.create({
   contenedor: { flex: 1, justifyContent: 'space-between' },
-  lista: { padding: spacing.lg, gap: spacing.md },
+  lista: { padding: spacing.lg, gap: spacing.lg },
   masAbajo: { paddingVertical: spacing.md },
-  fila: { flexDirection: 'row', paddingBottom: spacing.md, borderBottomWidth: 1, gap: spacing.md },
-  // Un solo nivel de sangrado: el hilo se lee sin encogerse a nada.
-  filaRespuesta: { marginLeft: spacing.xl, borderBottomWidth: 0, paddingBottom: spacing.sm },
+  fila: { flexDirection: 'row', gap: spacing.md },
+  // Un solo nivel de sangrado: el hilo se lee sin encogerse a nada. La raya
+  // de la izquierda es el hilo.
+  filaRespuesta: {
+    marginLeft: spacing.lg + 2,
+    marginTop: spacing.md,
+    paddingLeft: spacing.md,
+    borderLeftWidth: 2,
+  },
   texto: { flex: 1 },
+  // Nombre y hora juntos, a la izquierda: se leen de un golpe de vista.
   cabecera: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xs,
+    gap: spacing.xs,
+    marginBottom: 2,
   },
-  autor: { fontSize: 13, fontWeight: '700' },
-  hora: { fontSize: 10 },
-  cuerpo: { fontSize: 13, lineHeight: 18 },
-  acciones: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, marginTop: spacing.xs },
-  reaccion: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  contador: { fontSize: 11, fontWeight: '700' },
-  responder: { fontSize: 11, fontWeight: '700' },
+  autor: { fontSize: 14, fontWeight: '700' },
+  hora: { fontSize: 12 },
+  cuerpo: { fontSize: 14, lineHeight: 20 },
+  acciones: { flexDirection: 'row', alignItems: 'center', gap: spacing.xl, marginTop: spacing.sm },
+  reaccion: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 24 },
+  contador: { fontSize: 12, fontWeight: '700' },
+  responder: { fontSize: 12, fontWeight: '700' },
   respondiendo: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
     borderTopWidth: 1,
     gap: spacing.sm,
   },
-  respondiendoTexto: { flex: 1, fontSize: 12 },
-  cancelar: { fontSize: 12, fontWeight: '700' },
+  respondiendoTexto: { flex: 1, fontSize: 13 },
   barra: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     padding: spacing.md,
     borderTopWidth: 1,
     gap: spacing.sm,
   },
-  campo: { flex: 1 },
+  campo: { flex: 1, maxHeight: 120 },
 });

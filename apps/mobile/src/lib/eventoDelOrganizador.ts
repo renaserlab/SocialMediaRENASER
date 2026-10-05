@@ -71,6 +71,32 @@ export const ZONAS_HORARIAS = [
   'Europe/Madrid',
 ] as const;
 
+/** Los nombres que no salen bien de partir el identificador. */
+const NOMBRES_DE_ZONA: Readonly<Record<string, string>> = {
+  'America/Bogota': 'Bogotá',
+  'America/Sao_Paulo': 'São Paulo',
+  'America/Mexico_City': 'Ciudad de México',
+  'America/New_York': 'Nueva York',
+};
+
+/**
+ * Cómo se LEE una zona horaria.
+ *
+ * Lo que se guarda y viaja al servidor sigue siendo el identificador IANA
+ * (`America/Argentina/Buenos_Aires`), que es lo único inequívoco. Pero nadie
+ * elige su ciudad leyendo eso: en el formulario se enseña «Buenos Aires». Es
+ * solo la etiqueta; el valor no cambia.
+ *
+ * Una zona que no esté en la lista —la del teléfono, por ejemplo— se nombra
+ * por su última parte, con los guiones bajos como espacios.
+ */
+export function nombreDeZona(zona: string): string {
+  const conocido = NOMBRES_DE_ZONA[zona];
+  if (conocido) return conocido;
+  const ciudad = (zona.split('/').pop() ?? '').replace(/_/g, ' ').trim();
+  return ciudad || zona;
+}
+
 /** La zona del dispositivo, si es una IANA reconocible. `''` si no. */
 export function zonaDelDispositivo(): string {
   try {

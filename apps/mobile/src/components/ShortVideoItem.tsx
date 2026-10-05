@@ -3,13 +3,17 @@ import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
+import { ContadorAnimado } from '@/components/ContadorAnimado';
+import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
+import { Pulsable } from '@/components/Pulsable';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { ALTO_DE_LA_BARRA_DE_PROGRESO } from '@/components/VideoScrubber';
 import { assets } from '@/data/assets';
 import { compartirPublicacion } from '@/lib/enlaces';
 import { haptics } from '@/lib/haptics';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { esVertical } from '@/lib/formaDelVideo';
 import { snapToPage } from '@/lib/snapToPage';
 import { palette, spacing } from '@/theme/tokens';
@@ -310,15 +314,23 @@ function ShortVideoItemBase({
       <LinearGradient colors={['transparent', media.overlay]} style={styles.bottomScrim} pointerEvents="none" />
 
       <View style={[styles.sidebar, { bottom: alturaDeAcciones }]}>
-        <Pressable
+        {/*
+          TODA LA COLUMNA RESPONDE AL DEDO. Cada boton se hunde al tocarlo
+          (`Pulsable`), y el corazon ademas salta al encenderse. Sobre un video
+          en movimiento un cambio de color a secas no se ve; un gesto si. Son
+          animaciones de un instante, en el hilo de la interfaz: no compiten
+          con el video ni le quitan fotogramas.
+        */}
+        <Pulsable
           onPress={openProfile}
           disabled={!short.authorId}
+          escala={ESCALA_AL_PULSAR.icono}
           style={styles.sidebarItem}
           accessibilityRole="button"
           accessibilityLabel={t('post.viewProfileOf', { nombre: short.author })}
         >
           <ExpoImage source={short.avatarUrl ? { uri: short.avatarUrl } : assets.avatar} style={styles.avatar} contentFit="cover" />
-        </Pressable>
+        </Pulsable>
 
         {/*
           DOS DESTINOS, como en la tarjeta de Explorar (`AccionDePublicacion`):
@@ -331,15 +343,26 @@ function ShortVideoItemBase({
           pulsable, igual que en Explorar.
         */}
         <View style={styles.sidebarItem}>
-          <Pressable
+          <Pulsable
             onPress={toggleLike}
             hitSlop={AREA_DEL_CORAZON}
+            escala={ESCALA_AL_PULSAR.icono}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: liked }}
             accessibilityLabel={t('post.actionLike')}
           >
-            <Feather name="heart" size={28} color={liked ? media.danger : media.text} />
-          </Pressable>
+            <IconoQueSeEnciende activo={liked} clave={short.id}>
+              {/*
+                Relleno al reaccionar: cambia la FORMA, no solo el color. Un
+                contorno rojo sobre un video rojizo no se distingue del blanco.
+              */}
+              {liked ? (
+                <MaterialCommunityIcons name="heart" size={30} color={media.danger} />
+              ) : (
+                <Feather name="heart" size={28} color={media.text} />
+              )}
+            </IconoQueSeEnciende>
+          </Pulsable>
           {likes > 0 ? (
             <Pressable
               onPress={() => alVerReacciones(short.id)}
@@ -347,26 +370,33 @@ function ShortVideoItemBase({
               accessibilityRole="button"
               accessibilityLabel={t('post.whoReacted')}
             >
-              <Text style={[styles.sidebarLabel, { color: media.text }]}>{likes}</Text>
+              <ContadorAnimado valor={likes} clave={short.id} color={media.text} style={styles.sidebarLabel} />
             </Pressable>
           ) : (
-            <Text style={[styles.sidebarLabel, { color: media.text }]}>{likes}</Text>
+            <ContadorAnimado valor={likes} clave={short.id} color={media.text} style={styles.sidebarLabel} />
           )}
         </View>
 
-        <Pressable
+        <Pulsable
           onPress={() => alAbrirComentarios(short.id, comentarios)}
+          escala={ESCALA_AL_PULSAR.icono}
           style={styles.sidebarItem}
           accessibilityRole="button"
           accessibilityLabel={t('post.comments')}
         >
           <Feather name="message-square" size={28} color={media.text} />
-          <Text style={[styles.sidebarLabel, { color: media.text }]}>{comentarios}</Text>
-        </Pressable>
+          <ContadorAnimado valor={comentarios} clave={short.id} color={media.text} style={styles.sidebarLabel} />
+        </Pulsable>
 
-        <Pressable onPress={onShare} style={styles.sidebarItem} accessibilityRole="button" accessibilityLabel={t('post.share')}>
+        <Pulsable
+          onPress={onShare}
+          escala={ESCALA_AL_PULSAR.icono}
+          style={styles.sidebarItem}
+          accessibilityRole="button"
+          accessibilityLabel={t('post.share')}
+        >
           <Feather name="share-2" size={28} color={media.text} />
-        </Pressable>
+        </Pulsable>
 
         {/*
           «No me interesa». Va en la columna porque es una accion sobre el
@@ -380,15 +410,16 @@ function ShortVideoItemBase({
           dos decisiones distintas, y la segunda se toma en el perfil.
         */}
         {alDescartar ? (
-          <Pressable
+          <Pulsable
             onPress={() => alDescartar(short.id)}
+            escala={ESCALA_AL_PULSAR.icono}
             style={styles.sidebarItem}
             accessibilityRole="button"
             accessibilityLabel={t('feed.notInterested')}
             accessibilityHint={t('feed.notInterestedHint')}
           >
             <Feather name="slash" size={22} color={media.textMuted} />
-          </Pressable>
+          </Pulsable>
         ) : null}
 
         {/*
@@ -400,15 +431,19 @@ function ShortVideoItemBase({
           El estado lo lleva el icono, no un color: tachado es silencio, ondas
           es audio.
         */}
-        <Pressable
+        <Pulsable
           onPress={onToggleMuted}
+          escala={ESCALA_AL_PULSAR.icono}
           style={[styles.sidebarItem, styles.soundButton, { backgroundColor: media.overlay, borderColor: media.border }]}
           accessibilityRole="switch"
           accessibilityState={{ checked: !muted }}
           accessibilityLabel={muted ? t('video.unmute') : t('video.mute')}
         >
-          <Feather name={muted ? 'volume-x' : 'volume-2'} size={22} color={media.text} />
-        </Pressable>
+          {/* El icono salta al cambiar: silenciar tambien tiene su respuesta. */}
+          <IconoQueSeEnciende activo={!muted}>
+            <Feather name={muted ? 'volume-x' : 'volume-2'} size={22} color={media.text} />
+          </IconoQueSeEnciende>
+        </Pulsable>
       </View>
 
       <View style={[styles.bottomInfo, { bottom: alturaDeInformacion }]}>

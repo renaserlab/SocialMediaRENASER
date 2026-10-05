@@ -1,8 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Animated,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -10,9 +10,13 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
+import { OndaDeVoz } from '@/components/OndaDeVoz';
+import { Pulsable } from '@/components/Pulsable';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { FaseDeNotaDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
+import { haptics } from '@/lib/haptics';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { formatearDuracion } from '@/lib/notaDeVoz';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -54,6 +58,11 @@ type Props = {
   avance: number;
   /** De 0 a 1 mientras se sube. */
   progreso: number;
+  /**
+   * El nivel del micrófono (0–1) mientras se graba, o `null` si la plataforma
+   * no lo mide. Con `null` no se pinta una onda inventada.
+   */
+  nivel?: number | null;
   /** El fichero grabado, para poder escucharlo antes de mandarlo. */
   uri: string | null;
   empezar: () => void;
@@ -70,6 +79,7 @@ export function BotonDeNotaDeVoz({
   segundos,
   avance,
   progreso,
+  nivel = null,
   uri,
   empezar,
   detener,
@@ -90,6 +100,30 @@ export function BotonDeNotaDeVoz({
     if (fase !== 'lista' && fase !== 'fallida') setSonando(false);
   }, [fase]);
 
+  /*
+    EMPEZAR Y PARAR SE NOTAN EN LA MANO, Y SE DICEN EN VOZ ALTA.
+
+    Quien graba suele estar mirando a otra parte —o hablando al telefono como
+    si fuera una llamada—: una vibracion al abrirse el microfono y otra al
+    cerrarse le dicen lo que no esta viendo. Y quien usa lector de pantalla no
+    puede depender del punto rojo: se le anuncia que empieza y que termina.
+  */
+  const faseAnterior = useRef(fase);
+  useEffect(() => {
+    const antes = faseAnterior.current;
+    faseAnterior.current = fase;
+    if (antes === fase) return;
+    if (fase === 'grabando') {
+      haptics.medium();
+      AccessibilityInfo.announceForAccessibility(t('chat.recording'));
+    } else if (antes === 'grabando') {
+      haptics.light();
+      if (fase === 'lista') AccessibilityInfo.announceForAccessibility(t('chat.recordingReady'));
+    } else if (fase === 'fallida') {
+      AccessibilityInfo.announceForAccessibility(t('chat.recordingFailed'));
+    }
+  }, [fase, t]);
+
   const enPrevia = fase === 'lista' || fase === 'fallida';
   const preparando = fase === 'permiso' || fase === 'guardando';
 
@@ -103,24 +137,43 @@ export function BotonDeNotaDeVoz({
         qué no salió: todo lo que hay que decidir, en el mismo sitio.
       */}
       {fase === 'grabando' ? (
-        <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.aviso,
+            styles.avisoGrabando,
+            // El borde en el color de «grabando»: la barra entera cambia, no
+            // solo un punto de nueve pixeles.
+            { backgroundColor: colors.surface, borderColor: colors.danger },
+          ]}
+        >
           <PuntoQueLate color={colors.danger} />
-          <Text style={[styles.reloj, { color: colors.text }]}>
-            {formatearDuracion(segundos)}
-          </Text>
-          <Text numberOfLines={1} style={[styles.pista, { color: colors.textMuted }]}>
+          <Text style={[styles.grabando, { color: colors.danger }]}>
             {t('chat.recording')}
           </Text>
+          <Text
+            style={[styles.reloj, { color: colors.text }]}
+            // El reloj cambia cinco veces por segundo: sin esto el lector de
+            // pantalla lo leeria sin parar.
+            accessibilityLiveRegion="none"
+          >
+            {formatearDuracion(segundos)}
+          </Text>
+          {/*
+            La voz, mientras se habla. Con medicion real es la señal del
+            microfono; sin ella son tres puntos que no pretenden serlo.
+          */}
+          <OndaDeVoz nivel={nivel} latido={segundos} color={colors.text} />
 
-          <Pressable
+          <Pulsable
             onPress={cancelar}
             accessibilityRole="button"
             accessibilityLabel={t('chat.discardRecording')}
             hitSlop={10}
-            style={styles.accion}
+            escala={ESCALA_AL_PULSAR.icono}
+            style={[styles.accion, styles.circulo, { borderColor: colors.border }]}
           >
-            <Feather name="trash-2" size={18} color={colors.danger} />
-          </Pressable>
+            <Feather name="trash-2" size={16} color={colors.danger} />
+          </Pulsable>
 
           {/* Cuánto queda hasta el tope. Aparece cuando de verdad importa. */}
           {avance > 0.75 ? (
@@ -141,16 +194,17 @@ export function BotonDeNotaDeVoz({
           {sonando && uri ? (
             <NotaSonando uri={uri} duracion={segundos} color={colors.text} alTerminar={() => setSonando(false)} />
           ) : (
-            <Pressable
+            <Pulsable
               onPress={() => setSonando(true)}
               disabled={!uri}
               accessibilityRole="button"
               accessibilityLabel={t('chat.playRecording')}
               hitSlop={8}
-              style={[styles.play, { borderColor: colors.text }]}
+              escala={ESCALA_AL_PULSAR.icono}
+              style={[styles.play, { borderColor: colors.text, backgroundColor: colors.text }]}
             >
-              <Feather name="play" size={14} color={colors.text} />
-            </Pressable>
+              <Feather name="play" size={14} color={colors.background} />
+            </Pulsable>
           )}
 
           <Text style={[styles.reloj, { color: colors.text }]}>
@@ -167,7 +221,7 @@ export function BotonDeNotaDeVoz({
             {fase === 'fallida' ? t('chat.recordingFailed') : t('chat.recordingReady')}
           </Text>
 
-          <Pressable
+          <Pulsable
             onPress={eliminar}
             accessibilityRole="button"
             accessibilityLabel={t('chat.deleteRecording')}
@@ -175,7 +229,7 @@ export function BotonDeNotaDeVoz({
             style={styles.accion}
           >
             <Feather name="trash-2" size={18} color={colors.danger} />
-          </Pressable>
+          </Pulsable>
         </View>
       ) : null}
 
@@ -205,16 +259,24 @@ export function BotonDeNotaDeVoz({
         vez obligarían a elegir entre cosas que desde fuera son «mandar».
       */}
       {fase === 'grabando' ? (
-        <Pressable
+        <Pulsable
           onPress={detener}
           accessibilityRole="button"
           accessibilityLabel={t('chat.stopRecording')}
+          escala={ESCALA_AL_PULSAR.icono}
           style={[styles.boton, { backgroundColor: colors.danger }]}
         >
-          <Feather name="square" size={18} color={colors.onPrimary} />
-        </Pressable>
+          {/*
+            Un aro que se abre y se desvanece alrededor del boton: junto con
+            la barra de arriba, no deja dudas de que el microfono esta abierto
+            y de DONDE se para. El cuadrado va en blanco fijo —no en un color
+            de tema— porque el fondo es siempre el rojo de «grabando».
+          */}
+          <AroQueLate color={colors.danger} />
+          <Feather name="square" size={18} color="#FFFFFF" />
+        </Pulsable>
       ) : enPrevia ? (
-        <Pressable
+        <Pulsable
           onPress={enviar}
           accessibilityRole="button"
           accessibilityLabel={
@@ -227,13 +289,13 @@ export function BotonDeNotaDeVoz({
             size={20}
             color={colors.onPrimary}
           />
-        </Pressable>
+        </Pulsable>
       ) : preparando || fase === 'enviando' ? (
         <View style={styles.boton}>
           <ActivityIndicator size="small" color={colors.textMuted} />
         </View>
       ) : (
-        <Pressable
+        <Pulsable
           onPress={empezar}
           disabled={deshabilitado}
           accessibilityRole="button"
@@ -242,7 +304,7 @@ export function BotonDeNotaDeVoz({
           style={styles.boton}
         >
           <Feather name="mic" size={22} color={deshabilitado ? colors.border : colors.text} />
-        </Pressable>
+        </Pulsable>
       )}
     </>
   );
@@ -296,6 +358,45 @@ function PuntoQueLate({ color }: { color: string }) {
  * LAYOUT porque `expo-audio` libera el objeto nativo en la suya, declarada
  * antes: un `pause()` en un efecto pasivo caería sobre un objeto ya muerto.
  */
+/**
+ * El aro del boton de detener. Crece y se apaga en bucle mientras se graba.
+ *
+ * Con «reducir movimiento» se queda como un aro quieto alrededor del boton: la
+ * señal sigue ahi —junto con el texto «Grabando» y el reloj—, sin el pulso.
+ */
+function AroQueLate({ color }: { color: string }) {
+  const sinMovimiento = useReduceMotion();
+  const pulso = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (sinMovimiento) {
+      pulso.setValue(0.35);
+      return undefined;
+    }
+    const bucle = Animated.loop(
+      Animated.timing(pulso, { toValue: 1, duration: 1300, useNativeDriver: true }),
+    );
+    bucle.start();
+    return () => bucle.stop();
+  }, [pulso, sinMovimiento]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.aro,
+        {
+          borderColor: color,
+          opacity: pulso.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }),
+          transform: [
+            { scale: pulso.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) },
+          ],
+        },
+      ]}
+    />
+  );
+}
+
 function NotaSonando({
   uri,
   duracion,
@@ -334,7 +435,7 @@ function NotaSonando({
   const actual = estado?.currentTime ?? 0;
 
   return (
-    <Pressable
+    <Pulsable
       onPress={alTerminar}
       accessibilityRole="button"
       accessibilityLabel={t('chat.pauseRecording')}
@@ -350,7 +451,7 @@ function NotaSonando({
           ]}
         />
       ) : null}
-    </Pressable>
+    </Pulsable>
   );
 }
 
@@ -376,8 +477,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
-  punto: { width: 9, height: 9, borderRadius: 5 },
-  reloj: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  // Mas alta y con mas aire que las otras barras: es la que tiene que verse.
+  avisoGrabando: { paddingVertical: spacing.sm + 2, borderWidth: 1.5 },
+  grabando: { fontSize: 12, fontWeight: '800' },
+  circulo: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+  },
+  aro: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
+    borderWidth: 2,
+  },
+  punto: { width: 10, height: 10, borderRadius: 5 },
+  reloj: { fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
   pista: { flex: 1, fontSize: 11 },
   accion: { minWidth: 28, alignItems: 'center' },
   play: {

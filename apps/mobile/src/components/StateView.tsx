@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Aparecer } from '@/components/Aparecer';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import { Button } from './Button';
@@ -103,8 +104,22 @@ export function StateView({
   const finalDescription = description || defaultDescription;
 
   return (
-    <View style={[styles.centerContainer, style]}>
-      <Feather name={finalIcon} size={48} color={colors.textMuted} style={styles.icon} />
+    // Entra subiendo unos puntos: un estado vacío que aparece de golpe se lee
+    // como un fallo de carga; uno que llega se lee como una respuesta.
+    <Aparecer style={[styles.centerContainer, style]}>
+      {/*
+        El icono va dentro de un círculo suave. Suelto y gris sobre blanco
+        parecía un hueco; con su fondo es una ilustración pequeña, y sigue
+        siendo de la misma familia que el resto de la aplicación.
+      */}
+      <View
+        style={[
+          styles.circulo,
+          { backgroundColor: colors.backgroundAlt, borderColor: colors.border },
+        ]}
+      >
+        <Feather name={finalIcon} size={30} color={colors.text} />
+      </View>
       <Text style={[styles.title, { color: colors.text }]}>{finalTitle}</Text>
       {finalDescription && (
         <Text style={[styles.description, { color: colors.textMuted }]}>
@@ -126,7 +141,7 @@ export function StateView({
           style={styles.retryButton}
         />
       ) : null}
-    </View>
+    </Aparecer>
   );
 }
 
@@ -138,8 +153,14 @@ const styles = StyleSheet.create({
     padding: spacing.xxl,
     minHeight: 250,
   },
-  icon: {
-    marginBottom: spacing.md,
+  circulo: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
   },
   title: {
     fontSize: 16,

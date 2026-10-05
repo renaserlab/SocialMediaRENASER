@@ -3,6 +3,8 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
+import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
+import { conversacionDelPush } from '@/lib/rutaDelPush';
 import { supabase } from '@/services/supabase';
 
 /**
@@ -22,14 +24,33 @@ import { supabase } from '@/services/supabase';
  * cada usuario tenga configurado y no anade peso a la app.
  */
 
-/** Como se comporta un aviso con la app abierta: se ve y suena igual. */
+/**
+ * Como se comporta un aviso CON LA APLICACION ABIERTA.
+ *
+ * El aviso del sistema NO se pinta encima: con la aplicacion delante lo enseña
+ * la propia aplicacion, con su aviso flotante (`useAvisosDelPush`), que sabe a
+ * donde lleva y no repite lo que ya esta en pantalla. Dejar los dos seria ver
+ * el mismo aviso dos veces, uno sobre otro.
+ *
+ * Si se queda en el centro de avisos del telefono y si suena lo decide lo que
+ * la persona esta mirando: un mensaje de la conversacion que tiene abierta no
+ * suena ni se guarda —ya lo esta leyendo—; todo lo demas si.
+ *
+ * Con la aplicacion cerrada o en segundo plano esto no interviene: ahi manda
+ * el sistema, con el sonido del canal.
+ */
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (notificacion) => {
+    const aLaVista = seEstaViendoLaConversacion(
+      conversacionDelPush(notificacion.request.content.data),
+    );
+    return {
+      shouldShowBanner: false,
+      shouldShowList: !aLaVista,
+      shouldPlaySound: !aLaVista,
+      shouldSetBadge: true,
+    };
+  },
 });
 
 /**
@@ -43,11 +64,23 @@ Notifications.setNotificationHandler({
  * Ojo: los canales se crean UNA vez y despues Android ignora los cambios. Si
  * hay que cambiar el sonido o la importancia de uno, hay que darle otro id.
  */
+/*
+  SEGUNDA GENERACION DE CANALES (`-v2`), y el motivo es un fallo real: los de
+  la primera se crearon con `sound: null`, que en `expo-notifications` NO
+  significa «el sonido por defecto» sino «SIN SONIDO». Los avisos llegaban
+  mudos. Como Android no deja cambiar el sonido de un canal ya creado —ni
+  siquiera borrandolo y creandolo con el mismo id, que lo restaura tal cual—,
+  la unica salida es estrenar ids. El servidor manda a estos mismos ids
+  (`notifications/push.py`).
+*/
 const CHANNELS = [
-  { id: 'mensajes', name: 'Mensajes', description: 'Mensajes directos y del círculo' },
-  { id: 'interacciones', name: 'Interacciones', description: 'Me gusta, comentarios y seguidores' },
-  { id: 'contenido', name: 'Contenido', description: 'Cursos, eventos y sesiones' },
+  { id: 'mensajes-v2', name: 'Mensajes', description: 'Mensajes directos y del círculo' },
+  { id: 'interacciones-v2', name: 'Interacciones', description: 'Me gusta, comentarios y seguidores' },
+  { id: 'contenido-v2', name: 'Contenido', description: 'Cursos, eventos y sesiones' },
 ] as const;
+
+/** Los canales mudos de la primera generacion. Se retiran al crear los nuevos. */
+const CANALES_RETIRADOS = ['mensajes', 'interacciones', 'contenido'] as const;
 
 export type NotificationChannel = (typeof CHANNELS)[number]['id'];
 
@@ -58,10 +91,23 @@ async function ensureAndroidChannels(): Promise<void> {
       name: channel.name,
       description: channel.description,
       importance: Notifications.AndroidImportance.HIGH,
-      // `null` = sonido de notificacion por defecto del telefono.
-      sound: null,
-      vibrationPattern: [0, 250, 250, 250],
+      // SIN la clave `sound`: es lo que deja el sonido de notificacion por
+      // defecto del telefono. Escribir `sound: null` lo APAGA.
+      // Una vibracion corta y otra: se nota sin ser una alarma.
+      vibrationPattern: [0, 200, 150, 200],
+      // En la pantalla bloqueada se ve que hay un aviso de Z y de quien, que es
+      // lo unico que el servidor manda: nunca el contenido de un mensaje.
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
+  }
+  // Los mudos se quitan: en los ajustes del telefono saldrian duplicados, con
+  // el mismo nombre, y nadie sabria cual es el que suena.
+  for (const viejo of CANALES_RETIRADOS) {
+    try {
+      await Notifications.deleteNotificationChannelAsync(viejo);
+    } catch {
+      /* Ya no estaba. */
+    }
   }
 }
 
@@ -98,6 +144,12 @@ function projectId(): string | null {
     null
   );
 }
+
+/**
+ * Si este teléfono ya dejó su token en el servidor desde que arrancó la
+ * aplicación. Ver `asegurarRegistroDePush`.
+ */
+let registrado = false;
 
 /**
  * Registra este dispositivo para recibir push y guarda su token.
@@ -146,7 +198,37 @@ export async function registerForPush(): Promise<string | null> {
     return null;
   }
 
+  registrado = true;
   return token;
+}
+
+/**
+ * Vuelve a intentar el registro si todavía no se logró. Se llama al volver a
+ * la aplicación.
+ *
+ * QUÉ ARREGLA (auditoría del 04/10/2026). El registro se intentaba UNA vez, al
+ * entrar, y si fallaba no se repetía hasta cerrar la aplicación del todo y
+ * volver a abrirla. Fallaba en casos corrientes:
+ *
+ *   - sin cobertura justo al arrancar: no se obtiene el token o no se guarda;
+ *   - se negó el permiso y después se concedió desde los ajustes del sistema.
+ *
+ * En los dos la persona tiene sesión, tiene el permiso y no le llega ningún
+ * push, sin nada que se lo diga.
+ *
+ * NO VUELVE A PREGUNTAR. Solo actúa si el permiso YA está concedido: insistir
+ * con el diálogo cada vez que alguien vuelve a la aplicación es la forma de
+ * que lo niegue para siempre.
+ */
+export async function asegurarRegistroDePush(): Promise<void> {
+  if (registrado || Platform.OS === 'web' || !Device.isDevice) return;
+  try {
+    const permiso = await Notifications.getPermissionsAsync();
+    if (!permiso.granted) return;
+    await registerForPush();
+  } catch {
+    // Volverá a intentarse la próxima vez que se vuelva a la aplicación.
+  }
 }
 
 /**
@@ -156,6 +238,8 @@ export async function registerForPush(): Promise<string | null> {
  * los avisos de su cuenta en un aparato que ya no usa.
  */
 export async function unregisterPush(): Promise<void> {
+  // La cuenta siguiente tiene que registrarse de nuevo en este teléfono.
+  registrado = false;
   if (!supabase || !Device.isDevice) return;
   const id = projectId();
   if (!id) return;
@@ -177,7 +261,7 @@ export async function unregisterPush(): Promise<void> {
 export async function notifyLocally(
   title: string,
   body: string,
-  channel: NotificationChannel = 'interacciones',
+  channel: NotificationChannel = 'interacciones-v2',
 ): Promise<void> {
   try {
     await Notifications.scheduleNotificationAsync({

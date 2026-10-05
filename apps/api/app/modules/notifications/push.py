@@ -16,7 +16,7 @@ import logging
 
 import httpx
 from fastapi import BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.notifications.device_tokens import DeviceToken
@@ -50,6 +50,9 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "refund_rejected": ("Solicitud rechazada", "Revisa el motivo en tus compras."),
     "refund_refunded": ("Devolución completada", "El importe vuelve a tu método de pago."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
+    # Un mensaje de chat. SIN EL TEXTO DEL MENSAJE: un push se lee en la
+    # pantalla bloqueada. Dice quién escribe; el contenido se lee dentro.
+    "message": ("Nuevo mensaje", "{actor} te envió un mensaje."),
     # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
     # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
     "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
@@ -97,6 +100,7 @@ CHANNELS: dict[str, str] = {
     "refund_rejected": "contenido",
     "refund_refunded": "contenido",
     "follow": "interacciones",
+    "message": "mensajes",
     # Con los seguidores y los «me gusta»: es alguien a quien sigues haciendo
     # algo, no una gestion tuya.
     "live_started": "interacciones",
@@ -132,6 +136,35 @@ CHANNELS: dict[str, str] = {
         )
     },
 }
+
+
+#: La generación de los canales de Android.
+#:
+#: Los de la primera se crearon en el teléfono con `sound: null`, que en
+#: `expo-notifications` es «sin sonido»: los avisos llegaban mudos. Android no
+#: deja cambiar el sonido de un canal ya creado, así que la aplicación estrena
+#: ids (`services/notifications.ts`) y aquí se manda a esos mismos. Si algún
+#: día hay que volver a cambiar algo de los canales, se sube este sufijo en los
+#: DOS sitios a la vez.
+SUFIJO_DE_CANAL = "-v2"
+
+
+def canal_android(nombre: str) -> str:
+    """El id del canal tal como existe en el teléfono."""
+    return f"{nombre}{SUFIJO_DE_CANAL}"
+
+
+def nombre_visible(full_name: str | None, username: str | None) -> str | None:
+    """Como se nombra a quien provoca un aviso: su nombre, o su usuario.
+
+    El aviso tiene que decir QUIEN: «Ana empezó a seguirte» se puede decidir
+    desde la pantalla bloqueada; «Alguien empezó a seguirte» no. Casi todos los
+    sitios pasaban solo `full_name`, y un perfil con el nombre vacio salia como
+    «Alguien» aunque tuviera usuario. Ahora cae al usuario antes que al
+    generico. `None` deja el «Alguien» de la plantilla: mejor eso que ningun
+    aviso.
+    """
+    return (full_name or "").strip() or (username or "").strip() or None
 
 
 def build_message(notification_type: str, actor_name: str | None) -> tuple[str, str] | None:
@@ -185,20 +218,46 @@ async def send_push_many(
         return
     title, body = message
 
+    tokens = await _leer_tokens(db, user_ids)
+    await _enviar_a(
+        tokens,
+        title=title,
+        body=body,
+        channel=CHANNELS.get(notification_type, "interacciones"),
+        data=data,
+    )
+
+
+async def _leer_tokens(db: AsyncSession, user_ids: list[str]) -> list[str]:
+    """Los aparatos registrados de esas personas. NUNCA LANZA."""
     try:
         result = await db.execute(
             select(DeviceToken.token).where(DeviceToken.user_id.in_(user_ids))
         )
-        tokens = [row[0] for row in result.all()]
+        return [row[0] for row in result.all()]
     except Exception:  # noqa: BLE001 - un fallo aquí no debe romper la petición
         logger.warning("[push] no se pudieron leer los tokens", exc_info=True)
-        return
+        return []
 
+
+async def _enviar_a(
+    tokens: list[str],
+    *,
+    title: str,
+    body: str,
+    channel: str,
+    data: dict | None,
+) -> None:
+    """Habla con Expo. NO TOCA LA BASE DE DATOS mientras lo hace.
+
+    Recibe los tokens ya leídos, a propósito: quien llama puede haber soltado
+    su conexión antes de entrar aquí, y esta función puede tardar hasta diez
+    segundos por lote sin tener ninguna ocupada.
+    """
     if not tokens:
         # Nadie ha registrado un dispositivo todavía; no es un error.
         return
 
-    channel = CHANNELS.get(notification_type, "interacciones")
     messages = [
         {
             "to": token,
@@ -206,20 +265,90 @@ async def send_push_many(
             "body": body,
             # "default" = el sonido de notificación del propio teléfono.
             "sound": "default",
-            "channelId": channel,
+            "channelId": canal_android(channel),
+            # Sin esto Android puede retener el aviso hasta que el teléfono
+            # despierte por otra cosa: con el aparato en reposo, un mensaje
+            # llegaba minutos tarde o al desbloquear.
+            "priority": "high",
             "data": data or {},
         }
         for token in tokens
     ]
 
+    muertos: list[str] = []
     for start in range(0, len(messages), BATCH_SIZE):
         batch = messages[start : start + BATCH_SIZE]
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(EXPO_PUSH_URL, json=batch)
                 response.raise_for_status()
+                muertos.extend(tokens_muertos(batch, _cuerpo(response)))
         except Exception:  # noqa: BLE001
             logger.warning("[push] fallo al enviar un lote", exc_info=True)
+
+    await olvidar_tokens(muertos)
+
+
+def _cuerpo(respuesta) -> object:
+    """El JSON de la respuesta de Expo, o `None` si no se entiende."""
+    try:
+        return respuesta.json()
+    except Exception:  # noqa: BLE001 - un cuerpo raro no es motivo para fallar
+        return None
+
+
+def tokens_muertos(lote: list[dict], cuerpo: object) -> list[str]:
+    """Los tokens de un lote que Expo dice que ya no existen.
+
+    Expo contesta 200 y mete dentro un resultado POR MENSAJE, en el mismo orden
+    en que se mandaron. Una aplicación desinstalada, o un token caducado, llega
+    como `{"status": "error", "details": {"error": "DeviceNotRegistered"}}`.
+
+    Antes no se miraba: el token se quedaba en la tabla para siempre y cada
+    aviso volvía a mandarse a un teléfono que ya no estaba. No hace daño a
+    nadie, pero Expo penaliza a quien insiste, y la tabla solo crecía.
+
+    SOLO `DeviceNotRegistered`. Otros errores —límite de mensajes, credenciales
+    del proyecto— no dicen nada del token y borrarlo dejaría sin avisos a
+    alguien que sí tiene la aplicación.
+
+    Función pura, para poder probarla sin red.
+    """
+    if not isinstance(cuerpo, dict):
+        return []
+    recibos = cuerpo.get("data")
+    if not isinstance(recibos, list) or len(recibos) != len(lote):
+        # Sin correspondencia uno a uno no se sabe de quién es cada resultado.
+        return []
+    muertos: list[str] = []
+    for mensaje, recibo in zip(lote, recibos, strict=True):
+        if not isinstance(recibo, dict) or recibo.get("status") != "error":
+            continue
+        detalles = recibo.get("details")
+        if isinstance(detalles, dict) and detalles.get("error") == "DeviceNotRegistered":
+            token = mensaje.get("to")
+            if isinstance(token, str):
+                muertos.append(token)
+    return muertos
+
+
+async def olvidar_tokens(tokens: list[str]) -> None:
+    """Borra los tokens que ya no existen. NUNCA LANZA.
+
+    Con sesión PROPIA: quien llama puede estar usando la de una petición, y
+    hacer `commit` sobre ella desde aquí cerraría una transacción que no es
+    nuestra.
+    """
+    if not tokens:
+        return
+    try:
+        async with SessionLocal() as db:
+            await db.execute(delete(DeviceToken).where(DeviceToken.token.in_(tokens)))
+            await db.commit()
+        # Cuántos, nunca cuáles: un token es una credencial de envío.
+        logger.info("[push] %s token(s) dados de baja por Expo", len(tokens))
+    except Exception:  # noqa: BLE001
+        logger.warning("[push] no se pudieron borrar los tokens caducados", exc_info=True)
 
 
 async def _enviar_con_sesion_propia(
@@ -228,15 +357,37 @@ async def _enviar_con_sesion_propia(
     actor_name: str | None,
     data: dict | None,
 ) -> None:
-    """El envío real, ya fuera de la petición y con su propia sesión."""
+    """El envío real, ya fuera de la petición y con su propia sesión.
+
+    LA CONEXIÓN SE SUELTA ANTES DE HABLAR CON EXPO. Antes se leían los tokens y
+    se hacía el POST —con hasta diez segundos de espera— dentro del mismo
+    `async with`: la transacción seguía abierta y la conexión ocupada todo ese
+    tiempo. El pool son cinco conexiones más cinco de reserva
+    (`shared/database.py`); con Expo lento y diez avisos a la vez se agotaba y
+    se paraba la API entera, que es justo lo que `encolar_push` existe para
+    evitar. Desde que cada mensaje de chat manda un aviso, eso dejó de ser un
+    caso raro.
+
+    Ahora la sesión vive lo que tarda UNA consulta. El envío va después, sin
+    ninguna conexión cogida.
+    """
+    if not user_ids:
+        return
+    message = build_message(notification_type, actor_name)
+    if message is None:
+        return
+    title, body = message
+
     async with SessionLocal() as db:
-        await send_push_many(
-            db,
-            user_ids=user_ids,
-            notification_type=notification_type,
-            actor_name=actor_name,
-            data=data,
-        )
+        tokens = await _leer_tokens(db, user_ids)
+
+    await _enviar_a(
+        tokens,
+        title=title,
+        body=body,
+        channel=CHANNELS.get(notification_type, "interacciones"),
+        data=data,
+    )
 
 
 def encolar_push(
@@ -321,7 +472,8 @@ async def enviar_de_la_cola(
             "title": titulo,
             "body": cuerpo,
             "sound": "default",
-            "channelId": textos.CANALES.get(tipo, "contenido"),
+            "channelId": canal_android(textos.CANALES.get(tipo, "contenido")),
+            "priority": "high",
         }
         for token in tokens
     ]

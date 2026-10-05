@@ -1,10 +1,15 @@
 import { INTERVALO_DE_RESUMEN_MS } from '@/lib/ritmoDeChat';
 import {
-  esReaccion,
-  LiveRepository,
-  type EstadoDeEmision,
-  type TipoDeReaccion,
-} from '@/repositories/LiveRepository';
+  crearCanalDeReacciones,
+  crearTransporteDeRealtime,
+  type CanalDeReacciones,
+  type ClienteDeRealtime,
+  type ConteoDeReacciones,
+  type TransporteDeBroadcast,
+} from '@/live/reaccionesEnVivo';
+import { mantenerSuscripcion } from '@/live/suscripcionViva';
+import { topicoDeAvisosDelChat, type FilaDeChat } from '@/live/ventanaDeChat';
+import { LiveRepository, type EstadoDeEmision } from '@/repositories/LiveRepository';
 import { supabase } from '@/services/supabase';
 
 /**
@@ -25,8 +30,14 @@ import { supabase } from '@/services/supabase';
  *     base de datos que no le importan a nadie de forma individual, y el
  *     servidor los rechazaria en bloque. Viajan por un canal efimero entre
  *     clientes —quien esta mirando lo ve al instante— y cada pocos segundos se
- *     manda al backend el RESUMEN acumulado. Esa es la unica razon de que esto
- *     aguante una rafaga.
+ *     manda al backend el RESUMEN acumulado.
+ *
+ * LAS REGLAS NO ESTAN AQUI. Las de las reacciones estan en
+ * `live/reaccionesEnVivo.ts`, las del chat en `live/ventanaDeChat.ts` y la de
+ * no quedarse con un canal muerto en `live/suscripcionViva.ts`. Ninguno
+ * importa Supabase, y por eso se ejecutan en pruebas con varios clientes —y
+ * contra el cliente de Realtime de verdad—. Este fichero solo les da el
+ * cliente.
  *
  * TODO lo que se suscribe aqui devuelve su funcion de cancelacion. Un canal de
  * Realtime que sobrevive al desmontaje no se nota hasta que hay cinco: entonces
@@ -48,15 +59,11 @@ export const hayTiempoReal = Boolean(supabase);
  * NO trae nombre ni avatar: son columnas de `profiles`, y `postgres_changes`
  * manda la fila y nada mas. Quien pinte el chat necesita cruzarla con lo que
  * devolvio `LiveRepository.listarMensajes`.
+ *
+ * Y NO TRAE `hidden`: esa columna no existe. La tabla guarda CUANDO se
+ * escondio (`hidden_at`); el `hidden` booleano es cosa de la API.
  */
-export type FilaDeMensaje = {
-  id: string;
-  session_id: string;
-  user_id: string;
-  body: string;
-  created_at: string;
-  hidden: boolean;
-};
+export type FilaDeMensaje = FilaDeChat;
 
 /**
  * Fila cruda de `live_sessions`.
@@ -73,53 +80,85 @@ export type FilaDeEmision = {
   viewer_peak: number | null;
 };
 
+/** Como esta el canal del chat. Lo que no es `suscrito` no entrega mensajes. */
+export type EstadoDelCanalDeChat = 'conectando' | 'suscrito' | 'caido';
+
+/** Programar con el reloj de verdad. Devuelve como cancelarlo. */
+function programar(fn: () => void, ms: number): () => void {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
+}
+
 /*
-  Contador para nombres de canal unicos.
+  Contador para nombres de canal unicos. SOLO PARA `postgres_changes`.
 
   Supabase lanza «cannot add postgres_changes callbacks after subscribe()» si se
-  hace `.on()` sobre un canal ya suscrito, y eso pasa en cuanto un efecto se
-  vuelve a montar (React en modo estricto lo hace siempre). Mismo motivo y misma
-  solucion que en `services/realtime.ts`.
+  hace `.on()` sobre un canal ya suscrito, y eso pasa en cuanto dos sitios piden
+  un canal con el mismo nombre: el cliente devuelve el mismo objeto. Mismo
+  motivo y misma solucion que en `services/realtime.ts`.
+
+  AQUI SE PUEDE, Y EN BROADCAST NO. En `postgres_changes` el topico es solo un
+  nombre: lo que decide que llega es el filtro de la tabla, igual en todos los
+  telefonos. En Broadcast el topico ES la sala, y un contador local en el topico
+  pone a cada telefono en una sala distinta. Eso es justo lo que paso con las
+  reacciones hasta el 04/10/2026; ver `live/reaccionesEnVivo.ts`.
 */
 let secuencia = 0;
 
 /**
  * Los mensajes de una emision, segun se escriben.
  *
- * Escucha `*` y no solo `INSERT` porque esconder un mensaje es un UPDATE: si
- * solo se oyeran las altas, un mensaje moderado seguiria en pantalla de todo el
- * mundo menos de quien lo escondio, que es lo contrario de moderar.
+ * Escucha `*` y no solo `INSERT` porque esconder un mensaje es un UPDATE. OJO:
+ * ese UPDATE solo le llega a quien todavia puede leer la fila —quien modera y
+ * quien la escribio—, porque Realtime aplica la politica de lectura de la
+ * tabla. A los demas hay que avisarles por otro camino: `avisosDelChat`.
+ *
+ * `alCambiarEstado` cuenta como esta el canal. Sin eso la pantalla no podia
+ * distinguir «nadie escribe» de «se ha caido el chat», ni saber cuando vuelve
+ * para pedir lo que se perdio entre medias.
  */
 export function suscribirseAlChat(
   emisionId: string,
   alLlegarMensaje: (fila: FilaDeMensaje) => void,
+  alCambiarEstado?: (estado: EstadoDelCanalDeChat) => void,
 ): () => void {
   const cliente = supabase;
   if (!cliente) return () => {};
 
-  secuencia += 1;
-  const canal = cliente
-    .channel(`live-chat:${emisionId}:${secuencia}`)
-    .on<FilaDeMensaje>(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'live_messages',
-        filter: `session_id=eq.${emisionId}`,
-      },
-      (cambio) => {
-        // En un borrado `new` viene vacio. Un mensaje del chat no se borra —se
-        // esconde, que es un UPDATE—, pero salir por aqui evita entregar una
-        // fila sin identificador si alguna vez lo hiciera.
-        if (cambio.eventType === 'DELETE') return;
-        alLlegarMensaje(cambio.new);
-      },
-    )
-    .subscribe();
+  let vigente = true;
+  const dejar = mantenerSuscripcion({
+    programar,
+    alCambiar: (estado) => alCambiarEstado?.(estado),
+    abrir: (alCambiar) => {
+      secuencia += 1;
+      const canal = cliente
+        .channel(`live-chat:${emisionId}:${secuencia}`)
+        .on<FilaDeMensaje>(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'live_messages',
+            filter: `session_id=eq.${emisionId}`,
+          },
+          (cambio) => {
+            // En un borrado `new` viene vacio. Un mensaje del chat no se borra
+            // —se esconde, que es un UPDATE—, pero salir por aqui evita
+            // entregar una fila sin identificador si alguna vez lo hiciera.
+            if (!vigente || cambio.eventType === 'DELETE') return;
+            alLlegarMensaje(cambio.new);
+          },
+        )
+        .subscribe(alCambiar);
+      return () => {
+        void cliente.removeChannel(canal);
+      };
+    },
+  });
 
   return () => {
-    void cliente.removeChannel(canal);
+    vigente = false;
+    dejar();
   };
 }
 
@@ -137,152 +176,107 @@ export function suscribirseAlEstado(
   const cliente = supabase;
   if (!cliente) return () => {};
 
-  secuencia += 1;
-  const canal = cliente
-    .channel(`live-sala:${emisionId}:${secuencia}`)
-    .on<FilaDeEmision>(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'live_sessions',
-        filter: `id=eq.${emisionId}`,
-      },
-      (cambio) => alCambiar(cambio.new),
-    )
-    .subscribe();
+  let vigente = true;
+  const dejar = mantenerSuscripcion({
+    programar,
+    abrir: (alCambiarEstado) => {
+      secuencia += 1;
+      const canal = cliente
+        .channel(`live-sala:${emisionId}:${secuencia}`)
+        .on<FilaDeEmision>(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'live_sessions',
+            filter: `id=eq.${emisionId}`,
+          },
+          (cambio) => {
+            if (vigente) alCambiar(cambio.new);
+          },
+        )
+        .subscribe(alCambiarEstado);
+      return () => {
+        void cliente.removeChannel(canal);
+      };
+    },
+  });
 
   return () => {
-    void cliente.removeChannel(canal);
+    vigente = false;
+    dejar();
   };
 }
 
-/** Nombre del evento de Broadcast. Lo comparten todos los clientes de la sala. */
-const EVENTO_DE_REACCION = 'reaccion';
+export type { CanalDeReacciones } from '@/live/reaccionesEnVivo';
 
-export type CanalDeReacciones = {
-  /**
-   * Lanza una reaccion: sale por Broadcast y se apunta para el resumen.
-   *
-   * Devuelve enseguida y no lanza nunca. La animacion de quien reacciona no
-   * puede depender de que llegue nada.
-   */
-  enviar: (tipo: TipoDeReaccion) => void;
-  /** Las reacciones de LOS DEMAS. Devuelve como dejar de escuchar. */
-  alRecibir: (escuchar: (tipo: TipoDeReaccion) => void) => () => void;
-  /** Cierra el canal y manda lo que quedara acumulado. */
-  cerrar: () => void;
-};
+/**
+ * El Broadcast de este proceso. UNO: es quien garantiza que hay como mucho un
+ * canal por topico (ver `crearTransporteDeRealtime`).
+ */
+const transporte: TransporteDeBroadcast | null = supabase
+  ? crearTransporteDeRealtime(supabase as unknown as ClienteDeRealtime, { programar })
+  : null;
 
 /**
  * El canal efimero de reacciones de una emision.
  *
- * Junta las dos mitades que hacen que esto funcione: el Broadcast, que las
- * reparte al instante entre quienes miran, y el acumulador, que cada
- * `INTERVALO_DE_RESUMEN_MS` manda al backend cuantas ha puesto esta persona.
+ * El topico es `live-reacciones:${emisionId}`, el MISMO en todos los telefonos
+ * de la sala. Lo calcula `topicoDeReacciones`; aqui no se escribe.
+ *
+ * `alResumir` recibe los totales que devuelve el servidor despues de cada
+ * resumen, para que la pantalla se ponga al dia sin contar nada dos veces.
  *
  * Sin Supabase configurado sigue funcionando a medias, y es la degradacion
  * correcta: no se ven las reacciones de los demas —no hay por donde— pero las
  * propias se siguen contando en el servidor.
  */
-export function canalDeReacciones(emisionId: string): CanalDeReacciones {
-  const cliente = supabase;
-  const escuchas = new Set<(tipo: TipoDeReaccion) => void>();
+export function canalDeReacciones(
+  emisionId: string,
+  alResumir?: (totales: ConteoDeReacciones) => void,
+): CanalDeReacciones {
+  return crearCanalDeReacciones({
+    emisionId,
+    transporte,
+    resumir: (conteos) => LiveRepository.resumirReacciones(emisionId, conteos),
+    esCierreDeReacciones: (error) =>
+      (error as { code?: string } | null)?.code === 'live_reactions_closed',
+    intervaloDeResumenMs: INTERVALO_DE_RESUMEN_MS,
+    programar,
+    ahora: () => Date.now(),
+    alResumir,
+  });
+}
 
-  /** Lo puesto por esta persona desde el ultimo resumen. */
-  let acumulado: Partial<Record<TipoDeReaccion, number>> = {};
-  let temporizador: ReturnType<typeof setTimeout> | null = null;
-  let cerrado = false;
-  /*
-    Cuando el servidor dice que las reacciones estan cerradas se deja de
-    acumular. Sin esto, cada intervalo repetiria la misma peticion condenada al
-    409 durante todo el rato que quede alguien con la pantalla abierta.
-  */
-  let admiteReacciones = true;
+export type AvisosDelChat = {
+  /** «Algo ha cambiado en el chat: vuelve a leer». `false` = no salio. */
+  avisar: () => boolean;
+  cerrar: () => void;
+};
 
-  secuencia += 1;
-  const canal = cliente
-    ? cliente.channel(`live-reacciones:${emisionId}:${secuencia}`, {
-        // `self: false`: la propia reaccion no vuelve. La animacion ya se lanzo
-        // en el mismo gesto, y devolverla pintaria dos corazones por un toque.
-        config: { broadcast: { self: false } },
-      })
-    : null;
-
-  if (canal) {
-    canal
-      .on('broadcast', { event: EVENTO_DE_REACCION }, (mensaje) => {
-        // El payload lo escribe OTRO cliente: puede traer cualquier cosa. Se
-        // valida contra la lista cerrada del backend antes de tocar la interfaz.
-        const tipo = (mensaje as { payload?: { tipo?: unknown } }).payload?.tipo;
-        if (!esReaccion(tipo)) return;
-        escuchas.forEach((escuchar) => escuchar(tipo));
-      })
-      .subscribe();
-  }
-
-  async function vaciar(): Promise<void> {
-    if (temporizador) {
-      clearTimeout(temporizador);
-      temporizador = null;
-    }
-    const lote = acumulado;
-    if (Object.keys(lote).length === 0) return;
-    acumulado = {};
-
-    try {
-      await LiveRepository.resumirReacciones(emisionId, lote);
-    } catch (error) {
-      const codigo = (error as { code?: string })?.code;
-      if (codigo === 'live_reactions_closed') {
-        admiteReacciones = false;
-        return;
-      }
-      /*
-        Lo demas se tira, y a proposito. Una reaccion perdida no la echa de
-        menos nadie: el contador es agregado y la siguiente rafaga lo corrige.
-        Reintentar significaria guardar el lote y mandarlo doble mas tarde,
-        inflando un numero por un fallo de red.
-      */
-    }
-  }
-
-  function programarResumen(): void {
-    if (temporizador || cerrado) return;
-    temporizador = setTimeout(() => {
-      temporizador = null;
-      void vaciar();
-    }, INTERVALO_DE_RESUMEN_MS);
-  }
-
+/**
+ * El aviso de que el chat ha cambiado por algo que NO llega por la base.
+ *
+ * Hoy es una sola cosa: alguien ha moderado. Esconder un mensaje es un cambio
+ * que Realtime solo entrega a quien todavia puede leerlo, asi que el publico
+ * no se entera y el mensaje se queda en su pantalla. Quien modera manda por
+ * Broadcast un aviso SIN CONTENIDO, y quien lo recibe vuelve a leer del
+ * servidor, que es quien dice que se ve y que no.
+ *
+ * EL AVISO NO TIENE AUTORIDAD. El canal es publico: lo puede mandar cualquiera
+ * con la clave publica de la aplicacion. Por eso no dice QUE esconder —nadie
+ * puede hacer desaparecer un mensaje ajeno mandandolo— y por eso quien lo
+ * recibe lee como mucho una vez cada pocos segundos (`crearChatEnVivo`).
+ */
+export function avisosDelChat(emisionId: string, alAvisar: () => void): AvisosDelChat {
+  if (!transporte) return { avisar: () => false, cerrar: () => {} };
+  const conexion = transporte.abrir(topicoDeAvisosDelChat(emisionId), {
+    // Lo que traiga el mensaje da igual: solo cuenta que ha llegado.
+    alRecibir: () => alAvisar(),
+    alCambiarEstado: () => {},
+  });
   return {
-    enviar(tipo: TipoDeReaccion): void {
-      if (cerrado) return;
-      // Primero el Broadcast: es lo que ve el resto de la sala, y va sin await
-      // porque nada de la interfaz espera a esta promesa.
-      void canal?.send({ type: 'broadcast', event: EVENTO_DE_REACCION, payload: { tipo } });
-
-      if (!admiteReacciones) return;
-      acumulado[tipo] = (acumulado[tipo] ?? 0) + 1;
-      programarResumen();
-    },
-
-    alRecibir(escuchar: (tipo: TipoDeReaccion) => void): () => void {
-      escuchas.add(escuchar);
-      return () => {
-        escuchas.delete(escuchar);
-      };
-    },
-
-    cerrar(): void {
-      if (cerrado) return;
-      cerrado = true;
-      escuchas.clear();
-      // Lo acumulado sale ANTES de soltar el canal: si no, salir de la pantalla
-      // tiraria los ultimos segundos de reacciones, que son justo los de
-      // cuando la persona estaba mas enganchada.
-      void vaciar();
-      if (canal && cliente) void cliente.removeChannel(canal);
-    },
+    avisar: () => conexion.enviar({ v: 1 }),
+    cerrar: () => conexion.cerrar(),
   };
 }

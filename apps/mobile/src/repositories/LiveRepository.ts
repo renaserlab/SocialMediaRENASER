@@ -3,6 +3,11 @@ import {
   type FalloDeCredencial,
 } from '@/live/maquinaDeDirecto';
 import {
+  REACCIONES,
+  reaccionesVacias,
+  type ConteoDeReacciones,
+} from '@/live/reaccionesEnVivo';
+import {
   hayVideoEnLaCredencial,
   leerCredencial,
   type CredencialDeVideo,
@@ -29,28 +34,19 @@ import { profileImageUrl } from '@/services/storage';
 
 export type EstadoDeEmision = 'scheduled' | 'live' | 'ended' | 'cancelled';
 
-/**
- * Las reacciones que acepta el servidor, en el orden en que se pintan.
- *
- * Es la lista cerrada del backend. Vive aqui —y no en la pantalla— porque el
- * canal de Broadcast recibe lo que mande CUALQUIER otro cliente, y `esReaccion`
- * es lo que impide que un payload inventado acabe contando como reaccion.
- */
-export const REACCIONES = ['corazon', 'aplauso', 'fuego', 'asombro', 'risa'] as const;
-
-export type TipoDeReaccion = (typeof REACCIONES)[number];
-
-export type ConteoDeReacciones = Record<TipoDeReaccion, number>;
-
-/** Todas a cero. Se escribe entera para que el tipo no dependa de un bucle. */
-export function reaccionesVacias(): ConteoDeReacciones {
-  return { corazon: 0, aplauso: 0, fuego: 0, asombro: 0, risa: 0 };
-}
-
-/** Si un texto cualquiera es una reaccion valida. */
-export function esReaccion(valor: unknown): valor is TipoDeReaccion {
-  return typeof valor === 'string' && (REACCIONES as readonly string[]).includes(valor);
-}
+/*
+  La lista cerrada de reacciones vive en `live/reaccionesEnVivo.ts`, junto a
+  quien valida lo que llega por Broadcast, para que ese modulo se pueda ejecutar
+  en las pruebas sin arrastrar la capa de red. Se reexporta desde aqui porque
+  es de aqui de donde la importa el resto de la aplicacion.
+*/
+export {
+  REACCIONES,
+  esReaccion,
+  reaccionesVacias,
+  type ConteoDeReacciones,
+  type TipoDeReaccion,
+} from '@/live/reaccionesEnVivo';
 
 /** Una emision, ya en el idioma de la aplicacion. */
 export type Emision = {

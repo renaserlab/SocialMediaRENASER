@@ -10,10 +10,11 @@ separado costaba `1 + 3N` viajes a la base y era el motivo de que la pantalla de
 Mensajes tardara segundos en abrirse.
 """
 
+import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy import false, func, insert, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,7 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import audio, esquema, historias
+from app.modules.messaging import audio, avisos, esquema, historias
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
@@ -52,12 +53,15 @@ from app.modules.messaging.schemas import (
     MessagingAvailability,
     StoryContextRead,
 )
+from app.modules.notifications.push import encolar_push
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.pagination import Page, pagination_params
 from app.shared.permissions import is_admin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["messaging"])
 
@@ -834,6 +838,7 @@ async def list_messages(
 async def send_message(
     conversation_id: str,
     payload: MessageCreate,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRead:
@@ -963,6 +968,25 @@ async def send_message(
     profile = await db.get(Profile, current_user.id)
     if profile is None:
         raise NotFoundError("Perfil del remitente no encontrado.")
+
+    # AVISAR A QUIEN LO RECIBE. El mensaje YA ESTA GUARDADO: si calcular a
+    # quien avisar falla, se pierde el aviso y no el mensaje. Y el push sale
+    # despues de responder (`encolar_push`), asi que quien escribe no espera a
+    # Expo para ver su propio mensaje. Ver `messaging/avisos.py`.
+    try:
+        a_quien = await avisos.destinatarios(
+            db, conversation_id=conversation_id, remitente_id=current_user.id
+        )
+        encolar_push(
+            background,
+            user_ids=a_quien,
+            notification_type=avisos.TIPO,
+            actor_name=avisos.nombre_para_el_aviso(profile),
+            data=avisos.datos_del_aviso(conversation_id, str(message_id)),
+        )
+    except Exception:  # noqa: BLE001 - el aviso nunca tumba el envio
+        logger.warning("[mensajes] no se pudo programar el aviso", exc_info=True)
+
     return MessageRead(
         id=message_id,
         conversation_id=conversation_id,

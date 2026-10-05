@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Button } from '@/components/Button';
 import { EstadoDelCatalogo } from '@/components/EstadoDelCatalogo';
 import { StateView } from '@/components/StateView';
@@ -220,16 +221,19 @@ export function SelectorDeHorarios({
           const actual = d.date === fecha;
           const con = d.count > 0;
           return (
-            <Pressable
+            <Pulsable
               key={d.date}
               disabled={!con}
               onPress={() => elegirFecha(d.date)}
+              // Un dia sin horarios se ve apagado. Va en `opacidad` y no en el
+              // estilo: la opacidad la anima `Pulsable` y una escrita en el
+              // estilo quedaria pisada.
+              opacidad={con ? 1 : 0.4}
               style={[
                 styles.fecha,
                 {
                   borderColor: actual ? colors.primary : colors.border,
                   backgroundColor: actual ? colors.primary : 'transparent',
-                  opacity: con ? 1 : 0.4,
                 },
               ]}
               accessibilityRole="button"
@@ -246,7 +250,7 @@ export function SelectorDeHorarios({
               <Text weight="700" color={actual ? colors.onPrimary : colors.text}>
                 {d.date.slice(8, 10)}
               </Text>
-            </Pressable>
+            </Pulsable>
           );
         })}
       </ScrollView>
@@ -291,7 +295,7 @@ export function SelectorDeHorarios({
               {horarios.map((h) => {
                 const actual = h.starts_at === elegido;
                 return (
-                  <Pressable
+                  <Pulsable
                     key={h.starts_at}
                     onPress={alElegir ? () => alElegir(h, fecha, calendario.modality) : undefined}
                     disabled={!alElegir}
@@ -312,7 +316,7 @@ export function SelectorDeHorarios({
                     <Text weight="700" color={actual ? colors.onPrimary : colors.text}>
                       {etiquetaDelHorario(h, horarios)}
                     </Text>
-                  </Pressable>
+                  </Pulsable>
                 );
               })}
             </View>

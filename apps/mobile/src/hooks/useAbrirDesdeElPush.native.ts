@@ -3,7 +3,8 @@ import * as Notifications from 'expo-notifications';
 import { useRootNavigationState, useRouter } from 'expo-router';
 
 import { marcarDirectoComoAvisado } from '@/components/AvisoDeDirectoSeguido';
-import { directoDelPush, rutaDelPush } from '@/lib/rutaDelPush';
+import { rutaDelAviso } from '@/lib/avisosAlCreador';
+import { RUTA_DE_LA_BANDEJA, directoDelPush, rutaDelPush } from '@/lib/rutaDelPush';
 
 /**
  * Tocar un push lleva a lo que anuncia (hoy, los directos).
@@ -38,8 +39,11 @@ export function useAbrirDesdeElPush(): void {
     atendidas.current.add(identificador);
 
     const datos = respuesta.notification.request.content.data;
-    const ruta = rutaDelPush(datos);
-    if (!ruta) return;
+    // El destino sale del MAPA CERRADO, nunca de una ruta que traiga el aviso.
+    // Lo que no se reconoce lleva a la bandeja; lo que ni es un aviso, a nada.
+    // Un aviso sin datos (los de la cola de servicios, eventos y productos no
+    // los mandan) lleva a la bandeja, que es donde esta su fila y su destino.
+    const ruta = rutaDelPush(datos, { rutaDeDecision: rutaDelAviso }) ?? RUTA_DE_LA_BANDEJA;
     // Quien entra por el push de un directo ya va a verlo: el aviso de
     // «está transmitiendo» no tiene que salirle encima del mismo directo.
     const directo = directoDelPush(datos);

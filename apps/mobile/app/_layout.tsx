@@ -22,6 +22,8 @@ import { DialogHost } from '@/components/DialogHost';
 import { ToastHost } from '@/components/ToastHost';
 import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
 import { useAbrirDesdeElPush } from '@/hooks/useAbrirDesdeElPush';
+import { useAvisosDelPush } from '@/hooks/useAvisosDelPush';
+import { useAvisosEnVivo } from '@/hooks/useAvisosEnVivo';
 import { useSalidaConDoblePulsacion } from '@/hooks/useSalidaConDoblePulsacion';
 import { perfMark } from '@/lib/perf';
 import { useAppStore } from '@/store/useAppStore';
@@ -89,6 +91,11 @@ export default function RootLayout() {
   // transmitiendo en vivo»). En la raiz porque el push puede abrir la
   // aplicacion desde cerrada, con cualquier pantalla por debajo.
   useAbrirDesdeElPush();
+  // Los avisos con la aplicacion ABIERTA: el push que llega en primer plano y,
+  // sin depender de el, los mensajes en vivo y la lectura periodica de la
+  // bandeja. Los dos acaban en el mismo aviso flotante.
+  useAvisosDelPush();
+  useAvisosEnVivo();
 
   /*
     El segundo valor es el error de carga: si la fuente falla (sin red, cache

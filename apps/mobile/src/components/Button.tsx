@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { tocarConCerrojo } from '@/lib/toqueConCerrojo';
 import { radius, spacing } from '@/theme/tokens';
@@ -63,22 +64,22 @@ export function Button({
   };
 
   return (
-    <Pressable
+    <Pulsable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: disabled || ocupado, busy: ocupado }}
       onPress={pulsar}
       disabled={disabled || ocupado}
-      style={({ pressed }: { pressed: boolean }) => [
+      // Se hunde bajo el dedo y vuelve con un muelle corto: lo pinta
+      // `Pulsable`, igual que en el resto de la aplicación. Apagado se ve
+      // apagado; ocupado NO se atenúa, porque está trabajando, no prohibido.
+      opacidad={disabled ? 0.45 : 1}
+      style={[
         styles.base,
         {
           backgroundColor: primary ? colors.primary : ghost ? 'transparent' : colors.background,
           borderColor: primary ? colors.primary : colors.border,
           borderWidth: ghost ? 0 : 1,
-          opacity: disabled ? 0.45 : pressed ? 0.8 : 1,
-          // Se hunde un poco al tocarlo. Es un cambio de estado, no una
-          // animación: no hay nada que reducir.
-          transform: [{ scale: pressed ? 0.98 : 1 }],
         },
         style,
       ]}
@@ -96,7 +97,7 @@ export function Button({
           <ActivityIndicator color={tinta} size="small" />
         </View>
       ) : null}
-    </Pressable>
+    </Pulsable>
   );
 }
 

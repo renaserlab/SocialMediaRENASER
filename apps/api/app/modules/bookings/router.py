@@ -20,7 +20,7 @@ from app.modules.bookings.schemas import (
     es_momento_futuro,
     transicion_permitida,
 )
-from app.modules.notifications.push import encolar_push
+from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -61,9 +61,15 @@ async def _nombre_del_actor(db: AsyncSession, uid: str) -> str | None:
     siempre una sola persona.
 
     Devolver None es valido: `push.build_message` escribe «Alguien» y el aviso
-    sale igual. Un nombre generico es mejor que ningun aviso.
+    sale igual. Un nombre generico es mejor que ningun aviso. Antes de llegar
+    ahi se prueba con el usuario (`nombre_visible`).
     """
-    return await db.scalar(select(Profile.full_name).where(Profile.id == uid))
+    fila = (
+        await db.execute(
+            select(Profile.full_name, Profile.username).where(Profile.id == uid)
+        )
+    ).first()
+    return nombre_visible(fila[0], fila[1]) if fila else None
 
 
 def _exigir_momento_futuro(scheduled_at: datetime | None) -> None:

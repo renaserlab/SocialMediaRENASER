@@ -5,6 +5,8 @@ import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Button } from '@/components/Button';
+import { Pulsable } from '@/components/Pulsable';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { ScrimDeMedio, sobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { PasoDeCaptura } from '@/components/crear/PasoDeCaptura';
@@ -145,6 +147,8 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
     entera: equivocarse ensenando de mas es recuperable; de menos, no.
   */
   const encuadre = elegido?.kind === 'image' ? encuadreDePublicacion(elegido.width, elegido.height) : null;
+  /** Solo texto y todavia vacio: lo unico que impide publicar. */
+  const faltaTexto = !elegido && texto.trim().length === 0;
 
   return (
     <SinTecladoDelante style={styles.raiz}>
@@ -178,15 +182,16 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
         )
       ) : null}
 
-      <Pressable
+      <Pulsable
         onPress={volverAElegir}
         hitSlop={12}
+        escala={ESCALA_AL_PULSAR.icono}
         style={styles.volver}
         accessibilityRole="button"
         accessibilityLabel={elegido ? t('create.chooseSomethingElse') : t('common.back')}
       >
         <Feather name="arrow-left" size={24} color={media.text} />
-      </Pressable>
+      </Pulsable>
 
       {/*
         LA FRANJA DEL PIE SE APAGA. El editor, los temas, el aviso de subida y
@@ -235,8 +240,23 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
           onPress={publicar}
           loading={envio.ocupado}
           // Sin medio hace falta texto; con medio, el texto sobra.
-          disabled={envio.ocupado || (!elegido && texto.trim().length === 0)}
+          disabled={envio.ocupado || faltaTexto}
         />
+        {/*
+          UN BOTON APAGADO TIENE QUE DECIR POR QUE. Sin esta linea, «Publicar»
+          en gris parecia roto: no habia forma de saber que lo unico que falta
+          es escribir algo.
+        */}
+        {faltaTexto && !envio.ocupado ? (
+          <Text
+            variant="caption"
+            color={media.textMuted}
+            style={styles.porQueApagado}
+            accessibilityLiveRegion="polite"
+          >
+            {t('create.writeToPublish')}
+          </Text>
+        ) : null}
       </View>
     </SinTecladoDelante>
   );
@@ -281,4 +301,5 @@ const styles = StyleSheet.create({
   },
   entrada: { fontSize: 15, lineHeight: 21, minHeight: 44 },
   contador: { textAlign: 'right', marginTop: spacing.xs },
+  porQueApagado: { textAlign: 'center' },
 });

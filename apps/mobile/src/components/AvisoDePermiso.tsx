@@ -1,8 +1,11 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Aparecer } from '@/components/Aparecer';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
+import { retrasoEnCascada } from '@/lib/movimiento';
 import {
   abrirAjustes,
   textoDePermiso,
@@ -30,46 +33,72 @@ type Props = {
  * otra vez, ir a los ajustes cuando ya no se puede preguntar, o hacer lo mismo
  * por otro camino (elegir de la galeria en vez de grabar)—, nunca un callejon
  * sin nada que tocar.
+ *
+ * ES LO PRIMERO QUE VE QUIEN VA A PUBLICAR sin haber dado el permiso, y se
+ * reporto como «la peor vista de toda la aplicacion»: un icono pequeño, dos
+ * frases y dos botones iguales sobre negro. Ahora las piezas entran una tras
+ * otra, el icono tiene cuerpo, y cada boton dice con su icono a donde lleva:
+ * el principal a los ajustes (o a volver a preguntar) y el secundario al
+ * camino que SIEMPRE funciona, el carrete.
  */
 export function AvisoDePermiso({ tipo, estado, alPedir, alternativa }: Props) {
   const texto = textoDePermiso(tipo, estado);
   const icono: keyof typeof Feather.glyphMap =
     tipo === 'camara' ? 'camera-off' : tipo === 'microfono' ? 'mic-off' : 'image';
+  // A donde lleva el boton principal, dicho con un icono ademas de con texto.
+  const iconoDeAccion: keyof typeof Feather.glyphMap = texto.vaAAjustes
+    ? 'settings'
+    : estado === 'denegado'
+      ? 'refresh-cw'
+      : 'check';
 
   return (
     <View style={styles.raiz}>
-      <View style={[styles.icono, { borderColor: media.border }]}>
-        <Feather name={icono} size={26} color={media.text} />
-      </View>
-      <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
-        {texto.titulo}
-      </Text>
-      <Text variant="body" color={media.textMuted} style={styles.centrado}>
-        {texto.cuerpo}
-      </Text>
+      <Aparecer>
+        {/* Dos circulos concentricos: el de fuera da cuerpo sin añadir color. */}
+        <View style={[styles.halo, { borderColor: media.border }]}>
+          <View style={[styles.icono, { backgroundColor: media.surface, borderColor: media.glassBorder }]}>
+            <Feather name={icono} size={30} color={media.text} />
+          </View>
+        </View>
+      </Aparecer>
 
-      <View style={styles.acciones}>
-        <Pressable
+      <Aparecer retraso={retrasoEnCascada(1)} style={styles.textos}>
+        <Text variant="title" weight="800" color={media.text} style={styles.centrado}>
+          {texto.titulo}
+        </Text>
+        <Text variant="body" color={media.textMuted} style={styles.centrado}>
+          {texto.cuerpo}
+        </Text>
+      </Aparecer>
+
+      <Aparecer retraso={retrasoEnCascada(2)} style={styles.acciones}>
+        <Pulsable
           onPress={texto.vaAAjustes ? abrirAjustes : alPedir}
+          haptica="ligera"
           style={[styles.boton, { backgroundColor: media.text }]}
           accessibilityRole="button"
+          accessibilityLabel={texto.accion}
         >
+          <Feather name={iconoDeAccion} size={17} color={media.background} />
           <Text variant="body" weight="700" color={media.background}>
             {texto.accion}
           </Text>
-        </Pressable>
+        </Pulsable>
         {alternativa ? (
-          <Pressable
+          <Pulsable
             onPress={alternativa.alPulsar}
-            style={[styles.boton, styles.botonSecundario, { borderColor: media.border }]}
+            style={[styles.boton, styles.botonSecundario, { borderColor: media.glassBorder }]}
             accessibilityRole="button"
+            accessibilityLabel={alternativa.etiqueta}
           >
+            <Feather name="image" size={17} color={media.text} />
             <Text variant="body" weight="700" color={media.text}>
               {alternativa.etiqueta}
             </Text>
-          </Pressable>
+          </Pulsable>
         ) : null}
-      </View>
+      </Aparecer>
     </View>
   );
 }
@@ -79,26 +108,43 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
+    gap: spacing.lg,
     paddingHorizontal: spacing.xl,
     backgroundColor: media.background,
   },
-  icono: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+  halo: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.sm,
   },
+  icono: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textos: { gap: spacing.sm, alignItems: 'center' },
   centrado: { textAlign: 'center' },
-  acciones: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg, flexWrap: 'wrap', justifyContent: 'center' },
+  acciones: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
   boton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     borderRadius: radius.pill,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: 'center',
   },
   botonSecundario: { borderWidth: 1 },

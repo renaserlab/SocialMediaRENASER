@@ -2166,3 +2166,366 @@ Sustituye a «Las tareas sin planificador» de la sección anterior: con el
 planificador encendido ya no hace falta lanzarlas a mano (se puede seguir
 haciendo). Y a la nota sobre el formulario de precios: ya no ofrece los
 cuatro.
+
+---
+
+## Mejora integral de vistas, audio y notificaciones (03/10/2026, noche)
+
+Nada de esto se ha visto en un teléfono. Las pruebas automáticas ejecutan las
+reglas —la cola de avisos, las pulsaciones rápidas, el mapa de destinos del
+push, el nivel del micrófono— y la exportación web arranca, pero cómo se
+SIENTE una animación, si vibra lo justo y si un aviso suena solo se comprueba
+con el aparato en la mano. Android e iOS, tema claro y oscuro.
+
+**Antes de empezar.** El push con la aplicación cerrada necesita una
+compilación nueva con las credenciales de Firebase (Android) y de Apple (iOS).
+Sin ellas, lo de «Push» de abajo no se puede probar; lo demás sí.
+
+**Lo que se pulsa.**
+
+- [ ] Botones, chips, filas y tarjetas se hunden un poco bajo el dedo y
+      vuelven. No rebotan como un juguete ni se quedan encogidos.
+- [ ] El control de dos opciones (Para ti / Siguiendo, Mis cursos / Mis audios)
+      desliza su pastilla; las pestañas deslizan su raya.
+- [ ] Con «Reducir movimiento» activado en los ajustes del teléfono: nada se
+      desliza ni salta, pero todo sigue cambiando de estado y se entiende.
+- [ ] En un Android de gama media, desplazar el muro y el feed de Inicio no va
+      a tirones.
+
+**Inicio y Explorar.**
+
+- [ ] El corazón se rellena y salta al reaccionar; el número entra desde abajo
+      al subir y desde arriba al bajar.
+- [ ] GUARDAR, muchas veces seguidas y rápido: el marcador cambia en cada
+      toque, no hay pausa, y al parar queda como en el último toque. Al volver
+      a entrar en la aplicación sigue igual.
+- [ ] Sale UN aviso por ráfaga, no uno por toque. «Publicación guardada» ofrece
+      «Ver lista»; «eliminada de guardados» ofrece «Deshacer», y deshace.
+- [ ] Sin conexión, guardar: el marcador vuelve a su sitio y sale un aviso de
+      error (no un diálogo).
+- [ ] Republicar varias veces seguidas: el botón no se queda apagado.
+- [ ] El aviso de arriba se puede quitar arrastrándolo hacia arriba, no tapa la
+      muesca y se lee en los dos temas.
+- [ ] El `+` de Inicio se ve sobre un vídeo claro y sobre uno oscuro.
+- [ ] El menú de una publicación y la hoja de comentarios suben con el fondo
+      fundiéndose, no como una persiana.
+
+**Comentarios.**
+
+- [ ] Las respuestas cuelgan de su comentario con una raya a la izquierda.
+- [ ] El botón redondo de enviar crece al escribir y enseña la espera dentro.
+- [ ] Sin conexión, enviar un comentario: el texto sigue en el campo.
+
+**Búsqueda (Explorar y Mensajes).**
+
+- [ ] Al tocar el campo se marca el borde y aparece «Cancelar»; al pulsarlo se
+      borra lo escrito y se cierra el teclado.
+- [ ] La X aparece al escribir y vacía el campo.
+- [ ] Mientras busca, la lupa es un indicador.
+- [ ] Escribir rápido «mar» → «martinez»: no se quedan resultados de «mar».
+
+**Crear.**
+
+- [ ] Sin permiso de cámara: se entiende qué pasa, «Abrir ajustes» abre los
+      ajustes y «Elegir del carrete» funciona.
+- [ ] Publicación solo de texto, con el campo vacío: «Publicar» está apagado y
+      debajo dice por qué.
+- [ ] Subiendo un vídeo, la barra avanza sin saltos.
+
+**Mensajes y conversación.**
+
+- [ ] El globo de no leídos aparece en la fila y en la barra inferior, y salta
+      al llegar otro mensaje.
+- [ ] En la conversación, lo recién enviado sube a su sitio; el historial no se
+      anima al desplazar.
+- [ ] La hora se lee sobre la burbuja negra. Mis mensajes llevan reloj mientras
+      salen, una marca al enviarse y aviso si fallan. Nunca dos marcas.
+- [ ] El `+` abre la hoja de Fotos y vídeos / Cámara / Archivo y se cierra al
+      elegir.
+
+**Nota de voz.** Es lo más importante de comprobar en Android.
+
+- [ ] Al empezar vibra, la barra cambia entera (borde, «Grabando», reloj) y el
+      botón de detener late.
+- [ ] LA ONDA RESPONDE A LA VOZ: hablando se mueve, en silencio se queda plana,
+      con el micrófono tapado también. Si en algún teléfono salen tres puntos
+      en vez de barras, es que ese aparato no mide: anotarlo.
+- [ ] El reloj cuenta bien (no arranca en una cifra absurda ni se para solo).
+- [ ] Detener vibra; se puede escuchar, eliminar y enviar.
+- [ ] Salir del chat o pasar la aplicación a segundo plano mientras graba: la
+      grabación se corta, no sigue por detrás.
+- [ ] Una llamada entrante mientras graba.
+- [ ] Con TalkBack / VoiceOver: se anuncia «Grabando» al empezar.
+
+**Perfil.**
+
+- [ ] «Publicaciones» es el primer círculo y está encendido al entrar.
+- [ ] Tocar Podcast, Cursos o Reseñas y volver a Publicaciones con UN toque.
+- [ ] Tocar dos veces el mismo círculo no cambia nada.
+- [ ] Los cinco círculos caben en un teléfono estrecho sin cortarse.
+- [ ] «Lo que puedo aportar» se abre y se cierra con la altura creciendo y la
+      flecha girando; lo de debajo no da un salto.
+
+**Eventos y formularios.**
+
+- [ ] La zona horaria se lee como una ciudad («Buenos Aires») y, tras guardar y
+      volver a entrar, sigue elegida la misma.
+- [ ] «Eventos por revisar» con una cuenta que no es de curaduría: no hay
+      botones debajo del aviso.
+- [ ] «Mis eventos»: las cuatro bandejas son filas con flecha.
+
+**Notificaciones con la aplicación ABIERTA.** No necesitan la compilación
+nueva.
+
+- [ ] Con dos cuentas en dos teléfonos: A escribe a B. A B le sale el aviso
+      flotante con el nombre de A en un par de segundos, y sube el globo de
+      Mensajes.
+- [ ] Si B tiene abierta ESA conversación: no sale aviso; el mensaje aparece en
+      la conversación.
+- [ ] Tres mensajes seguidos de A: un aviso que se renueva, no tres apilados.
+- [ ] A reacciona a una publicación de B, o le pide una sesión: en menos de un
+      minuto a B le sale el aviso y se enciende la campana.
+- [ ] Tocar el aviso lleva a la conversación, a la publicación o a la agenda.
+- [ ] En la bandeja, lo nuevo sale resaltado (círculo relleno, negrita, punto).
+      Al volver a entrar ya no.
+- [ ] Con más de cincuenta avisos, bajar carga los siguientes.
+
+**Push con la aplicación cerrada.** Con la compilación nueva.
+
+- [ ] Llega con SONIDO y con el icono de Z. En Android, en los ajustes de
+      notificaciones de la aplicación hay tres canales (Mensajes,
+      Interacciones, Contenido) y ninguno duplicado.
+- [ ] El texto dice quién escribe y NO lo que escribió.
+- [ ] Tocarlo con la aplicación cerrada del todo abre la conversación, la
+      publicación o la agenda correspondiente.
+- [ ] Un aviso de Servicios, Eventos o Productos abre la bandeja.
+- [ ] B bloquea a A; A escribe en la conversación que ya tenían: a B no le
+      suena nada.
+- [ ] Cerrar sesión en un teléfono: deja de recibir los avisos de esa cuenta.
+- [ ] El icono de la aplicación lleva el número de lo no leído y se limpia al
+      abrir la bandeja.
+
+**Entrar y crear la cuenta (04/10/2026).** Rehechas tras verlas en el
+navegador; en web se comprobaron los dos temas, el foco, los errores y el
+requisito de la contraseña. En teléfono falta:
+
+- [ ] La marca llega una vez (crece y suelta una onda) y no se queda animada.
+- [ ] «Siguiente» en el teclado pasa de un campo al otro sin cerrarlo; «Ir» en
+      la contraseña entra o crea la cuenta.
+- [ ] El gestor de contraseñas del teléfono ofrece rellenar el acceso y
+      generar una contraseña en el alta.
+- [ ] El ojo muestra y oculta la contraseña sin cambiar la letra ni mover el
+      cursor (Android).
+- [ ] Enviar con un campo mal: ese campo se mueve un instante a los lados y
+      queda el motivo debajo. Con «reducir movimiento» no se mueve.
+- [ ] Al enfocar un campo se ve su halo (Android 9 o superior; en versiones
+      anteriores solo cambia el borde).
+- [ ] Al entrar o crear la cuenta con éxito se nota una vibración corta.
+- [ ] En el alta, «Mínimo 6 caracteres» pasa de círculo vacío a círculo
+      marcado al llegar a seis.
+- [ ] «Términos» y «Política de Privacidad» abren su pantalla; al volver, lo
+      escrito sigue ahí.
+- [ ] Con el teclado abierto en un teléfono pequeño se llega al botón
+      desplazando; nada queda tapado.
+
+**Mensajes, búsqueda y avisos (04/10/2026, tarde).** El buscador se comprobó
+en el navegador; la bandeja con conversaciones reales NO (necesita sesión).
+
+- [ ] La bandeja: título «Mensajes» grande a la izquierda, buscador arriba,
+      historias debajo, filas sin rayas con la foto grande y la hora pegada al
+      último mensaje («Que fue bro · 12:47»).
+- [ ] Lo no leído sale en negrita y con el globo; un nombre largo se recorta y
+      no empuja el globo fuera.
+- [ ] Buscar en Mensajes: la lista se estrecha con cada letra, sin vaciarse ni
+      pintar un indicador en medio. Al llegar la respuesta puede aparecer una
+      conversación que casa por el texto de un mensaje.
+- [ ] Buscar algo que no existe: «Nada por aquí» solo cuando el servidor lo
+      confirma.
+- [ ] El buscador de Explorar y el de Mensajes: caja rellena, sin marco ni
+      recuadro interior al enfocar; «Cancelar» a la derecha.
+- [ ] Explorar: buscar, borrar una letra y volver a escribirla se pinta al
+      instante.
+- [ ] Cursos: tocar el marcador guarda sin abrir el curso; guardado se ve
+      relleno, también en tema oscuro.
+- [ ] A pide una sesión a B con la aplicación de B abierta: a B le sale el
+      aviso con el nombre de A en menos de medio minuto.
+- [ ] A bloquea a B. B la sigue, reacciona y comenta: a A no le llega nada.
+- [ ] Negar el permiso de notificaciones al entrar, concederlo luego en los
+      ajustes del sistema y volver a la aplicación sin cerrarla: el push
+      empieza a llegar (con la compilación nueva).
+
+## Directos: reacciones, chat, efectos y calidad (04/10/2026)
+
+**Nada de esto se ha probado en un teléfono.** Las pruebas automáticas montan
+tres clientes sobre una red en memoria y comprueban la lógica; la pantalla se
+vio en el navegador con datos inventados y sin vídeo. No hay prueba automática
+que pueda decir si un desenfoque se ve, si lo recibe otro teléfono o si un
+aparato de gama media aguanta.
+
+**Hace falta:** una compilación **1.2.0** (trae el módulo de efectos), la
+cuenta de 100ms conectada y `FEATURE_LIVE` encendida donde se pruebe. **Tres
+aparatos a la vez:** un anfitrión y dos espectadores.
+
+| Aparato | Para qué |
+|---|---|
+| Android reciente | Anfitrión con efectos, y espectador |
+| Android de gama media o antiguo | Lo mismo: es donde se verá si el efecto es usable |
+| iPhone con iOS 16 o posterior | Anfitrión con efectos, y espectador |
+| iPhone con iOS 15, si hay | Que NO se ofrezcan los efectos, y lo diga |
+
+**Los efectos no se dan por cerrados hasta ver, en un SEGUNDO teléfono, la
+imagen del anfitrión con el efecto puesto.**
+
+### Reacciones
+
+- [ ] Espectador A pulsa un corazón: lo ve A, lo ve el espectador B y lo ve el
+      anfitrión. **Era el defecto: antes solo lo veía A.**
+- [ ] A ve su corazón UNA vez, no dos.
+- [ ] El anfitrión reacciona: lo ven A y B.
+- [ ] A y B pulsan a la vez, muchas veces y seguido, durante medio minuto: la
+      imagen del anfitrión no va a saltos en ninguno de los tres, las burbujas
+      suben por carriles sin taparse y no se amontonan.
+- [ ] El número junto a cada reacción sube en los tres y acaba igual en los
+      tres al cabo de unos segundos.
+- [ ] Salir de la emisión y volver a entrar enseguida: se siguen viendo las
+      reacciones de los demás, una vez cada una.
+- [ ] Abrir la emisión, salir, volver a entrar: el número es el del servidor
+      (no arranca en cero ni duplicado).
+- [ ] Dos emisiones a la vez con gente distinta: las reacciones de una no
+      aparecen en la otra.
+- [ ] Con «Reducir movimiento»: las burbujas aparecen y se apagan sin subir.
+
+### Chat
+
+- [ ] El último mensaje se ve entero al entrar; el chat no tapa la cara de
+      quien emite.
+- [ ] A escribe: lo ven B y el anfitrión, con el nombre de A, sin duplicarse.
+- [ ] Alguien que escribe por primera vez: su mensaje aparece con su nombre
+      (nunca con un hueco), un instante después.
+- [ ] Estando al final, los mensajes nuevos empujan la lista hacia arriba y se
+      sigue viendo el último.
+- [ ] Subir a leer mientras los demás escriben: la lista NO baja sola; aparece
+      «N mensajes nuevos»; al tocarlo, baja y desaparece.
+- [ ] El anfitrión mantiene pulsado un mensaje y lo oculta: desaparece en SU
+      pantalla al momento **y no vuelve a aparecer** un segundo después.
+- [ ] Ese mismo mensaje desaparece en los dos espectadores en un par de
+      segundos. **Es lo que hay que mirar con más cuidado:** al público el
+      cambio no le llega por la base, sino por un aviso aparte.
+- [ ] El anfitrión oculta el ÚLTIMO mensaje de un chat en el que nadie más
+      escribe: también desaparece en los espectadores.
+- [ ] A quien escribió el mensaje ocultado también le desaparece.
+- [ ] Un espectador que ha bloqueado a otra persona no ve sus mensajes en el
+      chat del directo.
+- [ ] Un espectador mantiene pulsado un mensaje: no pasa nada.
+- [ ] Muchos mensajes seguidos de varias personas: el desplazamiento sigue
+      fluido y el vídeo no se resiente.
+- [ ] Abrir el teclado: el campo queda a la vista, el chat encoge y la
+      cabecera sigue arriba. También en un teléfono pequeño.
+- [ ] Modo avión unos segundos y fuera: se ve «Reconectando el chat…», vuelve
+      solo y aparecen los mensajes que se escribieron entre medias, sin
+      repetirse.
+- [ ] Una emisión larga (una hora, para que caduque la sesión por medio): el
+      chat y las reacciones siguen llegando al final. Si se quedan en
+      «Reconectando…», anotar cuánto tardan en volver.
+- [ ] Abrir una emisión desde un enlace con el identificador en MAYÚSCULAS: las
+      reacciones se ven igual entre ese teléfono y los demás.
+- [ ] Lector de pantalla: cada mensaje se lee «Nombre: texto»; el botón de
+      mensajes nuevos se anuncia; quien modera oye la pista de «mantén
+      pulsado».
+- [ ] Letra grande del sistema: los mensajes se parten en líneas, no se cortan.
+
+### Efectos de cámara (anfitrión)
+
+- [ ] El botón de efectos solo le aparece a quien emite.
+- [ ] **Desenfoque:** se ve en la propia pantalla **y en los dos espectadores**.
+      El borde de la persona es aceptable.
+- [ ] **Cada uno de los tres fondos:** igual, en los dos espectadores.
+- [ ] Cambiar de desenfoque a fondo y de un fondo a otro: sin cortes largos ni
+      imagen negra.
+- [ ] **Ninguno:** vuelve la cámara tal cual, en los tres.
+- [ ] En Android, al pasar de «Ninguno» a un fondo: cuánto dura el desenfoque
+      intermedio (el complemento arranca desenfocando). Anotarlo.
+- [ ] Cambiar de cámara frontal a trasera con un efecto puesto: el efecto
+      sigue, en los tres.
+- [ ] Apagar y encender la cámara con un efecto puesto: al volver, el efecto
+      sigue. **En ningún momento se ve el fondo real en los espectadores.**
+- [ ] Mandar la aplicación a segundo plano y volver con un efecto puesto:
+      igual.
+- [ ] Llamada entrante durante la emisión con un efecto puesto: al colgar, la
+      cámara vuelve con el efecto o apagada; nunca sin efecto.
+- [ ] Modo avión hasta que la emisión se cae y reconecta: la cámara vuelve
+      **apagada** hasta que el efecto está puesto, y entonces se enciende. Si
+      el efecto no vuelve, la cámara se queda apagada y sale el aviso.
+- [ ] Terminar la emisión con un efecto puesto y salir: el indicador de cámara
+      del sistema se apaga.
+- [ ] El anfitrión, con desenfoque, pulsa Atrás y sale sin terminar: en los
+      espectadores la imagen se corta **sin que se llegue a ver el fondo
+      real**, ni un instante.
+- [ ] Un intento de entrar que falla (modo avión al abrir) y luego entra bien:
+      los efectos se pueden poner y **se ven en los espectadores**. Si la hoja
+      marca un efecto y los demás no lo reciben, es el fallo de «la instancia
+      vieja».
+- [ ] En el Android antiguo, pedir desenfoque y, si tarda y dice «no se pudo»,
+      esperar unos segundos: el desenfoque no aparece después por su cuenta. Si
+      aparece, «Ninguno» lo quita.
+- [ ] El botón de efectos está siempre a la vista de quien emite. En un
+      teléfono que no los admite sale atenuado y la hoja explica por qué.
+- [ ] En el Android antiguo: fotogramas con cada efecto. Si va a saltos,
+      «Ninguno» responde al momento.
+- [ ] iPhone: que la imagen publicada con el complemento tiene la **misma
+      resolución** que sin él (comparar en un espectador, con y sin efecto).
+- [ ] iPhone con iOS 15: no hay botón de efectos.
+- [ ] Un binario 1.1.x: no hay botón de efectos y nada falla.
+- [ ] Media hora emitiendo con desenfoque: temperatura, batería, y si el
+      sistema baja el rendimiento.
+
+### Calidad
+
+- [ ] Sin Simulcast en la plantilla: **no hay botón de calidad**. Es lo
+      esperado hoy.
+- [ ] Con Simulcast (si se autoriza activarlo): el botón aparece solo a quien
+      mira; la hoja enseña la medida real de cada opción.
+- [ ] «Ahorrar datos»: la imagen baja de definición en un par de segundos,
+      **sin** cortarse ni volver a conectar. «Alta calidad»: sube.
+- [ ] «Automática»: en Wi-Fi se ve bien; al pasar a datos con poca cobertura,
+      baja sola.
+- [ ] Con «Ahorrar datos» elegido, el anfitrión apaga y enciende la cámara: la
+      imagen vuelve en baja, no en alta.
+- [ ] El anfitrión no tiene botón de calidad.
+- [ ] Mala cobertura en un espectador: aparece «Conexión lenta» sobre la
+      imagen, sin parpadear, y se quita cuando mejora.
+- [ ] Mala cobertura en el anfitrión: qué ven los espectadores. Anotarlo.
+
+### Red, sistema y orientación
+
+- [ ] Todo lo anterior en Wi-Fi y en datos móviles.
+- [ ] Segundo plano y vuelta, como espectador: la imagen y el chat se
+      recuperan solos.
+- [ ] Llamada entrante como espectador: al colgar, se sigue en la emisión.
+- [ ] Girar el teléfono: la pantalla se queda en vertical y nada se descoloca.
+- [ ] Tema claro y oscuro del sistema: la pantalla del directo es oscura
+      siempre; las hojas de efectos y de calidad siguen el tema.
+- [ ] Salir de la emisión como espectador: sin diálogo. Como anfitrión:
+      pregunta antes.
+- [ ] El anfitrión termina la emisión: los dos espectadores ven «terminada»,
+      el chat se cierra, las reacciones desaparecen.
+- [ ] Un espectador entra con la emisión ya empezada: ve la imagen, los
+      últimos mensajes y los totales de reacciones.
+
+### Para medir, no para marcar
+
+Con el teléfono conectado y la emisión en marcha, anotar en cada aparato:
+
+| Qué | Android reciente | Android antiguo | iPhone |
+|---|---|---|---|
+| Fotogramas del anfitrión sin efecto / con desenfoque / con fondo | | | |
+| Uso de CPU y memoria a los 10 minutos | | | |
+| Temperatura a los 30 minutos | | | |
+| Batería gastada en 30 minutos (anfitrión / espectador) | | | |
+| Datos consumidos en 10 minutos en «Alta» y en «Ahorrar datos» | | | |
+| Retraso entre pulsar una reacción y verla en otro teléfono | | | |
+
+Y una emisión de ensayo con todos los teléfonos que se puedan juntar (20 o 30)
+reaccionando a la vez, mirando en el panel de Supabase los mensajes por segundo
+y si aparece algún error de límite. Es la medida que falta en
+[`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md) §8.

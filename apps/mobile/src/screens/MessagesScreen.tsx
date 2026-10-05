@@ -16,7 +16,9 @@ import { StateView } from '@/components/StateView';
 import { useTranslation } from '@/i18n/useTranslation';
 import {
   CONSULTA_VACIA,
+  esperandoAlServidor,
   esVigente,
+  filasVisibles,
   fusionarPaginas,
   hayConsulta,
   hayQueRecargar,
@@ -33,6 +35,7 @@ import {
 } from '@/repositories/EtiquetasRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { anotarMensajes } from '@/services/contadores';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Conversation } from '@/types';
@@ -71,6 +74,16 @@ import type { Conversation } from '@/types';
  * petición, y la paginación sigue funcionando sobre el resultado filtrado.
  *
  * -----------------------------------------------------------------------------
+ * ...PERO MIENTRAS CONTESTA, LO QUE HAY SE ESTRECHA AL INSTANTE
+ * -----------------------------------------------------------------------------
+ * Reportado el 04/10/2026: «se demora demasiado en buscar». Buscar esperaba al
+ * antirrebote, VACIABA la lista, pintaba un indicador y esperaba a la red: con
+ * cuatro conversaciones delante, encontrar una tardaba lo que tardara el viaje.
+ * Ahora cada tecla estrecha lo que ya está en pantalla (`filasVisibles`), y la
+ * respuesta del servidor —la que manda— lo sustituye al llegar. No es volver a
+ * filtrar en el teléfono: en cuanto hay respuesta se pinta la suya, sin tocar.
+ *
+ * -----------------------------------------------------------------------------
  * FILTROS Y ETIQUETAS SON DOS EJES DISTINTOS
  * -----------------------------------------------------------------------------
  * «No leídos» y «No respondidos» son ESTADOS DERIVADOS: se calculan de los
@@ -93,6 +106,19 @@ export function MessagesScreen() {
   const [consulta, setConsulta] = useState<ConsultaDeBandeja>(CONSULTA_VACIA);
   const [remote, setRemote] = useState<Conversation[]>([]);
   const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  /*
+    LO TECLEADO Y LO SERVIDO.
+
+    `tecleado` cambia en cada tecla (lo dice el buscador, ya normalizado);
+    `servido` es el texto de la última respuesta del servidor que se pintó.
+    Mientras difieren hay una pregunta por salir o en vuelo, y la lista enseña
+    lo que tiene, estrechado. Cuando coinciden, lo que se ve es del servidor.
+
+    Las filas llevan `React.memo`: estrechar repinta las que entran o salen, no
+    la lista entera, que era lo que costaba tener el texto en esta pantalla.
+  */
+  const [tecleado, setTecleado] = useState<string>(CONSULTA_VACIA.texto);
+  const [servido, setServido] = useState<string>(CONSULTA_VACIA.texto);
   const [refreshing, setRefreshing] = useState(false);
   // Si queda algo por debajo, y si se esta trayendo ahora mismo.
   const [hayMas, setHayMas] = useState(true);
@@ -126,6 +152,8 @@ export function MessagesScreen() {
   conversacionesRef.current = remote;
   const consultaRef = useRef<ConsultaDeBandeja>(consulta);
   consultaRef.current = consulta;
+  const servidoRef = useRef(servido);
+  servidoRef.current = servido;
 
   /*
     El sello de la última petición pedida, y cuándo se cargó por última vez.
@@ -159,21 +187,34 @@ export function MessagesScreen() {
         return Promise.resolve();
       }
       const mio = ++sello.current;
+      // Lo que se pide AHORA. Se guarda porque al volver la respuesta la
+      // consulta vigente puede ser ya otra, y lo servido es esto.
+      const pedida = consultaRef.current;
       if (!silencioso || conversacionesRef.current.length === 0) setStatus('loading');
-      return MessageRepository.listConversations({ consulta: consultaRef.current })
+      return MessageRepository.listConversations({ consulta: pedida })
         .then((data) => {
           if (!esVigente(mio, sello.current)) return;
           setRemote(data);
+          setServido(pedida.texto);
           setHayMas(data.length >= CONVERSACIONES_POR_PAGINA);
           setStatus('idle');
           ultimaCarga.current = Date.now();
+          // La bandeja sin filtrar es la fuente del globo de la barra: ya
+          // está aquí, no hace falta otra petición para contarla. Con una
+          // búsqueda o un filtro puestos NO se anota: sería contar un trozo.
+          if (!hayConsulta(consultaRef.current)) anotarMensajes(data);
         })
         .catch(() => {
           if (!esVigente(mio, sello.current)) return;
           // Un refresco silencioso que falla NO borra lo que se esta leyendo:
           // sustituir una lista buena por una pantalla de error porque se cayo
           // la red un segundo es peor que no refrescar.
-          if (silencioso && conversacionesRef.current.length > 0) return;
+          //
+          // SALVO que lo que falló sea una BÚSQUEDA nueva: ahí lo de delante no
+          // es la respuesta sino lo estrechado a la espera, y callar el fallo
+          // dejaría la lupa girando para siempre sobre una lista a medias.
+          const eraUnRefresco = pedida.texto === servidoRef.current;
+          if (silencioso && conversacionesRef.current.length > 0 && eraUnRefresco) return;
           setStatus('error');
         });
     },
@@ -249,11 +290,18 @@ export function MessagesScreen() {
 
   /*
     Cambiar de búsqueda, de filtro o de etiqueta vuelve a pedir la primera
-    página. No es silencioso a propósito: aquí sí cambia la lista entera, y
-    dejar la anterior mientras llega la nueva haría creer que el filtro no ha
-    hecho nada.
+    página.
+
+    UN FILTRO O UNA ETIQUETA NO SON SILENCIOSOS, a propósito: ahí cambia la
+    lista entera, y dejar la anterior mientras llega la nueva haría creer que
+    el filtro no ha hecho nada.
+
+    EL TEXTO SÍ: lo que hay delante ya se ha estrechado con cada tecla, así que
+    la lista ya dice que la búsqueda está en marcha. Vaciarla para pintar un
+    indicador era justo lo que hacía que buscar pareciera lento.
   */
   const primerRender = useRef(true);
+  const consultaPrevia = useRef(consulta);
   useEffect(() => {
     if (primerRender.current) {
       // Al montar ya carga el `useFocusEffect`; sin esta guarda serían dos
@@ -261,9 +309,13 @@ export function MessagesScreen() {
       primerRender.current = false;
       return;
     }
+    const previa = consultaPrevia.current;
+    consultaPrevia.current = consulta;
+    const soloCambioElTexto =
+      previa.filtro === consulta.filtro && previa.etiqueta === consulta.etiqueta;
     ultimaCarga.current = null;
     setHayMas(true);
-    void load();
+    void load(soloCambioElTexto);
   }, [consulta, load]);
 
   /*
@@ -295,6 +347,9 @@ export function MessagesScreen() {
     // identidad nueva: el efecto de arriba compara por referencia.
     setConsulta((previa) => (previa.texto === texto ? previa : { ...previa, texto }));
   }, []);
+
+  /** Cada tecla, ya normalizada. No pide nada: solo estrecha lo que hay. */
+  const alTeclear = useCallback((termino: string) => setTecleado(termino), []);
 
   const alFiltrar = useCallback((filtro: FiltroDeBandeja | null) => {
     setConsulta((previa) => (previa.filtro === filtro ? previa : { ...previa, filtro }));
@@ -358,8 +413,11 @@ export function MessagesScreen() {
     servidor al que preguntar ni paginación que romper. Es justo lo contrario del
     caso real, donde filtrar lo ya descargado sólo ve la primera página.
   */
+  const pendiente = supabaseEnabled && esperandoAlServidor(tecleado, servido);
   const conversations = useMemo(() => {
-    if (supabaseEnabled) return remote;
+    // Del servidor tal cual cuando ya contestó a lo tecleado; si no, lo que
+    // hay, estrechado, mientras llega. Ver `filasVisibles`.
+    if (supabaseEnabled) return filasVisibles(remote, { tecleado, servido });
     if (!hayConsulta(consulta)) return demoConversations;
     const texto = consulta.texto.toLowerCase();
     return demoConversations.filter((conv) => {
@@ -370,7 +428,7 @@ export function MessagesScreen() {
       const pasaFiltro = consulta.filtro !== 'unread' || conv.unread > 0;
       return coincide && pasaFiltro;
     });
-  }, [supabaseEnabled, remote, demoConversations, consulta]);
+  }, [supabaseEnabled, remote, demoConversations, consulta, tecleado, servido]);
 
   const hasMessages = conversations.length > 0;
   const uiState = supabaseEnabled && status === 'loading'
@@ -379,6 +437,10 @@ export function MessagesScreen() {
     ? 'error'
     : hasMessages
     ? 'content'
+    // Nada de lo cargado casa y el servidor aún no ha contestado: todavía no
+    // se sabe. «No hay ninguna así» se dice cuando lo confirma él.
+    : pendiente
+    ? 'loading'
     : 'empty';
 
   /*
@@ -416,14 +478,21 @@ export function MessagesScreen() {
     () => (
       <View style={styles.cabecera}>
         {/*
-          Las historias, arriba del todo y por la API (una consulta, un salto),
-          no por el camino de Supabase directo (cuatro saltos, ~1,7 s).
+          EL BUSCADOR, LO PRIMERO, como en cualquier bandeja: es lo que se
+          viene a usar cuando hay muchas conversaciones, y antes quedaba debajo
+          de las historias.
+        */}
+        <View style={styles.buscador}>
+          <BuscadorDeConversaciones alBuscar={alBuscar} alTeclear={alTeclear} ocupado={pendiente} />
+        </View>
+
+        {/*
+          Las historias, por la API (una consulta, un salto), no por el camino
+          de Supabase directo (cuatro saltos, ~1,7 s).
         */}
         {supabaseEnabled && signedIn ? <HistoriasDeLaBandeja /> : null}
 
         <View style={styles.controles}>
-          <BuscadorDeConversaciones alBuscar={alBuscar} />
-
           {/*
             PRIMERO LAS ETIQUETAS Y «FILTROS» A LA DERECHA (pedido el 25/09/2026:
             antes iba a la izquierda y el texto de ayuda de las etiquetas se
@@ -456,6 +525,8 @@ export function MessagesScreen() {
       supabaseEnabled,
       signedIn,
       alBuscar,
+      alTeclear,
+      pendiente,
       consulta.filtro,
       consulta.etiqueta,
       alFiltrar,
@@ -529,7 +600,7 @@ export function MessagesScreen() {
         chat nuevo se abre desde el perfil de la persona, que es donde está el
         botón que sí funciona.
       */}
-      <AppHeader title={t('messages.headerTitle')} />
+      <AppHeader title={t('messages.title')} grande />
       {supabaseEnabled && !signedIn ? (
         <SignedOutNotice
           icon="message-square"
@@ -583,7 +654,8 @@ const styles = StyleSheet.create({
   // se compensa el margen de la lista con un margen negativo. Es lo único que
   // sobresale; el resto de la cabecera respeta el mismo margen que las filas.
   cabecera: { marginHorizontal: -spacing.lg },
-  controles: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm },
+  buscador: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.sm },
+  controles: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xs },
   // Arriba y no al centro: debajo de los chips puede ir el texto de ayuda, y
   // «Filtros» tiene que quedar a la altura de los chips, no a media altura.
   filaDeFiltros: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },

@@ -1,7 +1,9 @@
 import React, { useCallback } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 
+import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
@@ -27,14 +29,28 @@ type Props = {
  * Una fila de la bandeja.
  *
  * -----------------------------------------------------------------------------
+ * CÓMO SE VE (04/10/2026)
+ * -----------------------------------------------------------------------------
+ * Reportado: «la vista de mensajes sigue igual… debe ser como la bandeja de
+ * Instagram». Era una tabla: foto con marco, nombre a un lado y la hora al
+ * otro, el resumen debajo en letra de 13 y una raya entre fila y fila.
+ *
+ * Ahora es una fila de bandeja: la foto grande y sin marco, el nombre, y debajo
+ * el último mensaje SEGUIDO de la hora («Que fue bro · 12:47»), que es como se
+ * lee de un vistazo. Sin rayas: las filas las separa el aire. Lo no leído se
+ * marca con el peso de la letra —nombre y resumen— y con el globo a la derecha;
+ * nunca solo con color.
+ *
+ * -----------------------------------------------------------------------------
  * `React.memo` NO ES UN ADORNO AQUÍ
  * -----------------------------------------------------------------------------
- * Medido en `docs/Z_MEDICION_MENSAJES_EXPLORE.md` §2.4: la fila mide 81 px, así
- * que en una pantalla de 812 px caben 7-8 filas visibles. Con el `renderItem`
- * en línea y sin memoria, cada pulsación en el buscador repintaba esas ocho, y
- * escribir un nombre de ocho letras eran unos 64 renders de fila. Con `memo`
- * aquí, `useCallback` en el `renderItem` y `useMemo` en la lista, una fila solo
- * se vuelve a pintar cuando de verdad cambia su contenido.
+ * Medido en `docs/Z_MEDICION_MENSAJES_EXPLORE.md` §2.4: en una pantalla de
+ * 812 px caben 7-8 filas visibles. Con el `renderItem` en línea y sin memoria,
+ * cada pulsación en el buscador repintaba esas ocho, y escribir un nombre de
+ * ocho letras eran unos 64 renders de fila. Con `memo` aquí, `useCallback` en
+ * el `renderItem` y `useMemo` en la lista, una fila solo se vuelve a pintar
+ * cuando de verdad cambia su contenido. Es también lo que permite que buscar
+ * estreche la lista en cada tecla sin que se note.
  *
  * Para que la memoria sirva, las dos funciones tienen que ser ESTABLES entre
  * renders (la pantalla las envuelve en `useCallback`) y por eso reciben la
@@ -68,30 +84,35 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
 
   const etiquetas = conversacion.labels ?? [];
   const sinLeer = conversacion.unread > 0;
+  const hora = conversacion.time ?? conversacion.messages.at(-1)?.createdAt;
 
   return (
-    <Pressable
+    <Pulsable
       onPress={abrir}
       onLongPress={alEtiquetar ? etiquetar : undefined}
       delayLongPress={350}
+      // Una fila ocupa todo el ancho: encoge apenas, lo justo para que se
+      // note bajo el dedo antes de que se abra la conversación.
+      escala={0.985}
+      atenuar={0.72}
       accessibilityRole="button"
       accessibilityLabel={t('messages.chatWith', {
         nombre: conversacion.name,
         detalle: conversacion.subtitle,
       })}
-      style={({ pressed }) => [
-        styles.fila,
-        { borderBottomColor: colors.border, opacity: pressed ? 0.78 : 1 },
-      ]}
+      style={styles.fila}
     >
       {/*
         La foto real de la otra persona. Antes se elegia una imagen de muestra
         segun la POSICION de la fila (la primera una, la segunda otra...), asi
         que no correspondia con nadie: quien tenia foto salia con la de otro.
+
+        Sin marco. El fondo es el de superficie: mientras la foto carga se ve
+        un círculo, no un hueco.
       */}
       <ExpoImage
         source={conversacion.avatarUrl ? { uri: conversacion.avatarUrl } : assets.avatar}
-        style={[styles.avatar, { borderColor: colors.border }]}
+        style={[styles.avatar, { backgroundColor: colors.surfaceAlt }]}
         contentFit="cover"
         cachePolicy="memory-disk"
         // La clave del reciclado: sin ella la celda reutilizada enseña la foto
@@ -100,31 +121,37 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
       />
 
       <View style={styles.centro}>
-        <View style={styles.lineaDeNombre}>
-          <Text
-            numberOfLines={1}
-            style={styles.nombre}
-            color={colors.text}
-            // Lo no leído en negrita, como en cualquier bandeja: el globo del
-            // número es pequeño y se pierde al ojear la lista de arriba abajo.
-            weight={sinLeer ? '800' : '700'}
-          >
-            {conversacion.name}
-          </Text>
-          <Text variant="caption" style={styles.hora} color={colors.textMuted}>
-            {conversacion.time ?? conversacion.messages.at(-1)?.createdAt}
-          </Text>
-        </View>
-
         <Text
           numberOfLines={1}
-          variant="caption"
-          style={styles.resumen}
-          color={sinLeer ? colors.text : colors.textMuted}
-          weight={sinLeer ? '600' : '400'}
+          style={styles.nombre}
+          color={colors.text}
+          // Lo no leído en negrita, como en cualquier bandeja: el globo del
+          // número es pequeño y se pierde al ojear la lista de arriba abajo.
+          weight={sinLeer ? '800' : '600'}
         >
-          {conversacion.subtitle}
+          {conversacion.name}
         </Text>
+
+        {/*
+          El último mensaje y, pegada a él, la hora. El resumen es el que se
+          recorta si no cabe; la hora no encoge, porque siempre es corta y es
+          lo que dice de cuándo es lo que se está leyendo.
+        */}
+        <View style={styles.lineaDeResumen}>
+          <Text
+            numberOfLines={1}
+            style={styles.resumen}
+            color={sinLeer ? colors.text : colors.textMuted}
+            weight={sinLeer ? '700' : '400'}
+          >
+            {conversacion.subtitle}
+          </Text>
+          {hora ? (
+            <Text style={styles.hora} color={colors.textMuted} numberOfLines={1}>
+              {` · ${hora}`}
+            </Text>
+          ) : null}
+        </View>
 
         {/*
           Las etiquetas del CRM, si las hay. SON PRIVADAS: el servidor solo manda
@@ -138,7 +165,7 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
             {etiquetas.map((etiqueta) => (
               <View
                 key={etiqueta.id}
-                style={[styles.etiqueta, { borderColor: colors.border }]}
+                style={[styles.etiqueta, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
               >
                 <Text variant="caption" style={styles.etiquetaTexto} color={colors.textMuted}>
                   {etiqueta.nombre}
@@ -149,15 +176,12 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
         ) : null}
       </View>
 
-      {sinLeer ? (
-        <View style={[styles.globo, { backgroundColor: colors.primary }]}>
-          <Text variant="caption" weight="700" color={colors.onPrimary} style={styles.globoTexto}>
-            {/* Más de 99 no cabe y tampoco aporta: lo que importa es «muchos». */}
-            {conversacion.unread > 99 ? '99+' : conversacion.unread}
-          </Text>
-        </View>
-      ) : null}
-    </Pressable>
+      {/*
+        El globo aparece creciendo y salta cuando llega otro mensaje: es el
+        mismo de la barra inferior (`GloboDeNoLeidos`).
+      */}
+      <GloboDeNoLeidos cuenta={conversacion.unread} />
+    </Pulsable>
   );
 });
 
@@ -166,37 +190,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    // Sin raya entre filas: las separa este aire.
+    paddingVertical: 10,
   },
-  avatar: { width: 52, height: 52, borderRadius: 26, borderWidth: 1 },
-  centro: { flex: 1, gap: 3 },
-  lineaDeNombre: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  // `flexShrink` para que un nombre largo se recorte y no empuje la hora fuera
-  // de la pantalla; la hora no encoge porque siempre es corta.
-  nombre: { fontSize: 14, flexShrink: 1 },
-  hora: { fontSize: 11 },
-  resumen: { fontSize: 12 },
-  etiquetas: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
+  avatar: { width: 56, height: 56, borderRadius: 28 },
+  // `minWidth: 0` para que un nombre o un resumen largos se recorten en vez de
+  // empujar el globo fuera de la pantalla.
+  centro: { flex: 1, minWidth: 0, gap: 2 },
+  nombre: { fontSize: 15, lineHeight: 20 },
+  lineaDeResumen: { flexDirection: 'row', alignItems: 'center' },
+  // `flexShrink` en el resumen y no en la hora: se recorta el mensaje.
+  resumen: { fontSize: 14, lineHeight: 19, flexShrink: 1 },
+  hora: { fontSize: 14, lineHeight: 19 },
+  etiquetas: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
   etiqueta: {
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 1,
   },
-  etiquetaTexto: { fontSize: 10 },
-  globo: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-  },
-  globoTexto: { fontSize: 10 },
+  etiquetaTexto: { fontSize: 11 },
 });

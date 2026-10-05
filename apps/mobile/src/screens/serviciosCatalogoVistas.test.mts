@@ -458,11 +458,14 @@ describe('los avisos del catálogo', () => {
     }
   });
 
-  it('tocar el PUSH abre la aplicación sin inventar una ruta (la cola no manda destino)', () => {
+  it('tocar el PUSH lleva a la bandeja sin inventar una ruta (la cola no manda destino)', () => {
     // Limitación documentada (Z_SERVICIOS_ARQUITECTURA.md §32): el push de la
-    // cola de entregas sale sin `data` y `rutaDelPush` solo conoce los
-    // directos; el destino lo da la bandeja. Si un día el push lleva el
-    // servicio, esta prueba tiene que cambiar A LA VEZ que `rutaDelPush`.
+    // cola de entregas sale sin `data`, así que no se sabe de qué servicio
+    // habla. Desde el 03/10/2026 tocarlo ya no deja la aplicación donde
+    // estuviera: lleva a la BANDEJA, que es donde está la fila con su destino.
+    // Lo que NO hace es fabricar una ruta de servicio con datos que no tiene.
+    // Si un día el push lleva el servicio, esta prueba tiene que cambiar A LA
+    // VEZ que `rutaDelPush`.
     const cola = readFileSync(join(API, 'notifications', 'push.py'), 'utf8')
       .replace(/\r\n/g, '\n')
       .split('async def enviar_de_la_cola(')[1]
@@ -470,7 +473,11 @@ describe('los avisos del catálogo', () => {
     assert.ok(cola.includes('"channelId"'), 'no se encontró el envío de la cola');
     assert.ok(!cola.includes('"data"'), 'la cola ya manda datos: enseñar a rutaDelPush los avisos del catálogo');
     for (const tipo of tipos) {
-      assert.equal(rutaDelPush({ type: tipo, serviceId: '5b7e2f7a-8d1c-4a55-9d61-0c3f1e2a4b6c' }), null, tipo);
+      assert.equal(
+        rutaDelPush({ type: tipo, serviceId: '5b7e2f7a-8d1c-4a55-9d61-0c3f1e2a4b6c' }),
+        '/notifications',
+        tipo,
+      );
     }
   });
 

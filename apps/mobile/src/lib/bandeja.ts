@@ -176,3 +176,74 @@ export function hayQueRecargar(
   // cero, así que no se pide dos veces lo mismo.
   return ahora - ultimaCarga >= validezMs;
 }
+
+/** Minúsculas y sin tildes: «Pérez» y «perez» son lo mismo para quien busca. */
+function plegar(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/**
+ * De las filas que YA hay, las que casan con lo tecleado.
+ *
+ * NO ES LA RESPUESTA: es lo que se enseña mientras llega. El servidor busca en
+ * toda la bandeja —y dentro de los mensajes—; esto solo mira el nombre y el
+ * último mensaje de lo que está cargado. Por eso nunca se usa como resultado
+ * final (ver `filasVisibles`).
+ *
+ * Todas las palabras tienen que estar, en cualquier orden: «perez luis»
+ * encuentra a «Luis Pérez».
+ */
+export function estrecharBandeja<T extends { name: string; subtitle?: string }>(
+  filas: readonly T[],
+  texto: string,
+): T[] {
+  const palabras = plegar(texto).split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return filas as T[];
+  return filas.filter((fila) => {
+    const pajar = plegar(`${fila.name} ${fila.subtitle ?? ''}`);
+    return palabras.every((palabra) => pajar.includes(palabra));
+  });
+}
+
+/**
+ * Si lo tecleado todavía no tiene respuesta del servidor.
+ *
+ * `servido` es el texto de la última respuesta que se pintó. Mientras difiere
+ * de lo tecleado hay una pregunta por salir o en vuelo.
+ */
+export function esperandoAlServidor(tecleado: string, servido: string): boolean {
+  return tecleado !== servido;
+}
+
+/**
+ * Las filas que se enseñan AHORA.
+ *
+ * LO QUE ARREGLA (reportado el 04/10/2026: «se demora demasiado en buscar»).
+ * Buscar esperaba al antirrebote, vaciaba la lista, pintaba un indicador y
+ * esperaba la respuesta: con cuatro conversaciones delante, encontrar una de
+ * ellas tardaba lo que tardara la red. Ahora cada tecla estrecha al instante
+ * lo que ya está en pantalla, y la respuesta del servidor —que es la que
+ * manda— lo sustituye cuando llega.
+ *
+ * LO QUE NO VUELVE: filtrar en el teléfono como respuesta. Eso era el fallo de
+ * la versión anterior —buscaba entre las veinte cargadas y callaba el resto—.
+ * Aquí, en cuanto el servidor contesta a lo tecleado, se pinta SU lista tal
+ * cual, sin tocar: trae lo que no estaba cargado y lo que casa por el texto de
+ * un mensaje.
+ *
+ * Devuelve el MISMO array cuando no estrecha, para que la lista no crea que
+ * sus datos han cambiado.
+ */
+export function filasVisibles<T extends { name: string; subtitle?: string }>(
+  filas: T[],
+  { tecleado, servido }: { tecleado: string; servido: string },
+): T[] {
+  if (!esperandoAlServidor(tecleado, servido)) return filas;
+  // Borrar la búsqueda no estrecha nada: se ve lo que hay hasta que llegue la
+  // bandeja entera.
+  if (tecleado === '') return filas;
+  return estrecharBandeja(filas, tecleado);
+}

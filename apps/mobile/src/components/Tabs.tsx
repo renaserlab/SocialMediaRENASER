@@ -1,7 +1,15 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View, ViewStyle } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { LayoutChangeEvent, ScrollView, StyleSheet, View, ViewStyle } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
+import { MUELLE_DE_PANEL } from '@/lib/movimiento';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
@@ -14,28 +22,65 @@ type TabsProps = {
   style?: ViewStyle;
 };
 
+type Medida = { x: number; ancho: number };
+
+/**
+ * Pestañas con una raya que VIAJA a la pestaña elegida.
+ *
+ * Antes cada pestaña pintaba su propia raya y al cambiar una se apagaba y otra
+ * se encendía. Ahora hay una sola, que se desliza y cambia de ancho: se ve a
+ * dónde se ha ido. Cada pestaña dice dónde está (`onLayout`) y la raya va a
+ * esa medida; mientras no la hay, no se pinta.
+ */
 export function Tabs({ tabs, activeTab, onChangeTab, scrollable = false, style }: TabsProps) {
   const { colors } = useAppTheme();
+  const reducir = useReducedMotion();
+  const [medidas, setMedidas] = useState<Record<string, Medida>>({});
+  const x = useSharedValue(0);
+  const ancho = useSharedValue(0);
+  const activa = medidas[activeTab];
+
+  useEffect(() => {
+    if (!activa) return;
+    // La primera vez aparece en su sitio; después viaja.
+    const primera = ancho.value === 0;
+    if (reducir || primera) {
+      x.value = activa.x;
+      ancho.value = activa.ancho;
+      return;
+    }
+    x.value = withSpring(activa.x, MUELLE_DE_PANEL);
+    ancho.value = withSpring(activa.ancho, MUELLE_DE_PANEL);
+  }, [activa, x, ancho, reducir]);
+
+  const raya = useAnimatedStyle(() => ({
+    width: ancho.value,
+    transform: [{ translateX: x.value }],
+  }));
+
+  const medir = useCallback((tab: string, evento: LayoutChangeEvent) => {
+    const { x: posicion, width } = evento.nativeEvent.layout;
+    setMedidas((previas) => {
+      const antes = previas[tab];
+      if (antes && antes.x === posicion && antes.ancho === width) return previas;
+      return { ...previas, [tab]: { x: posicion, ancho: width } };
+    });
+  }, []);
 
   const content = (
     <View style={[styles.tabsWrapper, !scrollable && styles.tabsWrapperFlex]}>
       {tabs.map((tab) => {
         const active = tab === activeTab;
         return (
-          <Pressable
+          <Pulsable
             key={tab}
             onPress={() => onChangeTab(tab)}
+            onLayout={(evento) => medir(tab, evento)}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
             accessibilityLabel={tab}
-            style={({ pressed }: { pressed: boolean }) => [
-              styles.tab,
-              !scrollable && styles.tabFlex,
-              {
-                borderBottomColor: active ? colors.primary : 'transparent',
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
+            atenuar={0.7}
+            style={[styles.tab, !scrollable && styles.tabFlex]}
           >
             <Text
               style={[
@@ -48,9 +93,15 @@ export function Tabs({ tabs, activeTab, onChangeTab, scrollable = false, style }
             >
               {tab}
             </Text>
-          </Pressable>
+          </Pulsable>
         );
       })}
+      {activa ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.raya, { backgroundColor: colors.primary }, raya]}
+        />
+      ) : null}
     </View>
   );
 
@@ -91,7 +142,6 @@ const styles = StyleSheet.create({
     height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderBottomWidth: 2,
     paddingHorizontal: spacing.md,
   },
   tabFlex: {
@@ -99,5 +149,12 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 14,
+  },
+  raya: {
+    position: 'absolute',
+    left: 0,
+    bottom: 0,
+    height: 2,
+    borderRadius: 1,
   },
 });

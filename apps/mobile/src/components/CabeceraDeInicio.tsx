@@ -1,10 +1,12 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Pulsable } from '@/components/Pulsable';
 import type { PestanaDeInicio } from '@/feed/fuenteDeVideos';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { getFontFamily, palette, spacing } from '@/theme/tokens';
@@ -57,28 +59,34 @@ export function CabeceraDeInicio({ activa, alCambiar, alCrear }: Props) {
       />
 
       <View style={styles.fila} pointerEvents="box-none">
-        <Pressable
+        {/*
+          El `+` es la puerta a publicar: lleva un fondo propio para que se
+          lea como un boton sobre cualquier video —un contorno fino sobre una
+          escena clara desaparecia— y se hunde al tocarlo, con un toque en la
+          mano. Es de las pocas cosas de la cabecera que merecen vibrar.
+        */}
+        <Pulsable
           onPress={alCrear}
           hitSlop={10}
-          style={({ pressed }) => [
-            styles.crear,
-            { borderColor: media.border, opacity: pressed ? 0.6 : 1 },
-          ]}
+          escala={ESCALA_AL_PULSAR.icono}
+          haptica="ligera"
+          style={[styles.crear, { borderColor: media.border, backgroundColor: media.overlay }]}
           accessibilityRole="button"
           accessibilityLabel={t('home.createContent')}
         >
-          <Feather name="plus" size={20} color={media.text} />
-        </Pressable>
+          <Feather name="plus" size={22} color={media.text} />
+        </Pulsable>
 
         <View style={styles.pestanas} pointerEvents="box-none">
           {PESTANAS.map(({ id, clave }) => {
             const seleccionada = id === activa;
             const etiqueta = t(clave);
             return (
-              <Pressable
+              <Pulsable
                 key={id}
                 onPress={() => alCambiar(id)}
                 hitSlop={8}
+                atenuar={0.6}
                 style={styles.pestana}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: seleccionada }}
@@ -101,7 +109,7 @@ export function CabeceraDeInicio({ activa, alCambiar, alCrear }: Props) {
                     { backgroundColor: seleccionada ? media.text : 'transparent' },
                   ]}
                 />
-              </Pressable>
+              </Pulsable>
             );
           })}
         </View>
@@ -139,15 +147,15 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   crear: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   // Mismo tamaño que el boton, cero decoracion: reserva sitio y nada mas.
-  hueco: { width: 36, height: 36 },
+  hueco: { width: 40, height: 40 },
   pestanas: {
     flex: 1,
     flexDirection: 'row',

@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -17,14 +18,14 @@ export function SectionTitle({ title, action, onActionPress }: SectionTitleProps
     <View style={styles.row}>
       <Text variant="titleMedium">{title}</Text>
       {action && onActionPress ? (
-        <Pressable
+        <Pulsable
           onPress={onActionPress}
           accessibilityLabel={action}
           accessibilityRole="button"
           style={styles.actionPressable}
         >
           <Text variant="secondary" color={colors.textMuted}>{action}</Text>
-        </Pressable>
+        </Pulsable>
       ) : action ? (
         <Text variant="secondary" color={colors.textMuted}>{action}</Text>
       ) : null}

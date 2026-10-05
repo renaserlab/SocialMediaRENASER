@@ -1,15 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import React, { useEffect, useRef, useState } from 'react';
 
+import { CampoDeBusqueda } from '@/components/CampoDeBusqueda';
 import { useTranslation } from '@/i18n/useTranslation';
 import {
   ESPERA_DE_TECLEO_MS,
   esBuscable,
   normalizarTermino,
 } from '@/lib/busquedaProgresiva';
-import { radius, spacing } from '@/theme/tokens';
-import { useAppTheme } from '@/theme/useAppTheme';
 
 type Props = {
   /**
@@ -19,6 +16,16 @@ type Props = {
    * entera. Nunca se llama con lo que se está tecleando a medias.
    */
   alBuscar: (termino: string) => void;
+  /**
+   * Se llama EN CADA TECLA, sin antirrebote, con el mismo término normalizado.
+   *
+   * No dispara ninguna petición: sirve para que la pantalla estreche al
+   * instante lo que ya tiene cargado mientras la pregunta al servidor espera su
+   * turno (ver `filasVisibles` en `lib/bandeja.ts`).
+   */
+  alTeclear?: (termino: string) => void;
+  /** La pregunta ya salió y la respuesta no ha llegado: la lupa sigue girando. */
+  ocupado?: boolean;
 };
 
 /**
@@ -51,11 +58,13 @@ type Props = {
  */
 export const BuscadorDeConversaciones = React.memo(function BuscadorDeConversaciones({
   alBuscar,
+  alTeclear,
+  ocupado = false,
 }: Props) {
   const { t } = useTranslation();
-  const { colors } = useAppTheme();
   const [texto, setTexto] = useState('');
-  const [enfocado, setEnfocado] = useState(false);
+  // Hay un termino tecleado que todavia no se le ha dicho a la pantalla.
+  const [pendiente, setPendiente] = useState(false);
 
   /*
     El último término que se le ha comunicado a la pantalla.
@@ -68,85 +77,38 @@ export const BuscadorDeConversaciones = React.memo(function BuscadorDeConversaci
 
   useEffect(() => {
     const termino = esBuscable(texto) ? normalizarTermino(texto) : '';
-    if (termino === ultimoEnviado.current) return;
+    // Lo tecleado se dice YA; lo que espera al antirrebote es la petición.
+    alTeclear?.(termino);
+    if (termino === ultimoEnviado.current) {
+      setPendiente(false);
+      return;
+    }
+    setPendiente(true);
     const temporizador = setTimeout(() => {
       ultimoEnviado.current = termino;
+      setPendiente(false);
       alBuscar(termino);
     }, ESPERA_DE_TECLEO_MS);
     // Cada tecla cancela el disparo anterior: es lo que convierte ocho
     // peticiones en una.
     return () => clearTimeout(temporizador);
-  }, [texto, alBuscar]);
+  }, [texto, alBuscar, alTeclear]);
 
-  const limpiar = useCallback(() => setTexto(''), []);
-
+  /*
+    EL CAMPO ES EL MISMO QUE EL DE EXPLORAR (`CampoDeBusqueda`): el foco, la X,
+    «Cancelar» y el indicador se comportan igual en las dos pantallas. Lo que
+    es de la bandeja —el texto local y el antirrebote— sigue aqui arriba.
+  */
   return (
-    <View
-      style={[
-        styles.campo,
-        {
-          backgroundColor: colors.surfaceAlt,
-          // Un borde de un pixel que solo se marca al enfocar. La captura del
-          // documento describía el campo anterior como «muy mal aspecto»: era un
-          // recuadro con el mismo grosor que un botón, siempre encendido.
-          borderColor: enfocado ? colors.text : colors.border,
-        },
-      ]}
-    >
-      {/*
-        La lupa va DENTRO de la caja, como un hermano del campo, y no colocada
-        encima con posición absoluta. Antes se superponía con `left`, `top: 0` y
-        `bottom: 0`, y el texto tenía que esquivarla con un relleno calculado a
-        mano: cualquier cambio de fuente o de tamaño lo descuadraba, y en web se
-        descuadraba solo.
-      */}
-      <Feather name="search" size={17} color={colors.textMuted} />
-      <TextInput
-        value={texto}
-        onChangeText={setTexto}
-        onFocus={() => setEnfocado(true)}
-        onBlur={() => setEnfocado(false)}
-        placeholder={t('messages.searchPlaceholder')}
-        placeholderTextColor={colors.textMuted}
-        style={[styles.entrada, { color: colors.text }]}
-        accessibilityLabel={t('messages.searchPlaceholder')}
-        // Un nombre no se escribe en mayúscula automática ni se autocorrige: el
-        // corrector convertía apellidos poco comunes en otra palabra y la
-        // búsqueda no encontraba a nadie.
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="search"
-        // En iOS pinta la X y el aspecto de campo de búsqueda del sistema; en
-        // Android y web no hace nada, y por eso el botón de borrar es propio.
-        clearButtonMode="never"
-      />
-      {texto.length > 0 ? (
-        <Pressable
-          onPress={limpiar}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel={t('messages.searchClear')}
-        >
-          <Feather name="x" size={16} color={colors.textMuted} />
-        </Pressable>
-      ) : null}
-    </View>
+    <CampoDeBusqueda
+      value={texto}
+      onChangeText={setTexto}
+      placeholder={t('messages.searchPlaceholder')}
+      etiquetaDeLimpiar={t('messages.searchClear')}
+      // Mientras el termino aun no se ha asentado la pregunta esta por salir,
+      // y despues esta en vuelo: en los dos casos la lupa lo dice.
+      buscando={pendiente || ocupado}
+      alto={42}
+    />
   );
-});
-
-const styles = StyleSheet.create({
-  campo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    // Alto fijo y no relleno vertical: así el campo mide lo mismo en Android,
-    // iOS y web, donde `TextInput` calcula su alto de tres formas distintas.
-    height: 40,
-  },
-  // `flex: 1` para que el texto ocupe lo que sobra entre la lupa y la X, sin
-  // rellenos calculados a mano.
-  entrada: { flex: 1, fontSize: 14, padding: 0 },
 });

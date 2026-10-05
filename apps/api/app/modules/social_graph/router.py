@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.notifications.push import encolar_push
+from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -222,7 +222,7 @@ async def follow_profile(
                 background,
                 user_ids=[profile_id],
                 notification_type="follow",
-                actor_name=actor.full_name if actor else None,
+                actor_name=nombre_visible(actor.full_name, actor.username) if actor else None,
                 data={"type": "follow", "profileId": current_user.id},
             )
     return {"following": True, "followers_count": await _followers_count(db, profile_id)}

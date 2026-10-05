@@ -115,3 +115,34 @@ export function formatearDuracion(segundos: number): string {
 export function llegoAlTope(ms: number): boolean {
   return Number.isFinite(ms) && ms >= MAX_DURACION_S * 1000;
 }
+
+/**
+ * El suelo de la medición, en decibelios. Por debajo es silencio: el ruido de
+ * fondo de una habitación tranquila ronda los -50 dB en el micrófono de un
+ * teléfono, y pintarlo como señal haría que la onda se moviera sin que nadie
+ * hable.
+ */
+export const SUELO_DE_VOZ_DB = -50;
+
+/**
+ * El nivel del micrófono, de 0 a 1, a partir de lo que mide el grabador.
+ *
+ * `expo-audio` lo da en decibelios —0 es el máximo, hacia abajo es más flojo—
+ * y SOLO si la plataforma sabe medir. Devuelve `null` cuando no hay medición:
+ * es la diferencia entre «silencio» (0) y «no lo sé» (`null`), y quien pinta
+ * la usa para no dibujar una onda inventada como si fuera la voz de verdad.
+ */
+export function nivelDeVoz(decibelios: number | null | undefined): number | null {
+  if (decibelios === null || decibelios === undefined || !Number.isFinite(decibelios)) return null;
+  const nivel = (decibelios - SUELO_DE_VOZ_DB) / -SUELO_DE_VOZ_DB;
+  return Math.min(1, Math.max(0, nivel));
+}
+
+/**
+ * Añade una muestra al historial de la onda, que tiene tope: la barra de
+ * grabación enseña los últimos segundos, no la nota entera.
+ */
+export function empujarNivel(historia: readonly number[], nivel: number, maximo: number): number[] {
+  const siguiente = [...historia, nivel];
+  return siguiente.length > maximo ? siguiente.slice(siguiente.length - maximo) : siguiente;
+}

@@ -90,7 +90,8 @@ test('el corazon y el numero son dos botones distintos', () => {
   assert.match(CELDA, /onPress=\{\(\) => alVerReacciones\(short\.id\)\}/);
   const corazon = CELDA.indexOf('onPress={toggleLike}');
   const numero = CELDA.indexOf('alVerReacciones(short.id)');
-  const cierreDelCorazon = CELDA.indexOf('</Pressable>', corazon);
+  // El corazon es un `Pulsable` (se hunde y salta); el numero, su propio pulsable.
+  const cierreDelCorazon = CELDA.indexOf('</Pulsable>', corazon);
   assert.ok(
     cierreDelCorazon > 0 && cierreDelCorazon < numero,
     'El numero esta dentro del boton del corazon: tocarlo daria «me gusta» ' +
@@ -143,8 +144,8 @@ test('el id del video es el de la publicacion', () => {
 test('el numero de comentarios del video sale del almacen compartido', () => {
   assert.match(CELDA, /state\.commentCounts\[short\.id\]/);
   assert.match(CELDA, /Math\.max\(comentariosAnotados \?\? 0, short\.comments\)/);
-  assert.match(CELDA, /\{comentarios\}<\/Text>/);
-  assert.doesNotMatch(CELDA, /\{short\.comments\}<\/Text>/);
+  assert.match(CELDA, /<ContadorAnimado valor=\{comentarios\}/);
+  assert.doesNotMatch(CELDA, /valor=\{short\.comments\}|\{short\.comments\}<\/Text>/);
 });
 
 test('comentar anota el total para las demas superficies', () => {

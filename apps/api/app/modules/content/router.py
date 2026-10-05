@@ -44,7 +44,7 @@ from app.modules.content.schemas import (
     PostUpdate,
     PostRead,
 )
-from app.modules.notifications.push import encolar_push
+from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
 from app.modules.profiles.schemas import ProfileSummary
@@ -152,8 +152,14 @@ async def _nombre_del_actor(db: AsyncSession, uid: str) -> str | None:
 
     Devolver None es valido: `send_push` escribe «Alguien» y el aviso sale
     igual. Un aviso con el nombre generico es infinitamente mejor que ninguno.
+    Antes de llegar ahi se prueba con el usuario (`nombre_visible`).
     """
-    return await db.scalar(select(Profile.full_name).where(Profile.id == uid))
+    fila = (
+        await db.execute(
+            select(Profile.full_name, Profile.username).where(Profile.id == uid)
+        )
+    ).first()
+    return nombre_visible(fila[0], fila[1]) if fila else None
 
 
 async def _etiquetas_del_lote(
@@ -1453,7 +1459,7 @@ async def create_comment(
             background,
             user_ids=[post.author_id],
             notification_type="comment",
-            actor_name=autor.full_name if autor else None,
+            actor_name=nombre_visible(autor.full_name, autor.username) if autor else None,
             data={"type": "comment", "postId": post_id},
         )
     if avisado_al_padre and autor_del_padre is not None:
@@ -1461,7 +1467,7 @@ async def create_comment(
             background,
             user_ids=[autor_del_padre],
             notification_type="comment_reply",
-            actor_name=autor.full_name if autor else None,
+            actor_name=nombre_visible(autor.full_name, autor.username) if autor else None,
             data={"type": "comment_reply", "postId": post_id},
         )
     await db.refresh(comment)

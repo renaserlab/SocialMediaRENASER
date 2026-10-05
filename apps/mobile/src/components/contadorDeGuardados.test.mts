@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { contadorOptimista } from '../lib/intencionFinal.ts';
+
 /**
  * EL MARCADOR SE PINTA, Y DICE CUANTA GENTE LA GUARDO.
  *
@@ -96,7 +98,8 @@ test('sigue avisando al guardar, con salida a la lista', () => {
   */
   assert.match(POST_CARD, /toastConAccion\(\s*t\('post\.savedToast'\)/);
   assert.match(POST_CARD, /etiqueta: t\('post\.viewSavedList'\)/);
-  assert.match(POST_CARD, /toast\(t\('post\.unsavedToast'\)\)/);
+  // Quitar tambien avisa, y ahora ofrece deshacerlo.
+  assert.match(POST_CARD, /toastConAccion\(t\('post\.unsavedToast'\), \{/);
 });
 
 // ---------------------------------------------------------------------------
@@ -140,44 +143,55 @@ test('el contador se lee del mismo sitio donde se actualiza', () => {
 const INICIO_GUARDAR = STORE.indexOf('toggleSavePost: async');
 const GUARDAR = STORE.slice(INICIO_GUARDAR, STORE.indexOf('addComment: async', INICIO_GUARDAR));
 
-test('el +1/-1 se aplica antes de preguntar al servidor', () => {
-  const iOptimista = GUARDAR.indexOf('contadorOptimista');
-  const iPeticion = GUARDAR.indexOf('PostRepository.unsave(postId)');
-  assert.ok(iOptimista !== -1 && iPeticion !== -1);
-  assert.ok(iOptimista < iPeticion, 'primero se pinta, despues se pregunta');
+test('el contador se pinta antes de que el servidor conteste', () => {
+  const iOptimista = GUARDAR.indexOf('pintar(guardada, contadorOptimista(contador, confirmado, guardada))');
+  const iEspera = GUARDAR.indexOf('await peticion.asentada');
+  assert.ok(iOptimista !== -1 && iEspera !== -1);
+  assert.ok(iOptimista < iEspera, 'primero se pinta, despues se espera al servidor');
 });
 
 test('el contador nunca baja de cero', () => {
-  assert.match(GUARDAR, /Math\.max\(0, contadorActual \+ \(guardada \? 1 : -1\)\)/);
+  // La cuenta vive en `lib/intencionFinal` y aqui se EJECUTA.
+  assert.equal(contadorOptimista(0, true, false), 0);
+  assert.equal(contadorOptimista(1, true, false), 0);
 });
 
 test('guardar dos veces no suma dos', () => {
   /*
     El signo sale de `wasSaved`, exactamente igual que `guardada`: si ya estaba
-    en la lista, la segunda pulsacion RESTA. No hay forma de sumar dos veces
-    sin haber restado en medio.
+    en la lista, la segunda pulsacion RESTA. Y el numero se calcula siempre
+    desde el contador DE PARTIDA de la rafaga, no sumando sobre lo ya pintado:
+    diez toques seguidos no pueden dejar un «+10».
   */
   assert.match(GUARDAR, /const wasSaved = estado\.savedPostIds\.includes\(postId\)/);
   assert.match(GUARDAR, /const guardada = !wasSaved/);
-  assert.match(GUARDAR, /\(guardada \? 1 : -1\)/);
+  assert.equal(contadorOptimista(3, false, true), 4, 'guardar: uno mas');
+  assert.equal(contadorOptimista(3, false, false), 3, 'guardar y quitar: el de partida');
+  assert.equal(contadorOptimista(3, false, true), 4, 'y volver a guardar: uno mas, no dos');
 });
 
 test('si el servidor rechaza, el numero vuelve al valor exacto de antes', () => {
-  const captura = GUARDAR.slice(GUARDAR.indexOf('} catch {'));
+  const fallo = GUARDAR.slice(GUARDAR.indexOf('if (!final.ok) {'));
   assert.match(
-    captura,
-    /saveCounts: \{ \.\.\.state\.saveCounts, \[postId\]: contadorActual \}/,
-    'rollback del contador',
+    fallo,
+    /pintar\(final\.valor, contadorOptimista\(contador, confirmado, final\.valor\)\)/,
+    'vuelve a lo que el servidor confirmo, con el contador de partida',
   );
-  assert.match(captura, /savesCount: contadorActual/, 'y tambien en la publicacion del muro');
-  assert.match(captura, /return \{ guardada, ok: false \}/, 'y se dice que fallo');
+  assert.match(
+    GUARDAR,
+    /return \{ guardada: final\.valor, ok: final\.ok, absorbida: false \}/,
+    'y se dice que fallo',
+  );
 });
 
 test('la lista y el numero se deshacen juntos', () => {
-  // Un icono despintado con el numero todavia subido seria peor que no pintar.
-  const captura = GUARDAR.slice(GUARDAR.indexOf('} catch {'));
-  assert.match(captura, /savedPostIds: wasSaved/);
-  assert.match(captura, /saveCounts:/);
+  // Un icono despintado con el numero todavia subido seria peor que no pintar:
+  // `pintar` mueve las tres cosas en el MISMO `set`.
+  const pintar = GUARDAR.slice(GUARDAR.indexOf('const pintar ='), GUARDAR.indexOf('const partida ='));
+  assert.match(pintar, /savedPostIds:/);
+  assert.match(pintar, /saveCounts: \{ \.\.\.state\.saveCounts, \[postId\]: contador \}/);
+  assert.match(pintar, /savesCount: contador/, 'y tambien en la publicacion del muro');
+  assert.equal(pintar.match(/set\(/g)?.length, 1);
 });
 
 test('el numero de guardados no se guarda en disco', () => {

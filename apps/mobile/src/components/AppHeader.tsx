@@ -1,9 +1,10 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { ZLogo } from '@/components/ZLogo';
 import { spacing } from '@/theme/tokens';
@@ -33,6 +34,15 @@ type Props = {
    * (foto y nombre, pulsables) y eso no cabe en una cadena de texto.
    */
   center?: React.ReactNode;
+  /**
+   * El título EN GRANDE y a la izquierda, como el de una bandeja.
+   *
+   * Para las pantallas que son el destino de una pestaña y no tienen a dónde
+   * volver (Mensajes): ahí un rótulo pequeño, centrado y en mayúsculas se lee
+   * como la cabecera de un formulario. Mismo alto que la cabecera normal, así
+   * que nada de lo que hay debajo cambia de sitio.
+   */
+  grande?: boolean;
 };
 
 export function AppHeader({
@@ -44,6 +54,7 @@ export function AppHeader({
   rightLabel,
   rightBadge = false,
   center,
+  grande = false,
 }: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
@@ -63,11 +74,53 @@ export function AppHeader({
     else router.replace('/');
   };
 
+  const derecha = rightIcon ? (
+    <Pulsable
+      onPress={onRightPress}
+      hitSlop={12}
+      accessibilityLabel={rightLabel ?? t('common.rightAction')}
+      accessibilityRole="button"
+      style={styles.backButton}
+    >
+      <Feather name={rightIcon} size={22} color={colors.text} />
+      {/* El punto no lleva texto: se acompana del propio icono, nunca es
+          el color el unico portador de la informacion. */}
+      {rightBadge ? (
+        <View
+          style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}
+        />
+      ) : null}
+    </Pulsable>
+  ) : null;
+
+  if (grande) {
+    return (
+      <View
+        style={[
+          styles.row,
+          styles.filaGrande,
+          { height: APP_HEADER_HEIGHT + insets.top, paddingTop: insets.top },
+        ]}
+      >
+        <Text
+          numberOfLines={1}
+          variant="title"
+          weight="900"
+          accessibilityRole="header"
+          style={styles.tituloGrande}
+        >
+          {title}
+        </Text>
+        {derecha}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.row, { height: APP_HEADER_HEIGHT + insets.top, paddingTop: insets.top }]}>
       <View style={styles.side}>
         {back || onBack ? (
-          <Pressable
+          <Pulsable
             onPress={handleBack}
             hitSlop={12}
             accessibilityLabel={t('common.back')}
@@ -75,7 +128,7 @@ export function AppHeader({
             style={styles.backButton}
           >
             <Feather name="chevron-left" size={24} color={colors.text} />
-          </Pressable>
+          </Pulsable>
         ) : null}
       </View>
       {/* La marca se pinta con su logo; el resto de pantallas llevan su
@@ -90,26 +143,7 @@ export function AppHeader({
       ) : (
         <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>{title}</Text>
       )}
-      <View style={[styles.side, { alignItems: 'flex-end' }]}>
-        {rightIcon ? (
-          <Pressable
-            onPress={onRightPress}
-            hitSlop={12}
-            accessibilityLabel={rightLabel ?? t('common.rightAction')}
-            accessibilityRole="button"
-            style={styles.backButton}
-          >
-            <Feather name={rightIcon} size={22} color={colors.text} />
-            {/* El punto no lleva texto: se acompana del propio icono, nunca es
-                el color el unico portador de la informacion. */}
-            {rightBadge ? (
-              <View
-                style={[styles.badge, { backgroundColor: colors.text, borderColor: colors.background }]}
-              />
-            ) : null}
-          </Pressable>
-        ) : null}
-      </View>
+      <View style={[styles.side, { alignItems: 'flex-end' }]}>{derecha}</View>
     </View>
   );
 }
@@ -122,6 +156,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   side: { width: 44 },
+  filaGrande: { justifyContent: 'space-between', gap: spacing.md },
+  // `flexShrink` para que un título largo se recorte antes de empujar al botón.
+  tituloGrande: { flexShrink: 1 },
   brand: { flex: 1, alignItems: 'center' },
   // `minWidth: 0` para que lo que se meta aqui se recorte en vez de empujar a
   // los botones de los lados fuera de la pantalla.

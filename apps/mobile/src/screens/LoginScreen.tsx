@@ -1,22 +1,30 @@
 import React, { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { notify } from '@/lib/confirm';
 import { rutaTrasAutenticar } from '@/lib/postAuthRoute';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { Aparecer } from '@/components/Aparecer';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { CabeceraDeAcceso } from '@/components/CabeceraDeAcceso';
+import { CampoDeContrasena } from '@/components/CampoDeContrasena';
 import { Input } from '@/components/Input';
-import { ZLogo } from '@/components/ZLogo';
+import { Pulsable } from '@/components/Pulsable';
+import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import { mensajeDeAuth } from '@/lib/authErrors';
+import { haptics } from '@/lib/haptics';
+import { retrasoEnCascada } from '@/lib/movimiento';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+
+/** Lo que tarda en entrar cada bloque respecto al anterior. */
+const PASO = 50;
 
 export function LoginScreen() {
   const { colors } = useAppTheme();
@@ -30,7 +38,6 @@ export function LoginScreen() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [hidden, setHidden] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [socialBusy, setSocialBusy] = useState(false);
 
@@ -38,6 +45,8 @@ export function LoginScreen() {
   // Evita dos intentos de acceso simultaneos: el segundo llegaba con la sesion
   // del primero ya en curso y podia dejar avisos contradictorios en pantalla.
   const accediendo = useRef(false);
+  // «Siguiente» en el teclado del correo lleva a la contraseña.
+  const campoDeContrasena = useRef<TextInput>(null);
 
   const submit = async () => {
     if (accediendo.current) return;
@@ -68,6 +77,8 @@ export function LoginScreen() {
     setSubmitting(true);
     try {
       await signInEmail({ email: cleanEmail, password });
+      // Dentro: se nota en la mano antes de que cambie la pantalla.
+      haptics.success();
       router.replace((await rutaTrasAutenticar()) as never);
     } catch (error) {
       /*
@@ -129,15 +140,12 @@ export function LoginScreen() {
           */}
           <View style={styles.container}>
             {/*
-              La marca se pinta con su logo y en la MISMA linea. Antes llevaba
-              un salto y la «Z» iba escrita con la tipografia del texto: se
-              leia como una letra suelta colgando debajo, no como el nombre
-              del producto.
+              LA MARCA, ARRIBA Y EN GRANDE. Antes era un logo de 34 puntos al
+              final de la frase «Inicia sesión en»: se leia como una letra
+              colgando. Ahora la marca llega una vez, con su muelle, y debajo
+              va un saludo. Ver `CabeceraDeAcceso`.
             */}
-            <View style={styles.titleRow}>
-              <Text style={[styles.title, { color: colors.text }]}>{t('auth.signInTitle')}</Text>
-              <ZLogo size={34} />
-            </View>
+            <CabeceraDeAcceso titulo={t('auth.signInHello')} subtitulo={t('auth.signInSubtitle')} />
 
             {/*
             ACCESO CON PROVEEDORES EXTERNOS — oculto a proposito.
@@ -178,21 +186,35 @@ export function LoginScreen() {
           </View>
           */}
 
-            <Input
-              label={t('auth.email')}
-              value={email}
-              onChangeText={(texto) => {
-                setEmail(texto);
-                setErrors((e) => ({ ...e, email: undefined }));
-              }}
-              placeholder={t('auth.emailPlaceholder')}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              error={errors.email}
-            />
-
-            <View style={styles.passwordContainer}>
+            <Aparecer retraso={retrasoEnCascada(2, PASO)}>
               <Input
+                forma="destacada"
+                icono="mail"
+                label={t('auth.email')}
+                value={email}
+                onChangeText={(texto) => {
+                  setEmail(texto);
+                  setErrors((e) => ({ ...e, email: undefined }));
+                }}
+                placeholder={t('auth.emailPlaceholder')}
+                keyboardType="email-address"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect={false}
+                // Que el gestor de contraseñas sepa qué campo es cada uno.
+                autoComplete="email"
+                textContentType="emailAddress"
+                returnKeyType="next"
+                submitBehavior="submit"
+                onSubmitEditing={() => campoDeContrasena.current?.focus()}
+                error={errors.email}
+              />
+            </Aparecer>
+
+            <Aparecer retraso={retrasoEnCascada(3, PASO)} style={styles.bloque}>
+              <CampoDeContrasena
+                forma="destacada"
+                campoRef={campoDeContrasena}
                 label={t('auth.password')}
                 value={password}
                 onChangeText={(texto) => {
@@ -200,43 +222,52 @@ export function LoginScreen() {
                   setErrors((e) => ({ ...e, password: undefined }));
                 }}
                 placeholder={t('auth.passwordPlaceholder')}
-                secureTextEntry={hidden}
+                autoComplete="current-password"
+                textContentType="password"
+                // «Ir» en el teclado entra, igual que el botón.
+                returnKeyType="go"
+                onSubmitEditing={() => void submit()}
                 error={errors.password}
               />
-              <Pressable
-                onPress={() => setHidden((v) => !v)}
-                style={styles.eyeButton}
-                accessibilityLabel={hidden ? t('auth.showPassword') : t('auth.hidePassword')}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: !hidden }}
+              {/* Junto al campo al que se refiere, no perdido debajo del botón. */}
+              <Pulsable
+                onPress={() => router.push('/forgot-password' as never)}
+                hitSlop={8}
+                style={styles.forgot}
+                accessibilityRole="link"
+                accessibilityLabel={t('auth.forgot')}
               >
-                <Feather name={hidden ? 'eye' : 'eye-off'} size={18} color={colors.textMuted} />
-              </Pressable>
-            </View>
+                <Text variant="secondary" weight="700">
+                  {t('auth.forgot')}
+                </Text>
+              </Pulsable>
+            </Aparecer>
 
-            <Button
-              label={t('auth.signIn')}
-              onPress={submit}
-              loading={submitting}
-              style={{ marginTop: spacing.sm }}
-            />
-            <Pressable
-              onPress={() => router.push('/forgot-password' as never)}
-              style={styles.forgot}
-              accessibilityRole="button"
-              accessibilityLabel={t('auth.forgot')}
-            >
-              <Text style={[styles.forgotText, { color: colors.textMuted }]}>
-                {t('auth.forgot')}
-              </Text>
-            </Pressable>
+            <Aparecer retraso={retrasoEnCascada(4, PASO)}>
+              <Button
+                label={t('auth.signIn')}
+                icon="log-in"
+                onPress={submit}
+                loading={submitting}
+                style={styles.principal}
+              />
+            </Aparecer>
 
-            <Pressable onPress={() => router.replace('/register')}>
-              <Text style={[styles.login, { color: colors.text }]}>
-                {t('auth.noAccount')}{' '}
-                <Text style={{ fontWeight: '900' }}>{t('auth.signUp')}</Text>
+            {/*
+              LA OTRA PUERTA ES UN BOTON, no una frase con media palabra en
+              negrita: se ve que se puede pulsar y tiene el alto de un dedo.
+            */}
+            <Aparecer retraso={retrasoEnCascada(5, PASO)} style={styles.pie}>
+              <View style={[styles.separador, { backgroundColor: colors.border }]} />
+              <Text variant="secondary" color={colors.textMuted} style={styles.centrado}>
+                {t('auth.noAccount')}
               </Text>
-            </Pressable>
+              <Button
+                label={t('auth.signUp')}
+                variant="secondary"
+                onPress={() => router.replace('/register')}
+              />
+            </Aparecer>
           </View>
         </AppScreen>
       </SinTecladoDelante>
@@ -245,8 +276,6 @@ export function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  forgot: { alignSelf: 'center', paddingVertical: spacing.md },
-  forgotText: { fontSize: 13, fontWeight: '600' },
   /*
     El centrado va en el CONTENEDOR del desplazamiento, no en un hijo con
     `flex: 1`. La diferencia importa: `flexGrow` solo estira cuando sobra sitio,
@@ -260,31 +289,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.xl,
   },
-  container: { gap: spacing.md },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: '900' },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    // Si el idioma alarga el texto, el logo baja en vez de salirse.
-    flexWrap: 'wrap',
-    marginVertical: spacing.lg,
-  },
+  // Con tope de ancho: en una ventana de escritorio el formulario no se
+  // estira de lado a lado, se queda centrado como una columna.
+  container: { gap: spacing.lg, width: '100%', maxWidth: 440, alignSelf: 'center' },
+  bloque: { gap: spacing.sm },
+  forgot: { alignSelf: 'flex-end', minHeight: 32, justifyContent: 'center' },
+  principal: { minHeight: 54, marginTop: spacing.xs },
+  pie: { gap: spacing.md, marginTop: spacing.sm },
+  centrado: { textAlign: 'center' },
+  separador: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
+  // Los tres de abajo son del bloque de proveedores externos, hoy comentado.
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginVertical: spacing.sm },
   line: { height: 1, flex: 1 },
   or: { fontSize: 11 },
-  passwordContainer: {
-    position: 'relative',
-    width: '100%',
-  },
-  eyeButton: {
-    position: 'absolute',
-    right: spacing.md,
-    top: 36,
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  login: { textAlign: 'center', marginTop: spacing.md, fontSize: 13 },
 });

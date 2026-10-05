@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Aparecer } from '@/components/Aparecer';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -49,7 +50,14 @@ export function BottomSheet({
     <Modal
       transparent
       visible={visible}
-      animationType="slide"
+      /*
+        EL FONDO SE FUNDE Y LA HOJA SUBE. Con `slide` subía todo el modal a la
+        vez —el velo oscuro incluido—, como una persiana: el fondo se oscurecía
+        de abajo arriba y se notaba el corte. Ahora el velo aparece en toda la
+        pantalla y la hoja entra sola desde abajo (`Aparecer`), que es como se
+        comportan las hojas del sistema. Al cerrar, todo se funde.
+      */
+      animationType="fade"
       onRequestClose={onClose}
     >
       {/*
@@ -68,7 +76,8 @@ export function BottomSheet({
         />
 
         {/* Content Sheet */}
-        <View
+        <Aparecer
+          desde={56}
           style={[
             styles.sheet,
             {
@@ -111,7 +120,7 @@ export function BottomSheet({
           ) : (
             <View style={[styles.contentScroll, styles.content]}>{children}</View>
           )}
-        </View>
+        </Aparecer>
       </SinTecladoDelante>
     </Modal>
   );

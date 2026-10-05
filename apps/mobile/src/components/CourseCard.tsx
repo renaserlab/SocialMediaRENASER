@@ -1,8 +1,9 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { radius, spacing } from '@/theme/tokens';
@@ -30,7 +31,7 @@ export function CourseCard({ course, onPress, onEdit }: Props) {
 
   return (
     <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-      <Pressable
+      <Pulsable
         onPress={onPress}
         style={StyleSheet.absoluteFill}
         accessibilityRole="button"
@@ -57,7 +58,7 @@ export function CourseCard({ course, onPress, onEdit }: Props) {
         </View>
 
         {onEdit ? (
-          <Pressable
+          <Pulsable
             onPress={onEdit}
             hitSlop={10}
             accessibilityRole="button"
@@ -65,7 +66,7 @@ export function CourseCard({ course, onPress, onEdit }: Props) {
             style={styles.edit}
           >
             <Feather name="edit-2" size={16} color={colors.textMuted} />
-          </Pressable>
+          </Pulsable>
         ) : (
           <View pointerEvents="none">
             <Feather name="chevron-right" size={18} color={colors.textMuted} />

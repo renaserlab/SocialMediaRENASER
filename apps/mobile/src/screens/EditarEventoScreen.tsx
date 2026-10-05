@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { Pulsable } from '@/components/Pulsable';
 import { DateField } from '@/components/DateField';
 import { CoverImage } from '@/components/CoverImage';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
@@ -18,6 +19,7 @@ import { confirm, notify } from '@/lib/confirm';
 import {
   CATEGORIAS,
   ZONAS_HORARIAS,
+  nombreDeZona,
   aforoEscrito,
   claveDeCategoria,
   estaEnRevision,
@@ -399,7 +401,7 @@ export function EditarEventoScreen() {
         {CATEGORIAS.map((categoria) => {
           const elegida = campos.category === categoria;
           return (
-            <Pressable
+            <Pulsable
               key={categoria}
               disabled={!editable || ocupado}
               onPress={() => setCampos({ ...campos, category: categoria })}
@@ -419,7 +421,7 @@ export function EditarEventoScreen() {
               >
                 {t(claveDeCategoria(categoria) as TranslationKey)}
               </Text>
-            </Pressable>
+            </Pulsable>
           );
         })}
       </View>
@@ -431,7 +433,7 @@ export function EditarEventoScreen() {
         {MODALIDADES.map((modalidad) => {
           const elegida = campos.eventType === modalidad.valor;
           return (
-            <Pressable
+            <Pulsable
               key={modalidad.valor}
               disabled={!editable || ocupado}
               onPress={() => setCampos({ ...campos, eventType: modalidad.valor })}
@@ -451,7 +453,7 @@ export function EditarEventoScreen() {
               >
                 {t(modalidad.clave as TranslationKey)}
               </Text>
-            </Pressable>
+            </Pulsable>
           );
         })}
       </View>
@@ -521,7 +523,7 @@ export function EditarEventoScreen() {
           {zonas.map((zona) => {
             const elegida = campos.timezone === zona;
             return (
-              <Pressable
+              <Pulsable
                 key={zona}
                 disabled={ocupado}
                 onPress={() => setCampos({ ...campos, timezone: zona })}
@@ -532,18 +534,27 @@ export function EditarEventoScreen() {
                     backgroundColor: elegida ? colors.primary : 'transparent',
                   },
                 ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: elegida }}
+                // Una sola zona: es una elección única, y se anuncia así.
+                accessibilityRole="radio"
+                accessibilityState={{ selected: elegida, checked: elegida }}
+                accessibilityLabel={nombreDeZona(zona)}
               >
+                {/*
+                  SE LEE LA CIUDAD, SE GUARDA EL IDENTIFICADOR. «Buenos Aires»
+                  y no `America/Argentina/Buenos_Aires`: lo que viaja al
+                  servidor no cambia, solo cómo se enseña.
+                */}
                 <Text variant="caption" color={elegida ? colors.onPrimary : colors.text}>
-                  {zona}
+                  {nombreDeZona(zona)}
                 </Text>
-              </Pressable>
+              </Pulsable>
             );
           })}
         </View>
       ) : (
-        <Text variant="secondary">{campos.timezone || t('miEvento.sinZona')}</Text>
+        <Text variant="secondary">
+          {campos.timezone ? nombreDeZona(campos.timezone) : t('miEvento.sinZona')}
+        </Text>
       )}
 
       {campos.eventType === 'presential' ? (

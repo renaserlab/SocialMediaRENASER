@@ -412,28 +412,45 @@ describe('«Lo que puede aportar»', () => {
 
   it('el encabezado entero es lo que se pulsa, y lo anuncia', () => {
     const codigo = sinComentarios(OFERTA);
-    assert.match(codigo, /<Pressable/);
+    // `Pulsable` es el `Pressable` de la aplicación: toda la fila responde.
+    assert.match(codigo, /<Pulsable/);
     assert.match(
       codigo,
       /accessibilityState=\{\{ expanded: abierta \}\}/,
       'Sin `expanded`, un lector de pantalla lee un título y deja a quien ' +
         'escucha sin saber que hay algo debajo.',
     );
+    // La flecha GIRA media vuelta: en reposo se ve abajo (cerrada) o arriba
+    // (abierta), que es un cambio de FORMA y no de color.
     assert.match(
       codigo,
-      /name=\{abierta \? 'chevron-up' : 'chevron-down'\}/,
+      /<FlechaDeDesplegable abierto=\{abierta\} color=\{colors\.text\} \/>/,
       'La flecha cambia de FORMA, no solo de color: el sistema es blanco y ' +
         'negro.',
     );
+    const flecha = sinComentarios(
+      readFileSync(join(SRC, 'components', 'Desplegable.tsx'), 'utf8').replace(/\r\n/g, '\n'),
+    );
+    assert.match(flecha, /rotate: `\$\{giro\.value \* 180\}deg`/);
   });
 
   it('al expandir enseña la oferta, y solo entonces', () => {
     const codigo = sinComentarios(OFERTA);
+    // La lista vive dentro del desplegable: cerrada mide cero, no se puede
+    // tocar y el lector de pantalla no la recorre.
     assert.match(
       codigo,
-      /\{abierta \? \(\s*<View style=\{styles\.lista\}>/,
-      'La lista de temas se pinta únicamente con la sección abierta.',
+      /<Desplegable abierto=\{abierta\}>\s*<View style=\{styles\.lista\}>/,
+      'La lista de temas se enseña únicamente con la sección abierta.',
     );
+    const desplegable = sinComentarios(
+      readFileSync(join(SRC, 'components', 'Desplegable.tsx'), 'utf8').replace(/\r\n/g, '\n'),
+    );
+    assert.match(desplegable, /pointerEvents=\{abierto \? 'auto' : 'none'\}/);
+    assert.match(desplegable, /accessibilityElementsHidden=\{!abierto\}/);
+    assert.match(desplegable, /height: avance\.value \* alto/, 'anima la altura');
+    assert.match(desplegable, /opacity: avance\.value/, 'y la opacidad');
+    assert.match(desplegable, /useReducedMotion\(\)/);
     assert.match(
       codigo,
       /visibles\.map\(\(tema\)/,

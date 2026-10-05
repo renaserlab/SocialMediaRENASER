@@ -1,7 +1,8 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View, ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Chip } from '@/components/Chip';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -126,7 +127,7 @@ export function ChipsDeEtiquetas({
           ))}
 
           {alGestionar ? (
-            <Pressable
+            <Pulsable
               onPress={alGestionar}
               style={[styles.gestionar, { borderColor: colors.border }]}
               accessibilityRole="button"
@@ -143,7 +144,7 @@ export function ChipsDeEtiquetas({
                   ? t('label.createShort')
                   : t('label.manageShort')}
               </Text>
-            </Pressable>
+            </Pulsable>
           ) : null}
         </ScrollView>
       </SinCambioDeSeccion>

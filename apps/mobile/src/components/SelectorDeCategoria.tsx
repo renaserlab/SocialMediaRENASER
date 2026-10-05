@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
+import { Pulsable } from '@/components/Pulsable';
 import { Chip } from '@/components/Chip';
 import { Text } from '@/components/Text';
 import { categoryLabel } from '@/data/categories';
@@ -91,7 +92,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
           ) : null}
 
           {!creando ? (
-            <Pressable
+            <Pulsable
               onPress={() => setCreando(true)}
               style={[styles.nueva, { borderColor: colors.border }]}
               accessibilityRole="button"
@@ -101,7 +102,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
               <Text variant="caption" weight="700" color={colors.text}>
                 {t('category.new')}
               </Text>
-            </Pressable>
+            </Pulsable>
           ) : null}
         </View>
       )}
@@ -123,7 +124,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
           {ocupado ? (
             <ActivityIndicator color={colors.text} />
           ) : (
-            <Pressable
+            <Pulsable
               onPress={() => void anadir()}
               hitSlop={8}
               disabled={!nombre.trim()}
@@ -132,9 +133,9 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
               style={styles.icono}
             >
               <Feather name="check" size={18} color={colors.text} />
-            </Pressable>
+            </Pulsable>
           )}
-          <Pressable
+          <Pulsable
             onPress={() => {
               setCreando(false);
               setNombre('');
@@ -146,7 +147,7 @@ export function SelectorDeCategoria({ ownerId, valor, alCambiar }: Props) {
             style={styles.icono}
           >
             <Feather name="x" size={18} color={colors.textMuted} />
-          </Pressable>
+          </Pulsable>
         </View>
       ) : null}
 

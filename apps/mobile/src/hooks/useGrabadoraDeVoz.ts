@@ -10,6 +10,7 @@ import {
   duracionEnSegundos,
   llegoAlTope,
   MAX_DURACION_S,
+  nivelDeVoz,
 } from '@/lib/notaDeVoz';
 import {
   abrirAjustes,
@@ -155,6 +156,19 @@ async function borrarGrabacion(uri: string | null | undefined): Promise<void> {
   }
 }
 
+/**
+ * El preset de siempre, con la MEDICIÓN encendida.
+ *
+ * `isMeteringEnabled` hace que el grabador informe del nivel del micrófono en
+ * cada lectura de estado. Es lo que permite pintar una onda que responde a la
+ * voz DE VERDAD mientras se graba, en vez de una animación que se movería
+ * igual con el micrófono tapado. No cambia el formato ni el fichero.
+ *
+ * Fuera del hook para que sea siempre el mismo objeto: unas opciones nuevas en
+ * cada render harían que `useAudioRecorder` creara otro grabador nativo.
+ */
+const OPCIONES_DE_GRABACION = { ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true };
+
 export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   const { t } = useTranslation();
 
@@ -166,11 +180,17 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     plataformas. Un solo formato es un solo camino que probar, una sola extensión
     que mandar al backend y un solo decodificador al otro lado.
   */
-  const grabador = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const grabador = useAudioRecorder(OPCIONES_DE_GRABACION);
 
   const [fase, setFase] = useState<FaseDeNotaDeVoz>('inactiva');
   /** Milisegundos grabados. Se actualiza solo mientras el micrófono está abierto. */
   const [milisegundos, setMilisegundos] = useState(0);
+  /**
+   * El nivel del micrófono (0–1) en la última lectura, o `null` si esta
+   * plataforma no mide. `null` NO es silencio: es «no se sabe», y quien pinta
+   * la onda lo usa para no inventarse una señal.
+   */
+  const [nivel, setNivel] = useState<number | null>(null);
   /** La nota terminada, desde que se detiene hasta que se envía o se elimina. */
   const [nota, setNota] = useState<AdjuntoElegido | null>(null);
   /** De 0 a 1 mientras se sube. */
@@ -253,9 +273,15 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   */
   useEffect(() => {
     if (fase !== 'grabando') return;
+    // Cada grabacion empieza sin nivel: hasta la primera lectura no se sabe
+    // si esta plataforma mide.
+    setNivel(null);
     const reloj = setInterval(() => {
       try {
-        setMilisegundos(grabador.getStatus().durationMillis ?? 0);
+        // UNA lectura nativa por tic, de la que salen el reloj y el nivel.
+        const estado = grabador.getStatus();
+        setMilisegundos(estado.durationMillis ?? 0);
+        setNivel(nivelDeVoz(estado.metering));
       } catch {
         /* El objeto nativo ya no está. Se deja el último valor leído. */
       }
@@ -685,6 +711,8 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     nota,
     /** De 0 a 1 mientras se sube. */
     progreso,
+    /** El nivel del micrófono (0–1) mientras se graba; `null` si no se mide. */
+    nivel,
     empezar,
     detener,
     cancelar,

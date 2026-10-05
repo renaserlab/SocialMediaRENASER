@@ -381,6 +381,11 @@ huérfanas consumiendo.
 **Los precios de 100ms no están en el código ni lo estarán.** Cambian, y
 pertenecen a la documentación operativa y al contrato con el proveedor.
 
+**Cuánta gente cabe en una emisión** no lo decide ninguna de estas palancas.
+Está en [`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md), con los límites de
+100ms y de Supabase, y con lo que habría que construir para audiencias grandes.
+Resumen: hoy, emisiones pequeñas; lo demás es diseño.
+
 ---
 
 ## 11. Pruebas
@@ -488,6 +493,16 @@ autenticidad de los avisos es por cabecera y no por firma.
   iOS) → la app sube a **1.1.0**: los directos necesitan esa build nueva.
 - `FEATURE_LIVE` de la app deja de ser `false` a fuego (ver §3).
 
+### Hecho el 04/10/2026 (rama `Edson`) → §17
+
+- **Las reacciones llegan a los demás.** No llegaban: cada teléfono abría su
+  canal con un contador propio en el nombre y nadie escuchaba a nadie.
+- **Chat virtualizado**, con ventana de mensajes y sin arrastrar a quien lee.
+- **Efectos de cámara** para quien emite: ninguno, desenfoque y tres fondos.
+- **Calidad:** «conexión lenta» se emite de verdad, y quien mira puede elegir
+  capa **si la plantilla tiene Simulcast**.
+- La app sube a **1.2.0**: los efectos traen un módulo nativo nuevo en Android.
+
 ### Depende de la cuenta de 100ms → §16
 
 ### Depende de una decisión
@@ -524,6 +539,7 @@ teléfono real confirma que la imagen se pinta. Lista de QA en
    HLS: la app entra siempre con `sdk.join`.
 2. En la plantilla: **grabación desactivada**, **HLS y RTMP desactivados** (no
    hay código que los use) y calidad de vídeo de `host` a 720p o menos.
+   Simulcast y degradación: ver §17, «Lo que depende del panel».
 3. Copiar el **Template ID** (*Template › Settings*).
 4. *Developer*: copiar el **App Access Key** y el **App Secret**. El secreto no
    se pega en ningún chat ni documento.
@@ -570,3 +586,251 @@ y, en el registro de la API, «Proveedor de directo: 100ms».
 Build **1.1.0** (APK `preview` para probar; AAB `production` para la tienda).
 Las builds 1.0.0 no ofrecen «Vivo»: no llevan los permisos. Prueba con dos
 teléfonos: uno emite desde *Crear › Vivo*, el otro entra desde la pestaña Live.
+
+---
+
+## 17. Reacciones, chat, efectos y calidad en la aplicación (04/10/2026)
+
+Todo esto vive en `apps/mobile`. El backend no ha cambiado.
+
+### Dónde está cada cosa
+
+| Fichero | Qué decide | ¿Se ejecuta en pruebas? |
+|---|---|---|
+| `live/reaccionesEnVivo.ts` | El tópico, qué viaja, cuándo, y el contador | Sí, con varios clientes |
+| `live/burbujas.ts` | Cuántas reacciones se pintan y cada cuánto | Sí |
+| `live/ventanaDeChat.ts` | La ventana del chat, el orden, las lecturas al servidor | Sí, con varios clientes |
+| `live/suscripcionViva.ts` | Volver a abrir un canal que cierra el servidor | Sí, contra el cliente de Realtime de verdad |
+| `live/efectosDeVideo.ts` | El orden de las llamadas al SDK, los fallos, los tiempos límite | Sí, con un SDK de mentira |
+| `live/calidadDeVideo.ts` | Qué opciones existen, y cuándo se dice «conexión lenta» | Sí |
+| `live/salaDeVideo100ms.ts` | **El único que habla con 100ms.** Traduce | No: necesita un teléfono |
+| `components/live/*` | Pintar | No: se custodia leyendo el código |
+
+### Reacciones
+
+**El defecto.** `services/directoEnVivo.ts` abría el canal con
+`live-reacciones:${emisionId}:${secuencia}`, y `secuencia` es un contador de
+cada teléfono. Anfitrión y espectadores estaban en tópicos distintos. Quien
+pulsaba veía su corazón —no pasa por la red— y los totales acababan cuadrando
+por el resumen al servidor; la animación en los demás no llegaba nunca.
+
+**La corrección.** El tópico es `live-reacciones:${emisionId}` y lo calcula
+`topicoDeReacciones`. El contador sigue en los canales de `postgres_changes`
+(chat y estado de sala), donde el tópico es solo un nombre.
+
+**Lo que hubo que resolver además**, porque el contador lo tapaba. Las tres
+cosas están comprobadas **ejecutando el cliente de verdad**
+(`@supabase/realtime-js` 2.110.7) contra un servidor en memoria, en
+`reaccionesConElClienteReal.test.mts`:
+
+- el cliente devuelve **el mismo canal** para el mismo tópico: dos pantallas de
+  una emisión lo comparten, y la primera que cerraba se lo quitaba a la otra.
+  Ahora se cuentan los usuarios del canal;
+- `send()` sin suscripción **cae a una petición HTTP** por mensaje, que además
+  devuelve la reacción a quien la envió. Ahora no se envía nada hasta
+  `SUBSCRIBED`: lo pulsado antes espera (60 como mucho, 10 s como mucho) y sale
+  junto, una vez;
+- si el canal lo cierra **el servidor**, el cliente lo quita y **no vuelve a
+  unirse** (de una caída de red sí se recupera solo). Ahora, con la pantalla
+  abierta, el canal se vuelve a montar tras 2 s, doblando hasta 30 s. Lo mismo
+  para el canal del chat y el del estado de la sala.
+
+> Una cuarta «costumbre» que se dio por comprobada **no lo estaba**: que abrir
+> un canal justo después de cerrarlo dejaba un canal muerto. La revisión
+> independiente ejecutó el cliente real y vio que el cierre es inmediato. El
+> código que lo «arreglaba» se quitó, y con él el cliente de Realtime escrito a
+> mano que lo «demostraba».
+
+**Carga.** Un toque suelto sale al momento. Una ráfaga se agrupa: como mucho un
+mensaje cada 300 ms, con tipo y cantidad. Quien recibe suma la cantidad entera
+y pinta una muestra. Los números, en [`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md) §2.
+
+**El contador.** La propia suma una vez al pulsar; la ajena, una vez al
+recibir. Lo que contesta el servidor tras un resumen **no se suma**: se toma el
+mayor de los dos. Al recargar la emisión manda lo persistido.
+
+### Chat
+
+`FlashList` en vez de `ScrollView` con `.map()`. En memoria, los últimos 150.
+Al entrar, los últimos 50 que da el servidor. Sin historial infinito.
+
+Quien está al final sigue los mensajes nuevos; quien subió a leer se queda
+donde está y ve «N mensajes nuevos». Estados que se dicen: conectando,
+reconectando y «no se pudieron leer» con su botón de reintentar.
+
+Una ráfaga de gente nueva escribiendo no es una lectura por mensaje: las
+lecturas van de una en una —también la inicial—, con 250 ms entre ellas y un
+poco de espera al azar para que no pregunten todos los teléfonos a la vez. A
+quien el servidor no devuelve (alguien a quien se ha bloqueado) se deja de
+preguntar durante un minuto.
+
+**Moderación.** Estaba rota de dos maneras, y la primera es anterior a este
+trabajo:
+
+- la aplicación leía `hidden` de la fila de tiempo real, y esa columna **no
+  existe**: la tabla guarda `hidden_at`. A quien moderaba le reaparecía el
+  mensaje en cuanto llegaba el cambio;
+- Realtime solo entrega ese cambio a quien todavía puede leer la fila —quien
+  modera y quien la escribió—. **Al público no le llega nada.**
+
+Ahora quien modera manda además un aviso **sin contenido** por Broadcast
+(`live-chat-avisos:${emisionId}`), y quien lo recibe vuelve a leer del
+servidor, que es quien dice qué se ve. Lo que el servidor deja de devolver se
+quita de la pantalla.
+
+El aviso no tiene autoridad: el canal es público, así que no dice *qué*
+esconder, y por muchos que lleguen provocan una lectura cada 5 s como mucho.
+Si el aviso se pierde, a quien mira se le va el mensaje en su siguiente
+lectura, no antes. **Que el público no reciba el cambio por la base está leído
+en la política de la tabla, no probado contra Supabase.**
+
+### Efectos de cámara
+
+Solo para quien publica. Tres opciones: **ninguno**, **desenfoque** y **fondo**
+(tres imágenes que trae la aplicación: `assets/live/fondos/`). No se descarga
+ninguna imagen.
+
+Lo aplica `@100mslive/react-native-video-plugin` **1.1.4** a los fotogramas de
+la cámara antes de codificarlos: lo que ve quien emite es lo que reciben los
+demás. No hay nada dibujado encima de la vista.
+
+| | Android | iOS |
+|---|---|---|
+| Quién procesa | El módulo nativo del complemento (`ReactNativeVideoPlugin`) | El propio SDK de 100ms, que ya estaba |
+| Cuándo se engancha a la pista | Al activar el efecto | Al construir el SDK (apagado) |
+| Radio del desenfoque | 75 (lo fija la aplicación) | El del SDK; el valor de la aplicación no se usa |
+| Mínimo | El que ya pide la app (Android 7) | **iOS 16** |
+| Sin el módulo (binario 1.1.x) | No se ofrecen | — |
+
+- **iOS 16 y no 15.** El código nativo del SDK instalado los admite desde
+  iOS 15; la guía de 100ms para React Native pide iOS 16. Se toma el más
+  exigente. Si se prueba en un iPhone con iOS 15 y va bien, es una constante
+  (`IOS_MINIMO_PARA_EFECTOS`).
+- **Rendimiento.** La guía de 100ms avisa de pocos fotogramas en Android
+  antiguos y recomienda iPhone potentes. La aplicación no mide los fotogramas:
+  lo que ofrece es que «Ninguno» se pueda pulsar siempre, también a mitad de
+  aplicar otra cosa.
+- **Si falla**, la pista vuelve a «ninguno» y se dice. Ninguna llamada al SDK
+  espera más de 8 s. Si el SDK contesta **después** de ese límite —un Android
+  lento cargando el modelo—, lo que haya aparecido se quita solo, y «Ninguno»
+  funciona mientras tanto.
+- **Al salir**, primero se apaga la cámara y después se quita el efecto. Al
+  revés, quien miraba recibía el fondo real durante un instante.
+- **Caída y vuelta.** Al volver a entrar se suelta antes la instancia anterior
+  del SDK (la máquina reintenta sin salir, y el complemento de efectos solo
+  sabe hablar con una instancia de identificador fijo). Si había un efecto, la
+  cámara **nace apagada**, se repone y solo entonces se enciende. Si no
+  vuelve, la cámara se queda apagada y se avisa: quien tapaba su fondo no lo
+  enseña sin saberlo.
+- **Cambiar de cámara o apagarla** no toca el efecto: sigue enganchado a la
+  pista.
+- **No se puede empezar ya desenfocado.** Quien emite entra con la cámara
+  encendida y sin efecto, y lo pone después. Empezar tapado exigiría entrar
+  con la cámara apagada; no se ha hecho.
+
+**Todo esto está sin probar en teléfonos.** Lo que se ejecuta en las pruebas es
+el orden de las llamadas con un SDK de mentira; el adaptador de 100ms solo se
+puede leer.
+
+### Calidad
+
+**No hay botón de «HD».** Lo que hay:
+
+- **«Conexión lenta»** se emite con dos señales del SDK: la nota de red propia
+  (`NETWORK_QUALITY_UPDATED`, de 1 a 5; mala si ≤ 2 dos veces seguidas) y la
+  degradación de la pista que se está viendo (`TRACK_DEGRADED`). El estado
+  existía en la máquina desde el principio y nadie lo emitía.
+- **Elegir calidad**, solo quien mira y **solo si la pista tiene más de una
+  capa**:
+
+  | Opción | Qué hace en 100ms |
+  |---|---|
+  | Automática | `autoSimulcast` de `HmsView`: el proveedor elige por tamaño y red |
+  | Ahorrar datos | `setLayer` con la capa más baja que exista |
+  | Alta calidad | `setLayer` con la más alta que exista |
+
+  Se enseña la medida real de cada capa (la de `getLayerDefinition()`), no un
+  nombre. Cambiar no reconecta la sala. La elección dura mientras dure la
+  pantalla y se repone si la pista cambia; no se guarda entre sesiones.
+- Con mala red el proveedor baja o corta la imagen igual, se elija lo que se
+  elija.
+
+### Lo que depende del panel de 100ms
+
+**No se ha tocado el panel, y no se puede ver desde el repositorio cómo está.**
+La documentación de Z solo dice de la plantilla: grabación, HLS y RTMP
+desactivados, y `host` a 720p o menos. De Simulcast no dice nada.
+
+La aplicación lo averigua sola: si `getLayerDefinition()` devuelve menos de dos
+capas para la imagen del anfitrión, no pinta el botón de calidad.
+
+Para que el selector aparezca hace falta, **con autorización**, revisar esto en
+*Templates › la plantilla de Z*:
+
+| Ajuste | Dónde | Valor |
+|---|---|---|
+| Simulcast (Adaptive Bitrate) | Rol `host` (y `moderator`, `guest`) › publicación de vídeo | Activado |
+| Capas de vídeo | El mismo sitio | Al menos dos (alta y baja); tres si se quiere una media |
+| Resolución y tasa de bits de `host` | Rol `host` › vídeo | 720p o menos, como hoy. Es el techo de «Alta calidad» |
+| Degradación al suscribirse | Rol `viewer` › suscripción | Activada. Es lo que produce `TRACK_DEGRADED` con mala red |
+
+Nada de esto cambia el código. Si no se activa, los directos funcionan como
+hasta ahora y sin selector.
+
+### Compilación
+
+`@100mslive/react-native-video-plugin` es un módulo nativo. La versión de la
+aplicación sube a **1.2.0** (`perfilesDeCompilacion.test.mts`). Un binario
+1.1.x que recibiera este JavaScript no encontraría el módulo: la aplicación lo
+detecta y no ofrece los efectos, pero con la versión subida la actualización
+ni le llega.
+
+Cosas que **solo confirma una compilación**, y no están confirmadas:
+
+- que el complemento (compilado contra el SDK de Android 2.9.78) enlaza con el
+  2.9.84 que trae `react-native-hms` 1.12.3. El complemento declara que es
+  compatible (`>=1.12.0 <2.0.0`);
+- que en iOS, al pasarle el complemento al construir el SDK, la resolución de
+  lo que se publica sigue siendo la de la plantilla. El puente de React Native
+  crea esos ajustes de pista con unos valores fijos propios, y hay que ver en
+  un teléfono que no mandan.
+
+### La revisión independiente
+
+Una segunda lectura, hecha por alguien que no había visto el código y con la
+consigna de romperlo. Ningún bloqueante; cuatro hallazgos altos, corregidos y
+con una prueba que fallaba antes del arreglo:
+
+| Hallazgo | Arreglo |
+|---|---|
+| La moderación no llegaba a quien mira, y a quien modera le reaparecía el mensaje | `hidden_at`, retirada de lo que el servidor ya no devuelve, y aviso por Broadcast |
+| Al salir, el efecto se quitaba antes de apagar la cámara | Se invirtió el orden |
+| Tras un reintento, el complemento hablaba con otra instancia del SDK | Se suelta la instancia anterior antes de construir otra |
+| «La cámara nace apagada al volver» no se podía alcanzar | Lo anterior, y «hay que reponer» ya no depende de haber salido |
+
+Y de los medios: un canal que cierra el servidor se vuelve a montar; un
+`activar` que contesta tarde se limpia; las lecturas del chat están acotadas de
+verdad; y se retiraron las afirmaciones de «comprobado» que no lo estaban.
+
+**Lo que la revisión dejó abierto**, por ser de teléfono o del proveedor:
+
+- si `leave()` cancela un `join` que sigue en vuelo (cámara viva al salir a
+  mitad de la conexión);
+- un error del SDK posterior a la entrada no llega a la máquina de estados;
+- si las capas de calidad ya existen cuando aparece la pista (por si acaso, se
+  preguntan una segunda vez a los 4 s);
+- cuándo cierra Supabase un canal por su cuenta, y si el proyecto admite
+  Broadcast público;
+- que el motor de JavaScript del teléfono lea igual las fechas con
+  microsegundos (se recortan a milisegundos antes de leerlas, por si no).
+
+### Lo que no se hizo
+
+- Maquillaje, alisado, máscaras, seguimiento de cara, color: 100ms no lo
+  ofrece.
+- Fondos subidos por la persona o descargados.
+- Guardar la calidad elegida entre sesiones.
+- Contar la audiencia.
+- Reacciones agregadas, HLS, canal privado: diseñados en
+  [`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md), sin construir.
+- Telemetría: los contadores de diagnóstico se quedan en el teléfono.

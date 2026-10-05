@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@100mslive/react-native-hms": "1.12.3",
+    "@100mslive/react-native-video-plugin": "1.1.4",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.1.1",

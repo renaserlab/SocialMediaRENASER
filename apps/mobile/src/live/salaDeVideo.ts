@@ -20,6 +20,8 @@
  * `salaDeVideo.test.mts`).
  */
 import type { ComponentType } from 'react';
+import type { EstadoDeCalidad, PreferenciaDeCalidad } from '@/live/calidadDeVideo';
+import type { CapacidadDeEfectos, EfectoDeVideo, EstadoDeEfectos } from '@/live/efectosDeVideo';
 
 /* ------------------------------------------------------------------------- *
  * LA CREDENCIAL. Lo que responde el backend, ya leido y comprobado.
@@ -183,6 +185,11 @@ export type PropsDeVistaDePista = {
   espejo: boolean;
   /** Estilo de React Native. `unknown` para no importar React Native aqui. */
   estilo?: unknown;
+  /**
+   * Que el proveedor elija la capa de calidad de esta pista. `false` cuando la
+   * persona ha fijado una (`SalaDeVideo.elegirCalidad`). Sin capas no hace nada.
+   */
+  capaAutomatica?: boolean;
 };
 
 /**
@@ -191,7 +198,7 @@ export type PropsDeVistaDePista = {
  * Es deliberadamente corto. Cada proveedor tiene decenas de eventos propios
  * (calidad por pista, cambios de rol, mensajes de la sala); traducirlos todos
  * aqui ataria la maquina de estados al SDK que se elija, que es justo lo que
- * este fichero evita. Solo cruzan los seis que cambian lo que se ve.
+ * este fichero evita. Solo cruzan los que cambian lo que se ve.
  */
 export type EventoDeSala =
   | { tipo: 'conectado' }
@@ -202,6 +209,10 @@ export type EventoDeSala =
   | { tipo: 'medios'; medios: EstadoDeMedios }
   /** Cambiaron las pistas: alguien entro, salio, encendio o apago la camara. */
   | { tipo: 'pistas'; pistas: PistasDeSala }
+  /** Cambio el efecto de la camara propia, o se esta cambiando, o fallo. */
+  | { tipo: 'efecto'; estado: EstadoDeEfectos }
+  /** Cambiaron las calidades entre las que se puede elegir, o la elegida. */
+  | { tipo: 'capas'; estado: EstadoDeCalidad }
   /**
    * Se acabo la conexion. `recuperable` decide si se vuelve a intentar: una
    * caida de red lo es; un token caducado o una expulsion, no.
@@ -245,6 +256,19 @@ export interface SalaDeVideo {
    * falsa). Solo pinta pistas de ESTA sala.
    */
   readonly VistaDePista: ComponentType<PropsDeVistaDePista> | null;
+  /**
+   * Los efectos que esta sala sabe aplicar a la camara de quien emite, y si no
+   * sabe, por que. Se aplican a la pista que SALE: los ve todo el mundo.
+   */
+  efectos(): CapacidadDeEfectos;
+  /** El efecto que lleva la pista ahora. */
+  estadoDeEfectos(): EstadoDeEfectos;
+  /** Pide un efecto. No rechaza: si no se puede, lo dice el estado. */
+  aplicarEfecto(efecto: EfectoDeVideo): Promise<EstadoDeEfectos>;
+  /** Entre que calidades de imagen puede elegir quien mira, y cual tiene. */
+  calidad(): EstadoDeCalidad;
+  /** Elige una. No rechaza, y no reconecta la sala. */
+  elegirCalidad(preferencia: PreferenciaDeCalidad): Promise<EstadoDeCalidad>;
   /** Suscribe un oyente. Devuelve como quitarlo. */
   alOcurrir(oyente: (evento: EventoDeSala) => void): () => void;
   /**
@@ -350,6 +374,35 @@ export function crearSalaFalsa(): SalaDeVideo {
     },
 
     VistaDePista: null,
+
+    efectos() {
+      // Sin proveedor no hay pista que procesar, y se dice.
+      return { admitidos: false, motivo: 'sin_proveedor', fondos: [] };
+    },
+
+    estadoDeEfectos() {
+      return { efecto: { tipo: 'ninguno' }, aplicando: false, error: null };
+    },
+
+    aplicarEfecto(efecto) {
+      // NO se finge: la respuesta es siempre «sin efecto», y si se pidio uno,
+      // que no se pudo. Un desenfoque que la interfaz marca como puesto sobre
+      // una camara que nadie procesa seria la maqueta que este modulo no es.
+      return Promise.resolve({
+        efecto: { tipo: 'ninguno' },
+        aplicando: false,
+        error: efecto.tipo === 'ninguno' ? null : 'no_se_pudo',
+      });
+    },
+
+    calidad() {
+      // Sin pistas no hay capas entre las que elegir.
+      return { opciones: [], elegida: 'automatica', aplicando: false, fallo: false };
+    },
+
+    elegirCalidad() {
+      return Promise.resolve({ opciones: [], elegida: 'automatica', aplicando: false, fallo: false });
+    },
 
     alOcurrir(oyente) {
       if (destruida) return () => {};

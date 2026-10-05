@@ -1,9 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { FEATURE_LIVE } from '@/config/features';
 import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
 import { confirm } from '@/lib/confirm';
 import { pedirPermiso } from '@/lib/permisos';
+import {
+  calidadSinOpciones,
+  type EstadoDeCalidad,
+  type PreferenciaDeCalidad,
+} from '@/live/calidadDeVideo';
+import {
+  estadoSinEfectos,
+  type CapacidadDeEfectos,
+  type EfectoDeVideo,
+  type EstadoDeEfectos,
+} from '@/live/efectosDeVideo';
 import { asegurarProveedorDeVideo } from '@/live/registro100ms';
 import {
   crearSesionDeDirecto,
@@ -57,6 +68,17 @@ export type SesionEnPantalla = {
   pistas: PistasDeSala;
   /** Dibuja una pista de ESTA sala, o `null` si la sala no sabe dibujar. */
   VistaDePista: SalaDeVideo['VistaDePista'];
+  /** Los efectos de la camara propia: que se puede, que hay puesto, y pedir. */
+  efectos: {
+    capacidad: CapacidadDeEfectos;
+    estado: EstadoDeEfectos;
+    aplicar: (efecto: EfectoDeVideo) => void;
+  };
+  /** La calidad de lo que se recibe: entre que se elige, y elegir. */
+  calidad: {
+    estado: EstadoDeCalidad;
+    elegir: (preferencia: PreferenciaDeCalidad) => void;
+  };
 };
 
 export function useSesionDeDirecto({
@@ -70,6 +92,8 @@ export function useSesionDeDirecto({
     vistaInicialDeDirecto(estadoDeSesion),
   );
   const [pistas, setPistas] = useState<PistasDeSala>(sinPistas);
+  const [efectos, setEfectos] = useState<EstadoDeEfectos>(estadoSinEfectos);
+  const [calidad, setCalidad] = useState<EstadoDeCalidad>(calidadSinOpciones);
 
   /*
     Lo que cambia en cada render entra por una referencia y NO por las
@@ -196,6 +220,17 @@ export function useSesionDeDirecto({
           setPistas(evento.pistas);
           maquina.laSalaCambioDePistasAjenas(evento.pistas.hayMediosAjenos);
           break;
+        case 'efecto':
+          setEfectos(evento.estado);
+          // Un efecto que se quita solo se DICE, aunque la hoja este cerrada:
+          // quien emitia con el fondo tapado tiene que saber que ya no lo esta.
+          if (evento.estado.error === 'se_apago') {
+            ultimas.current.avisar(traduceEnElIdiomaActual('live.effectTurnedOff'));
+          }
+          break;
+        case 'capas':
+          setCalidad(evento.estado);
+          break;
         case 'desconectado':
           // Fuera de la sala no queda ninguna pista que dibujar.
           setPistas(sinPistas());
@@ -224,5 +259,37 @@ export function useSesionDeDirecto({
     motor.maquina.cambiaLaSesion(estadoDeSesion);
   }, [motor, estadoDeSesion]);
 
-  return { vista, sesion: motor.maquina, pistas, VistaDePista: motor.sala.VistaDePista };
+  /*
+    Efectos y calidad NO pasan por la maquina: no cambian el estado del directo
+    ni tienen reglas que decidir aqui. Sus reglas estan en
+    `live/efectosDeVideo.ts` y `live/calidadDeVideo.ts`, y la sala no rechaza
+    nunca: lo que no se pudo lo cuenta el evento.
+  */
+  const aplicarEfecto = useCallback(
+    (efecto: EfectoDeVideo) => {
+      void motor.sala.aplicarEfecto(efecto).then(setEfectos);
+    },
+    [motor],
+  );
+  const elegirCalidad = useCallback(
+    (preferencia: PreferenciaDeCalidad) => {
+      void motor.sala.elegirCalidad(preferencia).then(setCalidad);
+    },
+    [motor],
+  );
+
+  return {
+    vista,
+    sesion: motor.maquina,
+    pistas,
+    VistaDePista: motor.sala.VistaDePista,
+    efectos: {
+      // Se lee en cada pintado: cambia al entrar en la sala publicando, y de
+      // eso ya avisa la maquina con su propio cambio de vista.
+      capacidad: motor.sala.efectos(),
+      estado: efectos,
+      aplicar: aplicarEfecto,
+    },
+    calidad: { estado: calidad, elegir: elegirCalidad },
+  };
 }

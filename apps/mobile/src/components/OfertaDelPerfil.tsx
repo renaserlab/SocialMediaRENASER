@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { Desplegable, FlechaDeDesplegable } from '@/components/Desplegable';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import {
   RecommendationRepository,
@@ -213,25 +215,29 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
         color ni de opacidad: en un sistema visual en blanco y negro, la forma es
         lo unico que se lee siempre.
       */}
-      <Pressable
+      <Pulsable
         onPress={() => setAbierta((previo) => !previo)}
         accessibilityRole="button"
         accessibilityLabel={titulo}
         accessibilityState={{ expanded: abierta }}
         hitSlop={6}
-        style={({ pressed }) => [styles.cabecera, { opacity: pressed ? 0.7 : 1 }]}
+        escala={0.99}
+        atenuar={0.7}
+        style={styles.cabecera}
       >
         <Text variant="titleMedium" style={styles.tituloDeSeccion}>
           {titulo}
         </Text>
-        <Feather
-          name={abierta ? 'chevron-up' : 'chevron-down'}
-          size={20}
-          color={colors.text}
-        />
-      </Pressable>
+        {/* Gira media vuelta al abrirse: abajo cerrada, arriba abierta. */}
+        <FlechaDeDesplegable abierto={abierta} color={colors.text} />
+      </Pulsable>
 
-      {abierta ? (
+      {/*
+        SE ABRE, NO APARECE. La altura crece hasta lo que mide la lista y el
+        contenido gana opacidad a la vez; lo que hay debajo baja con ella en
+        vez de dar un salto (`Desplegable`).
+      */}
+      <Desplegable abierto={abierta}>
       <View style={styles.lista}>
         {visibles.map((tema) => {
           const etiquetas = ORDEN.filter((relacion) => tema.relations.includes(relacion));
@@ -272,7 +278,7 @@ export function OfertaDelPerfil({ perfilId, esPropio }: Props) {
           );
         })}
       </View>
-      ) : null}
+      </Desplegable>
     </View>
   );
 }
