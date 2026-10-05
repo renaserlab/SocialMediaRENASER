@@ -2651,7 +2651,7 @@ la copia web, pero el toque de verdad solo existe en el aparato. Dos cuentas,
 | B cierra la app del todo y la abre DESDE EL ICONO: abre en Inicio, sin error | | | |
 | Otra vez, y otra: sigue abriendo, y NO vuelve a meterse sola en aquel chat | | | |
 | B con la app en segundo plano. A le escribe. B toca la notificación: se abre el chat | | | |
-| B toca una notificación que no es de mensaje (seguidor, reacción): lleva a lo que anuncia o a la bandeja | | | |
+| B toca una notificación que no es de mensaje (seguidor, reacción): lleva a lo que anuncia; si no anuncia nada concreto, la app se queda en Inicio (ya NO abre Notificaciones) | | | |
 | Dos notificaciones seguidas de dos personas: cada una abre su chat, una sola vez | | | |
 | Si aun así sale «Algo no ha salido bien»: captura con las líneas «Pantalla», «En» y «Por» | | | |
 
@@ -2666,3 +2666,91 @@ la copia web, pero el toque de verdad solo existe en el aparato. Dos cuentas,
 | A le pide una sesión a B: sale UN aviso, no dos | | | |
 | Con el chat de A delante, A escribe: NO sale aviso flotante | | | |
 | Captura del aviso flotante en claro y en oscuro, para valorar su diseño | | | |
+
+---
+
+## Compilación 46 (05/10/2026, tarde): lo que se vio y lo que cambia
+
+**Confirmado en el teléfono con la 46:** la aplicación ya no deja de abrirse
+después de tocar una notificación.
+
+**Lo que se reportó con la 46**, y su causa:
+
+| Lo reportado | Causa | Dónde |
+|---|---|---|
+| «Cada que entro a la aplicación me redirige a notificaciones» (Xiaomi) | En Android la biblioteca de avisos toma por «han tocado un aviso» cualquier dato con que el sistema abra la aplicación, y ese lanzador la abre con datos suyos. Llegaba sin identificador, con un tipo desconocido, y lo desconocido iba a la bandeja | `apps/mobile/src/lib/rutaDelPush.ts` (`destinoDelToque`) |
+| «Muestra notificaciones pasadas, ni siquiera se actualiza» | La bandeja no lleva los mensajes de chat (van en Mensajes): se llegaba a ella por el salto de arriba y no había nada nuevo que enseñar | — |
+| «Aparece en la bandeja que tengo mensajes, pero no llegaban hasta volver a entrar al chat» / «no llegan instantáneamente» | El chat cargaba UNA vez y después dependía solo de su canal de tiempo real, que no repone lo que se pierde mientras está caído (segundo plano, cambio de red). Con el chat delante no había otro camino | `apps/mobile/src/screens/ChatScreen.tsx` (`ponerAlDia`) |
+| «Al inicio no me llegaban hasta que entraba a la app; luego comenzó a funcionarme» | El registro del teléfono para recibir avisos, si fallaba la primera vez, solo se repetía al volver del segundo plano | `apps/mobile/src/hooks/useAvisosEnVivo.ts` |
+| El recuadro negro «Ver contenido de Darren gratis aquí» en Notificaciones | Era un aviso fijo de la propia aplicación. Retirado, y con él el punto que encendía en la campana | `apps/mobile/src/screens/NotificationsScreen.tsx` |
+
+**Comprobado sin teléfono** (copia web local, con el tiempo real caído a
+propósito): la aplicación arranca en Inicio; salen los avisos de «sin leer»;
+Notificaciones no lleva el recuadro; con un chat abierto, un mensaje nuevo
+aparece solo en 2–3 s sin salir ni volver a entrar. **Lo que solo existe en el
+teléfono** —tocar una notificación, el lanzador de Xiaomi, el push— es esta
+lista. Dos cuentas, **A** y **B**, con la compilación nueva.
+
+### Abrir la aplicación
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Abrir la app desde el icono, cinco veces seguidas (cerrándola del todo entre una y otra): SIEMPRE abre en Inicio, nunca en Notificaciones | | | |
+| Lo mismo en el Xiaomi donde se vio el salto | | | |
+| Con mensajes sin leer, al abrir sale UN aviso flotante: de una sola persona, con su nombre y su foto; de varias, «Tienes N mensajes sin leer» | | | |
+| Con notificaciones sin leer, al abrir sale «Tienes N notificaciones sin leer» (si es una sola, dice cuál) | | | |
+| Tocar esos avisos abre Mensajes, ese chat o Notificaciones | | | |
+| Salir a otra app y volver SIN que haya llegado nada nuevo: no se repite el aviso | | | |
+| Salir, que A escriba, volver: el aviso sale otra vez | | | |
+| En Notificaciones no hay ningún recuadro negro encima de la lista | | | |
+
+### El chat, al momento
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A y B con el mismo chat abierto: lo que escribe uno le aparece al otro en 1–2 s | | | |
+| B con el chat de A abierto sale a otra app medio minuto; A le escribe dos mensajes; B vuelve: los dos mensajes están ahí SIN salir del chat | | | |
+| B con el chat de A abierto apaga la pantalla un minuto; A escribe; B la enciende: el mensaje está ahí | | | |
+| B con el chat de A abierto cambia de wifi a datos; A escribe: el mensaje aparece en pocos segundos | | | |
+| B abre el chat de A, entra desde ahí al perfil de A y vuelve atrás; mientras, A escribió: al volver está el mensaje | | | |
+| B tiene el chat de A abierto DEBAJO de otra pantalla; A escribe: en Mensajes esa conversación SÍ lleva globo (no se dio por leída sin verla) | | | |
+
+### Avisos con la aplicación cerrada
+
+Si a alguien no le llegan con la aplicación cerrada, **el permiso de
+notificaciones no es lo único que cuenta**. Por orden:
+
+1. **¿Tiene la compilación nueva?** Las anteriores a la 44 no llevan Firebase y
+   no reciben nada con la aplicación cerrada.
+2. **¿Dejó su teléfono el token?** En el editor SQL de Supabase (cambia el
+   usuario; no enseña el token, solo si existe):
+
+   ```sql
+   select p.username,
+          count(d.token)       as aparatos,
+          max(d.platform)      as plataforma,
+          max(d.last_seen_at)  as ultimo_registro
+   from public.profiles p
+   left join public.device_tokens d on d.user_id = p.id
+   where p.username in ('USUARIO_QUE_NO_RECIBE', 'USUARIO_QUE_SI_RECIBE')
+   group by p.username;
+   ```
+
+   `aparatos = 0` → el teléfono no se registró: que abra la aplicación, la deje
+   abierta un minuto (ahora se reintenta sola cada 30 s) y se repita la
+   consulta. Si sigue en 0 con el permiso concedido, es un fallo nuestro.
+3. **Con `aparatos ≥ 1`, lo que dice el servidor.** Desde este cambio queda en
+   los registros de la API por qué no salió un aviso: `[push] Expo rechazó…`
+   con el motivo, o `sin ningún aparato registrado`.
+4. **Con todo lo anterior bien, es el teléfono.** Xiaomi, Huawei, Oppo, Vivo y
+   otros cierran del todo las aplicaciones al quitarlas de recientes y no dejan
+   que el sistema las despierte: el aviso no llega hasta abrirla. No es el
+   permiso de notificaciones: es **Inicio automático** (activado) y **Ahorro de
+   batería → Sin restricciones** para Z, en los ajustes de la aplicación.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Recién instalada: conceder el permiso, usar la app un minuto SIN salir de ella, cerrarla; que A escriba: llega el aviso | | | |
+| App cerrada (quitada de recientes) y pantalla apagada 5 minutos; A escribe: suena y se ve en la pantalla de bloqueo | | | |
+| Lo mismo en el teléfono de la persona a la que no le llegaban | | | |
+| En ese teléfono: marca y modelo, y si Z tiene «Inicio automático» y batería «Sin restricciones» | | | |
