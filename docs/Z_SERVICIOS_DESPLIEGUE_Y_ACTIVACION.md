@@ -333,6 +333,44 @@ callado sola, entonces sí hay que mirar.
 Coste nuevo: unas 8 640 llamadas al mes por el destino de EventBridge y una
 alarma de CloudWatch. Céntimos.
 
+### Abrir Servicios a todos, en lugar de a una lista
+
+La lista del piloto no es obligatoria. El perfil tiene un tercer valor, que es
+**la apertura general**:
+
+```json
+{ "ParameterKey": "ServicesPublicAccess", "ParameterValue": "true" }
+```
+
+Con él, cualquier cuenta ve Servicios y la lista deja de mirarse: el punto 1
+de este apartado (los UUID en el secreto) sobra. Se enciende junto con los
+otros dos (`FeatureServiceBooking=true`, `PlanificadorDeServicios=Si`) y va
+por el mismo camino: `Planificar`, `Plataforma`, `Salud`. **`-Accion Secretos`
+sigue haciendo falta antes**: es quien genera la clave del planificador.
+
+Qué cambia y qué no:
+
+- **Sigue sin publicarse nada sin revisión.** Abrir a todos deja a cualquiera
+  postular y reservar; lo que aparece en el catálogo lo decide administración,
+  postulación por postulación y servicio por servicio. Es más trabajo para
+  quien revisa, no menos control.
+- **Los límites son los mismos**: sin pagos, Perú, virtual o presencial, sin
+  categorías reguladas.
+- **Las dos condiciones publicadas dicen otra cosa.** Su apartado 1 dice que
+  el acceso es limitado a las cuentas que Z ha autorizado. Con la apertura
+  general esa frase deja de describir lo que hace el sistema: hay que publicar
+  una versión nueva de las dos con ese apartado corregido. No lo impide el
+  servidor; lo exige que el texto que la gente acepta sea verdad. Qué debe
+  decir es de la empresa.
+- **«Todos» son todas las cuentas de Z**, no las de la empresa: quien se
+  registre entra. Mientras la aplicación solo se reparta dentro de la empresa
+  es lo mismo; el día que esté en la tienda, no.
+- **Se vuelve atrás igual**: `ServicesPublicAccess=false` y `Plataforma`.
+  Nada se borra; quien no esté en la lista deja de ver Servicios.
+
+Es una decisión de la empresa (política P101): la apertura no se deduce de
+nada, se escribe.
+
 ## 8. Comprobar que funciona
 
 **En el servidor:**
@@ -344,6 +382,7 @@ alarma de CloudWatch. Céntimos.
 | La API lo recibe | Logs de la API, buscar `servicios.procesos expired=` | una línea por pasada, con cinco cuentas |
 | No hay rechazos | Logs de la API, buscar `servicios.procesos: llamada rechazada` | ninguna tras el despliegue. Si las hay, dicen si falta el secreto en la API o si no coincide |
 | Nadie avisa de un fallo | la alarma `…-procesos-de-servicios` | en `OK` |
+| Los avisos salen al teléfono | Logs de la API, buscar `[avisos] cola:` | una línea cada vez que hubo algo que enviar, con cinco cuentas. `enviadas` es lo que salió; `sin_destino`, personas sin teléfono registrado |
 
 **En la aplicación** (con la actualización del paso 6 instalada):
 
@@ -352,6 +391,18 @@ alarma de CloudWatch. Céntimos.
 | Entra quien debe | una cuenta de la lista abre Servicios | ve el catálogo |
 | No entra quien no | una cuenta fuera de la lista | no ve ninguna entrada a Servicios |
 | No hay dinero | el formulario del servicio | solo «Gratis» y «A consultar» |
+| Avisa con la aplicación cerrada | administración aprueba una postulación con el teléfono de quien postuló bloqueado | suena en segundos; ya no hace falta abrir Z para enterarse |
+
+**Quién administra entra por otra puerta.** El acceso «Servicios» de Explorar
+es el de quien usa Servicios, y se rige por la lista (o por la apertura
+general): una cuenta de administración que no esté en la lista ve ahí
+«Servicios llegará más adelante». Su entrada es Perfil › menú › Administración
+› Servicios, que va por su rol y no por la lista.
+
+**Los avisos de Servicios ya salen solos** (`apps/api/app/modules/notifications/despacho.py`).
+Se guardan en una cola y se envían al terminar la petición que los crea; el
+planificador recoge los reintentos en cada pasada. Antes solo salían por una
+ruta de administración que nadie llamaba.
 
 La alarma avisa al tema de alertas de la pila, que hoy envía a la dirección de
 `CorreoDeAlertas` del perfil. Quién lee ese correo es quien vigila los

@@ -2754,3 +2754,18 @@ notificaciones no es lo único que cuenta**. Por orden:
 | App cerrada (quitada de recientes) y pantalla apagada 5 minutos; A escribe: suena y se ve en la pantalla de bloqueo | | | |
 | Lo mismo en el teléfono de la persona a la que no le llegaban | | | |
 | En ese teléfono: marca y modelo, y si Z tiene «Inicio automático» y batería «Sin restricciones» | | | |
+
+### Avisos de Servicios con la aplicación cerrada
+
+Los avisos de Servicios, de la posventa de eventos y de los envíos de
+productos se guardaban en una cola que nadie vaciaba: solo se veían dentro de
+la aplicación. Desde el 05/10/2026 salen solos al guardarse. Necesita el
+servidor desplegado con ese cambio.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien postuló tiene la app cerrada; administración aprueba su postulación: le llega el aviso al teléfono en segundos | | | |
+| Lo mismo al aprobar y publicar su servicio | | | |
+| El prestador tiene la app cerrada; un cliente reserva: le llega «Tienes una reserva nueva» | | | |
+| Tocar ese aviso abre la app en Inicio, y el aviso flotante dice que hay una notificación sin leer | | | |
+| Ningún aviso de estos llega dos veces | | | |
