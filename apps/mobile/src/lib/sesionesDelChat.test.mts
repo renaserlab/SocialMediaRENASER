@@ -3,10 +3,12 @@ import { describe, it } from 'node:test';
 
 import { accionesDeSesion } from './accionesDeSesion.ts';
 import {
+  comoSolicitud,
   estadosVigentes,
   fraseDelHecho,
   iconoDelHecho,
   loQueSigueHaciendoFalta,
+  sesionesSinTarjeta,
 } from './sesionesDelChat.ts';
 import { es } from '../i18n/es.ts';
 import { en } from '../i18n/en.ts';
@@ -176,5 +178,77 @@ describe('cada hecho se cuenta con su frase, distinta si lo hice yo', () => {
   it('aceptar y rechazar no comparten icono', () => {
     assert.notEqual(iconoDelHecho('accepted'), iconoDelHecho('rejected'));
     assert.notEqual(iconoDelHecho('accepted'), iconoDelHecho('cancelled'));
+  });
+});
+
+describe('una sesión cuya tarjeta no está en pantalla se puede responder igual', () => {
+  /*
+    La tarjeta es el mensaje de la solicitud, y puede no estar: más arriba en
+    el historial, de antes de este cambio, o texto normal mientras el servidor
+    no guarde de qué sesión habla cada mensaje. Entonces se pinta una al final.
+  */
+  const sesion = (id: string, estado: Estado, creadaIso = T0) => ({
+    id,
+    tema: 'Mi portafolio',
+    nota: '',
+    estado,
+    cuandoIso: null,
+    creadaIso,
+    actualizadaIso: creadaIso,
+    miRol: 'provider' as const,
+  });
+  const vigentes = (...pares: [string, Estado][]) => new Map<string, Estado>(pares);
+
+  it('sin tarjeta entre los mensajes, la sesión pendiente sale al final', () => {
+    const texto = [{}, {}]; // la solicitud llegó como texto normal
+    const salida = sesionesSinTarjeta([sesion('s1', 'pending')], texto, vigentes());
+    assert.deepEqual(salida.map((s) => s.id), ['s1']);
+  });
+
+  it('con su tarjeta en pantalla NO se repite', () => {
+    const salida = sesionesSinTarjeta(
+      [sesion('s1', 'pending')],
+      [mensaje('requested', 'pending', T0, 's1')],
+      vigentes(),
+    );
+    assert.deepEqual(salida, []);
+  });
+
+  it('una línea de registro no es la tarjeta: si solo está el «aceptó», falta la tarjeta', () => {
+    // Una sesión de antes: se aceptó y eso sí quedó escrito, pero nunca tuvo
+    // tarjeta. Sigue viva (se puede cancelar o dar por hecha) y sin botones.
+    const salida = sesionesSinTarjeta(
+      [sesion('s1', 'accepted')],
+      [mensaje('accepted', 'accepted', T1, 's1')],
+      vigentes(['s1', 'accepted']),
+    );
+    assert.deepEqual(salida.map((s) => s.id), ['s1']);
+  });
+
+  it('lo que ya terminó no sale: no hay nada que responder', () => {
+    for (const estado of ['rejected', 'cancelled', 'completed', 'expired'] as const) {
+      assert.deepEqual(sesionesSinTarjeta([sesion('s1', estado)], [], vigentes()), [], estado);
+    }
+  });
+
+  it('manda el estado de hoy: la lista dice pendiente y un mensaje más nuevo, cancelada', () => {
+    const salida = sesionesSinTarjeta([sesion('s1', 'pending')], [], vigentes(['s1', 'cancelled']));
+    assert.deepEqual(salida, []);
+  });
+
+  it('varias, en el orden en que se pidieron', () => {
+    const salida = sesionesSinTarjeta(
+      [sesion('nueva', 'pending', T2), sesion('vieja', 'accepted', T0)],
+      [],
+      vigentes(),
+    );
+    assert.deepEqual(salida.map((s) => s.id), ['vieja', 'nueva']);
+  });
+
+  it('la tarjeta del final ofrece los mismos botones que la de un mensaje', () => {
+    const solicitud = comoSolicitud(sesion('s1', 'pending'));
+    assert.equal(solicitud.hecho, 'requested');
+    assert.equal(solicitud.sesionId, 's1');
+    assert.deepEqual(accionesDeSesion(solicitud.estado, solicitud.miPapel), ['accepted', 'rejected']);
   });
 });

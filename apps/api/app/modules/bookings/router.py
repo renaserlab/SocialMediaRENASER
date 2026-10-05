@@ -191,11 +191,21 @@ async def _cargar(db: AsyncSession, reserva: Booking, uid: str) -> BookingRead:
 async def list_bookings(
     role: str = Query(default="all", pattern="^(all|received|sent)$"),
     status_filter: str | None = Query(default=None, alias="status"),
+    conversation_id: str | None = Query(
+        default=None,
+        description="Solo las que viven en esta conversacion (las del chat abierto).",
+    ),
     page: Page = Depends(pagination_params),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[BookingRead]:
     """Las sesiones en las que participa quien pregunta.
+
+    `conversation_id` las acota a las de un chat. Es lo que deja a la
+    conversacion ofrecer los botones de una sesion aunque el mensaje que la
+    pidio no este a la vista —o no sea una tarjeta, mientras la 0097 espere—.
+    No abre nada: el filtro de arriba sigue exigiendo que quien pregunta
+    participe, asi que el identificador de un chat ajeno devuelve vacio.
 
     `received` = «me las piden a mi» (la bandeja de solicitudes);
     `sent` = «las he pedido yo». Se separan porque son dos lecturas distintas
@@ -214,6 +224,9 @@ async def list_bookings(
         )
     if status_filter:
         consulta = consulta.where(Booking.status == status_filter)
+    if conversation_id is not None:
+        ensure_uuid(conversation_id, "Conversación no encontrada.")
+        consulta = consulta.where(Booking.conversation_id == conversation_id)
 
     reservas = (
         (
@@ -405,13 +418,6 @@ async def update_booking(
         # Ni siquiera se le dice que existe: no es asunto suyo.
         raise NotFoundError("Sesión no encontrada.")
 
-    if not transicion_permitida(reserva.status, payload.status, rol):
-        raise ValidationAppError(
-            "Esa acción ya no es posible sobre esta sesión.",
-            # Con codigo: el movil lo distingue de un fallo cualquiera y, en vez
-            # de quedarse con un boton que ya no vale, vuelve a leer la sesion.
-            code="booking_transition_not_allowed",
-        )
 
     # Reprogramar tampoco vale hacia atras. Sin esto, la comprobacion de crear
     # se saltaba en un paso: se pedia la sesion para manana y acto seguido se
@@ -432,8 +438,27 @@ async def update_booking(
         conversacion_id = await _conversacion_de(
             db, reserva.requester_id, reserva.provider_id
         )
-        await db.refresh(reserva)
+
+    # LA SESION SE VUELVE A LEER CON CERROJO, y lo que vale se decide DESPUES.
+    #
+    # Sin el, dos respuestas a la vez —un doble toque en «Aceptar», o aceptar en
+    # el chat mientras la otra persona cancela— leian las dos el mismo estado,
+    # las dos pasaban la comprobacion y las dos escribian: la sesion quedaba
+    # con el estado de la ultima y el chat con dos registros contradictorios.
+    # Con el cerrojo la segunda espera, lee el estado que dejo la primera y
+    # recibe «eso ya no es posible», que el movil trata como «vuelve a leer».
+    # (SQLite ignora el cerrojo; en las pruebas no hay dos conexiones a la vez.)
+    await db.refresh(reserva, with_for_update=True)
+    if reserva.conversation_id is None:
         reserva.conversation_id = conversacion_id
+
+    if not transicion_permitida(reserva.status, payload.status, rol):
+        raise ValidationAppError(
+            "Esa acción ya no es posible sobre esta sesión.",
+            # Con codigo: el movil lo distingue de un fallo cualquiera y, en vez
+            # de quedarse con un boton que ya no vale, vuelve a leer la sesion.
+            code="booking_transition_not_allowed",
+        )
 
     reserva.status = payload.status
     if payload.status == "completed":

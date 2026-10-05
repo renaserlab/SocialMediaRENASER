@@ -47,13 +47,15 @@ import {
   reconciliarEnvio,
 } from '@/lib/mensajesEnVivo';
 import {
+  comoSolicitud,
   estadosVigentes,
   loQueSigueHaciendoFalta,
+  sesionesSinTarjeta,
   type LoSabidoDeUnaSesion,
 } from '@/lib/sesionesDelChat';
-import { toMessageFromRow } from '@/mappers/messageMapper';
+import { formatTime, toMessageFromRow } from '@/mappers/messageMapper';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
-import { BookingRepository } from '@/repositories/BookingRepository';
+import { BookingRepository, type Sesion } from '@/repositories/BookingRepository';
 import {
   MessageRepository,
   MENSAJES_POR_PAGINA,
@@ -391,11 +393,70 @@ export function ChatScreen() {
   */
   const [sabidas, setSabidas] = useState<LoSabidoDeUnaSesion[]>([]);
   /*
+    Las sesiones que viven en esta conversación, según la agenda. Sirven para
+    dos cosas: poner al día una tarjeta vieja, y poder responder una sesión
+    cuya tarjeta no está a la vista (ver `sesionesSinTarjeta`).
+  */
+  const [sesionesDelChat, setSesionesDelChat] = useState<Sesion[]>([]);
+  const conversacionDeSesiones = supabaseEnabled ? params.id : undefined;
+  const leerSesiones = useCallback(() => {
+    if (!conversacionDeSesiones) return;
+    BookingRepository.deLaConversacion(conversacionDeSesiones)
+      .then(setSesionesDelChat)
+      .catch(() => {
+        // Sin esto solo falta el atajo: la agenda sigue teniendo los botones.
+      });
+  }, [conversacionDeSesiones]);
+  useEffect(() => {
+    setSesionesDelChat([]);
+    leerSesiones();
+  }, [leerSesiones]);
+
+  /*
+    Y se vuelven a leer cuando llega un mensaje de la otra persona: puede ser
+    que acabe de pedir una sesión, o de responder a una. Con un respiro, para
+    que una ráfaga de mensajes sea una sola pregunta.
+  */
+  const ultimoAjeno = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const mensaje = messages[i];
+      if (mensaje && mensaje.sender === 'them') return mensaje.id;
+    }
+    return null;
+  }, [messages]);
+  const primeraVezDelAjeno = useRef(true);
+  useEffect(() => {
+    // El primero es el de la carga inicial: las sesiones ya se han pedido.
+    if (primeraVezDelAjeno.current) {
+      if (ultimoAjeno !== null) primeraVezDelAjeno.current = false;
+      return undefined;
+    }
+    const respiro = setTimeout(leerSesiones, 800);
+    return () => clearTimeout(respiro);
+  }, [ultimoAjeno, leerSesiones]);
+
+  /*
     Cómo está HOY cada sesión de la que habla esta conversación. La tarjeta de
     la solicitud pinta esto, no lo que traía su mensaje cuando se cargó: una
     respuesta posterior lo deja viejo. Ver `lib/sesionesDelChat.ts`.
   */
-  const estadosDeSesion = useMemo(() => estadosVigentes(messages, sabidas), [messages, sabidas]);
+  const estadosDeSesion = useMemo(
+    () =>
+      estadosVigentes(messages, [
+        ...sesionesDelChat.map((sesion) => ({
+          sesionId: sesion.id,
+          estado: sesion.estado,
+          actualizadaIso: sesion.actualizadaIso,
+        })),
+        ...sabidas,
+      ]),
+    [messages, sesionesDelChat, sabidas],
+  );
+  /** Las vivas cuya tarjeta no está en pantalla: se pintan al final. */
+  const sesionesAlFinal = useMemo(
+    () => sesionesSinTarjeta(sesionesDelChat, messages, estadosDeSesion),
+    [sesionesDelChat, messages, estadosDeSesion],
+  );
 
   // En cuanto un mensaje trae esa versión, deja de hacer falta recordarla.
   useEffect(() => {
@@ -407,32 +468,20 @@ export function ChatScreen() {
   }, [messages]);
 
   const { ocupada: sesionOcupada, responder: responderSesion } = useResponderSesion({
-    alCambiar: (sesion) =>
+    alCambiar: (sesion) => {
       setSabidas((previas) => [
         ...previas.filter((dato) => dato.sesionId !== sesion.id),
         { sesionId: sesion.id, estado: sesion.estado, actualizadaIso: sesion.actualizadaIso },
-      ]),
+      ]);
+      setSesionesDelChat((previas) => previas.map((s) => (s.id === sesion.id ? sesion : s)));
+    },
     /*
       El servidor dijo «eso ya no se puede»: la sesión cambió por otro lado —se
       respondió desde la agenda, o respondió la otra persona— y lo que hay en
       pantalla es viejo. Se le pregunta a la agenda cómo están, que es quien lo
       sabe aunque el mensaje que lo registra no haya llegado.
     */
-    alDesfasar: () => {
-      BookingRepository.list('all')
-        .then((sesiones) =>
-          setSabidas(
-            sesiones.map((sesion) => ({
-              sesionId: sesion.id,
-              estado: sesion.estado,
-              actualizadaIso: sesion.actualizadaIso,
-            })),
-          ),
-        )
-        .catch(() => {
-          // Se queda como estaba; el siguiente mensaje lo pondrá al día.
-        });
-    },
+    alDesfasar: leerSesiones,
   });
   // Lo que la lista tiene que mirar, además de los mensajes, para repintar.
   const extraDeSesiones = useMemo(
@@ -1175,6 +1224,31 @@ export function ChatScreen() {
             if (evento.nativeEvent.contentOffset.y <= 24) cargarMasHistorial();
           }}
           scrollEventThrottle={200}
+          /*
+            LAS SESIONES VIVAS CUYA TARJETA NO ESTÁ ARRIBA, al final de la
+            conversación: es donde se mira, y con los mismos botones. Sin esto,
+            una sesión cuya solicitud no es una tarjeta —está más arriba en el
+            historial, es de antes, o el servidor aún no la marca— no se podría
+            responder desde aquí.
+          */
+          ListFooterComponent={
+            sesionesAlFinal.length > 0 ? (
+              <View>
+                {sesionesAlFinal.map((sesion) => (
+                  <SesionEnElChat
+                    key={sesion.id}
+                    sesion={comoSolicitud(sesion)}
+                    estado={estadosDeSesion.get(sesion.id) ?? sesion.estado}
+                    mio={sesion.miRol === 'requester'}
+                    nombre={headerName}
+                    hora={formatTime(sesion.creadaIso)}
+                    ocupada={sesionOcupada === sesion.id}
+                    alElegir={(accion) => void responderSesion(sesion.id, accion)}
+                  />
+                ))}
+              </View>
+            ) : null
+          }
           ListHeaderComponent={
             cargandoHistorial ? (
               <View style={styles.cargandoHistorial}>

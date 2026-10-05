@@ -470,3 +470,62 @@ async def test_un_hecho_desconocido_no_se_escribe(entorno):
             await sesiones.anotar(
                 db, conversation_id=ANA, sender_id=LUIS, reserva=reserva, evento="inventado"
             )
+
+
+# --------------------------------------------------------------------------- #
+# 6. Las sesiones de UNA conversación: lo que deja responder sin la tarjeta
+# --------------------------------------------------------------------------- #
+
+
+async def test_el_chat_puede_pedir_las_sesiones_que_viven_en_el(entorno, pushes):
+    http, fabrica, identidad = entorno
+    sesion = await _pedir(http, identidad)
+    # Otra sesión de Ana, con otra persona y en otro chat: no tiene que salir.
+    async with fabrica() as db:
+        db.add(Booking(requester_id=EVA, provider_id=ANA, topic="Otra", status="pending"))
+        await db.commit()
+
+    identidad["uid"] = ANA
+    respuesta = await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
+    assert respuesta.status_code == 200, respuesta.text
+    assert [s["id"] for s in respuesta.json()] == [sesion["id"]]
+    assert respuesta.json()[0]["my_role"] == "provider"
+    # Sin el filtro siguen saliendo las dos.
+    assert len((await http.get(RESERVAS)).json()) == 2
+
+
+async def test_el_filtro_por_conversacion_no_abre_las_sesiones_de_otros(entorno, pushes):
+    http, _, identidad = entorno
+    sesion = await _pedir(http, identidad)
+    identidad["uid"] = EVA
+    respuesta = await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
+    assert respuesta.status_code == 200
+    assert respuesta.json() == []
+
+
+async def test_sin_la_0097_la_sesion_se_sigue_pudiendo_encontrar_por_su_chat(
+    entorno_sin_la_0097, pushes
+):
+    """Es el camino que no necesita la migración: el chat pregunta a la agenda."""
+    http, _, identidad = entorno_sin_la_0097
+    sesion = await _pedir(http, identidad)
+    identidad["uid"] = ANA
+    del_chat = (
+        await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
+    ).json()
+    assert [s["status"] for s in del_chat] == ["pending"]
+
+    await _responder(http, identidad, ANA, sesion["id"], "accepted")
+    identidad["uid"] = LUIS
+    del_chat = (
+        await http.get(RESERVAS, params={"conversation_id": sesion["conversation_id"]})
+    ).json()
+    assert [s["status"] for s in del_chat] == ["accepted"]
+    assert del_chat[0]["my_role"] == "requester"
+
+
+async def test_un_identificador_de_conversacion_que_no_lo_es_no_revienta(entorno, pushes):
+    http, _, identidad = entorno
+    identidad["uid"] = ANA
+    respuesta = await http.get(RESERVAS, params={"conversation_id": "no-es-un-uuid"})
+    assert respuesta.status_code == 404

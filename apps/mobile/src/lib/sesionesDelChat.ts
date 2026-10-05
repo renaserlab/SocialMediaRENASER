@@ -97,6 +97,70 @@ export function loQueSigueHaciendoFalta(
   );
 }
 
+/** Lo que hace falta de una sesión para pintar su tarjeta al final del chat. */
+export type SesionDelChat = {
+  id: string;
+  tema: string;
+  nota: string;
+  estado: EstadoDeSesionEnChat;
+  cuandoIso: string | null;
+  creadaIso: string;
+  actualizadaIso: string | null;
+  miRol: 'provider' | 'requester';
+};
+
+/** Los estados en los que una sesión todavía admite algún cambio. */
+const VIVOS: readonly EstadoDeSesionEnChat[] = ['pending', 'accepted', 'reschedule_requested'];
+
+/**
+ * Las sesiones VIVAS de la conversación cuya tarjeta no está entre los
+ * mensajes que hay en pantalla. A esas se les pinta una al final.
+ *
+ * POR QUÉ HACE FALTA. Los botones de una sesión viven en la tarjeta de su
+ * solicitud, que es un mensaje. Y ese mensaje puede no estar:
+ *   - está más arriba, en una página del historial que no se ha cargado;
+ *   - la sesión es de antes de que las solicitudes se escribieran en el chat;
+ *   - el servidor todavía no guarda de qué sesión habla cada mensaje (la
+ *     migración 0097 espera) y la solicitud es un texto normal.
+ * En los tres casos, sin esto la sesión no se podría responder desde Mensajes,
+ * que es justo lo que se reportó.
+ *
+ * NUNCA LAS DOS: si la tarjeta de la solicitud está en pantalla, no se repite.
+ *
+ * @param vigentes el estado de hoy de cada sesión (`estadosVigentes`): una
+ *   sesión que la lista trae como pendiente y un mensaje más reciente dice
+ *   cancelada ya no está viva.
+ */
+export function sesionesSinTarjeta<T extends SesionDelChat>(
+  sesiones: readonly T[],
+  mensajes: readonly { sesion?: MensajeDeSesion }[],
+  vigentes: ReadonlyMap<string, EstadoDeSesionEnChat>,
+): T[] {
+  const conTarjeta = new Set<string>();
+  for (const mensaje of mensajes) {
+    if (mensaje.sesion?.hecho === 'requested') conTarjeta.add(mensaje.sesion.sesionId);
+  }
+  return sesiones
+    .filter((sesion) => !conTarjeta.has(sesion.id))
+    .filter((sesion) => VIVOS.includes(vigentes.get(sesion.id) ?? sesion.estado))
+    // La más antigua primero: es el orden en que se pidieron.
+    .sort((a, b) => instante(a.creadaIso) - instante(b.creadaIso));
+}
+
+/** Una sesión, con la forma que espera la tarjeta del chat. */
+export function comoSolicitud(sesion: SesionDelChat): MensajeDeSesion {
+  return {
+    sesionId: sesion.id,
+    hecho: 'requested',
+    estado: sesion.estado,
+    tema: sesion.tema,
+    nota: sesion.nota,
+    cuandoIso: sesion.cuandoIso,
+    miPapel: sesion.miRol,
+    actualizadaIso: sesion.actualizadaIso,
+  };
+}
+
 /**
  * Cómo se cuenta cada hecho en la conversación. Son CLAVES de traducción.
  *

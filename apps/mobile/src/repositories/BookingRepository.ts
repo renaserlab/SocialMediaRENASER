@@ -111,6 +111,20 @@ export const BookingRepository = {
   },
 
   /**
+   * Las sesiones que viven en UNA conversacion, con su estado de ahora.
+   *
+   * Es lo que deja al chat ofrecer los botones de una sesion aunque el mensaje
+   * que la pidio no este a la vista, y lo que pone al dia una tarjeta vieja.
+   */
+  async deLaConversacion(conversacionId: string): Promise<Sesion[]> {
+    const dtos = await apiRequest<SesionDto[]>(
+      `${API_V1}/bookings?role=all&limit=50&conversation_id=${encodeURIComponent(conversacionId)}`,
+    );
+    // Una API anterior ignora el filtro y devuelve todas: se acota aqui tambien.
+    return dtos.map(aSesion).filter((sesion) => sesion.conversacionId === conversacionId);
+  },
+
+  /**
    * Pide una sesion.
    *
    * No lleva quien la pide: sale del token. Si el backend encuentra una
