@@ -169,20 +169,92 @@ describe('la fila de filtros son píldoras, no columnas', () => {
   });
 
   it('el área táctil se declara en vez de depender de cuánto se estire', () => {
-    const nivel = PORTADA_ENTERA.match(/\n {2}nivel:\s*\{[\s\S]*?\n {2}\}/);
-    assert.ok(nivel, 'no se encuentra el estilo de la píldora de filtro.');
-    assert.match(
-      nivel[0],
-      /minHeight:\s*(\d+)/,
-      'una píldora que ya no se estira necesita su propia altura mínima, o el ' +
-        'objetivo táctil queda a merced del relleno.',
+    /*
+      Los filtros son ahora la píldora de toda la aplicación (`Chip`), y es
+      ELLA la que declara su altura: 44, el mínimo táctil, sin `hitSlop` que
+      lo complete ni caja que dependa de cuánto se estire el carril.
+    */
+    const chip = fuente('components/Chip.tsx');
+    const base = chip.match(/\n {2}base:\s*\{[\s\S]*?\n {2}\}/);
+    assert.ok(base, 'no se encuentra el estilo de la píldora.');
+    const alto = Number(/minHeight:\s*(\d+)/.exec(base[0])?.[1]);
+    assert.ok(alto >= 44, `la píldora mide ${alto}: por debajo del mínimo táctil.`);
+    assert.match(PORTADA, /<Chip\s+key=\{cual \?\? 'todos'\}[\s\S]*?selected=\{activo\}[\s\S]*?rol="radio"/);
+  });
+});
+
+describe('la portada de Cursos se ve entera aunque falten imágenes', () => {
+  /*
+    Visto el 05/10/2026 al revisar la portada con datos: un curso sin imagen
+    pintaba una caja del color de la superficie —blanco sobre blanco—, los
+    títulos de sección quedaban pegados al borde de la pantalla y los filtros
+    eran un dibujo distinto del de Eventos.
+  */
+  it('un curso sin portada enseña un hueco que se ve, no una caja del color del fondo', () => {
+    assert.ok(!/styles\.(portada|miniatura), \{ backgroundColor: colors\.surface \}/.test(PORTADA));
+    assert.equal(PORTADA.match(/<PortadaVacia icono="book-open"/g)?.length, 3, 'rejilla, guardados y en curso');
+    const hueco = sinComentarios(fuente('components/PortadaVacia.tsx'));
+    assert.match(hueco, /backgroundColor: colors\.surfaceAlt/);
+    assert.match(hueco, /<Feather name=\{icono\} size=\{tamano\} color=\{colors\.textMuted\} \/>/);
+    // Sale del tema: ningún color escrito a mano.
+    assert.ok(!/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(hueco));
+  });
+
+  it('los títulos de sección van alineados con lo que titulan', () => {
+    assert.match(PORTADA_ENTERA, /tituloDeSeccion:\s*\{\s*paddingHorizontal:\s*spacing\.md\s*\}/);
+    assert.equal(
+      PORTADA.match(/<View style=\{styles\.tituloDeSeccion\}>\s*<SectionTitle /g)?.length,
+      3,
+      'continúa aprendiendo, guardados y todo el catálogo',
     );
-    // Los 44 del mínimo táctil: 40 de caja más el hitSlop vertical de cada una.
+    assert.ok(!/\n\s*<SectionTitle title=\{t\('cursos\./.test(PORTADA.replace(/<View style=\{styles\.tituloDeSeccion\}>\s*<SectionTitle /g, '')));
+  });
+
+  it('todo lo que se toca responde al dedo como en el resto de la aplicación', () => {
+    assert.ok(!/<Pressable|TouchableOpacity/.test(PORTADA), 'queda un pulsable sin el movimiento común.');
+    assert.ok(!/import \{[^}]*\bPressable\b[^}]*\} from 'react-native'/.test(PORTADA));
+  });
+});
+
+describe('Eventos y Servicios, con el mismo dibujo', () => {
+  const EVENTOS = sinComentarios(fuente('screens/EventsScreen.tsx'));
+  const SERVICIO = sinComentarios(fuente('components/TarjetaDeServicio.tsx'));
+
+  it('los filtros de Eventos son la misma píldora que los de Cursos', () => {
+    assert.match(EVENTOS, /<Chip\s+key=\{opcion\.clave\}[\s\S]*?selected=\{elegida\}[\s\S]*?rol="radio"/);
+    assert.ok(!/styles\.modalidad\b/.test(EVENTOS), 'vuelve a haber una píldora dibujada a mano.');
+  });
+
+  it('la fila de un evento no crece sin tope', () => {
+    const desde = EVENTOS.indexOf('style={styles.cuerpoDeFila}');
+    const cuerpo = EVENTOS.slice(desde, EVENTOS.indexOf('</Pulsable>', desde));
+    assert.ok(desde !== -1 && cuerpo.length > 0, 'no se encuentra el cuerpo de la fila.');
+    assert.match(cuerpo, /<Text numberOfLines=\{2\} style=\{\[styles\.title/);
+    assert.match(cuerpo, /<Text numberOfLines=\{2\} style=\{\[styles\.description/);
+    assert.match(cuerpo, /<Text numberOfLines=\{1\} style=\{\[styles\.meta/);
+    // Y se sigue leyendo: nada por debajo de 11.
+    for (const estilo of ['title', 'description', 'meta']) {
+      const tamano = Number(new RegExp(`\\n {2}${estilo}: \\{ fontSize: (\\d+)`).exec(EVENTOS)?.[1]);
+      assert.ok(tamano >= 11, `${estilo} mide ${tamano}`);
+    }
+  });
+
+  it('lo que hace cada toque en Eventos no ha cambiado', () => {
+    // Solo cambia cómo responde al dedo: a dónde lleva y qué reserva, igual.
+    assert.match(EVENTOS, /onPress=\{\(\) => router\.push\(`\/eventos\/\$\{event\.id\}` as never\)\}/);
     assert.match(
-      PORTADA_ENTERA,
-      /hitSlop=\{\{\s*top:\s*6,\s*bottom:\s*6\s*\}\}/,
-      'sin el hitSlop la caja de 40 se queda por debajo del mínimo de 44.',
+      EVENTOS,
+      /onPress=\{\(\) =>\s*event\.type === 'live'\s*\? router\.push\(`\/eventos\/\$\{event\.id\}` as never\)\s*: toggle\(event\.id\)\s*\}/,
     );
+    assert.match(EVENTOS, /onPress=\{\(\) => setModalidad\(opcion\.valor\)\}/);
+  });
+
+  it('un servicio sin foto enseña el mismo hueco, y se le sigue diciendo al lector de pantalla', () => {
+    assert.match(
+      SERVICIO,
+      /<PortadaVacia\s+icono="briefcase"\s+style=\{styles\.portada\}\s+etiqueta=\{tarjeta\.cover\?\.alt_text \?\? f\('servicios\.descubrir\.sinImagen'\)\}/,
+    );
+    assert.match(SERVICIO, /<Pulsable\s+onPress=\{alAbrir\}/);
   });
 });
 

@@ -3,10 +3,13 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
+import { PortadaVacia } from '@/components/PortadaVacia';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { useTextosDeServicios } from '@/hooks/useServicios';
 import { claveDeLaModalidad, nombreDeLaCategoria, precioLegible } from '@/lib/serviciosCatalogo';
 import { motivoLegible, type TarjetaDeServicio as Tarjeta } from '@/lib/serviciosDescubrimiento';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -43,9 +46,10 @@ export function TarjetaDeServicio({
 
   return (
     <View style={[styles.tarjeta, { borderColor: colors.border }]}>
-      <Pressable
+      <Pulsable
         onPress={alAbrir}
-        style={({ pressed }) => [styles.cuerpo, { opacity: pressed ? 0.7 : 1 }]}
+        escala={ESCALA_AL_PULSAR.superficie}
+        style={styles.cuerpo}
         accessibilityRole="button"
         accessibilityLabel={`${titulo}. ${tarjeta.provider.display_name}. ${f(precio.clave, precio.params)}`}
         accessibilityHint={f('servicios.descubrir.abrirFicha')}
@@ -58,13 +62,13 @@ export function TarjetaDeServicio({
             accessibilityLabel={tarjeta.cover.alt_text}
           />
         ) : (
-          <View
-            style={[styles.portada, styles.marcador, { borderColor: colors.border }]}
-            accessible
-            accessibilityLabel={tarjeta.cover?.alt_text ?? f('servicios.descubrir.sinImagen')}
-          >
-            <Feather name="image" size={20} color={colors.textMuted} />
-          </View>
+          // El mismo hueco de portada que en Cursos: se ve que falta la foto
+          // y de qué es la tarjeta, en vez de un recuadro vacío con borde.
+          <PortadaVacia
+            icono="briefcase"
+            style={styles.portada}
+            etiqueta={tarjeta.cover?.alt_text ?? f('servicios.descubrir.sinImagen')}
+          />
         )}
         <View style={styles.textos}>
           <Text weight="700" numberOfLines={2}>
@@ -89,7 +93,7 @@ export function TarjetaDeServicio({
             </Text>
           ) : null}
         </View>
-      </Pressable>
+      </Pulsable>
       {alGuardar ? (
         <Pressable
           onPress={alGuardar}
@@ -118,7 +122,6 @@ const styles = StyleSheet.create({
   tarjeta: { flexDirection: 'row', borderWidth: 1, borderRadius: radius.lg, padding: spacing.sm, gap: spacing.sm },
   cuerpo: { flex: 1, flexDirection: 'row', gap: spacing.sm },
   portada: { width: 72, height: 72, borderRadius: radius.md },
-  marcador: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   textos: { flex: 1, gap: 2 },
   sello: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   guardar: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'flex-start', paddingTop: spacing.xs },

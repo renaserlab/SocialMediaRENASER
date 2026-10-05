@@ -17,6 +17,7 @@ import { toast } from '@/lib/toast';
 import {
   aforoDelEvento,
   fechaLargaDelEvento,
+  iconoDeLaModalidad,
   modalidadDelEvento,
   sePuedeReservar,
 } from '@/lib/eventoEnDetalle';
@@ -191,7 +192,7 @@ export function EventoScreen() {
       ) : (
         <Dato icono="calendar" texto={t('evento.sinFecha')} />
       )}
-      <Dato icono="video" texto={t(modalidadDelEvento(evento))} />
+      <Dato icono={iconoDeLaModalidad(evento)} texto={t(modalidadDelEvento(evento))} />
       {evento.location ? <Dato icono="map-pin" texto={evento.location} /> : null}
       {aforo !== null ? (
         <Dato

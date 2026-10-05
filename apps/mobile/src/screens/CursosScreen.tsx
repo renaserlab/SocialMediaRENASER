@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -7,9 +7,11 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { AccesoDeCreador } from '@/components/AccesoDeCreador';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { Chip } from '@/components/Chip';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
 import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
+import { PortadaVacia } from '@/components/PortadaVacia';
 import { Pulsable } from '@/components/Pulsable';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
@@ -234,14 +236,15 @@ export function CursosScreen() {
           accessibilityLabel={t('cursos.queQuieresAprender')}
         />
         {texto.length > 0 ? (
-          <Pressable
+          <Pulsable
             onPress={() => setTexto('')}
             hitSlop={12}
+            escala={ESCALA_AL_PULSAR.icono}
             accessibilityRole="button"
             accessibilityLabel={t('search.clear')}
           >
             <Feather name="x" size={16} color={colors.textMuted} />
-          </Pressable>
+          </Pulsable>
         ) : null}
       </View>
 
@@ -286,31 +289,19 @@ export function CursosScreen() {
           {([undefined, 'beginner', 'intermediate', 'advanced'] as const).map((cual) => {
             const activo = nivel === cual;
             return (
-              <Pressable
+              /*
+                LA PÍLDORA DE TODA LA APLICACIÓN (`Chip`), y no una dibujada
+                aquí: la de Cursos y la de Eventos eran dos dibujos distintos
+                de lo mismo —una se rellenaba al elegirla, la otra solo se
+                sombreaba— y ninguna respondía al dedo como el resto.
+              */
+              <Chip
                 key={cual ?? 'todos'}
+                label={t(cual ? `cursos.nivel.${cual}` : 'cursos.nivel.todos')}
+                selected={activo}
                 onPress={() => setNivel(cual)}
-                // Con la caja a 40 de alto, el dedo sigue teniendo sus 44.
-                hitSlop={{ top: 6, bottom: 6 }}
-                style={[
-                  styles.nivel,
-                  {
-                    borderColor: activo ? colors.text : colors.border,
-                    backgroundColor: activo ? colors.text : 'transparent',
-                  },
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: activo }}
-                accessibilityLabel={t(cual ? `cursos.nivel.${cual}` : 'cursos.nivel.todos')}
-              >
-                <Text
-                  style={[
-                    styles.etiquetaDeNivel,
-                    { color: activo ? colors.background : colors.text },
-                  ]}
-                >
-                  {t(cual ? `cursos.nivel.${cual}` : 'cursos.nivel.todos')}
-                </Text>
-              </Pressable>
+                rol="radio"
+              />
             );
           })}
         </ScrollView>
@@ -329,14 +320,14 @@ export function CursosScreen() {
         <ScrollView contentContainerStyle={styles.contenido}>
           {enCurso.length > 0 ? (
             <View style={styles.seccion}>
-              <SectionTitle title={t('cursos.continuaAprendiendo')} />
+              <View style={styles.tituloDeSeccion}>
+                <SectionTitle title={t('cursos.continuaAprendiendo')} />
+              </View>
               {enCurso.map((curso) => (
-                <Pressable
+                <Pulsable
                   key={curso.id}
-                  style={({ pressed }) => [
-                    styles.fila,
-                    { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-                  ]}
+                  escala={ESCALA_AL_PULSAR.superficie}
+                  style={[styles.fila, { borderColor: colors.border }]}
                   onPress={() =>
                     curso.nextLessonId
                       ? router.push(`/lesson/${curso.nextLessonId}`)
@@ -351,7 +342,7 @@ export function CursosScreen() {
                   {curso.coverUrl ? (
                     <ExpoImage source={{ uri: curso.coverUrl }} style={styles.miniatura} />
                   ) : (
-                    <View style={[styles.miniatura, { backgroundColor: colors.surface }]} />
+                    <PortadaVacia icono="book-open" tamano={18} style={styles.miniatura} />
                   )}
                   <View style={styles.textoDeFila}>
                     <Text numberOfLines={2} style={[styles.tituloDeFila, { color: colors.text }]}>
@@ -365,7 +356,7 @@ export function CursosScreen() {
                     </Text>
                   </View>
                   <Feather name="play-circle" size={24} color={colors.text} />
-                </Pressable>
+                </Pulsable>
               ))}
             </View>
           ) : null}
@@ -374,7 +365,9 @@ export function CursosScreen() {
 
           {guardados.length > 0 ? (
             <View style={styles.seccion}>
-              <SectionTitle title={t('cursos.guardados')} />
+              <View style={styles.tituloDeSeccion}>
+                <SectionTitle title={t('cursos.guardados')} />
+              </View>
               <SinCambioDeSeccion>
                 <ScrollView
                   horizontal
@@ -382,8 +375,9 @@ export function CursosScreen() {
                   contentContainerStyle={styles.carrusel}
                 >
                   {guardados.map((curso) => (
-                    <Pressable
+                    <Pulsable
                       key={curso.id}
+                      escala={ESCALA_AL_PULSAR.superficie}
                       style={styles.guardado}
                       onPress={() => router.push(`/course/${curso.id}`)}
                       accessibilityRole="button"
@@ -392,12 +386,12 @@ export function CursosScreen() {
                       {curso.coverUrl ? (
                         <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
                       ) : (
-                        <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                        <PortadaVacia icono="book-open" style={styles.portada} />
                       )}
                       <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
                         {curso.title}
                       </Text>
-                    </Pressable>
+                    </Pulsable>
                   ))}
                 </ScrollView>
               </SinCambioDeSeccion>
@@ -405,7 +399,9 @@ export function CursosScreen() {
           ) : null}
 
           <View style={styles.seccion}>
-            <SectionTitle title={t('cursos.todoElCatalogo')} />
+            <View style={styles.tituloDeSeccion}>
+              <SectionTitle title={t('cursos.todoElCatalogo')} />
+            </View>
             {catalogo.length === 0 ? (
               <StateView state="empty" description={t('cursos.catalogoVacio')} />
             ) : (
@@ -423,6 +419,7 @@ export function CursosScreen() {
                     <View key={curso.id} style={styles.tarjeta}>
                       <Pulsable
                         style={styles.cuerpoDeTarjeta}
+                        escala={ESCALA_AL_PULSAR.superficie}
                         onPress={() => router.push(`/course/${curso.id}`)}
                         accessibilityRole="button"
                         accessibilityLabel={curso.title}
@@ -430,7 +427,7 @@ export function CursosScreen() {
                         {curso.coverUrl ? (
                           <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
                         ) : (
-                          <View style={[styles.portada, { backgroundColor: colors.surface }]} />
+                          <PortadaVacia icono="book-open" style={styles.portada} />
                         )}
                         <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
                           {curso.title}
@@ -497,7 +494,7 @@ const styles = StyleSheet.create({
   entrada: { flex: 1, fontSize: 15, padding: 0 },
   carrilDeNiveles: { flexGrow: 0 },
   niveles: {
-    gap: spacing.xs,
+    gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
     /*
@@ -507,21 +504,13 @@ const styles = StyleSheet.create({
     */
     alignItems: 'flex-start',
   },
-  nivel: {
-    /*
-      El área táctil deja de depender de cuánto se estire la caja: se declara.
-      40 es la altura de las píldoras de Eventos, la vertical hermana, para que
-      las dos portadas no se vean distintas; los 44 del mínimo táctil los
-      completa el `hitSlop` vertical de cada filtro.
-    */
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 999,
-  },
-  etiquetaDeNivel: { fontSize: 13, fontWeight: '600' },
+  /*
+    Los títulos de sección, a la misma distancia del borde que lo que titulan.
+    `SectionTitle` no trae margen lateral —quien lo usa suele estar ya dentro
+    de una caja con el suyo— y aquí cada bloque pone su propio margen: los
+    títulos se quedaban pegados al borde de la pantalla, fuera de la columna.
+  */
+  tituloDeSeccion: { paddingHorizontal: spacing.md },
   seccion: { gap: spacing.sm },
   fila: {
     flexDirection: 'row',
@@ -542,8 +531,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
   },
-  tarjeta: { width: '47%' },
-  cuerpoDeTarjeta: { gap: 4 },
+  // Dos columnas que llenan el ancho: con 47 % sobraba un margen a la derecha
+  // que no había a la izquierda.
+  tarjeta: { width: '48.5%' },
+  cuerpoDeTarjeta: { gap: 6 },
   marcador: {
     position: 'absolute',
     top: 6,
@@ -552,8 +543,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   carrusel: { gap: spacing.sm, paddingHorizontal: spacing.md },
-  guardado: { width: 160, gap: 4 },
-  portada: { width: '100%', aspectRatio: 16 / 10, borderRadius: radius.sm },
+  guardado: { width: 160, gap: 6 },
+  portada: { width: '100%', aspectRatio: 16 / 10, borderRadius: radius.md },
   tituloDeTarjeta: { fontSize: 14, fontWeight: '600' },
   precio: { fontSize: 13 },
 });

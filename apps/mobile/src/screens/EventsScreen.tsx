@@ -8,8 +8,11 @@ import { AccesoDeCreador } from '@/components/AccesoDeCreador';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
+import { Pulsable } from '@/components/Pulsable';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
+import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { assets } from '@/data/assets';
 import { events as mockEvents } from '@/data/mockData';
@@ -176,20 +179,29 @@ export function EventsScreen() {
           source={event.coverUrl ? { uri: event.coverUrl } : assets.event}
           style={[styles.thumb, { borderColor: colors.border }]}
         />
-        <Pressable
-          style={{ flex: 1 }}
+        <Pulsable
+          style={styles.cuerpoDeFila}
+          escala={ESCALA_AL_PULSAR.superficie}
           onPress={() => router.push(`/eventos/${event.id}` as never)}
           accessibilityRole="button"
           accessibilityLabel={event.title}
         >
-          <Text style={[styles.title, { color: colors.text }]}>{event.title}</Text>
-          <Text style={[styles.description, { color: colors.textMuted }]}>
+          {/*
+            CON TOPE DE LÍNEAS. Sin él, un título largo ocupaba cuatro
+            renglones, la descripción tres y el lugar dos: cada tarjeta tenía
+            una altura distinta y la lista no se podía recorrer con la vista.
+            Lo que no cabe se lee entero en la ficha, que es a donde lleva.
+          */}
+          <Text numberOfLines={2} style={[styles.title, { color: colors.text }]}>
+            {event.title}
+          </Text>
+          <Text numberOfLines={2} style={[styles.description, { color: colors.textMuted }]}>
             {event.description}
           </Text>
-          <Text style={[styles.meta, { color: colors.textMuted }]}>
+          <Text numberOfLines={1} style={[styles.meta, { color: colors.textMuted }]}>
             {event.date} · {event.location}
           </Text>
-        </Pressable>
+        </Pulsable>
         {/*
           NUNCA UN BOTÓN MUERTO. Un evento que ya terminó no se reserva, así
           que no se ofrece un botón que iba a no servir de nada: se dice que
@@ -203,7 +215,7 @@ export function EventsScreen() {
             </Text>
           </View>
         ) : (
-          <Pressable
+          <Pulsable
             // «En directo» lleva a la FICHA del evento. Antes iba a
             // `/live/main`, un id fijo que no es ninguna emisión.
             onPress={() =>
@@ -211,6 +223,9 @@ export function EventsScreen() {
                 ? router.push(`/eventos/${event.id}` as never)
                 : toggle(event.id)
             }
+            escala={ESCALA_AL_PULSAR.icono}
+            haptica="ligera"
+            hitSlop={6}
             style={[styles.reserve, { backgroundColor: colors.primary }]}
             accessibilityLabel={
               isReserved
@@ -226,7 +241,7 @@ export function EventsScreen() {
               size={18}
               color={colors.onPrimary}
             />
-          </Pressable>
+          </Pulsable>
         )}
       </View>
     );
@@ -315,24 +330,15 @@ export function EventsScreen() {
                   {MODALIDADES.map((opcion) => {
                     const elegida = modalidad === opcion.valor;
                     return (
-                      <Pressable
+                      // La píldora de toda la aplicación: la misma que en
+                      // Cursos, que es la vertical hermana.
+                      <Chip
                         key={opcion.clave}
+                        label={t(opcion.clave)}
+                        selected={elegida}
                         onPress={() => setModalidad(opcion.valor)}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: elegida }}
-                        accessibilityLabel={t(opcion.clave)}
-                        style={[
-                          styles.modalidad,
-                          {
-                            borderColor: elegida ? colors.text : colors.border,
-                            backgroundColor: elegida ? colors.surfaceAlt : 'transparent',
-                          },
-                        ]}
-                      >
-                        <Text style={{ color: colors.text, fontSize: 13 }}>
-                          {t(opcion.clave)}
-                        </Text>
-                      </Pressable>
+                        rol="radio"
+                      />
                     );
                   })}
                 </ScrollView>
@@ -440,13 +446,6 @@ const styles = StyleSheet.create({
   entrada: { flex: 1, paddingVertical: spacing.sm, fontSize: 14 },
   modalidades: { gap: spacing.sm, paddingBottom: spacing.md },
   accesos: { gap: spacing.sm },
-  modalidad: {
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    justifyContent: 'center',
-    minHeight: 40,
-  },
   container: { paddingHorizontal: spacing.lg },
   mainCard: { height: 460, borderRadius: radius.xl, overflow: 'hidden', justifyContent: 'flex-end', marginBottom: spacing.lg, borderWidth: 1, borderColor: '#333' },
   overlay: { ...StyleSheet.absoluteFillObject },
@@ -460,9 +459,10 @@ const styles = StyleSheet.create({
   // depender solo de eso, y por eso lleva además la etiqueta «Finalizado».
   terminado: { opacity: 0.72 },
   thumb: { width: 70, height: 86, borderRadius: radius.md, borderWidth: 1 },
-  title: { fontSize: 14, fontWeight: '800' },
-  description: { fontSize: 11, lineHeight: 16, marginTop: 4 },
-  meta: { fontSize: 10, marginTop: spacing.sm },
+  cuerpoDeFila: { flex: 1 },
+  title: { fontSize: 15, fontWeight: '800', lineHeight: 20 },
+  description: { fontSize: 12, lineHeight: 17, marginTop: 4 },
+  meta: { fontSize: 11, marginTop: spacing.sm },
   reserve: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   finalizado: {
     flexDirection: 'row',

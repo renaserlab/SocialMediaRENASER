@@ -93,6 +93,29 @@ export type ClaveDeModalidad =
   | 'evento.modalidad.live'
   | 'evento.modalidad.desconocida';
 
+/**
+ * El icono de la modalidad en la ficha.
+ *
+ * Era una cámara para las tres, también para lo presencial: un evento en un
+ * auditorio se anunciaba con el dibujo de una videollamada (visto el
+ * 05/10/2026 al revisar la ficha con datos). Ahora cada una lleva el suyo, y
+ * lo que el modelo no conoce no se disfraza de ninguna.
+ */
+export function iconoDeLaModalidad(
+  evento: EventoParaLaFicha,
+): 'map' | 'radio' | 'monitor' | 'help-circle' {
+  switch (evento.type) {
+    case 'presencial':
+      return 'map';
+    case 'live':
+      return 'radio';
+    case 'webinar':
+      return 'monitor';
+    default:
+      return 'help-circle';
+  }
+}
+
 /** La clave de traducción de la modalidad. Las tres del modelo, y nada más. */
 export function modalidadDelEvento(evento: EventoParaLaFicha): ClaveDeModalidad {
   switch (evento.type) {
