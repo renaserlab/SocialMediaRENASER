@@ -97,7 +97,18 @@ async def lifespan(_: FastAPI):
 
     elegido = proveedores_de_directo.registrar_desde_configuracion()
     logger.info("Proveedor de directo: %s", elegido)
-    yield
+
+    # Este proceso sirve peticiones: desde aquí, los avisos que queden en la
+    # cola de entregas se envían solos (`notifications/despacho.py`). Apagado
+    # de fábrica para que importar la aplicación —una prueba, un guion— no
+    # lance tareas por detrás.
+    from app.modules.notifications import despacho
+
+    despacho.encender()
+    try:
+        yield
+    finally:
+        despacho.apagar()
 
 
 def create_app() -> FastAPI:

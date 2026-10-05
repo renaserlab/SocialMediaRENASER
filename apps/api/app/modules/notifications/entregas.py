@@ -12,9 +12,11 @@ QUÉ GARANTIZA Y QUÉ NO:
   * `sent` solo después de que el envío termine bien;
   * un fallo aquí NO deshace lo que provocó el aviso.
 
-Lo que NO hace: enviar por su cuenta. Quien vacía la cola es un endpoint
-administrativo idempotente que invoca un planificador EXTERNO. Dentro de la API
-no hay temporizador, porque hay varias réplicas y cada una dispararía el suyo.
+Lo que NO hace: enviar. Esto es la cola —qué hay, a quién le toca, qué pasó—;
+quién la vacía y cuándo está en `despacho.py`: la petición que encola, al
+terminar, y el planificador de Servicios para los reintentos. Dentro de la API
+sigue sin haber temporizador, porque hay varias réplicas y cada una dispararía
+el suyo; la ruta de administración sigue ahí para vaciarla a mano.
 """
 
 from __future__ import annotations
@@ -31,6 +33,12 @@ from app.modules.notifications.models import NotificationDelivery
 PENDIENTE = "pending"
 ENVIADA = "sent"
 FALLIDA = "failed"
+
+#: Lo que `encolar` deja anotado en la sesión (`session.info`) para que, al
+#: terminar la petición, alguien vacíe la cola (`despacho.tras_la_peticion`).
+#: En la sesión y no en una variable del módulo: es de ESA petición, y si su
+#: transacción no llega a confirmarse la pasada no encuentra nada y ya está.
+MARCA_DE_ENCOLADO = "entregas_encoladas"
 
 #: Cuánto se espera antes de cada reintento. La lista ES el tope: cuando se
 #: acaba, la entrega queda `failed` y nadie la vuelve a tocar sola.
@@ -111,6 +119,7 @@ async def encolar(
         if fila in db:
             db.expunge(fila)
         return None
+    db.info[MARCA_DE_ENCOLADO] = True
     return fila
 
 
@@ -342,6 +351,7 @@ __all__ = [
     "ENVIADA",
     "ESPERAS",
     "FALLIDA",
+    "MARCA_DE_ENCOLADO",
     "PENDIENTE",
     "encolar",
     "marcar_enviada",
