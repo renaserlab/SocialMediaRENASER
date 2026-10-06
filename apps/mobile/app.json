@@ -2,7 +2,7 @@
   "expo": {
     "name": "Z",
     "slug": "z-app",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "z",
@@ -104,9 +104,14 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#000000"
+          "color": "#000000",
+          "sounds": [
+            "./assets/sonidos/mensaje_enviado.wav",
+            "./assets/sonidos/mensaje_recibido.wav"
+          ]
         }
       ],
+      "./plugins/withColoresDelRecorte",
       "expo-font",
       "expo-video",
       "react-native-compressor",

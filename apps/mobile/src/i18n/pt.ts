@@ -435,6 +435,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'chat.removeAttachment': 'Remover {nombre}',
   'chat.theFile': 'o arquivo',
   'chat.sendMessage': 'Enviar mensagem',
+  'chat.goToLatest': 'Ir para a última mensagem',
   'chat.attach': 'Anexar',
   'chat.photosAndVideos': 'Fotos e vídeos',
   'chat.camera': 'Câmera',

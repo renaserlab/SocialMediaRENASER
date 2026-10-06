@@ -287,6 +287,23 @@ NATIVO_POR_VERSION['1.2.0'] = {
   ],
 };
 
+// 1.2.1: dependencias y permisos iguales que 1.2.0. Sube por dos cosas que
+// solo llegan con un binario nuevo:
+//   - el plugin propio `./plugins/withColoresDelRecorte`, que declara como
+//     recursos de Android los colores de la pantalla de recorte de fotos (su
+//     barra salia gris oscuro con los iconos en negro);
+//   - los dos tonos del chat, que el plugin `expo-notifications` empaqueta
+//     dentro de la aplicacion (`sounds`). Sin ellos en el binario, un tono
+//     sonaria como el aviso por defecto del telefono.
+NATIVO_POR_VERSION['1.2.1'] = {
+  ...(NATIVO_POR_VERSION['1.2.0'] as (typeof NATIVO_POR_VERSION)[string]),
+  plugins: (() => {
+    const anteriores = (NATIVO_POR_VERSION['1.2.0'] as (typeof NATIVO_POR_VERSION)[string]).plugins;
+    const tras = anteriores.indexOf('expo-notifications') + 1;
+    return [...anteriores.slice(0, tras), './plugins/withColoresDelRecorte', ...anteriores.slice(tras)];
+  })(),
+};
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];

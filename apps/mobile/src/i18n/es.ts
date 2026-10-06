@@ -462,6 +462,7 @@ export const es = {
   'chat.removeAttachment': 'Quitar {nombre}',
   'chat.theFile': 'el archivo',
   'chat.sendMessage': 'Enviar mensaje',
+  'chat.goToLatest': 'Ir al último mensaje',
   'chat.attach': 'Adjuntar',
   'chat.photosAndVideos': 'Fotos y vídeos',
   'chat.camera': 'Cámara',
