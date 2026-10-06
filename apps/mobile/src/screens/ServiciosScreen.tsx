@@ -179,6 +179,7 @@ export function ServiciosScreen() {
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/explore' as never));
   const abrir = (t: Tarjeta) => router.push(`/servicios/ficha/${t.id}` as never);
+  const ofrecer = () => router.push('/servicios/prestador' as never);
   const buscando = estaBuscando(filtros);
   const cuantos = cuantosFiltros(filtros);
   const visibles = todas ? categorias : categoriasFrecuentes(categorias);
@@ -203,12 +204,22 @@ export function ServiciosScreen() {
         rightLabel={f('servicios.descubrir.guardados.abrir')}
         onRightPress={() => router.push('/servicios/guardados' as never)}
       />
-      <Button
-        label={f('servicios.reserva.misReservas')}
-        variant="ghost"
-        icon="calendar"
-        onPress={() => router.push('/servicios/reservas' as never)}
-      />
+      {/*
+        LAS DOS PUERTAS DE QUIEN NO SOLO BUSCA. «Ofrecer un servicio» vivía
+        únicamente en el menú del perfil: quien entraba aquí con algo que
+        ofrecer no encontraba por dónde (visto en teléfono el 06/10/2026).
+        Lleva al mismo sitio que la fila del perfil; qué se puede hacer allí
+        lo sigue decidiendo el servidor.
+      */}
+      <View style={styles.accesos}>
+        <Button
+          label={f('servicios.reserva.misReservas')}
+          variant="ghost"
+          icon="calendar"
+          onPress={() => router.push('/servicios/reservas' as never)}
+        />
+        <Button label={f('servicios.entrada')} variant="ghost" icon="briefcase" onPress={ofrecer} />
+      </View>
       <Text variant="title" accessibilityRole="header">
         {f('servicios.descubrir.pregunta')}
       </Text>
@@ -317,6 +328,8 @@ export function ServiciosScreen() {
                 icon="briefcase"
                 title={f('servicios.descubrir.vacio')}
                 description={f('servicios.descubrir.vacioCuerpo')}
+                actionLabel={f('servicios.entrada')}
+                onAction={ofrecer}
               />
             )
           ) : (
@@ -393,6 +406,7 @@ export function ServiciosScreen() {
 
 const styles = StyleSheet.create({
   contenido: { padding: spacing.lg, gap: spacing.md },
+  accesos: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: spacing.sm },
   fila: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   bloque: { gap: spacing.sm },
