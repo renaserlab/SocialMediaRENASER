@@ -2786,3 +2786,43 @@ verlas con datos reales, en claro y en oscuro.
 | En las tres: tocar una tarjeta o un filtro se nota (se encoge un poco) y hace lo mismo que antes | | | |
 | En el inicio (vídeo, fondo negro), el aviso flotante se ve como una caja con borde | | | |
 | Todo lo anterior, también en modo oscuro | | | |
+
+## Chat, notas de voz y recorte de fotos (06/10/2026) — versión 1.2.1
+
+Del documento «Z bugs y problemas de vistas». El desplazamiento del chat está
+comprobado en la copia web local (abrir, recibir, enviar, encoger la pantalla
+y leer el historial). El teclado, los tonos, la nota de voz y la pantalla de
+recorte solo existen en el teléfono: nada de eso se ha visto todavía.
+
+**Hace falta una compilación nueva** (la 1.2.1): los tonos y los colores del
+recorte van dentro del binario.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Abrir una conversación larga: se ve el último mensaje sin deslizar | | | |
+| Con el teclado abierto, enviar un mensaje: se ve encima del redactor, sin deslizar | | | |
+| Con el teclado abierto, recibir un mensaje: se ve, sin deslizar | | | |
+| Abrir el teclado estando abajo: el último mensaje sigue a la vista | | | |
+| Cerrar el teclado con el botón Atrás: el redactor vuelve abajo del todo, sin hueco debajo | | | |
+| Lo mismo en Comentarios y en un formulario largo (usan el mismo arreglo del teclado) | | | |
+| Subir a leer mensajes antiguos y recibir uno: NO salta abajo; aparece un botón redondo con una flecha y un punto | | | |
+| Tocar ese botón: baja al último y el botón desaparece | | | |
+| Subir a leer y ENVIAR un mensaje: baja al último | | | |
+| Llegar arriba del todo sigue cargando mensajes más antiguos, sin saltos | | | |
+| Enviar un mensaje: suena un toque corto cuando sale | | | |
+| Recibir un mensaje con el chat abierto: suenan dos notas suaves | | | |
+| Con el teléfono en silencio o en vibración, ninguno de los dos suena | | | |
+| Con música puesta en otra aplicación, los tonos NO la paran | | | |
+| Varios mensajes seguidos: no suenan pisándose | | | |
+| Los tonos no dejan ningún aviso en la barra de notificaciones ni mueven la campana | | | |
+| Ajustes del teléfono › Z › Notificaciones: aparecen «Sonido al enviar un mensaje» y «Sonido al recibir un mensaje», y apagarlos los calla | | | |
+| Grabar una nota de voz: la barra de la grabación ocupa el sitio del campo de texto, con la papelera a la izquierda | | | |
+| Detener la grabación: papelera a la izquierda, escuchar, duración y enviar a la derecha | | | |
+| Tocar la papelera, grabando y en la previa: la nota se borra y vuelve el campo de texto | | | |
+| Cambiar la foto de perfil, teléfono en modo claro: la barra de arriba es blanca y «atrás», «girar», «voltear» y «CORTAR» se leen en negro | | | |
+| Lo mismo con el teléfono en modo oscuro: barra negra, todo en blanco | | | |
+
+**Lo que este arreglo NO cambia:** la cuadrícula del recorte sigue siendo
+blanca y sobre una foto clara apenas se ve. Esa pantalla es de la biblioteca
+de fotos y no deja cambiar ese color; hacerlo exige una pantalla de recorte
+propia, que necesita añadir un paquete (`expo-image-manipulator`).
