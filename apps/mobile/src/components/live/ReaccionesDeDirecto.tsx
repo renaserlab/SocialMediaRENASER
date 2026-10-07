@@ -8,6 +8,7 @@ import { Text } from '@/components/Text';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { haptics } from '@/lib/haptics';
+import { estiloDeEmoji } from '@/lib/lineaDeEmoji';
 import {
   CARRILES,
   crearPistaDeBurbujas,
@@ -278,8 +279,10 @@ const estilos = StyleSheet.create({
     height: ALTURA_DE_BURBUJA + 60,
   },
   burbuja: { position: 'absolute', bottom: 0 },
-  simbolo: { fontSize: 20 },
-  simboloGrande: { fontSize: 30 },
+  // Con su propia linea: heredando la del cuerpo, Android los recortaba por
+  // arriba y por abajo (ver `lib/lineaDeEmoji`).
+  simbolo: estiloDeEmoji(20),
+  simboloGrande: estiloDeEmoji(30),
   fila: {
     flexDirection: 'row',
     justifyContent: 'space-between',

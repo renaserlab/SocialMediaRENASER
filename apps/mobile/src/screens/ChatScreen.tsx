@@ -19,6 +19,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { TextoConEnlaces } from '@/components/TextoConEnlaces';
 import { Aparecer } from '@/components/Aparecer';
 import { BotonDeEnviar } from '@/components/BotonDeEnviar';
 import { BotonDeNotaDeVoz } from '@/components/BotonDeNotaDeVoz';
@@ -1757,10 +1758,17 @@ export function ChatScreen() {
                         mine && !item.estado ? t('chat.holdForActions') : undefined
                       }
                     >
+                      {/*
+                        Los enlaces se pueden tocar (07/10/2026): el de una
+                        reunión pegado aquí se abre con un toque. Sin
+                        enlaces se pinta exactamente lo de antes.
+                      */}
                       {item.text ? (
-                        <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 22 }}>
-                          {item.text}
-                        </Text>
+                        <TextoConEnlaces
+                          texto={item.text}
+                          colorDelTexto={mine ? colors.onPrimary : colors.text}
+                          style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 22 }}
+                        />
                       ) : null}
 
                       {item.progreso !== undefined ? (

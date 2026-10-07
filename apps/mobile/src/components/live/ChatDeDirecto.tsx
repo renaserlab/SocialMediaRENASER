@@ -474,6 +474,26 @@ export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDe
   );
 });
 
+/**
+ * Lo que ocupa una fila de UNA linea: el globo —la linea del texto y su
+ * relleno— mas el aire de la fila. Sale de los estilos de abajo; si cambian,
+ * cambia con ellos (lo vigila `pantallaDeDirecto.test.mts`).
+ */
+const LINEA_DEL_TEXTO = 18.2;
+const RELLENO_DEL_GLOBO = 5;
+const AIRE_DE_LA_FILA = 3;
+const ALTO_DE_UNA_FILA = LINEA_DEL_TEXTO + RELLENO_DEL_GLOBO * 2 + AIRE_DE_LA_FILA * 2;
+
+/**
+ * El alto de la zona del chat para que se vean `filas` comentarios.
+ *
+ * La pantalla pide FILAS y no puntos: «que se vean cuatro» es la decision de
+ * producto, y cuanto mide una fila solo lo sabe este fichero.
+ */
+export function altoDelChatPara(filas: number): number {
+  return Math.ceil(filas * ALTO_DE_UNA_FILA + spacing.xs * 2);
+}
+
 const estilos = StyleSheet.create({
   // Encoge si no cabe (teclado abierto en un telefono pequeno) antes que
   // empujar fuera de la pantalla el campo donde se escribe.
@@ -484,14 +504,14 @@ const estilos = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.xs,
-    paddingVertical: 3,
+    paddingVertical: AIRE_DE_LA_FILA,
   },
   globo: {
     flexShrink: 1,
     backgroundColor: 'rgba(0,0,0,0.38)',
     borderRadius: radius.md,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
+    paddingVertical: RELLENO_DEL_GLOBO,
   },
   estado: {
     flexDirection: 'row',

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -356,16 +356,59 @@ export function EditarEventoScreen() {
       {/* LA PORTADA. Se guarda la RUTA de Storage, no la URL firmada: una URL
           guardada es una llave que caduca en la base y sigue pareciendo
           válida. */}
-      {portadaUrl ? <CoverImage uri={portadaUrl} /> : null}
+      {/*
+        SE VE QUE AHÍ VA UNA IMAGEN, CON O SIN ELLA. Antes, sin portada, lo
+        único que había era un botón «Poner portada» entre los campos: en la
+        revisión del 06/10/2026 no se encontró, y se pidió «poder poner una
+        portada o un flyer, como en Cursos». La opción existía; lo que
+        faltaba era el recuadro que dice «aquí va». Ahora es el mismo gesto
+        que en Cursos: se toca el recuadro.
+      */}
       {editable ? (
-        <Button
-          label={portada ? t('miEvento.cambiarPortada') : t('miEvento.ponerPortada')}
-          variant="secondary"
-          icon="image"
+        <Pulsable
           onPress={() => void elegirPortada()}
-          loading={subiendo}
           disabled={ocupado || subiendo}
-        />
+          accessibilityRole="button"
+          accessibilityLabel={portada ? t('miEvento.cambiarPortada') : t('miEvento.ponerPortada')}
+          accessibilityState={{ busy: subiendo, disabled: ocupado || subiendo }}
+        >
+          {portadaUrl ? (
+            <View>
+              <CoverImage uri={portadaUrl} />
+              <View style={styles.cambiarPortada}>
+                {subiendo ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Feather name="image" size={14} color="#FFFFFF" />
+                )}
+                <Text variant="caption" weight="800" color="#FFFFFF">
+                  {t('miEvento.cambiarPortada')}
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.portadaVacia,
+                { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+              ]}
+            >
+              {subiendo ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <Feather name="image" size={26} color={colors.textMuted} />
+              )}
+              <Text variant="secondary" weight="700">
+                {t('miEvento.portadaVacia')}
+              </Text>
+              <Text variant="caption" color={colors.textMuted} style={styles.centrado}>
+                {t('miEvento.portadaPista')}
+              </Text>
+            </View>
+          )}
+        </Pulsable>
+      ) : portadaUrl ? (
+        <CoverImage uri={portadaUrl} />
       ) : null}
 
       <Input
@@ -681,6 +724,31 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
 
 const styles = StyleSheet.create({
   contenido: { padding: spacing.lg, gap: spacing.md },
+  // La misma proporcion que la portada ya puesta (banner 820x312), para
+  // que el formulario no salte al elegirla.
+  portadaVacia: {
+    aspectRatio: 820 / 312,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+  },
+  cambiarPortada: {
+    position: 'absolute',
+    right: spacing.sm,
+    bottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 30,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+  },
+  centrado: { textAlign: 'center' },
   crece: { flex: 1 },
   parrafo: { minHeight: 110, textAlignVertical: 'top' },
   fichas: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

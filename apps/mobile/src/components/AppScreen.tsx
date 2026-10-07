@@ -14,9 +14,15 @@ type AppScreenProps = PropsWithChildren<{
   edges?: Borde[];
   scrollProps?: ScrollViewProps;
   /**
-   * La pantalla tiene campos donde se escribe: que el teclado no los tape.
-   * Se pide, no viene de fabrica, porque una pantalla que ya lleva su propio
-   * `SinTecladoDelante` se encogeria dos veces.
+   * Que el teclado no tape lo que se escribe. VIENE DE FABRICA.
+   *
+   * Antes habia que pedirlo, y 49 pantallas con campos no lo pedian (auditado
+   * el 07/10/2026): al escribir en el ultimo campo de un formulario, el
+   * teclado lo tapaba. Se podia dejar apagado de fabrica porque dos
+   * `SinTecladoDelante` anidados se encogian dos veces; ya no: cuando hay
+   * uno dentro de otro aparta solo el de dentro.
+   *
+   * En una pantalla sin campos no hace nada: sin teclado no hay hueco.
    */
   teclado?: boolean;
 }>;
@@ -49,7 +55,7 @@ export function AppScreen({
   contentStyle,
   edges,
   scrollProps,
-  teclado = false,
+  teclado = true,
 }: AppScreenProps) {
   const { colors } = useAppTheme();
   const dentroDeLasPestanas = useDentroDeLasPestanas();

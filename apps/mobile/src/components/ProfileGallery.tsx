@@ -4,7 +4,6 @@ import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { SegmentedControl } from '@/components/SegmentedControl';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { VideoTile } from '@/components/VideoTile';
@@ -86,16 +85,15 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
   return (
     <View style={styles.wrap}>
       {/*
-        Solo "Publicaciones". Los audios publicados siguen llegando en `audios`
-        y se muestran en el podcast del perfil, no como una pestaña aparte.
-      */}
-      <SegmentedControl
-        options={[esperando ? t('profile.posts') : `${t('profile.posts')} ${gallery.length}`]}
-        selectedIndex={0}
-        onChange={() => {}}
-        style={styles.tabs}
-      />
+        SIN EL BOTON LARGO «Publicaciones N» (retirado el 07/10/2026). Era un
+        selector con UNA sola opcion: parecia un boton, no llevaba a ningun
+        sitio al pulsarlo y repetia lo que ya dicen el acceso «Publicaciones»
+        de justo encima —encendido cuando es lo que se ve— y el contador de
+        la cabecera del perfil. La cuadricula empieza directamente.
 
+        Los audios publicados siguen llegando en `audios` y se muestran en el
+        podcast del perfil, no aqui.
+      */}
       {!esperando && items.length === 0 ? (
         <View style={styles.center}>
           <Feather name="camera" size={30} color={colors.textMuted} />
@@ -232,7 +230,6 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
 
 const styles = StyleSheet.create({
   wrap: { marginTop: spacing.sm },
-  tabs: { marginBottom: spacing.md },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl },
   centerText: { textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP },

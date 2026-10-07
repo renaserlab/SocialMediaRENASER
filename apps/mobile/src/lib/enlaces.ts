@@ -53,6 +53,8 @@ export const RESPALDOS_ES = {
   'share.videoBy': 'Mira este vídeo de {nombre} en Z',
   'share.post': 'Mira esta publicación en Z',
   'share.postBy': 'Mira esta publicación de {nombre} en Z',
+  'share.live': 'Mira este directo en Z',
+  'share.liveBy': 'Mira el directo de {nombre} en Z',
 } as const;
 
 const enEspanol: TraductorDeEnlaces = (clave, params) => {
@@ -154,4 +156,55 @@ export function compartirPublicacion(opciones: {
   const texto = textoParaCompartir(clase, opciones.autor, opciones.traducir);
   const url = enlaceDePublicacion(opciones.postId);
   return { message: url ? `${texto}\n${url}` : texto, url };
+}
+
+/**
+ * Enlace a la sala de un directo: `/live/{id}`.
+ *
+ * Es la misma ruta que abre la aplicacion (`app/live/[id].tsx`), asi que el
+ * enlace lleva a ESE directo y no a una portada. `null` con las mismas
+ * condiciones que el de una publicacion.
+ */
+export function enlaceDeDirecto(emisionId: string | null | undefined): string | null {
+  const base = baseDeLaWeb();
+  if (!base || !emisionId) return null;
+  return `${base}/live/${encodeURIComponent(emisionId)}`;
+}
+
+/**
+ * Texto + enlace de un directo, listo para `Share.share`.
+ *
+ * Mismo criterio que `compartirPublicacion`: la URL va dentro de `message`, y
+ * con nombre y sin nombre son dos frases distintas.
+ */
+export function compartirDirecto(opciones: {
+  emisionId: string | null | undefined;
+  anfitrion?: string | null;
+  traducir?: TraductorDeEnlaces;
+}): MensajeCompartido {
+  const traducir = opciones.traducir ?? enEspanol;
+  const nombre = opciones.anfitrion?.trim();
+  const texto = nombre ? traducir('share.liveBy', { nombre }) : traducir('share.live');
+  const url = enlaceDeDirecto(opciones.emisionId);
+  return { message: url ? `${texto}
+${url}` : texto, url };
+}
+
+/**
+ * La ruta de la aplicacion a la que lleva un enlace de la propia web de Z, o
+ * `null` si el enlace es de fuera.
+ *
+ * Para que un enlace de Z pegado en un chat se abra DENTRO de la aplicacion y
+ * no saque a la persona al navegador a ver lo mismo. Solo se reconoce lo que
+ * la aplicacion sabe abrir por ruta: un directo y una publicacion.
+ */
+export function rutaInternaDe(url: string | null | undefined): string | null {
+  const base = baseDeLaWeb();
+  if (!base || typeof url !== 'string') return null;
+  const limpio = url.trim();
+  if (!limpio.startsWith(`${base}/`)) return null;
+  const camino = limpio.slice(base.length).split(/[?#]/)[0] ?? '';
+  const partes = /^\/(live|post)\/([A-Za-z0-9_-]+)\/?$/.exec(camino);
+  if (!partes) return null;
+  return `/${partes[1]}/${partes[2]}`;
 }

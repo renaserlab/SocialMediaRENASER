@@ -43,10 +43,13 @@ const tieneCampos = (codigo: string) => /<Input\b|<TextInput\b/.test(codigo);
  */
 const SIN_NADA_QUE_TAPAR = new Set(['ServiciosScreen']);
 
-test('AppScreen aparta el teclado solo cuando se le pide', () => {
+test('AppScreen aparta el teclado DE FÁBRICA', () => {
+  // Hasta el 07/10/2026 había que pedirlo, y 49 pantallas con campos no lo
+  // pedían. Podía venir apagado porque dos apartados anidados se encogían dos
+  // veces; ahora, de los anidados, aparta solo el de más adentro.
   const codigo = sinComentarios(fuente('components/AppScreen.tsx'));
   assert.match(codigo, /teclado\?: boolean;/);
-  assert.match(codigo, /teclado = false,/, 'de fábrica no: quien ya lleva el suyo se encogería dos veces');
+  assert.match(codigo, /teclado = true,/, 'vuelve a hacer falta acordarse de pedirlo');
   assert.match(codigo, /teclado \? <SinTecladoDelante>\{pantalla\}<\/SinTecladoDelante> : pantalla/);
   // Y la zona segura sigue envolviéndolo todo, con teclado o sin él.
   assert.match(codigo, /bordes\.includes\('bottom'\) \? <ReservaDeZonaSegura>\{contenido\}<\/ReservaDeZonaSegura> : contenido/);

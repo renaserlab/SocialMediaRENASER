@@ -10,7 +10,7 @@ import {
   estaPegadoAlFinal,
   queHacerConLoUltimo,
 } from '../lib/chatAlFinal.ts';
-import { huecoParaElTeclado } from '../lib/huecoDelTeclado.ts';
+import { TECLADO_CERRADO, huecoDelMarco, huecoParaElTeclado } from '../lib/huecoDelTeclado.ts';
 import {
   MARCA_DE_TONO,
   PAUSA_ENTRE_TONOS_MS,
@@ -142,16 +142,20 @@ describe('el teclado no deja hueco al cerrarse', () => {
       borde no incluye las barras del sistema: se quedaba encogido.
     */
     assert.ok(!/android: 'height'/.test(APARTADO), 'vuelve el `height` de Android.');
-    assert.match(APARTADO, /if \(Platform\.OS === 'android'\) \{\s*return \(\s*<ApartadoEnAndroid/);
+    assert.match(APARTADO, /Platform\.OS === 'android' \? \(\s*<ApartadoEnAndroid/);
   });
 
-  it('al ocultarse el hueco es cero, sin hacer ninguna cuenta', () => {
-    assert.match(APARTADO, /Keyboard\.addListener\('keyboardDidHide', \(\) => setHueco\(0\)\)/);
-    assert.match(APARTADO, /Keyboard\.addListener\('keyboardDidShow'/);
+  it('sin teclado el hueco es cero, sin hacer ninguna cuenta', () => {
+    // Ya no hay un hueco GUARDADO que poner a cero al ocultarse: se deriva de
+    // lo que se sabe del teclado, y con el teclado cerrado no hay nada que
+    // restar. De ahí salía el que se quedaba puesto.
+    assert.equal(huecoDelMarco(800, TECLADO_CERRADO), 0);
+    assert.match(APARTADO, /const hueco = enabled \? huecoDelMarco\(bordeInferior, teclado\) : 0;/);
+    assert.ok(!/setHueco\(/.test(APARTADO), 'vuelve a guardarse el hueco en vez de derivarse');
   });
 
   it('el hueco es relleno: el marco no cambia de tamaño al apartarse', () => {
-    assert.match(APARTADO, /enabled && hueco > 0 \? \{ paddingBottom: hueco \} : null/);
+    assert.match(APARTADO, /relleno !== null \? \{ paddingBottom: relleno \} : null/);
     assert.match(APARTADO, /collapsable=\{false\}/);
     assert.ok(!/height: /.test(APARTADO));
   });

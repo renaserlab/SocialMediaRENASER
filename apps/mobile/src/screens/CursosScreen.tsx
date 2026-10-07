@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { AccesoDeCreador } from '@/components/AccesoDeCreador';
@@ -184,6 +184,30 @@ export function CursosScreen() {
   useEffect(() => {
     void cargar();
   }, [cargar]);
+
+  /*
+    AL VOLVER A ESTA PANTALLA SE VUELVE A PREGUNTAR. Quien publica un curso
+    sale del asistente hacia aquí (`volverA`), y la lista que quedó debajo
+    es la de antes de crearlo: sin esto el curso recién publicado no
+    aparecía hasta salir y volver a entrar.
+
+    NO LA PRIMERA VEZ: esa carga ya la hace el efecto de arriba, y pedirla
+    dos veces al abrir eran dos peticiones para pintar lo mismo. Y por una
+    referencia, no como dependencia: `cargar` cambia con cada filtro, y
+    atarlo al foco repetiría la petición del efecto en cada búsqueda.
+  */
+  const cargarVigente = useRef(cargar);
+  cargarVigente.current = cargar;
+  const yaTuvoElFoco = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!yaTuvoElFoco.current) {
+        yaTuvoElFoco.current = true;
+        return;
+      }
+      void cargarVigente.current();
+    }, []),
+  );
 
   if (cargando && !yaCargo) {
     return (
