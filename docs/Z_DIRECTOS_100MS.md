@@ -839,8 +839,16 @@ verdad; y se retiraron las afirmaciones de «comprobado» que no lo estaban.
 
 Quien emite puede subir a otras personas a su directo: salen con su cámara y su
 micrófono y la pantalla se reparte, como en TikTok. **Hecho en el código; sin
-ver en teléfonos y sin desplegar.** Necesita la migración 0098 aplicada, el
-servidor desplegado y una compilación nueva de la aplicación.
+ver en teléfonos y sin desplegar.** Necesita el servidor desplegado y una
+compilación nueva de la aplicación.
+
+**La migración 0098 está aplicada en Supabase desde el 07/10/2026** (la ejecutó
+Edson a mano) y su fichero ya no se edita: su huella consta en `APLICADAS`
+(`apps/api/tests/test_servicios_migracion_0090.py`). Que corriera sin error ya
+dice que la tabla quedó con RLS y sin ninguna política —su bloque final se
+niega a terminar si no—. La comprobación en solo lectura del resto (columnas,
+claves, índices, que no esté en la publicación de tiempo real) está pendiente
+de su resultado.
 
 ### Qué había ya y qué faltaba
 
@@ -920,7 +928,9 @@ tiene `host` y `guest`. Y en el rol `viewer`, que «Subscribe to» incluye
 
 El servidor contesta 503 (`live_guests_not_available`) a todo lo de invitados,
 la aplicación no enseña el botón de invitar y el directo funciona como antes.
-Tras aplicarla hay que reiniciar la API (recuerda el esquema por proceso).
+Tras aplicarla hay que reiniciar la API (recuerda el esquema por proceso). En
+producción no hace falta hacerlo aparte: la 0098 se aplicó ANTES de desplegar
+el código que la usa, y ese despliegue arranca la API de nuevo.
 
 ### Lo que no se hizo
 

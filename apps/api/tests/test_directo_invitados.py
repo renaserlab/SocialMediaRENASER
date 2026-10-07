@@ -699,3 +699,96 @@ async def test_un_proveedor_que_no_sabe_bajar_no_cambia_ninguna_conexion():
             room_id="sala1", user_id=BRUNO, de_rol="guest", a_rol="viewer"
         )
     ) == 0
+
+
+# --------------------------------------------------------------------------- #
+# 7. La migración 0098, leída
+# --------------------------------------------------------------------------- #
+#
+# Está APLICADA en Supabase (07/10/2026) y ya no se edita: su huella consta en
+# `APLICADAS` (`test_servicios_migracion_0090.py`). Aquí se comprueba, sobre su
+# texto, que hace lo que su cabecera promete y nada más. Que PostgreSQL la
+# acepte, y que se pueda volver a pegar, lo ejecuta GitHub
+# (`test_migraciones_reales.py`), que es donde hay un PostgreSQL desechable.
+
+
+def _sql_de_la_0098() -> str:
+    import re
+    from pathlib import Path
+
+    texto = (
+        Path(__file__).resolve().parents[3]
+        / "supabase" / "migrations" / "0098_invitados_en_el_directo.sql"
+    ).read_text(encoding="utf-8").replace("\r\n", "\n")
+    return re.sub(r"--[^\n]*", "", texto)
+
+
+def test_la_0098_consta_como_aplicada_y_congelada():
+    from tests.test_servicios_migracion_0090 import APLICADAS
+
+    assert "0098_invitados_en_el_directo.sql" in APLICADAS
+
+
+def test_la_0098_crea_una_sola_tabla_y_no_toca_ninguna_que_ya_existiera():
+    import re
+
+    sql = _sql_de_la_0098().lower()
+    assert re.findall(r"create table (?:if not exists )?([a-z_.]+)", sql) == ["public.live_guests"]
+    # Todo `alter table` es sobre la tabla nueva.
+    assert set(re.findall(r"alter table ([a-z_.]+)", sql)) == {"public.live_guests"}
+    for prohibido in (
+        "drop table", "truncate", "delete from", "insert into", "update public.",
+        "alter publication", "grant ", "revoke ", "create trigger", "create function",
+    ):
+        assert prohibido not in sql, prohibido
+
+
+def test_la_0098_se_puede_pegar_dos_veces():
+    sql = _sql_de_la_0098().lower()
+    assert "create table if not exists public.live_guests" in sql
+    assert sql.count("create index if not exists") == sql.count("create index") == 2
+    # La restricción se quita antes de ponerla: la segunda vez no choca.
+    quita = sql.index("drop constraint if exists live_guests_status_check")
+    pone = sql.index("add constraint live_guests_status_check")
+    assert quita < pone
+
+
+def test_la_0098_deja_la_tabla_cerrada_al_cliente():
+    """RLS activada y NINGUNA política: ni leer ni escribir desde la aplicación.
+    Con una sola política de escritura, cualquiera se apuntaría como aceptado
+    en el directo de otra persona."""
+    sql = _sql_de_la_0098().lower()
+    assert "alter table public.live_guests enable row level security" in sql
+    assert "create policy" not in sql
+    # Y lo comprueba ella misma al terminar: si no, se niega.
+    assert "raise exception" in sql and "pg_policies" in sql and "relrowsecurity" in sql
+
+
+def test_la_0098_borra_en_cascada_lo_que_debe_y_conserva_quien_invito():
+    import re
+
+    sql = re.sub(r"\s+", " ", _sql_de_la_0098().lower())
+    assert "session_id uuid not null references public.live_sessions(id) on delete cascade" in sql
+    assert "user_id uuid not null references public.profiles(id) on delete cascade" in sql
+    # Si desaparece la cuenta de quien invitó, la invitación no desaparece.
+    assert "invited_by uuid references public.profiles(id) on delete set null" in sql
+    assert "primary key (session_id, user_id)" in sql
+
+
+def test_las_columnas_de_la_0098_y_las_del_modelo_son_las_mismas():
+    """En los dos sentidos: ni el modelo se inventa una, ni ignora ninguna."""
+    import re
+
+    sql = _sql_de_la_0098().lower()
+    cuerpo = sql[sql.index("create table if not exists public.live_guests (") :]
+    cuerpo = cuerpo[cuerpo.index("(") + 1 : cuerpo.index(");")]
+    del_sql = {
+        linea.split()[0]
+        for linea in (trozo.strip() for trozo in re.split(r",\s*\n", cuerpo))
+        if linea and not linea.startswith("primary key")
+    }
+    del_modelo = {columna.name for columna in LiveGuest.__table__.columns}
+    assert del_sql == del_modelo == {
+        "session_id", "user_id", "status", "invited_by",
+        "invited_at", "responded_at", "ended_at",
+    }

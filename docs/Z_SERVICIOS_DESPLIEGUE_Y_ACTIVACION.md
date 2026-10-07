@@ -29,7 +29,7 @@ Aquí está solo **el orden y los comandos**.
 | El remoto está donde se dejó | `git ls-remote origin Edson main` (no descarga nada) |
 | Las variables de despliegue de GitHub apuntan a RenaserLab | `gh variable list` y comparar la cuenta de `AWS_ROLE_ARN` con la de RenaserLab |
 | La sesión de AWS es la de RenaserLab | el guion lo comprueba en cada acción; sin `RENASERLAB_AWS_ACCOUNT_ID` no hace nada |
-| En Supabase están aplicadas las migraciones 0086–0096 | ya verificado el 02/10/2026 (`Z_SERVICIOS_ARQUITECTURA.md`, §131). La 0097 no es de Servicios (sesiones 1:1 en el chat); se aplicó el 05/10/2026 |
+| En Supabase están aplicadas las migraciones 0086–0096 | ya verificado el 02/10/2026 (`Z_SERVICIOS_ARQUITECTURA.md`, §131). La 0097 no es de Servicios (sesiones 1:1 en el chat); se aplicó el 05/10/2026. La 0098 tampoco (invitados en el directo); se aplicó el 07/10/2026 |
 | Quien despliega puede crear una conexión de EventBridge | hace falta poder crear su rol vinculado y su secreto `events!connection/*`. **Sin comprobar**: si falta, el paso 7 revierte sin cambiar nada |
 
 **La cuenta anterior (la de Ricardo) no se toca en ningún paso.** Si

@@ -2960,8 +2960,8 @@ abajo solo se ve en un teléfono.
 ## Invitados en el directo (07/10/2026)
 
 Quien emite invita a otras personas, que salen con su cámara, y la pantalla se
-reparte. Necesita **la migración 0098 aplicada, el servidor desplegado y una
-compilación nueva**. En la copia web se vio el botón de invitar, la hoja con el
+reparte. La migración 0098 ya está aplicada (07/10/2026); falta **el servidor
+desplegado y una compilación nueva**. En la copia web se vio el botón de invitar, la hoja con el
 buscador, el aviso al invitado y que aceptar y bajarse llegan al servidor.
 **El vídeo no existe en la web**: la pantalla repartida, el sonido y el retraso
 solo se ven con teléfonos.
