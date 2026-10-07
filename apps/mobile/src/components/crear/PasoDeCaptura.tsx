@@ -1,18 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { AvisoDePermiso } from '@/components/AvisoDePermiso';
 import { sobreMedio } from '@/components/CapaDeContraste';
+import { SalirDeCrear } from '@/components/crear/SalirDeCrear';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
+import { alturasDeCamara } from '@/lib/controlesDeCamara';
 import { consultarPermiso, pedirPermiso, type EstadoDePermiso } from '@/lib/permisos';
-import {
-  alturaDelSelector,
-  lastGalleryPhoto,
-  StoryCaptureScreen,
-} from '@/screens/StoryCaptureScreen';
+import { lastGalleryPhoto, StoryCaptureScreen } from '@/screens/StoryCaptureScreen';
 import { StoryGalleryScreen } from '@/screens/StoryGalleryScreen';
 import { pickImage, pickVideo, PermisoDenegadoError, type PickedMedia } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
@@ -27,7 +24,11 @@ type Props = {
   soloVideo?: boolean;
   /** Tope de grabacion con camara. */
   duracionMaximaMs: number;
-  /** Selector de modo, que se pinta dentro de la camara. */
+  /**
+   * La barra de tipos de publicacion. En cada paso va en el MISMO sitio —abajo
+   * del todo, donde iba la de secciones—, para que no se mueva al pasar de la
+   * camara al carrete o a un aviso.
+   */
   pie?: React.ReactNode;
   alElegir: (elegido: PickedMedia) => void;
   alCerrar: () => void;
@@ -91,14 +92,13 @@ export function PasoDeCaptura({
 }: Props) {
   const { t } = useTranslation();
   const enWeb = Platform.OS === 'web';
-  const insets = useSafeAreaInsets();
   /*
-    Cuanto ocupa la barra flotante, contando la zona segura DE ESTE aparato.
+    Lo que hay que dejar libre abajo EN ESTE aparato, contando su zona segura.
 
-    Antes era `espacioParaLaBarra(0)` escrito en la hoja de estilos, es decir,
-    la barra medida como si el telefono no tuviera indicador de inicio: se
-    reservaban 78 px donde hacian falta 104 y el selector volvia a asomar por
-    debajo de la capsula en cuanto habia muesca.
+    En Crear ya no hay barra de secciones que esquivar: la medida es el margen
+    al que flota la barra de tipos de publicacion, que es justo lo que va en
+    `pie`. Sale de un solo sitio para que los cuatro pasos de aqui la coloquen
+    a la misma altura.
   */
   const espacioInferior = useEspacioInferior();
   const [paso, setPaso] = useState<'camara' | 'galeria'>(enWeb ? 'galeria' : 'camara');
@@ -228,6 +228,7 @@ export function PasoDeCaptura({
   if (enWeb) {
     return (
       <View style={styles.raiz}>
+        <SalirDeCrear alSalir={alCerrar} />
         <View style={styles.centro}>
           <View style={[styles.icono, { borderColor: media.border }]}>
             <Feather name={soloVideo ? 'video' : 'image'} size={26} color={media.text} />
@@ -299,6 +300,7 @@ export function PasoDeCaptura({
   if (permisoCamara === 'denegado' || permisoCamara === 'bloqueado') {
     return (
       <View style={styles.raiz}>
+        <SalirDeCrear alSalir={alCerrar} />
         <AvisoDePermiso
           tipo="camara"
           estado={permisoCamara}
@@ -330,8 +332,11 @@ export function PasoDeCaptura({
   if (permisoCamara !== 'concedido') {
     return (
       <View style={styles.raiz}>
+        <SalirDeCrear alSalir={alCerrar} />
         {pie ? (
-          <View style={[styles.piePendiente, { bottom: alturaDelSelector(insets.bottom) }]}>
+          <View
+            style={[styles.piePendiente, { bottom: alturasDeCamara(espacioInferior).selector }]}
+          >
             {pie}
           </View>
         ) : null}
@@ -381,22 +386,18 @@ const styles = StyleSheet.create({
   },
   secundario: { borderWidth: 1 },
   /*
-    El selector se aparta de la barra de secciones.
+    La barra de tipos de publicacion, al final de la columna.
 
-    Antes eran 24 px, es decir, DENTRO de la franja que ocupa la barra flotante:
-    la fila quedaba por detras de la capsula y lo unico que asomaba era el
-    trocito de etiqueta que sobresalia por su izquierda. Eso es el texto suelto
-    y cortado que aparece junto a la barra en el documento. Se apoya en la misma
-    medida que usa la barra para saber cuanto ocupa.
+    `paddingBottom` lo pone el componente: sale de `useEspacioInferior`, la
+    misma medida con la que la camara y el carrete colocan la suya.
   */
-  // `paddingBottom` lo pone el componente: sale de `useEspacioInferior`.
   pieWeb: {},
   /*
     El selector mientras el permiso se resuelve.
 
-    A la MISMA altura a la que lo pinta la camara (`pie` de
-    `StoryCaptureScreen`), para que al conceder el permiso la fila de modos no
-    de un salto: lo unico que cambia es que detras aparece la imagen.
+    A la MISMA altura a la que lo pinta la camara (`alturasDeCamara`), para
+    que al conceder el permiso la barra no de un salto: lo unico que cambia es
+    que detras aparece la imagen.
   */
   piePendiente: { position: 'absolute', left: 0, right: 0 },
 });

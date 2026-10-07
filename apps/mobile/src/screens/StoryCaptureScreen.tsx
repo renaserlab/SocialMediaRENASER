@@ -18,7 +18,7 @@ import Svg, { Circle } from 'react-native-svg';
 
 
 import { Button } from '@/components/Button';
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { SuperficieSobreMedio } from '@/components/CapaDeContraste';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
@@ -72,18 +72,6 @@ const PERIMETRO = 2 * Math.PI * RADIO;
 const RECORRIDO_ZOOM_PX = 220;
 
 /**
- * A que altura queda el selector de modo dentro de la camara.
- *
- * Vive fuera del componente y se exporta porque `PasoDeCaptura` pinta ESE MISMO
- * selector mientras el permiso se resuelve, cuando la camara todavia no esta
- * montada. Con la altura escrita a mano en los dos sitios, la fila de modos
- * daba un salto en el momento exacto en que aparecia la imagen.
- */
-export function alturaDelSelector(insetInferior: number): number {
-  return alturasDeCamara(espacioParaLaBarra(insetInferior)).selector;
-}
-
-/**
  * `Circle` animable.
  *
  * `strokeDashoffset` no es una propiedad de estilo, asi que Animated no la
@@ -105,9 +93,9 @@ type Props = {
    */
   duracionMaximaMs?: number;
   /**
-   * Franja propia justo encima de los controles.
+   * Barra propia, abajo del todo, por debajo de los controles.
    *
-   * La usa la pantalla de Crear para poner ahi el selector de modo
+   * La usa la pantalla de Crear para poner ahi los tipos de publicacion
    * (Publicacion · Historia · Reel · Vivo) sin duplicar la camara entera: la
    * camara es la misma, lo unico que cambia es que se hace con lo capturado.
    */
@@ -136,25 +124,22 @@ export function StoryCaptureScreen({
   const topeMs = duracionMaximaMs;
 
   /*
-    LOS CONTROLES VAN POR ENCIMA DE LA BARRA FLOTANTE DE SECCIONES.
+    LOS CONTROLES SE APOYAN EN LA BARRA DE ABAJO, NO EN UN NUMERO.
 
-    La camara solo se abre desde Crear, que vive DENTRO de las pestanas, asi que
-    la capsula de vidrio esta siempre ahi y se pinta despues —por encima— de
-    esta pantalla. El disparador estaba a 58 px del borde y la capsula ocupa de
-    42 a 104 px en un telefono con gesto: casi dos tercios del boton quedaban
-    tapados, y el dedo que iba a hacer la foto pulsaba en realidad un icono de
-    la barra y se marchaba a otra seccion.
+    El disparador estuvo clavado a 58 px del borde con una barra flotante
+    encima que ocupa hasta 104: casi dos tercios del boton quedaban tapados, y
+    el dedo que iba a hacer la foto pulsaba en realidad la barra.
 
-    La cuadricula del carrete ya se apoyaba en esta misma medida; la camara se
-    habia quedado sin hacerlo. El dato lo publica el grupo de pestañas
-    (`useEspacioInferior`), que es quien sabe cuanto ocupa la barra, para que
-    moverla no obligue a acordarse de corregir numeros sueltos aqui.
+    La camara solo se abre desde Crear, donde la barra de secciones se retira y
+    en su sitio va la de los tipos de publicacion (`pie`). Lo que hay que dejar
+    libre por debajo lo dice `useEspacioInferior`, que es quien lo sabe, para
+    que cambiar una barra no obligue a acordarse de corregir numeros aqui.
   */
   const espacioInferior = useEspacioInferior();
   /*
-    De abajo arriba: pista, disparador, selector de modo y nivel de zoom, sin
-    solaparse y ninguno por debajo de la barra. El calculo y su prueba estan en
-    `lib/controlesDeCamara`.
+    De abajo arriba: barra de tipos de publicacion, pista, disparador y nivel
+    de zoom, sin solaparse y ninguno por debajo del margen. El calculo y su
+    prueba estan en `lib/controlesDeCamara`.
   */
   const alturas = alturasDeCamara(espacioInferior);
 
@@ -519,8 +504,7 @@ export function StoryCaptureScreen({
         acercado ni si el gesto esta haciendo algo.
       */}
       {recording && zoom > 0.01 ? (
-        // Por encima del selector de modo: antes compartian los mismos 148 px y
-        // el nivel de zoom se pintaba justo sobre las etiquetas.
+        // Por encima del disparador, que es lo que se esta deslizando.
         <View style={[styles.zoomPill, { bottom: alturas.zoom }]}>
           <Feather name="search" size={13} color={media.text} />
           <Text variant="secondary" weight="700" color={media.text}>
@@ -655,13 +639,27 @@ export function StoryCaptureScreen({
         </Pressable>
       </View>
 
-      <Text
-        variant="secondary"
-        color={media.textMuted}
-        style={[styles.hint, { bottom: alturas.pista }]}
-      >
-        {t('camera.hint')}
-      </Text>
+      {/*
+        LA PISTA VA SOBRE UNA SUPERFICIE, NO SOBRE LA IMAGEN. Era una linea gris
+        escrita directamente encima de la camara: sobre una mesa clara o una
+        pared no se distinguia, y como no cabia a lo ancho se salia por los dos
+        lados. Ahora lleva fondo propio, letra clara, margenes y dos lineas.
+
+        No se queda los toques: esta entre el disparador y la barra.
+      */}
+      <View style={[styles.hint, { bottom: alturas.pista }]} pointerEvents="none">
+        <SuperficieSobreMedio forma="pildora" style={styles.hintPill}>
+          <Text
+            variant="secondary"
+            weight="600"
+            color={media.text}
+            numberOfLines={2}
+            style={styles.hintText}
+          >
+            {t('camera.hint')}
+          </Text>
+        </SuperficieSobreMedio>
+      </View>
     </View>
   );
 }
@@ -728,7 +726,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: media.overlay,
   },
-  // Justo encima del disparador: cerca de los controles, sin taparlos.
+  // Abajo del todo, donde iba la barra de secciones. Los margenes a los lados
+  // los pone la propia barra.
   pie: { position: 'absolute', left: 0, right: 0 },
   bottomBar: {
     position: 'absolute',
@@ -759,9 +758,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   shutterCore: { width: 58, height: 58, borderRadius: 29 },
+  // La franja mide siempre lo mismo y la pista se centra dentro: en una
+  // pantalla ancha, donde la frase cabe en una linea, no queda descolgada.
   hint: {
     position: 'absolute',
-    alignSelf: 'center',
+    left: spacing.lg,
+    right: spacing.lg,
     height: ALTO_PISTA,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  hintPill: { maxWidth: '100%', paddingVertical: 6 },
+  // `flexShrink` es lo que deja partir la frase: la pildora es una fila.
+  hintText: { textAlign: 'center', flexShrink: 1 },
 });

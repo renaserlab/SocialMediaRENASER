@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
+import { PildoraActiva } from '@/components/PildoraActiva';
 import { Pulsable } from '@/components/Pulsable';
 import { useTranslation } from '@/i18n/useTranslation';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
@@ -12,7 +13,7 @@ import { SECCIONES } from '@/navigation/secciones';
 import type { PropsDeBarra } from '@/navigation/SwipeTabs';
 import { useAppStore } from '@/store/useAppStore';
 import { useContadoresStore } from '@/store/useContadoresStore';
-import { getFontFamily, motion, radius, spacing } from '@/theme/tokens';
+import { getFontFamily, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
@@ -48,37 +49,19 @@ const BAR_HEIGHT = 62;
  * corregir un numero suelto en otro archivo.
  */
 export function espacioParaLaBarra(insetInferior: number): number {
-  return Math.max(insetInferior, spacing.sm) + spacing.sm + BAR_HEIGHT;
+  return margenDeBarraFlotante(insetInferior) + BAR_HEIGHT;
 }
 
-/** Capsula animada tras el icono activo. */
-function ActivePill({ focused, color }: { focused: boolean; color: string }) {
-  const progreso = useRef(new Animated.Value(focused ? 1 : 0)).current;
-  useEffect(() => {
-    // 180 ms: dentro del rango 150-250 que se percibe como respuesta, no como
-    // animacion. Native driver: no toca el hilo de JavaScript.
-    Animated.timing(progreso, {
-      toValue: focused ? 1 : 0,
-      duration: motion.fast,
-      useNativeDriver: true,
-    }).start();
-  }, [focused, progreso]);
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        styles.pill,
-        {
-          backgroundColor: color,
-          opacity: progreso,
-          transform: [
-            { scale: progreso.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) },
-          ],
-        },
-      ]}
-    />
-  );
+/**
+ * A que distancia del canto flota una barra: por encima de la zona segura, y
+ * con un minimo para que no quede pegada al borde en un aparato sin ella.
+ *
+ * Es una funcion y no una cuenta repetida porque ya no la usa solo esta barra:
+ * la de los tipos de publicacion de Crear ocupa SU sitio cuando esta se
+ * retira, y tiene que caer exactamente a la misma altura.
+ */
+export function margenDeBarraFlotante(insetInferior: number): number {
+  return Math.max(insetInferior, spacing.sm) + spacing.sm;
 }
 
 export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeBarra) {
@@ -134,7 +117,7 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeB
         {
           // Respeta el gesto/home indicator: la capsula flota POR ENCIMA de la
           // zona segura, nunca debajo de ella.
-          bottom: Math.max(insets.bottom, spacing.sm) + spacing.sm,
+          bottom: margenDeBarraFlotante(insets.bottom),
         },
       ]}
     >
@@ -202,7 +185,7 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeB
                   globo ? `${etiqueta}. ${t('notif.unreadTab', { cuenta: unread })}` : etiqueta
                 }
               >
-                <ActivePill focused={focused} color={colors.glassActive} />
+                <PildoraActiva activa={focused} color={colors.glassActive} style={styles.pill} />
                 <View>
                   <Feather name={icono} size={22} color={color} />
                   {/*
@@ -275,13 +258,9 @@ const styles = StyleSheet.create({
   pill: {
     // Con los botones ya repartidos a lo ancho, la capsula se cine al
     // contenido en vez de ocupar toda la celda: marca el activo sin
-    // convertirse en una franja.
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
+    // convertirse en una franja. Lo demas lo pone `PildoraActiva`.
     left: spacing.sm,
     right: spacing.sm,
-    borderRadius: radius.pill,
   },
   label: {
     fontSize: 10,

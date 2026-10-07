@@ -36,3 +36,21 @@ export const ORDEN_SECCIONES: readonly string[] = SECCIONES.map((s) => s.nombre)
 export function posicionDeSeccion(nombreDeRuta: string): number {
   return ORDEN_SECCIONES.indexOf(nombreDeRuta);
 }
+
+/**
+ * Secciones que ponen SU barra donde va la de secciones, y por eso la retiran.
+ *
+ * Hoy solo Crear: sus cuatro tipos de publicacion (Publicacion · Historia ·
+ * Reel · Vivo) van en una barra propia abajo, y dos barras flotantes a la vez
+ * —la una encima de la otra— no se entienden. En todas las demas secciones la
+ * barra de siempre sigue donde estaba.
+ *
+ * Vive aqui, junto a la lista, para que la decision dependa solo de EN QUE
+ * SECCION se esta: es un dato de navegacion, no algo que una pantalla tenga
+ * que acordarse de encender al entrar y de apagar al salir.
+ */
+const CON_BARRA_PROPIA: readonly string[] = ['create'];
+
+export function traeSuPropiaBarra(nombreDeRuta: string | undefined): boolean {
+  return nombreDeRuta !== undefined && CON_BARRA_PROPIA.includes(nombreDeRuta);
+}

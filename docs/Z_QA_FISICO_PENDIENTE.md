@@ -2918,3 +2918,41 @@ Hace falta un teléfono que emita y al menos dos que miren.
 decisión: fijar mensajes en el directo, el texto animado de quien emite, la
 descarga del directo, los clips con IA, la agenda de disponibilidad y la moneda
 de los cursos.
+
+## La barra de Crear (07/10/2026, tarde)
+
+Del documento «Cambio de vista Z». En Crear, los cuatro tipos de publicación
+(Publicación · Historia · Reel · Vivo) pasan a una barra abajo del todo, y la
+barra de navegación se retira **solo ahí**. Nada de esto cambia el servidor ni
+la versión (sigue 1.2.1): hace falta compilar de nuevo para verlo.
+
+En la copia web se comprobó la barra en claro y en oscuro, que cae a la misma
+altura en los cuatro tipos, la salida con la `X` y que sin cuenta la barra de
+navegación se queda. **La cámara no existe en la web**: todo lo de la cámara de
+abajo solo se ve en un teléfono.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Al entrar en Crear desaparece la barra de navegación y en su sitio hay una barra con Publicación · Historia · Reel · Vivo | | | |
+| Se leen las cuatro palabras enteras, ninguna cortada | | | |
+| Con el tema claro: barra blanca y letra negra. Con el oscuro: barra oscura y letra blanca | | | |
+| El tipo elegido va en negativo (píldora negra con letra blanca en claro; al revés en oscuro) | | | |
+| La barra es más ancha y más alta que la de navegación: no se confunden | | | |
+| Tocar cada palabra cambia de tipo; la barra NO se mueve de sitio al cambiar | | | |
+| Deslizar de lado sobre la pantalla también cambia de tipo, y no de sección | | | |
+| Cámara: de abajo arriba se ven la barra, la pista de ayuda, y la fila de carrete · disparador · girar. Nada se pisa | | | |
+| La pista («Toca para una foto · Mantén para grabar · Desliza para acercar») se lee sobre un fondo oscuro, entera, sin salirse por los lados; también apuntando a algo claro | | | |
+| El disparador hace foto al tocar y graba al mantener, como antes; el dedo no toca la barra | | | |
+| Grabando y deslizando para acercar: el «2.4x» sale encima del disparador, sin tapar nada | | | |
+| Carrete: la barra sigue abajo; bajando hasta el final, las últimas fotos quedan por encima de ella y se pueden tocar | | | |
+| Carrete en Publicación: «Escribir sin foto» se lee sobre cualquier foto (lleva fondo) | | | |
+| Tras elegir una foto o un vídeo ya no hay barra: el botón de publicar queda abajo, a la vista, y se puede pulsar | | | |
+| La flecha de volver de ese paso devuelve a la cámara, con la barra otra vez en su sitio | | | |
+| Vivo: hay una `X` arriba a la izquierda y lleva a Inicio | | | |
+| Sin permiso de cámara: el aviso tiene `X`, y la barra sigue abajo | | | |
+| La `X` de la cámara lleva a Inicio y allí vuelve a estar la barra de navegación | | | |
+| «Atrás» de Android en Crear vuelve a la sección anterior, con su barra de navegación | | | |
+| Inicio, Explorar, Mensajes y Perfil: la barra de navegación sigue como siempre | | | |
+| Llegar a Crear DESLIZANDO desde Explorar o Mensajes: durante el arrastre solo se ve la barra de navegación; al soltar, la de Crear | | | |
+| Sin cuenta, la pestaña Crear enseña la invitación a registrarse y la barra de navegación NO desaparece | | | |
+| Teléfono con botones de Android abajo (no gestos): la barra queda por encima de ellos | | | |

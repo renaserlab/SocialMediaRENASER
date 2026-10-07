@@ -4,6 +4,8 @@ import { withLayoutContext } from 'expo-router';
 
 import { FloatingGlassTabBar } from '@/components/FloatingGlassTabBar';
 import { ProveedorDeEspacioInferior } from '@/components/espacioInferior';
+import { useHaceFaltaCuenta } from '@/hooks/useRequireAuth';
+import { traeSuPropiaBarra } from '@/navigation/secciones';
 import { createSwipeTabNavigator, type PropsDeBarra } from '@/navigation/SwipeTabs';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useAppStore } from '@/store/useAppStore';
@@ -30,6 +32,7 @@ export default function TabsLayout() {
   const hydrated = useAppStore((state) => state.hydrated);
   const authStatus = useAuthStore((state) => state.status);
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
+  const haceFaltaCuenta = useHaceFaltaCuenta();
 
   // Mismo criterio que app/index.tsx: no se decide nada hasta saber si hay
   // sesion, o cada arranque rebotaria a la bienvenida antes de resolverla.
@@ -84,7 +87,21 @@ export default function TabsLayout() {
         mueva con el: la barra se queda quieta mientras las secciones pasan por
         debajo, que es como se comporta en las aplicaciones de referencia.
       */
-      barra={(props: PropsDeBarra) => <FloatingGlassTabBar {...props} />}
+      /*
+        EN CREAR NO SE PINTA. Su sitio lo ocupa la barra de los tipos de
+        publicacion (`SelectorDeModo`), que es de la misma familia: con las
+        dos a la vez no se sabria cual es cual.
+
+        Sin cuenta si se pinta: Crear ensena entonces la invitacion a
+        registrarse, no su barra, y sin esta no habria por donde salir. Es la
+        misma pregunta que se hace `CrearScreen` (`useHaceFaltaCuenta`), para
+        que no pueda quitarse una barra sin que aparezca la otra.
+      */
+      barra={(props: PropsDeBarra) =>
+        traeSuPropiaBarra(props.state.routes[props.state.index]?.name) && !haceFaltaCuenta ? null : (
+          <FloatingGlassTabBar {...props} />
+        )
+      }
       /*
         Atras vuelve a la pestaña ANTERIOR, no siempre a Inicio.
 
