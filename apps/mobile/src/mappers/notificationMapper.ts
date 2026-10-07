@@ -186,6 +186,16 @@ export function toNotificationItem(dto: NotificationDto): NotificationItem {
       icon = 'radio';
       break;
     /*
+      Quien emite te invita a salir con tu cámara (07/10/2026). Tocarlo abre el
+      directo, y allí está la invitación si sigue en pie. Si ya no —terminó, o
+      la retiraron—, la sala lo dice: el aviso no promete que siga abierta.
+    */
+    case 'live_invited':
+      title = t('notif.liveInviteTitle');
+      subtitle = t('notif.liveInviteBody', { actor });
+      icon = 'radio';
+      break;
+    /*
       Compras y devoluciones. El servidor ya escribía estos avisos en la
       bandeja, pero aquí no tenían texto y salían con el genérico «Tienes una
       notificación», que no dice qué ha pasado.

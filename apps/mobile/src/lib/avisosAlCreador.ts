@@ -223,7 +223,9 @@ export function rutaDelAviso(
     case 'service_incident_appealed_team':
       return id ? `/admin/servicios/casos/${id}` : '/admin/servicios/casos';
     // «Juan está transmitiendo en vivo»: al directo, siga o no en emisión.
+    // Y «Juan te invita a su directo»: a la misma sala, donde se contesta.
     case 'live_started':
+    case 'live_invited':
       return id ? `/live/${id}` : null;
     default:
       return null;

@@ -129,8 +129,8 @@ export function useSesionDeDirecto({
       banderaEncendida: FEATURE_LIVE,
       estadoInicialDeSesion: ultimas.current.estadoDeSesion,
 
-      pedirCredencial: async () => {
-        const credencial = await LiveRepository.solicitarCredencial(emisionId);
+      pedirCredencial: async ({ publicar }) => {
+        const credencial = await LiveRepository.solicitarCredencial(emisionId, { publicar });
         return {
           puedePublicar: credencial.puedePublicar,
           hayVideo: LiveRepository.hayVideo(credencial),

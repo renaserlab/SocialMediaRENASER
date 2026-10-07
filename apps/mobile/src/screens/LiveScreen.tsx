@@ -23,11 +23,15 @@ import {
   altoDelChatPara,
   type ChatDeDirectoRef,
 } from '@/components/live/ChatDeDirecto';
+import { EscenarioDeVideo } from '@/components/live/EscenarioDeVideo';
 import { FinDeDirecto } from '@/components/live/FinDeDirecto';
 import { HojaDeCalidad } from '@/components/live/HojaDeCalidad';
 import { HojaDeEfectos } from '@/components/live/HojaDeEfectos';
+import { HojaDeInvitados } from '@/components/live/HojaDeInvitados';
+import { InvitacionAlEscenario } from '@/components/live/InvitacionAlEscenario';
 import { ReaccionesDeDirecto } from '@/components/live/ReaccionesDeDirecto';
 import { useAudienciaDeDirecto } from '@/hooks/useAudienciaDeDirecto';
+import { useEscenarioDeDirecto } from '@/hooks/useEscenarioDeDirecto';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { useSesionDeDirecto } from '@/hooks/useSesionDeDirecto';
 import { describeError } from '@/lib/describeError';
@@ -40,7 +44,7 @@ import {
   type EstadoDeDirecto,
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
-import { elegirPistaPrincipal } from '@/live/salaDeVideo';
+import { elegirPistasDeEscenario } from '@/live/escenario';
 import { volverA } from '@/navigation/salirDelTramite';
 import {
   LiveRepository,
@@ -509,6 +513,7 @@ export function LiveScreen() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [hojaDeEfectos, setHojaDeEfectos] = useState(false);
   const [hojaDeCalidad, setHojaDeCalidad] = useState(false);
+  const [hojaDeInvitados, setHojaDeInvitados] = useState(false);
   /** La emision termino CON ESTA PERSONA DELANTE, no antes de que entrara. */
   const [terminoMirando, setTerminoMirando] = useState(false);
 
@@ -690,6 +695,22 @@ export function LiveScreen() {
     anfitrionId: emision?.anfitrionId ?? null,
   });
 
+  /*
+    El escenario: a quien ha invitado quien emite a salir con su camara, y que
+    me pasa a mi. Aqui no se decide nada —lo decide el servidor—; el hook
+    pregunta, manda los gestos y le dice a la sesion cuando subir o bajar.
+  */
+  const alQuitarme = useCallback(() => setAviso(t('live.stageRemovedYou')), [t]);
+  const escena = useEscenarioDeDirecto({
+    emisionId,
+    enDirecto: emision?.estado === 'live',
+    gestiono: puedeGestionar,
+    anfitrionId: emision?.anfitrionId ?? null,
+    sesion,
+    alFallar: setAviso,
+    alQuitarme,
+  });
+
   if (errorDeCarga) {
     return (
       <View style={estilos.fondo}>
@@ -731,14 +752,16 @@ export function LiveScreen() {
   }
 
   /*
-    Que imagen ocupa la pantalla. La propia para quien emite (su vista previa),
-    la del anfitrion para quien mira; `null` = no hay imagen y se pinta el
-    cartel del estado. Lo decide `elegirPistaPrincipal`, no esta pantalla.
+    Que imagenes ocupan la pantalla. Con una sola persona, lo de siempre: la
+    propia para quien emite (su vista previa), la de quien emite para quien
+    mira. Con invitados, todas, repartidas. Ninguna = no hay imagen y se pinta
+    el cartel del estado. Lo decide `elegirPistasDeEscenario`, no esta pantalla.
   */
-  const pista = ESTADOS_CON_IMAGEN.includes(vista.estado)
-    ? elegirPistaPrincipal(pistas.video, { emito: vista.puedePublicar })
-    : null;
-  const hayImagen = Boolean(pista && VistaDePista);
+  const enEscena = ESTADOS_CON_IMAGEN.includes(vista.estado)
+    ? elegirPistasDeEscenario(pistas.video, { emito: vista.puedePublicar })
+    : [];
+  const hayImagen = enEscena.length > 0 && Boolean(VistaDePista);
+  const variasEnPantalla = enEscena.length > 1;
 
   const cartel = cartelDelEstado(vista.estado, emision.puedeGestionar);
   // Con imagen, el estado de la conexion se dice en una linea: la imagen se
@@ -754,24 +777,27 @@ export function LiveScreen() {
 
   return (
     <View style={estilos.fondo}>
-      {/* La imagen, a pantalla completa y por detras de todo. */}
-      {pista && VistaDePista ? (
-        <View style={StyleSheet.absoluteFill}>
-          <VistaDePista
-            pistaId={pista.id}
-            // Espejo solo en la camara frontal PROPIA: a los demas se les ve
-            // como son, y la trasera no se refleja.
-            espejo={pista.local && vista.camaraFrontal}
-            estilo={StyleSheet.absoluteFill}
-            // Mientras la persona no fije una calidad, la elige el proveedor.
-            capaAutomatica={calidad.estado.elegida === 'automatica'}
-          />
-        </View>
+      {/*
+        La imagen, por detras de todo: a pantalla completa con una persona, o
+        repartida arriba cuando quien emite ha subido a alguien.
+      */}
+      {hayImagen && VistaDePista ? (
+        <EscenarioDeVideo
+          pistas={enEscena}
+          VistaDePista={VistaDePista}
+          camaraFrontal={vista.camaraFrontal}
+          // Mientras la persona no fije una calidad, la elige el proveedor.
+          capaAutomatica={calidad.estado.elegida === 'automatica'}
+        />
       ) : null}
 
       {/* Solo se oscurecen las dos franjas donde hay texto encima. */}
       {hayImagen ? <ScrimDeMedio borde="arriba" alto={150} /> : null}
-      {hayImagen ? <ScrimDeMedio borde="abajo" alto={altoDelChat + 260} /> : null}
+      {/* Con varias personas el chat va DEBAJO de la rejilla, sobre el fondo
+          oscuro de la sala: ahi no hay imagen que apagar. */}
+      {hayImagen && !variasEnPantalla ? (
+        <ScrimDeMedio borde="abajo" alto={altoDelChat + 260} />
+      ) : null}
 
       <SafeAreaView style={estilos.seguro}>
         <SinTecladoDelante style={estilos.columna}>
@@ -816,6 +842,21 @@ export function LiveScreen() {
             </View>
           ) : null}
 
+          {/*
+            Bajarse del escenario, para quien salio invitado. En el mismo sitio
+            donde quien emite tiene «Terminar»: es la misma clase de boton —el
+            que corta lo propio— y cada cual solo ve el suyo.
+          */}
+          {escena.enPantalla && emision.estado === 'live' ? (
+            <View style={estilos.filaDeGestion}>
+              <BotonDeTexto
+                texto={t('live.stageLeave')}
+                alPulsar={() => void escena.bajarme()}
+                desactivado={escena.ocupado}
+              />
+            </View>
+          ) : null}
+
           {/* El hueco por el que se ve la emision. Sin imagen, aqui va el cartel. */}
           <View style={estilos.hueco} pointerEvents="box-none">
             {terminada ? (
@@ -842,6 +883,29 @@ export function LiveScreen() {
               <BotonDeTexto texto={t('live.openSettings')} alPulsar={abrirAjustes} />
             ) : vista.estado === 'error_definitivo' ? (
               <BotonDeTexto texto={t('live.retry')} alPulsar={() => sesion.reintentar()} />
+            ) : null}
+
+            {/*
+              Quien acepto salir y luego no dio el permiso de camara se queda
+              sin emitir Y sin ver: la sala no le deja entrar a medias. Tiene
+              que poder volver a mirar sin ir a los ajustes.
+            */}
+            {escena.enPantalla && pideAccionDeLaPersona(vista.estado) ? (
+              <BotonDeTexto
+                texto={t('live.stageKeepWatching')}
+                alPulsar={() => void escena.bajarme()}
+                desactivado={escena.ocupado}
+              />
+            ) : null}
+
+            {/* Quien emite me invita a salir con mi camara. */}
+            {escena.meInvitan ? (
+              <InvitacionAlEscenario
+                anfitrion={emision.anfitrionNombre}
+                ocupado={escena.ocupado}
+                alAceptar={() => void escena.aceptar()}
+                alRechazar={() => void escena.rechazar()}
+              />
             ) : null}
 
             {vista.puedePublicar && !enDirecto ? (
@@ -877,6 +941,20 @@ export function LiveScreen() {
                   activo={false}
                   desactivado={false}
                   alPulsar={compartir}
+                />
+              ) : null}
+              {/*
+                Invitar a alguien a salir con su camara. Solo para quien
+                gestiona, y solo si el servidor dice que se puede: sin la tabla
+                de invitados, o con el tope en cero, el boton no existe.
+              */}
+              {enDirecto && escena.disponible && escena.escenario.puedeInvitar ? (
+                <BotonDeControl
+                  icono="user-plus"
+                  etiqueta={t('live.stageInviteButton')}
+                  activo={false}
+                  desactivado={false}
+                  alPulsar={() => setHojaDeInvitados(true)}
                 />
               ) : null}
               {/*
@@ -947,6 +1025,12 @@ export function LiveScreen() {
         capacidad={efectos.capacidad}
         estado={efectos.estado}
         alElegir={efectos.aplicar}
+      />
+      <HojaDeInvitados
+        visible={hojaDeInvitados && escena.disponible && escena.escenario.puedeInvitar}
+        alCerrar={() => setHojaDeInvitados(false)}
+        escena={escena}
+        anfitrionId={emision.anfitrionId}
       />
       <HojaDeCalidad
         visible={hojaDeCalidad && calidad.estado.opciones.length > 0}

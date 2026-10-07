@@ -11,6 +11,7 @@ import {
 import { mantenerSuscripcion } from '@/live/suscripcionViva';
 import { topicoDeAvisosDelChat, type FilaDeChat } from '@/live/ventanaDeChat';
 import { LiveRepository, type EstadoDeEmision } from '@/repositories/LiveRepository';
+import { avisoDeEscenario, topicoDeEscenario } from '@/live/escenario';
 import { supabase } from '@/services/supabase';
 
 /**
@@ -304,6 +305,39 @@ export function seguirAudiencia(
   return () => {
     vigente = false;
     dejar();
+  };
+}
+
+export type AvisosDelEscenario = {
+  /** «El escenario ha cambiado». `para` = a quien le incumbe, o `null`. */
+  avisar: (paraUsuarioId: string | null) => boolean;
+  cerrar: () => void;
+};
+
+/**
+ * El aviso de que alguien ha sido invitado, ha contestado o se ha bajado.
+ *
+ * Es Broadcast y no la base, igual que el aviso de moderacion del chat: la
+ * tabla de invitados no se puede leer desde el cliente, asi que no hay cambio
+ * que Realtime pueda entregar. Quien hace el gesto avisa, y quien recibe el
+ * aviso le PREGUNTA al servidor.
+ *
+ * EL AVISO NO TIENE AUTORIDAD (ver `meTocaElAviso`): solo provoca la pregunta.
+ * Si se pierde —o no hay tiempo real—, la persona se entera igual por la
+ * notificacion y al volver a entrar en la sala.
+ */
+export function avisosDelEscenario(
+  emisionId: string,
+  alAvisar: (carga: unknown) => void,
+): AvisosDelEscenario {
+  if (!transporte || !emisionId) return { avisar: () => false, cerrar: () => {} };
+  const conexion = transporte.abrir(topicoDeEscenario(emisionId), {
+    alRecibir: (carga) => alAvisar(carga),
+    alCambiarEstado: () => {},
+  });
+  return {
+    avisar: (paraUsuarioId) => conexion.enviar(avisoDeEscenario(paraUsuarioId)),
+    cerrar: () => conexion.cerrar(),
   };
 }
 

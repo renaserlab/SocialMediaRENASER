@@ -834,3 +834,98 @@ verdad; y se retiraron las afirmaciones de «comprobado» que no lo estaban.
 - Reacciones agregadas, HLS, canal privado: diseñados en
   [`Z_DIRECTOS_ESCALA.md`](Z_DIRECTOS_ESCALA.md), sin construir.
 - Telemetría: los contadores de diagnóstico se quedan en el teléfono.
+
+## 18. Invitados en el directo (07/10/2026)
+
+Quien emite puede subir a otras personas a su directo: salen con su cámara y su
+micrófono y la pantalla se reparte, como en TikTok. **Hecho en el código; sin
+ver en teléfonos y sin desplegar.** Necesita la migración 0098 aplicada, el
+servidor desplegado y una compilación nueva de la aplicación.
+
+### Qué había ya y qué faltaba
+
+- El papel existía: `invitado` en `live/roles.py`, `guest` en la plantilla de
+  100ms (publica audio y vídeo). `roles.resolver` ya aceptaba una lista de
+  invitados; nadie se la pasaba, porque no había dónde guardarla.
+- La aplicación ya recibía la lista de TODAS las imágenes de la sala con el rol
+  de cada una; pintaba solo una.
+- Faltaba: guardar a quién se invita, el ir y venir de invitar y aceptar, y
+  repartir la pantalla.
+
+### Cómo funciona
+
+| Paso | Quién | Qué pasa |
+|---|---|---|
+| Invitar | Quien gestiona la emisión | `POST /live/sessions/{id}/guests`. Se guarda una fila `invited` en `live_guests`, queda un aviso en la bandeja de la persona y se le manda un push (`live_invited`) |
+| Enterarse | La persona invitada | Si está mirando, por un aviso de difusión que le hace preguntar al servidor; si no, por la notificación, que abre la sala |
+| Aceptar | La persona invitada | `POST …/guests/me/accept`. Su aplicación sale de la sala y vuelve a entrar pidiendo publicar; el servidor le da el rol `guest` |
+| Bajarse | La persona invitada | `POST …/guests/me/leave`. La cámara se apaga antes de preguntar a la red |
+| Quitar | Quien gestiona | `DELETE …/guests/{user_id}`. Vale para quien está en pantalla y para una invitación sin contestar |
+
+**Lo decide el servidor.** Aceptar una invitación que no existe da 409, y el
+permiso de publicar va firmado en la credencial. Lo único que el cliente puede
+pedir al sacar la credencial es MENOS (`{"publish": false}`): así nadie sale al
+aire solo por abrir la pantalla —quien aceptó, cerró la aplicación y vuelve
+sigue constando como aceptado, y entra a mirar—.
+
+**Al quitar a alguien, el servidor lo baja también en 100ms**
+(`bajar_del_escenario`): lista sus conexiones (`GET /active-rooms/{sala}/peers`)
+y a las que siguen con rol `guest` les cambia el rol a `viewer`
+(`POST /active-rooms/{sala}/peers/{conexión}`). Es para la aplicación que no
+obedece: la normal ya se ha ido sola. No depende de ningún permiso de la
+plantilla; lo hace el servidor con su token de administración.
+
+### Límites
+
+- **Tres invitados a la vez** (`LIVE_MAX_GUESTS`, cero apaga la función): cuatro
+  imágenes en pantalla. Cada una es un vídeo más que descarga y decodifica el
+  teléfono de todo el que mira.
+- La plaza se ocupa al invitar, no al aceptar. Quien dice que no la deja libre.
+- Veinte invitaciones cada cinco minutos por emisión.
+- Un bloqueo, en cualquier sentido, se contesta como «persona no encontrada».
+- Administración entra en las salas con permiso de moderar y no tiene recuadro:
+  no es parte de la emisión.
+
+### La pantalla
+
+- Una persona: igual que antes, a pantalla completa.
+- Dos: lado a lado. Tres: quien emite a la izquierda, a lo alto, y los otros
+  dos a la derecha. Cuatro: cuadrícula. En columnas y no en filas porque cada
+  teléfono manda su cámara en vertical: así se recortan los lados y no la cara.
+- Con varias, la rejilla ocupa la parte de arriba y el chat va debajo, sobre
+  fondo oscuro. Cada recuadro lleva el nombre de la persona; quien apaga la
+  cámara conserva el suyo.
+- La calidad de cada recuadro la elige 100ms según su tamaño (Simulcast).
+
+### Sonido y retraso
+
+El directo usa WebRTC para todos, también para quien mira (HLS está apagado en
+la plantilla). El retraso es el de una videollamada, así que quien emite y sus
+invitados pueden conversar, y quien mira oye a todos a la vez. **No está medido
+en teléfonos.** Dos cosas a tener en cuenta en las pruebas:
+
+- dos teléfonos que están en pantalla, en la misma habitación, se acoplan y
+  pitan. No es un fallo: hay que usar audífonos o separarlos;
+- si un día quien mira pasa a HLS (ver `Z_DIRECTOS_ESCALA.md`), el escenario
+  seguirá en tiempo real y solo el público irá con 10–12 s de retraso.
+
+### Lo que hay que comprobar en el panel de 100ms
+
+Nada que cambiar, según las capturas del 04/10/2026. A confirmar mirando el
+rol `guest` de la plantilla: que publica audio y vídeo, y que en «Subscribe to»
+tiene `host` y `guest`. Y en el rol `viewer`, que «Subscribe to» incluye
+`guest`: si no, el público no vería a los invitados.
+
+### Sin la migración 0098
+
+El servidor contesta 503 (`live_guests_not_available`) a todo lo de invitados,
+la aplicación no enseña el botón de invitar y el directo funciona como antes.
+Tras aplicarla hay que reiniciar la API (recuerda el esquema por proceso).
+
+### Lo que no se hizo
+
+- Elegir a quién invitar de entre quienes están mirando (hoy se busca por
+  nombre).
+- Que una persona PIDA subir.
+- Silenciar el micrófono de un invitado sin quitarlo.
+- Guardar el reparto de la pantalla o dejar elegirlo.

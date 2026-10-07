@@ -505,7 +505,18 @@ export type EntornoDeDirecto = {
   banderaEncendida: boolean;
   estadoInicialDeSesion: EstadoDeSesion | null;
 
-  pedirCredencial: () => Promise<CredencialLeida>;
+  /**
+   * Pide el permiso de entrada. `publicar` dice si esta persona QUIERE salir
+   * con su camara: quien gestiona la emision, o quien acaba de aceptar una
+   * invitacion en esta visita. Con `false` el servidor da permiso de publico
+   * aunque pudiera dar mas.
+   *
+   * NO ES PEDIR UN ROL. El rol lo decide el servidor; lo unico que se puede
+   * hacer desde aqui es renunciar. Hace falta para que nadie salga al aire
+   * solo por abrir la pantalla: un invitado que acepto y cerro la aplicacion
+   * sigue constando como aceptado cuando vuelve.
+   */
+  pedirCredencial: (pedido: { publicar: boolean }) => Promise<CredencialLeida>;
   /** Traduce lo que sea que haya lanzado la red a una clase del dominio. */
   clasificarFallo: (error: unknown) => FalloDeCredencial;
   /** `true` si se concedio. Solo se llama a quien va a publicar. */
@@ -581,6 +592,15 @@ export type SesionDeDirecto = {
   /** Reintento a mano. Vuelve a poner el contador a cero. */
   reintentar: () => void;
 
+  /**
+   * Esta persona ha aceptado salir con su camara. Vuelve a entrar en la sala,
+   * ahora pidiendo publicar; si el servidor lo concede, se piden los permisos
+   * de camara y microfono, igual que a quien emite.
+   */
+  subirAlEscenario: () => void;
+  /** Deja de salir: vuelve a entrar como publico. Sin estar arriba no hace nada. */
+  bajarDelEscenario: () => void;
+
   /** Suelta todo: temporizador, sala, camara y microfono. Idempotente. */
   destruir: () => void;
 };
@@ -620,6 +640,15 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
   /** Estamos dentro de la sala del SDK: sin esto, `destruir` saldria de nada. */
   let dentroDeLaSala = false;
   let cancelarReintento: (() => void) | null = null;
+  /**
+   * Esta persona ha aceptado salir con su camara EN ESTA VISITA.
+   *
+   * Nace en `false` siempre, tambien para quien el servidor recuerda como
+   * aceptado de una visita anterior: abrir la pantalla no pone a nadie al aire.
+   */
+  let enElEscenario = false;
+  /** Cambio de papel pedido mientras habia una entrada en vuelo. */
+  let papelPendiente = false;
 
   const vistaActual = (): VistaDeDirecto => ({
     estado: decidirEstadoDeDirecto({
@@ -718,7 +747,7 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
     try {
       await entrarEnLaSala();
     } finally {
-      conectando = false;
+      alTerminarDeConectar();
     }
   };
 
@@ -737,7 +766,10 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
   const entrarEnLaSala = async (): Promise<void> => {
     let leida: CredencialLeida;
     try {
-      leida = await entorno.pedirCredencial();
+      // Quien gestiona publica siempre; el resto, solo si acepto en esta visita.
+      leida = await entorno.pedirCredencial({
+        publicar: entorno.esAnfitrion() || enElEscenario,
+      });
     } catch (error) {
       if (yaNoProcede()) return;
       tratarFallo(error);
@@ -810,6 +842,71 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
   };
 
   /**
+   * Una entrada ha terminado, bien o mal. Si mientras tanto se pidio cambiar de
+   * papel, se hace ahora: la entrada que acaba de terminar pidio su permiso con
+   * el papel de antes.
+   */
+  const alTerminarDeConectar = (): void => {
+    conectando = false;
+    if (papelPendiente && !destruida) {
+      papelPendiente = false;
+      reentrar();
+    }
+  };
+
+  /**
+   * Vuelve a entrar en la sala con el papel que toque AHORA.
+   *
+   * POR QUE SE SALE Y SE VUELVE A ENTRAR, en vez de cambiar de rol dentro: lo
+   * que una conexion puede hacer va firmado en su credencial. Subir al
+   * escenario es pedir otra, y entrar con ella es el MISMO camino por el que
+   * entra quien emite —permisos, camara, efectos—, que es el que ya esta
+   * probado. Quien cambia de papel ve un corte de uno o dos segundos; los
+   * demas, nada.
+   *
+   * SE SALE ANTES DE PEDIR NADA. Al bajar, es lo que apaga la camara en el
+   * acto, sin esperar a la red. Al subir, evita tener dos conexiones a la vez.
+   */
+  const reentrar = (): void => {
+    if (destruida || sesion !== 'live') return;
+    if (conectando) {
+      papelPendiente = true;
+      return;
+    }
+    olvidarReintento();
+    intentos = 0;
+    credencial = { estado: 'pendiente' };
+    permisoCamara = 'noHaceFalta';
+    permisoMicrofono = 'noHaceFalta';
+    conexion = 'conectando';
+    publicandoAqui = false;
+    mediosAjenos = false;
+    camara = false;
+    microfono = false;
+    puedePublicar = false;
+    arrancada = true;
+    publicar();
+
+    conectando = true;
+    void (async () => {
+      try {
+        if (dentroDeLaSala) {
+          dentroDeLaSala = false;
+          try {
+            await entorno.salirDeLaSala();
+          } catch {
+            // Salir nunca impide volver a entrar: la sala suelta lo anterior.
+          }
+        }
+        if (yaNoProcede()) return;
+        await entrarEnLaSala();
+      } finally {
+        alTerminarDeConectar();
+      }
+    })();
+  };
+
+  /**
    * Envuelve un gesto de la persona con el freno de la doble pulsacion.
    *
    * El freno se pone ANTES de cualquier `await`, incluido el del dialogo de
@@ -860,6 +957,10 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
         mediosAjenos = false;
         camara = false;
         microfono = false;
+        // Una emision terminada no tiene escenario: si empezara otra, nadie
+        // esta arriba hasta que vuelva a aceptar.
+        enElEscenario = false;
+        papelPendiente = false;
         publicar();
         return;
       }
@@ -1021,6 +1122,18 @@ export function crearSesionDeDirecto(entorno: EntornoDeDirecto): SesionDeDirecto
       arrancada = true;
       publicar();
       void conectar();
+    },
+
+    subirAlEscenario() {
+      if (destruida || enElEscenario) return;
+      enElEscenario = true;
+      reentrar();
+    },
+
+    bajarDelEscenario() {
+      if (destruida || !enElEscenario) return;
+      enElEscenario = false;
+      reentrar();
     },
 
     destruir() {

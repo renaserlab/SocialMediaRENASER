@@ -2956,3 +2956,47 @@ abajo solo se ve en un teléfono.
 | Llegar a Crear DESLIZANDO desde Explorar o Mensajes: durante el arrastre solo se ve la barra de navegación; al soltar, la de Crear | | | |
 | Sin cuenta, la pestaña Crear enseña la invitación a registrarse y la barra de navegación NO desaparece | | | |
 | Teléfono con botones de Android abajo (no gestos): la barra queda por encima de ellos | | | |
+
+## Invitados en el directo (07/10/2026)
+
+Quien emite invita a otras personas, que salen con su cámara, y la pantalla se
+reparte. Necesita **la migración 0098 aplicada, el servidor desplegado y una
+compilación nueva**. En la copia web se vio el botón de invitar, la hoja con el
+buscador, el aviso al invitado y que aceptar y bajarse llegan al servidor.
+**El vídeo no existe en la web**: la pantalla repartida, el sonido y el retraso
+solo se ven con teléfonos.
+
+Hacen falta tres: uno emite (A), uno es invitado (B) y uno mira (C). **A y B en
+habitaciones distintas o con audífonos**: juntos se acoplan y pitan, y eso no
+es un fallo de la aplicación.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A, emitiendo: a la derecha, debajo de compartir, hay un botón con una persona y un «+» | | | |
+| Al tocarlo se abre «Invitar al directo» y dice «Caben 3 personas más» | | | |
+| Buscando el nombre de B, sale; A no sale en su propia búsqueda | | | |
+| «Invitar» deja a B en la lista con «Invitación enviada» y baja el contador a 2 | | | |
+| B, mirando el directo: le sale «A te invita a salir en su directo», con «Ahora no» y «Aceptar y salir» | | | |
+| B, con la aplicación cerrada: le llega la notificación «Te invitan a un directo»; al tocarla se abre la sala con la invitación | | | |
+| B toca «Ahora no»: la tarjeta desaparece; en la lista de A pasa a «No aceptó» y el sitio vuelve a estar libre | | | |
+| A lo invita otra vez y B acepta: se le piden los permisos de cámara y micrófono (la primera vez) y sale en pantalla | | | |
+| Mientras B entra solo B ve un corte de uno o dos segundos; a A y a C no se les corta nada | | | |
+| C ve la pantalla partida en dos, lado a lado, con A a la izquierda; cada recuadro lleva el nombre | | | |
+| A, B y C ven a las personas colocadas en el mismo orden | | | |
+| Las caras se ven enteras en los recuadros (no cortadas por arriba) | | | |
+| C oye a A y a B a la vez, sin eco y sin que uno vaya claramente por detrás del otro | | | |
+| A y B pueden conversar con naturalidad: el retraso es el de una videollamada | | | |
+| El chat, las reacciones y el título se ven debajo de la rejilla, sin taparle la cara a nadie | | | |
+| B tiene sus botones de cámara, micrófono, girar y efectos; y arriba a la derecha, «Bajarme» | | | |
+| B apaga la cámara: su recuadro se queda, con sus iniciales; al encenderla vuelve la imagen | | | |
+| B toca «Bajarme»: su cámara se apaga en el acto, la pantalla vuelve a ser solo A y B sigue mirando | | | |
+| A, en la lista, toca «Quitar» sobre B: B deja de salir, le aparece «Quien emite te ha quitado de la pantalla» y sigue mirando | | | |
+| B, estando arriba, sale de la sala con «atrás»: deja de salir para todos y su sitio queda libre | | | |
+| B aceptó, cerró la aplicación a la fuerza y vuelve a entrar al directo: entra MIRANDO, sin que se le encienda la cámara | | | |
+| Con dos invitados (tres en pantalla): A a la izquierda a lo alto y los otros dos a la derecha, uno encima de otro | | | |
+| Con tres invitados (cuatro en pantalla): cuadrícula de 2×2; el teléfono de C no se calienta ni va a tirones | | | |
+| Con tres invitados, el contador dice que no caben más y «Invitar» está apagado | | | |
+| A termina el directo: B y C ven el cartel de fin; la cámara de B se apaga | | | |
+| C (que solo mira) no ve en ningún momento el botón de invitar ni la lista de invitados | | | |
+| Una persona sin cuenta que mira: no ve nada de esto y el directo le funciona igual | | | |
+| Un directo sin invitados se ve y se oye exactamente como antes | | | |

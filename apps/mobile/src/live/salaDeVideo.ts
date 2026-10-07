@@ -141,6 +141,12 @@ export type PistaDeVideo = {
   papel: string;
   /** Camara apagada: la pista existe pero no hay imagen. */
   silenciada: boolean;
+  /**
+   * El nombre con el que esa persona entro en la sala. Hace falta cuando hay
+   * varias en pantalla; con una sola no se pinta. Opcional: un proveedor que
+   * no lo sepa sigue siendo valido.
+   */
+  nombre?: string;
 };
 
 /** Lo que circula por la sala, ademas de lo propio. */
