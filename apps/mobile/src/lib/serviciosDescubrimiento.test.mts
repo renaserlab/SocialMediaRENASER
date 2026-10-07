@@ -158,6 +158,32 @@ describe('los filtros en la ruta', () => {
     }
   });
 
+  it('desde aquí también se llega a ofrecer un servicio, por la misma puerta que en el perfil', () => {
+    /*
+      Visto en teléfono el 06/10/2026: con el catálogo vacío, quien quería
+      publicar un servicio entraba a Servicios y no encontraba por dónde. La
+      única entrada estaba en el menú del perfil.
+    */
+    const leer = (nombre: string) =>
+      readFileSync(join(import.meta.dirname, '..', 'screens', nombre), 'utf8').replace(/\r\n/g, '\n');
+    const pantalla = leer('ServiciosScreen.tsx');
+    const RUTA = "router.push('/servicios/prestador' as never)";
+    assert.ok(leer('ProfileScreen.tsx').includes(RUTA), 'el perfil ya no lleva ahí: las dos entradas van juntas.');
+    assert.ok(pantalla.includes(`const ofrecer = () => ${RUTA};`));
+    // Siempre a la vista, y como salida del catálogo vacío; con el texto del perfil.
+    assert.match(
+      pantalla,
+      /<Button label=\{f\('servicios\.entrada'\)\} variant="ghost" icon="briefcase" onPress=\{ofrecer\} \/>/,
+    );
+    assert.match(
+      pantalla,
+      /title=\{f\('servicios\.descubrir\.vacio'\)\}[\s\S]{0,160}actionLabel=\{f\('servicios\.entrada'\)\}\s+onAction=\{ofrecer\}/,
+    );
+    for (const idioma of [es, en, pt]) {
+      assert.ok((idioma as Record<string, string>)['servicios.entrada'], 'falta el texto en un idioma.');
+    }
+  });
+
   it('lo que no se entiende se descarta', () => {
     const f = D.filtrosDesdeRuta({
       categoria: 'no-es-un-id', modalidad: 'hybrid', precio: 'cheap', moneda: 'XXX', orden: 'popular',

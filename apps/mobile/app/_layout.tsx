@@ -20,6 +20,7 @@ import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { AvisoDeDirectoSeguido } from '@/components/AvisoDeDirectoSeguido';
 import { DialogHost } from '@/components/DialogHost';
 import { LimiteDeErrores } from '@/components/LimiteDeErrores';
+import { ProveedorDelTeclado } from '@/components/teclado';
 import { ToastHost } from '@/components/ToastHost';
 import { useAuthDeepLink } from '@/hooks/useAuthDeepLink';
 import { useAbrirDesdeElPush } from '@/hooks/useAbrirDesdeElPush';
@@ -28,6 +29,7 @@ import { useAvisosEnVivo } from '@/hooks/useAvisosEnVivo';
 import { useNavegadorMontado } from '@/hooks/useNavegadorMontado';
 import { useSalidaConDoblePulsacion } from '@/hooks/useSalidaConDoblePulsacion';
 import { perfMark } from '@/lib/perf';
+import { DURACION_DE_LA_TRANSICION_MS } from '@/navigation/transicion';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -164,6 +166,12 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      {/*
+        Lo que se sabe del teclado, para toda la aplicacion. Va FUERA de la
+        zona segura a proposito: su vista es la regla contra la que se mide
+        el teclado y tiene que ocupar la ventana entera, bordes incluidos.
+      */}
+      <ProveedorDelTeclado>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
         {/*
@@ -173,7 +181,16 @@ export default function RootLayout() {
         */}
         <LimiteDeErrores ruta={ruta}>
           <Stack
-            screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }}
+            /*
+              La duracion sale de `navigation/transicion` y no de un numero
+              escrito aqui: el anfitrion de los avisos espera ESE MISMO tiempo
+              antes de ensenar un aviso tras un cambio de pantalla.
+            */
+            screenOptions={{
+              headerShown: false,
+              animation: 'slide_from_right',
+              animationDuration: DURACION_DE_LA_TRANSICION_MS,
+            }}
           />
           {/*
             «Juan está transmitiendo en vivo» al entrar, como en TikTok. Antes que
@@ -186,6 +203,7 @@ export default function RootLayout() {
           <ToastHost />
         </LimiteDeErrores>
       </SafeAreaProvider>
+      </ProveedorDelTeclado>
     </GestureHandlerRootView>
   );
 }

@@ -480,6 +480,9 @@ class SalaDe100ms implements SalaDeVideo {
           local,
           papel: par.role?.name ?? '',
           silenciada: videoApagado,
+          // Con varias personas en pantalla hay que poder decir quien es cada
+          // una. Es el nombre con el que entro (`unirseCon`).
+          nombre: typeof par.name === 'string' ? par.name : '',
         });
       }
       const audio = par.audioTrack;

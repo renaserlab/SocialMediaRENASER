@@ -213,10 +213,8 @@ describe('nada que se repita por fila deja una vista animada montada', () => {
     'components/Tabs.tsx': 'una fila de pestañas por pantalla',
     'components/Toast.tsx': 'el aviso flotante; solo mientras hay alguno',
     'components/crear/ProgresoDePublicacion.tsx': 'solo mientras se publica',
-    'components/crear/SelectorDeModo.tsx': 'uno, en Crear',
     'components/live/ReaccionesDeDirecto.tsx': 'las burbujas de un directo, con tope',
     'navigation/SwipeTabs.tsx': 'el carrusel de pestañas: uno en toda la aplicación',
-    'screens/CrearScreen.tsx': 'una pantalla',
     'screens/StoriesScreen.tsx': 'una pantalla',
   };
 

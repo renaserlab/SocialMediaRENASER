@@ -1,7 +1,7 @@
 import React, { createContext, useContext } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { espacioParaLaBarra } from '@/components/FloatingGlassTabBar';
+import { espacioParaLaBarra, margenDeBarraFlotante } from '@/components/FloatingGlassTabBar';
 import { spacing } from '@/theme/tokens';
 
 /**
@@ -59,6 +59,27 @@ export function ProveedorDeEspacioInferior({ children }: { children: React.React
 }
 
 /**
+ * Para la seccion que RETIRA la capsula y pone su propia barra en ese sitio.
+ *
+ * Hoy es Crear: mientras se esta en ella la barra de secciones no se pinta
+ * (`traeSuPropiaBarra`), asi que lo que hay que dejar libre abajo ya no es la
+ * capsula sino solo el margen al que flota una barra. Todo lo que cuelga de
+ * Crear —la camara, el carrete, el pie con el boton de publicar— sigue
+ * pidiendo `useEspacioInferior()` y recibe la medida correcta sin enterarse.
+ *
+ * Se publica un NUMERO y no `null` a proposito: `null` significaria «fuera de
+ * las pestañas», y Crear sigue estando dentro.
+ */
+export function SinBarraDeSecciones({ children }: { children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <EspacioDeLaBarra.Provider value={margenDeBarraFlotante(insets.bottom)}>
+      {children}
+    </EspacioDeLaBarra.Provider>
+  );
+}
+
+/**
  * Si esto se pinta dentro del grupo de pestañas, debajo de la capsula.
  *
  * Lo pregunta `AppScreen` para decidir si reserva la zona segura: dentro de
@@ -102,6 +123,6 @@ export function useEspacioInferior(): number {
   const conBarra = useContext(EspacioDeLaBarra);
   const reservada = useContext(ZonaSeguraReservada);
   const insets = useSafeAreaInsets();
-  const desdeElCanto = conBarra ?? Math.max(insets.bottom, spacing.sm) + spacing.sm;
+  const desdeElCanto = conBarra ?? margenDeBarraFlotante(insets.bottom);
   return reservada ? Math.max(desdeElCanto - insets.bottom, spacing.sm) : desdeElCanto;
 }

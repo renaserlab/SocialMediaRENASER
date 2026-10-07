@@ -13,6 +13,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { mensajeDeAuth } from '@/lib/authErrors';
 import { postAuthRoute } from '@/lib/postAuthRoute';
 import { toast } from '@/lib/toast';
+import { empezarDeNuevoEn } from '@/navigation/salirDelTramite';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -61,8 +62,15 @@ export function ResetPasswordScreen() {
     setError(null);
     try {
       await updatePassword(password);
+      /*
+        SE SALE DEL TRÁMITE ENTERO, no solo de esta pantalla. Debajo quedan
+        las de entrar y de pedir el correo, y con un `replace` seguían ahí:
+        «Atrás» desde Inicio devolvía a un formulario de acceso con la
+        sesión ya iniciada. El aviso sale al llegar: el anfitrión espera a
+        que la pantalla esté quieta (ver `lib/avisoTrasNavegar`).
+      */
+      empezarDeNuevoEn(router, postAuthRoute());
       toast(t('auth.passwordUpdated'));
-      router.replace(postAuthRoute() as never);
     } catch (err) {
       // Mismo criterio que en el envio del correo: el motivo tecnico va a la
       // consola y a la pantalla solo sale algo que se pueda entender y usar.

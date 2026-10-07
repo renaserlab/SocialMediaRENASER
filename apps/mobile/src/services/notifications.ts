@@ -5,6 +5,13 @@ import Constants from 'expo-constants';
 
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
 import { conversacionDelPush } from '@/lib/rutaDelPush';
+import {
+  TONOS,
+  datosDelTono,
+  esUnTono,
+  puedeSonar,
+  type TonoDelChat,
+} from '@/lib/tonosDelChat';
 import { supabase } from '@/services/supabase';
 
 /**
@@ -41,6 +48,16 @@ import { supabase } from '@/services/supabase';
  */
 Notifications.setNotificationHandler({
   handleNotification: async (notificacion) => {
+    // Un tono del chat (`sonarTono`): suena y nada más. Ni tira, ni lista, ni
+    // globo: no es un aviso, es el sonido de haber enviado o recibido.
+    if (esUnTono(notificacion.request.content.data)) {
+      return {
+        shouldShowBanner: false,
+        shouldShowList: false,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      };
+    }
     const aLaVista = seEstaViendoLaConversacion(
       conversacionDelPush(notificacion.request.content.data),
     );
@@ -100,6 +117,7 @@ async function ensureAndroidChannels(): Promise<void> {
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
+  await crearCanalesDeTonos();
   // Los mudos se quitan: en los ajustes del telefono saldrian duplicados, con
   // el mismo nombre, y nadie sabria cual es el que suena.
   for (const viejo of CANALES_RETIRADOS) {
@@ -108,6 +126,74 @@ async function ensureAndroidChannels(): Promise<void> {
     } catch {
       /* Ya no estaba. */
     }
+  }
+}
+
+/**
+ * Los canales de los tonos del chat (`lib/tonosDelChat`).
+ *
+ * En Android el sonido de un aviso es el de SU CANAL, asi que cada tono tiene
+ * el suyo. Aparecen en los ajustes del telefono con su nombre, y eso es una
+ * ventaja: quien no quiera el sonido al enviar lo apaga ahi, sin tocar los
+ * avisos de mensajes.
+ *
+ * Sin vibracion, sin globo y sin nada en la pantalla bloqueada: estos avisos
+ * no se ensenan nunca.
+ */
+async function crearCanalesDeTonos(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  for (const tono of Object.values(TONOS)) {
+    await Notifications.setNotificationChannelAsync(tono.canal, {
+      name: tono.nombre,
+      importance: Notifications.AndroidImportance.DEFAULT,
+      sound: tono.fichero,
+      enableVibrate: false,
+      showBadge: false,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.SECRET,
+    });
+  }
+}
+
+/** Los canales de los tonos, una vez por arranque. `false` si no se pudo. */
+let tonosListos: Promise<boolean> | null = null;
+
+function prepararTonos(): Promise<boolean> {
+  tonosListos ??= crearCanalesDeTonos().then(
+    () => true,
+    () => false,
+  );
+  return tonosListos;
+}
+
+/** Cuando sono cada tono por ultima vez. */
+const ultimoTono: Partial<Record<TonoDelChat, number>> = {};
+
+/**
+ * Hace sonar un tono del chat. No ensena nada.
+ *
+ * Es un aviso local que el manejador de arriba deja solo en sonido. Por que
+ * por aqui y no con un reproductor, en `lib/tonosDelChat`.
+ *
+ * SIN SU CANAL NO SUENA. Si el canal no existe, Android pondria el sonido de
+ * notificacion por defecto del telefono —entero— en cada mensaje enviado. Por
+ * eso primero se asegura el canal y, si no se pudo, se calla.
+ *
+ * Nunca lanza: un tono que no suena no puede estropear un envio.
+ */
+export async function sonarTono(cual: TonoDelChat): Promise<void> {
+  if (Platform.OS === 'web') return;
+  const ahora = Date.now();
+  if (!puedeSonar(ahora, ultimoTono[cual])) return;
+  ultimoTono[cual] = ahora;
+  try {
+    if (!(await prepararTonos())) return;
+    await Notifications.scheduleNotificationAsync({
+      content: { sound: TONOS[cual].fichero, data: datosDelTono(cual) },
+      // null = inmediato. En Android el canal es quien trae el sonido.
+      trigger: Platform.OS === 'android' ? { channelId: TONOS[cual].canal } : null,
+    });
+  } catch {
+    // Sin tono. Lo enviado ya esta en pantalla.
   }
 }
 

@@ -1,7 +1,7 @@
 """Modelos de las transmisiones en vivo.
 
 Mapean public.live_sessions / public.live_messages / public.live_reaction_totals
-de la migracion 0029.
+de la migracion 0029, y public.live_guests de la 0098.
 """
 
 from datetime import datetime
@@ -126,4 +126,42 @@ class LiveReactionTotal(Base):
     total: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LiveGuest(Base):
+    """Una persona invitada a salir con su camara en una emision.
+
+    UNA FILA POR PERSONA Y EMISION, con lo ultimo que paso. Las reglas —quien
+    puede invitar, cuantos caben, que significa cada estado— estan en
+    `escenario.py`; aqui solo esta la forma de la tabla (migracion 0098).
+    """
+
+    __tablename__ = "live_guests"
+
+    session_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("live_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="invited", server_default="invited"
+    )
+    invited_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    invited_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

@@ -66,7 +66,8 @@ export function BottomSheet({
         testimonio, el titulo de una leccion— quedaba tapado en cuanto se tocaba.
         Se resuelve aqui, en la hoja compartida, y no en cada formulario.
       */}
-      <SinTecladoDelante style={styles.modalContainer}>
+      {/* `ventanaPropia`: la hoja es un Modal, otra ventana encima de la pantalla. */}
+      <SinTecladoDelante style={styles.modalContainer} ventanaPropia>
         {/* Overlay backdrop */}
         <Pressable
           style={[styles.backdrop, { backgroundColor: colors.overlay }]}

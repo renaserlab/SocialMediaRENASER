@@ -201,8 +201,9 @@ describe('el chat es una lista virtualizada con ventana', () => {
     assert.match(SERVICIO, /alRecibir: \(\) => alAvisar\(\)/);
   });
 
-  it('el chat y la sala no se quedan con un canal muerto si lo cierra el servidor', () => {
-    assert.equal((SERVICIO.match(/mantenerSuscripcion\(\{/g) ?? []).length, 2);
+  it('el chat, la sala y la audiencia no se quedan con un canal muerto si lo cierra el servidor', () => {
+    // Tres desde el 07/10/2026: se añadió la presencia de quienes miran.
+    assert.equal((SERVICIO.match(/mantenerSuscripcion\(\{/g) ?? []).length, 3);
   });
 
   it('moderar sigue siendo mantener pulsado, solo para quien puede', () => {

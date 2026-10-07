@@ -34,6 +34,7 @@ import {
 import { confirm, notify } from '@/lib/confirm';
 import { aCentavos, aTextoEditable } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
+import { volverA } from '@/navigation/salirDelTramite';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { LearningRepository, type RequisitosDeCurso } from '@/repositories/LearningRepository';
@@ -305,8 +306,14 @@ export function AsistenteDeCursoScreen() {
     try {
       const resultado = await LearningRepository.publish(id);
       if (resultado.published) {
+        /*
+          A CURSOS, que es donde se ve publicado, y no a la ficha. La lista
+          se refresca al recuperar el foco y el catálogo trae primero lo
+          más reciente: el curso aparece arriba. «Atrás» desde ahí ya no
+          devuelve a este asistente.
+        */
+        volverA(router, '/cursos');
         toast(t('course.published'));
-        router.replace(`/course/${id}` as never);
       } else {
         setRequisitos((anterior) =>
           anterior ? { ...anterior, ready: false, missing: resultado.missing } : anterior,

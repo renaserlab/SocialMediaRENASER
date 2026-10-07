@@ -2769,3 +2769,234 @@ servidor desplegado con ese cambio.
 | El prestador tiene la app cerrada; un cliente reserva: le llega «Tienes una reserva nueva» | | | |
 | Tocar ese aviso abre la app en Inicio, y el aviso flotante dice que hay una notificación sin leer | | | |
 | Ningún aviso de estos llega dos veces | | | |
+
+### Vistas de Cursos, Eventos y Servicios (05/10/2026)
+
+Revisadas con datos de prueba en la copia web local; en el teléfono falta
+verlas con datos reales, en claro y en oscuro.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Cursos: un curso sin imagen enseña un recuadro gris con un libro, no un hueco en blanco (rejilla, «Guardados», «Continúa aprendiendo») | | | |
+| Cursos: «Continúa aprendiendo», «Guardados» y «Todo el catálogo» empiezan a la misma altura del borde que las tarjetas | | | |
+| Cursos y Eventos: el filtro elegido se rellena igual en las dos (negro en claro, blanco en oscuro) | | | |
+| Eventos: todas las filas de la lista miden parecido aunque el título sea largo | | | |
+| Ficha de un evento presencial: la modalidad NO lleva el dibujo de una cámara | | | |
+| Servicios: una tarjeta sin foto enseña un recuadro gris con un maletín | | | |
+| En las tres: tocar una tarjeta o un filtro se nota (se encoge un poco) y hace lo mismo que antes | | | |
+| En el inicio (vídeo, fondo negro), el aviso flotante se ve como una caja con borde | | | |
+| Todo lo anterior, también en modo oscuro | | | |
+
+## Chat, notas de voz y recorte de fotos (06/10/2026) — versión 1.2.1
+
+Del documento «Z bugs y problemas de vistas». El desplazamiento del chat está
+comprobado en la copia web local (abrir, recibir, enviar, encoger la pantalla
+y leer el historial). El teclado, los tonos, la nota de voz y la pantalla de
+recorte solo existen en el teléfono: nada de eso se ha visto todavía.
+
+**Hace falta una compilación nueva** (la 1.2.1): los tonos y los colores del
+recorte van dentro del binario.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Abrir una conversación larga: se ve el último mensaje sin deslizar | | | |
+| Con el teclado abierto, enviar un mensaje: se ve encima del redactor, sin deslizar | | | |
+| Con el teclado abierto, recibir un mensaje: se ve, sin deslizar | | | |
+| Abrir el teclado estando abajo: el último mensaje sigue a la vista | | | |
+| Cerrar el teclado con el botón Atrás: el redactor vuelve abajo del todo, sin hueco debajo | | | |
+| Lo mismo en Comentarios y en un formulario largo (usan el mismo arreglo del teclado) | | | |
+| Subir a leer mensajes antiguos y recibir uno: NO salta abajo; aparece un botón redondo con una flecha y un punto | | | |
+| Tocar ese botón: baja al último y el botón desaparece | | | |
+| Subir a leer y ENVIAR un mensaje: baja al último | | | |
+| Llegar arriba del todo sigue cargando mensajes más antiguos, sin saltos | | | |
+| Enviar un mensaje: suena un toque corto cuando sale | | | |
+| Recibir un mensaje con el chat abierto: suenan dos notas suaves | | | |
+| Con el teléfono en silencio o en vibración, ninguno de los dos suena | | | |
+| Con música puesta en otra aplicación, los tonos NO la paran | | | |
+| Varios mensajes seguidos: no suenan pisándose | | | |
+| Los tonos no dejan ningún aviso en la barra de notificaciones ni mueven la campana | | | |
+| Ajustes del teléfono › Z › Notificaciones: aparecen «Sonido al enviar un mensaje» y «Sonido al recibir un mensaje», y apagarlos los calla | | | |
+| Grabar una nota de voz: la barra de la grabación ocupa el sitio del campo de texto, con la papelera a la izquierda | | | |
+| Detener la grabación: papelera a la izquierda, escuchar, duración y enviar a la derecha | | | |
+| Tocar la papelera, grabando y en la previa: la nota se borra y vuelve el campo de texto | | | |
+| Cambiar la foto de perfil, teléfono en modo claro: la barra de arriba es blanca y «atrás», «girar», «voltear» y «CORTAR» se leen en negro | | | |
+| Lo mismo con el teléfono en modo oscuro: barra negra, todo en blanco | | | |
+
+**Lo que este arreglo NO cambia:** la cuadrícula del recorte sigue siendo
+blanca y sobre una foto clara apenas se ve. Esa pantalla es de la biblioteca
+de fotos y no deja cambiar ese color; hacerlo exige una pantalla de recorte
+propia, que necesita añadir un paquete (`expo-image-manipulator`).
+
+## Pantalla gris, teclado, directo, enlaces y portada (07/10/2026)
+
+Del documento «Z bugs y nuevas funcionalidades». No cambia nada del servidor ni
+de la base: basta una compilación nueva de la aplicación. La versión sigue
+siendo la 1.2.1 (no entra ningún componente nativo nuevo).
+
+En la copia web local se ha visto: el directo con su cabecera nueva, el tema
+abajo y el cartel de fin; «Seguir»; la vuelta a Inicio; el enlace dentro de un
+mensaje; el perfil sin el botón largo; y la contraseña, que termina en Inicio
+con el aviso un instante después de llegar. **La pantalla gris, el teclado y
+el número de personas viendo solo se pueden comprobar en teléfono.**
+
+**Anotar en cada fila la versión instalada y el modelo del teléfono.**
+
+### La pantalla gris
+
+No se pudo reproducir fuera del teléfono. Se cambió lo que tenían en común los
+dos casos (el aviso de «hecho» pedido en el mismo instante en que se sustituía
+la pantalla). Si alguna de estas filas vuelve a salir gris, hace falta una
+captura y saber si la aplicación estaba abierta de fondo o cerrada.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Recuperar contraseña con la aplicación ABIERTA de fondo: tras guardar se llega a Inicio, con contenido | | | |
+| Lo mismo con la aplicación CERRADA del todo antes de tocar el enlace del correo | | | |
+| El aviso «Contraseña actualizada» aparece ya en Inicio, no antes | | | |
+| Desde ese Inicio, «Atrás» NO devuelve a la pantalla de entrar ni a la del correo | | | |
+| Crear un curso, completar los pasos y publicarlo: se llega a Cursos, con contenido | | | |
+| El curso recién publicado aparece el primero de «Todo el catálogo» | | | |
+| Desde Cursos, «Atrás» NO devuelve al asistente del curso | | | |
+| Publicar un producto y enviar un servicio a revisión: la pantalla siguiente se ve, y el aviso sale al llegar | | | |
+
+### El teclado
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Directo: tocar el campo y ESCRIBIR varias letras (sale la fila de sugerencias): el campo sigue entero encima del teclado | | | |
+| Directo: abrir el panel de emojis del teclado: el campo sigue a la vista | | | |
+| Comentarios de una publicación: lo mismo, escribiendo varias letras | | | |
+| Crear › Publicación: escribir la descripción; el campo no queda tapado | | | |
+| Cerrar el teclado en cada una: no queda hueco debajo | | | |
+| Un formulario largo (crear producto, postular como prestador): al tocar el último campo, se ve encima del teclado | | | |
+| Una hoja inferior con campos (crear curso, crear evento desde el perfil): el campo se ve al escribir | | | |
+| Entrar con la cuenta y crear cuenta: sin cambios respecto a antes | | | |
+
+### El directo
+
+Hace falta un teléfono que emita y al menos dos que miren.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Arriba a la izquierda: foto y nombre de quien emite | | | |
+| Quien MIRA y no sigue a quien emite ve «Seguir» debajo del nombre; al tocarlo desaparece y queda siguiéndole | | | |
+| Quien EMITE no ve «Seguir» | | | |
+| A la izquierda de «EN VIVO»: un ojo con el número de personas viendo | | | |
+| Con dos teléfonos mirando marca 2; al salir uno, baja a 1 en unos segundos | | | |
+| Quien emite no se cuenta a sí mismo | | | |
+| Se ven cuatro comentarios; los anteriores se alcanzan deslizando | | | |
+| Al llegar un comentario nuevo estando abajo, la lista lo sigue | | | |
+| El título del directo está debajo de los comentarios y encima de las reacciones, en un recuadro claro, sin pegarse a ninguno | | | |
+| Un título largo se corta con puntos suspensivos, sin salirse | | | |
+| Las reacciones (botones y las que suben) se ven enteras, sin recortar | | | |
+| Botón de compartir, a la derecha, para quien emite y para quien mira: abre el menú de compartir con un enlace | | | |
+| Abrir ese enlace en otro teléfono lleva a ESE directo | | | |
+| Quien emite: «Terminar» es rojo, con un cuadrado; pide confirmación | | | |
+| Efectos: aparecen «Pantalla verde», «Atardecer» y «Montañas», y se aplican detrás de la persona | | | |
+| Al terminar, quien miraba ve «El directo ha terminado» y una cuenta atrás; a los 8 s vuelve a Inicio | | | |
+| «Quedarme a leer el chat» para la cuenta atrás y deja leer | | | |
+| «Ir a Inicio» lleva a Inicio; «Atrás» desde ahí no vuelve a la sala | | | |
+| Abrir una emisión que ya había terminado: se ve el cartel, SIN cuenta atrás | | | |
+| Quien emitía ve el cartel sin cuenta atrás | | | |
+| Tras una emisión con público, la ficha guarda el máximo de espectadores | | | |
+
+### Mensajes, eventos y perfil
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Enviar por chat el enlace de un Meet: sale celeste y subrayado, en la burbuja propia y en la ajena | | | |
+| Tocarlo abre la reunión | | | |
+| El punto o la coma que va detrás del enlace no forma parte de él | | | |
+| Un correo (`nombre@gmail.com`) no sale subrayado | | | |
+| Pegar en un chat el enlace de un directo de Z: al tocarlo se abre DENTRO de la aplicación | | | |
+| Mantener pulsado un mensaje propio sigue abriendo sus acciones | | | |
+| Eventos › Crear evento: arriba hay un recuadro «Portada o flyer del evento»; al tocarlo se elige la imagen | | | |
+| Con portada puesta, se ve entera y un botón «Cambiar portada» sobre ella | | | |
+| Perfil propio y ajeno: ya no está el botón largo «Publicaciones N»; la cuadrícula empieza justo debajo de los accesos | | | |
+
+**Lo que NO entra en esta entrega** y necesita servidor, una migración o una
+decisión: fijar mensajes en el directo, el texto animado de quien emite, la
+descarga del directo, los clips con IA, la agenda de disponibilidad y la moneda
+de los cursos.
+
+## La barra de Crear (07/10/2026, tarde)
+
+Del documento «Cambio de vista Z». En Crear, los cuatro tipos de publicación
+(Publicación · Historia · Reel · Vivo) pasan a una barra abajo del todo, y la
+barra de navegación se retira **solo ahí**. Nada de esto cambia el servidor ni
+la versión (sigue 1.2.1): hace falta compilar de nuevo para verlo.
+
+En la copia web se comprobó la barra en claro y en oscuro, que cae a la misma
+altura en los cuatro tipos, la salida con la `X` y que sin cuenta la barra de
+navegación se queda. **La cámara no existe en la web**: todo lo de la cámara de
+abajo solo se ve en un teléfono.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Al entrar en Crear desaparece la barra de navegación y en su sitio hay una barra con Publicación · Historia · Reel · Vivo | | | |
+| Se leen las cuatro palabras enteras, ninguna cortada | | | |
+| Con el tema claro: barra blanca y letra negra. Con el oscuro: barra oscura y letra blanca | | | |
+| El tipo elegido va en negativo (píldora negra con letra blanca en claro; al revés en oscuro) | | | |
+| La barra es más ancha y más alta que la de navegación: no se confunden | | | |
+| Tocar cada palabra cambia de tipo; la barra NO se mueve de sitio al cambiar | | | |
+| Deslizar de lado sobre la pantalla también cambia de tipo, y no de sección | | | |
+| Cámara: de abajo arriba se ven la barra, la pista de ayuda, y la fila de carrete · disparador · girar. Nada se pisa | | | |
+| La pista («Toca para una foto · Mantén para grabar · Desliza para acercar») se lee sobre un fondo oscuro, entera, sin salirse por los lados; también apuntando a algo claro | | | |
+| El disparador hace foto al tocar y graba al mantener, como antes; el dedo no toca la barra | | | |
+| Grabando y deslizando para acercar: el «2.4x» sale encima del disparador, sin tapar nada | | | |
+| Carrete: la barra sigue abajo; bajando hasta el final, las últimas fotos quedan por encima de ella y se pueden tocar | | | |
+| Carrete en Publicación: «Escribir sin foto» se lee sobre cualquier foto (lleva fondo) | | | |
+| Tras elegir una foto o un vídeo ya no hay barra: el botón de publicar queda abajo, a la vista, y se puede pulsar | | | |
+| La flecha de volver de ese paso devuelve a la cámara, con la barra otra vez en su sitio | | | |
+| Vivo: hay una `X` arriba a la izquierda y lleva a Inicio | | | |
+| Sin permiso de cámara: el aviso tiene `X`, y la barra sigue abajo | | | |
+| La `X` de la cámara lleva a Inicio y allí vuelve a estar la barra de navegación | | | |
+| «Atrás» de Android en Crear vuelve a la sección anterior, con su barra de navegación | | | |
+| Inicio, Explorar, Mensajes y Perfil: la barra de navegación sigue como siempre | | | |
+| Llegar a Crear DESLIZANDO desde Explorar o Mensajes: durante el arrastre solo se ve la barra de navegación; al soltar, la de Crear | | | |
+| Sin cuenta, la pestaña Crear enseña la invitación a registrarse y la barra de navegación NO desaparece | | | |
+| Teléfono con botones de Android abajo (no gestos): la barra queda por encima de ellos | | | |
+
+## Invitados en el directo (07/10/2026)
+
+Quien emite invita a otras personas, que salen con su cámara, y la pantalla se
+reparte. La migración 0098 ya está aplicada (07/10/2026); falta **el servidor
+desplegado y una compilación nueva**. En la copia web se vio el botón de invitar, la hoja con el
+buscador, el aviso al invitado y que aceptar y bajarse llegan al servidor.
+**El vídeo no existe en la web**: la pantalla repartida, el sonido y el retraso
+solo se ven con teléfonos.
+
+Hacen falta tres: uno emite (A), uno es invitado (B) y uno mira (C). **A y B en
+habitaciones distintas o con audífonos**: juntos se acoplan y pitan, y eso no
+es un fallo de la aplicación.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A, emitiendo: a la derecha, debajo de compartir, hay un botón con una persona y un «+» | | | |
+| Al tocarlo se abre «Invitar al directo» y dice «Caben 3 personas más» | | | |
+| Buscando el nombre de B, sale; A no sale en su propia búsqueda | | | |
+| «Invitar» deja a B en la lista con «Invitación enviada» y baja el contador a 2 | | | |
+| B, mirando el directo: le sale «A te invita a salir en su directo», con «Ahora no» y «Aceptar y salir» | | | |
+| B, con la aplicación cerrada: le llega la notificación «Te invitan a un directo»; al tocarla se abre la sala con la invitación | | | |
+| B toca «Ahora no»: la tarjeta desaparece; en la lista de A pasa a «No aceptó» y el sitio vuelve a estar libre | | | |
+| A lo invita otra vez y B acepta: se le piden los permisos de cámara y micrófono (la primera vez) y sale en pantalla | | | |
+| Mientras B entra solo B ve un corte de uno o dos segundos; a A y a C no se les corta nada | | | |
+| C ve la pantalla partida en dos, lado a lado, con A a la izquierda; cada recuadro lleva el nombre | | | |
+| A, B y C ven a las personas colocadas en el mismo orden | | | |
+| Las caras se ven enteras en los recuadros (no cortadas por arriba) | | | |
+| C oye a A y a B a la vez, sin eco y sin que uno vaya claramente por detrás del otro | | | |
+| A y B pueden conversar con naturalidad: el retraso es el de una videollamada | | | |
+| El chat, las reacciones y el título se ven debajo de la rejilla, sin taparle la cara a nadie | | | |
+| B tiene sus botones de cámara, micrófono, girar y efectos; y arriba a la derecha, «Bajarme» | | | |
+| B apaga la cámara: su recuadro se queda, con sus iniciales; al encenderla vuelve la imagen | | | |
+| B toca «Bajarme»: su cámara se apaga en el acto, la pantalla vuelve a ser solo A y B sigue mirando | | | |
+| A, en la lista, toca «Quitar» sobre B: B deja de salir, le aparece «Quien emite te ha quitado de la pantalla» y sigue mirando | | | |
+| B, estando arriba, sale de la sala con «atrás»: deja de salir para todos y su sitio queda libre | | | |
+| B aceptó, cerró la aplicación a la fuerza y vuelve a entrar al directo: entra MIRANDO, sin que se le encienda la cámara | | | |
+| Con dos invitados (tres en pantalla): A a la izquierda a lo alto y los otros dos a la derecha, uno encima de otro | | | |
+| Con tres invitados (cuatro en pantalla): cuadrícula de 2×2; el teléfono de C no se calienta ni va a tirones | | | |
+| Con tres invitados, el contador dice que no caben más y «Invitar» está apagado | | | |
+| A termina el directo: B y C ven el cartel de fin; la cámara de B se apaga | | | |
+| C (que solo mira) no ve en ningún momento el botón de invitar ni la lista de invitados | | | |
+| Una persona sin cuenta que mira: no ve nada de esto y el directo le funciona igual | | | |
+| Un directo sin invitados se ve y se oye exactamente como antes | | | |

@@ -18,6 +18,7 @@ import {
   aforoCompleto,
   aforoDelEvento,
   fechaLargaDelEvento,
+  iconoDeLaModalidad,
   modalidadDelEvento,
   sePuedeReservar,
 } from './eventoEnDetalle.ts';
@@ -258,5 +259,32 @@ describe('los tres idiomas dicen todo lo que la ficha pregunta', () => {
         );
       }
     }
+  });
+});
+
+describe('el icono de la modalidad', () => {
+  /*
+    La ficha pintaba una cámara para las tres modalidades: un evento en un
+    auditorio se anunciaba con el dibujo de una videollamada.
+  */
+  it('cada modalidad lleva el suyo, y lo presencial no es una cámara', () => {
+    assert.equal(iconoDeLaModalidad({ type: 'presencial' }), 'map');
+    assert.equal(iconoDeLaModalidad({ type: 'live' }), 'radio');
+    assert.equal(iconoDeLaModalidad({ type: 'webinar' }), 'monitor');
+    const iconos = ['presencial', 'live', 'webinar'].map((type) => iconoDeLaModalidad({ type }));
+    assert.equal(new Set(iconos).size, 3, 'dos modalidades comparten dibujo');
+  });
+
+  it('lo que el modelo no conoce no se disfraza de ninguna', () => {
+    assert.equal(iconoDeLaModalidad({}), 'help-circle');
+    assert.equal(iconoDeLaModalidad({ type: 'otra-cosa' }), 'help-circle');
+  });
+
+  it('y la ficha lo usa', () => {
+    assert.ok(
+      fuente('screens/EventoScreen.tsx').includes(
+        '<Dato icono={iconoDeLaModalidad(evento)} texto={t(modalidadDelEvento(evento))} />',
+      ),
+    );
   });
 });

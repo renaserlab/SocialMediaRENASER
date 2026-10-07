@@ -56,6 +56,9 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
     # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
     "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
+    # Quien emite te invita a salir con tu cámara (`live/escenario.py`). Dice
+    # QUÉ te piden: aceptar es salir en pantalla, y eso se decide dentro.
+    "live_invited": ("Te invitan a un directo", "{actor} te invita a participar en su directo."),
     "session_booked": ("Nueva solicitud de sesión", "{actor} quiere agendar contigo."),
     # Cada respuesta lleva su propio texto. Con un unico tipo para todo, a
     # quien le rechazaban una sesion le llegaba «reservó una sesión contigo».
@@ -104,6 +107,7 @@ CHANNELS: dict[str, str] = {
     # Con los seguidores y los «me gusta»: es alguien a quien sigues haciendo
     # algo, no una gestion tuya.
     "live_started": "interacciones",
+    "live_invited": "interacciones",
     "session_booked": "contenido",
     "session_accepted": "contenido",
     "session_rejected": "contenido",

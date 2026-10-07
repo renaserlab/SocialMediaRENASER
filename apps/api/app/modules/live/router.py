@@ -39,20 +39,25 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.live import avisos, limites, providers, roles, webhooks
+from app.modules.live import avisos, escenario, limites, providers, roles, webhooks
 from app.modules.live.models import LiveMessage, LiveReactionTotal, LiveSession
 from app.modules.live.schemas import (
     REACCIONES,
     LiveAvailability,
     LiveCredential,
+    LiveCredentialRequest,
+    LiveGuestInvite,
+    LiveGuestRead,
     LiveMessageCreate,
     LiveMessageRead,
     LiveSessionCreate,
     LiveSessionRead,
     LiveSessionUpdate,
+    LiveStageRead,
     ReactionFlush,
     ReactionTotals,
 )
+from app.modules.notifications.models import Notification
 from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.profiles.models import Profile
 from app.modules.recommendations import esquema
@@ -953,11 +958,289 @@ async def sumar_reacciones(
 
 
 # --------------------------------------------------------------------------- #
+# El escenario: a quien se invita a salir con su camara
+# --------------------------------------------------------------------------- #
+#
+# LO DECIDE ESTE SERVIDOR. Quien gestiona la emision invita; la persona acepta;
+# y solo entonces `credencial` le da un permiso que deja publicar. Las reglas
+# estan en `escenario.py`; aqui se comprueba QUIEN pregunta y se avisa.
+#
+# COMO SE ENTERAN LOS TELEFONOS. Estas rutas no empujan nada: quien invita o
+# contesta manda despues una difusion por tiempo real («el escenario cambio»), y
+# cada aplicacion vuelve a preguntar aqui. La difusion no lleva ningun permiso
+# —cualquiera puede mandar una falsa—, y por eso lo unico que consigue es que se
+# pregunte: la respuesta siempre sale de la tabla.
+
+#: El aviso que le llega a quien se invita. Ver `notifications/push.py`.
+TIPO_DE_INVITACION = "live_invited"
+
+
+async def _exigir_escenario(db: AsyncSession) -> None:
+    """Sin la migracion 0098 no hay donde apuntar a quien se invita.
+
+    503 y no 500, igual que `_exigir_esquema`: no se ha roto nada, es que esta
+    parte todavia no esta montada. La aplicacion lo lee como «aqui no se puede
+    invitar» y no ensena el boton.
+    """
+    await _exigir_esquema(db)
+    if not await esquema.hay_invitados_de_directo(db):
+        raise ServiceUnavailableError(
+            "Invitar a una transmisión todavía no está disponible.",
+            code="live_guests_not_available",
+        )
+
+
+async def _leer_escenario(
+    db: AsyncSession, sesion: LiveSession, uid: str, settings: Settings
+) -> LiveStageRead:
+    """El escenario, visto por `uid`. Dos consultas, haya los invitados que haya."""
+    gestiona = await _puede_gestionar(db, uid, sesion)
+    todas = await escenario.filas(db, sesion.id)
+    mia = next((f.status for f in todas if f.user_id == uid), None)
+
+    # Quien gestiona ve a quien invito y que le contestaron. El resto, solo a
+    # quien esta en pantalla. Quien se fue o fue retirado no sale en ninguna:
+    # ya no ocupa sitio y se le puede volver a invitar buscandolo.
+    a_la_vista = (
+        (escenario.INVITADA, escenario.ACEPTADA, escenario.RECHAZADA)
+        if gestiona
+        else (escenario.ACEPTADA,)
+    )
+    visibles = [f for f in todas if f.status in a_la_vista]
+    perfiles: dict[str, Profile] = {}
+    if visibles:
+        perfiles = {
+            p.id: p
+            for p in (
+                await db.scalars(
+                    select(Profile).where(Profile.id.in_([f.user_id for f in visibles]))
+                )
+            ).all()
+        }
+
+    maximo = max(0, settings.live_max_guests)
+    return LiveStageRead(
+        max_guests=maximo,
+        can_invite=gestiona and maximo > 0 and sesion.status == "live",
+        guests=[
+            LiveGuestRead(
+                user_id=f.user_id,
+                name=perfiles[f.user_id].full_name if f.user_id in perfiles else "",
+                username=perfiles[f.user_id].username if f.user_id in perfiles else None,
+                avatar_path=perfiles[f.user_id].avatar_path if f.user_id in perfiles else None,
+                status=f.status,
+                invited_at=f.invited_at,
+            )
+            for f in visibles
+        ],
+        me=mia,
+    )
+
+
+async def _bajar_en_el_proveedor(sesion_id: str, proveedor_nombre: str, room_id: str, user_id: str) -> None:
+    """Le quita el permiso de publicar a una conexion que ya estaba dentro.
+
+    VA DESPUES DE RESPONDER y nunca lanza: que el proveedor no conteste no
+    puede impedir que alguien se baje ni que se le retire. Lo que queda escrito
+    en la tabla ya impide que vuelva a entrar como invitado.
+    """
+    proveedor = providers.obtener_proveedor(proveedor_nombre)
+    if proveedor is None:
+        return
+    try:
+        cambiadas = await proveedor.bajar_del_escenario(
+            room_id=room_id,
+            user_id=user_id,
+            de_rol=roles.nombre_en_el_proveedor(roles.RolDeZ.INVITADO),
+            a_rol=roles.nombre_en_el_proveedor(roles.RolDeZ.ESPECTADOR),
+        )
+        logger.info(
+            "[live] bajada del escenario sesion=%s usuario=%s conexiones=%s",
+            sesion_id,
+            user_id,
+            cambiadas,
+        )
+    except Exception:  # noqa: BLE001 - bajarse nunca depende del proveedor
+        logger.exception(
+            "[live] no se pudo bajar en el proveedor sesion=%s usuario=%s",
+            sesion_id,
+            user_id,
+        )
+
+
+def _encolar_bajada(background: BackgroundTasks, sesion: LiveSession, user_id: str) -> None:
+    if sesion.provider_room_id and providers.hay_proveedor_real():
+        background.add_task(
+            _bajar_en_el_proveedor, sesion.id, sesion.provider, sesion.provider_room_id, user_id
+        )
+
+
+@router.get("/sessions/{session_id}/guests", response_model=LiveStageRead)
+async def ver_escenario(
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> LiveStageRead:
+    """A quien se ha invitado y que me pasa a mi en esta emision."""
+    await _exigir_escenario(db)
+    sesion = await _sesion_visible(db, session_id, current_user.id)
+    return await _leer_escenario(db, sesion, current_user.id, settings)
+
+
+@router.post("/sessions/{session_id}/guests", response_model=LiveStageRead)
+async def invitar_al_escenario(
+    session_id: str,
+    payload: LiveGuestInvite,
+    background: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> LiveStageRead:
+    """Invitar a una persona a salir con su camara. Solo quien gestiona."""
+    await _exigir_escenario(db)
+    sesion = await _sesion_visible(db, session_id, current_user.id)
+    if not await _puede_gestionar(db, current_user.id, sesion):
+        raise ForbiddenError("Solo quien emite puede invitar.")
+
+    maximo = max(0, settings.live_max_guests)
+    if maximo <= 0:
+        raise ServiceUnavailableError(
+            "Invitar a una transmisión todavía no está disponible.",
+            code="live_guests_not_available",
+        )
+    if not limites.invitaciones.permitido(f"{current_user.id}|{sesion.id}"):
+        raise ConflictError(
+            "Demasiadas invitaciones seguidas. Espera un momento.",
+            code="live_guests_rate_limited",
+        )
+
+    invitado_id = payload.user_id
+    ensure_uuid(invitado_id, "Persona no encontrada.")
+    invitado = await db.get(Profile, invitado_id)
+    # UN BLOQUEO SE CONTESTA COMO «NO EXISTE». Decir «te ha bloqueado» seria
+    # contarle a quien emite algo que la otra persona eligio no decirle.
+    if invitado is None or invitado_id in await _bloqueados(db, sesion.host_id):
+        raise NotFoundError("Persona no encontrada.")
+
+    _fila, es_nueva = await escenario.invitar(
+        db, sesion=sesion, por=current_user.id, user_id=invitado_id, maximo=maximo
+    )
+    await db.commit()
+    respuesta = await _leer_escenario(db, sesion, current_user.id, settings)
+
+    if es_nueva:
+        # EL AVISO NUNCA TUMBA LA INVITACION: ya esta guardada y respondida.
+        try:
+            db.add(
+                Notification(
+                    user_id=invitado_id,
+                    actor_id=sesion.host_id,
+                    type=TIPO_DE_INVITACION,
+                    entity_type="live",
+                    entity_id=sesion.id,
+                    payload={"title": (sesion.title or "")[:120]},
+                )
+            )
+            await db.commit()
+            anfitrion = await db.get(Profile, sesion.host_id)
+            encolar_push(
+                background,
+                user_ids=[invitado_id],
+                notification_type=TIPO_DE_INVITACION,
+                actor_name=(
+                    nombre_visible(anfitrion.full_name, anfitrion.username)
+                    if anfitrion
+                    else None
+                ),
+                data={"type": TIPO_DE_INVITACION, "liveId": sesion.id},
+            )
+        except Exception:  # noqa: BLE001 - ver arriba
+            logger.exception("[live] no se pudo avisar de la invitacion a %s", sesion.id)
+            await db.rollback()
+    return respuesta
+
+
+@router.delete("/sessions/{session_id}/guests/{user_id}", response_model=LiveStageRead)
+async def retirar_del_escenario(
+    session_id: str,
+    user_id: str,
+    background: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> LiveStageRead:
+    """Quitar a alguien: de la pantalla, o retirarle una invitacion sin contestar."""
+    await _exigir_escenario(db)
+    sesion = await _sesion_visible(db, session_id, current_user.id)
+    if not await _puede_gestionar(db, current_user.id, sesion):
+        raise ForbiddenError("Solo quien emite puede quitar a un invitado.")
+    ensure_uuid(user_id, "Persona no encontrada.")
+
+    estaba_arriba = await escenario.quitar(db, sesion=sesion, user_id=user_id)
+    await db.commit()
+    if estaba_arriba:
+        _encolar_bajada(background, sesion, user_id)
+    return await _leer_escenario(db, sesion, current_user.id, settings)
+
+
+async def _responder_invitacion(
+    session_id: str, acepta: bool, uid: str, settings: Settings, db: AsyncSession
+) -> LiveStageRead:
+    await _exigir_escenario(db)
+    sesion = await _sesion_visible(db, session_id, uid)
+    await _caducar_si_toca(db, sesion)
+    await escenario.responder(db, sesion=sesion, user_id=uid, acepta=acepta)
+    await db.commit()
+    return await _leer_escenario(db, sesion, uid, settings)
+
+
+@router.post("/sessions/{session_id}/guests/me/accept", response_model=LiveStageRead)
+async def aceptar_invitacion(
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> LiveStageRead:
+    """Acepto salir. A partir de aqui `credencial` me deja publicar."""
+    return await _responder_invitacion(session_id, True, current_user.id, settings, db)
+
+
+@router.post("/sessions/{session_id}/guests/me/decline", response_model=LiveStageRead)
+async def rechazar_invitacion(
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> LiveStageRead:
+    """Ahora no. Deja libre el sitio para otra persona."""
+    return await _responder_invitacion(session_id, False, current_user.id, settings, db)
+
+
+@router.post("/sessions/{session_id}/guests/me/leave", response_model=LiveStageRead)
+async def dejar_el_escenario(
+    session_id: str,
+    background: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> LiveStageRead:
+    """Me bajo. Siempre se puede, tambien con la emision ya terminada."""
+    await _exigir_escenario(db)
+    sesion = await _sesion_visible(db, session_id, current_user.id)
+    if await escenario.dejar(db, sesion=sesion, user_id=current_user.id):
+        await db.commit()
+        _encolar_bajada(background, sesion, current_user.id)
+    return await _leer_escenario(db, sesion, current_user.id, settings)
+
+
+# --------------------------------------------------------------------------- #
 # El proveedor
 # --------------------------------------------------------------------------- #
 @router.post("/sessions/{session_id}/credential", response_model=LiveCredential)
 async def credencial(
     session_id: str,
+    peticion: LiveCredentialRequest | None = None,
     current_user: AuthUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
@@ -969,9 +1252,13 @@ async def credencial(
     pudiera, el permiso de EMITIR depende de quien pregunta, y eso solo lo sabe
     con certeza quien verifico el token de sesion.
 
-    Quien emite recibe permiso de publicacion; todos los demas, de visionado.
-    Deducirlo en el cliente seria dejar que cualquier espectador se pusiera a
-    emitir en la sala de otra persona.
+    Quien emite recibe permiso de publicacion, y tambien quien ha aceptado una
+    invitacion suya; todos los demas, de visionado. Deducirlo en el cliente
+    seria dejar que cualquier espectador se pusiera a emitir en la sala de otra
+    persona.
+
+    Lo unico que el cliente puede pedir es MENOS: entrar a mirar aunque pudiera
+    publicar (`LiveCredentialRequest`).
     """
     await _exigir_esquema(db)
 
@@ -1034,11 +1321,25 @@ async def credencial(
     # que decirlo: hoy no existe un permiso de moderacion de directos separado
     # del rol general. El dia que lo haya, se cambia el argumento de aqui y
     # `roles.resolver` no se entera.
+    #
+    # QUIEN HA ACEPTADO UNA INVITACION ENTRA COMO INVITADO. Sin la migracion
+    # 0098 no hay lista y nadie lo es: la credencial sale como antes de que
+    # existieran los invitados.
+    invitados = (
+        await escenario.en_pantalla(db, sesion.id)
+        if await esquema.hay_invitados_de_directo(db)
+        else set()
+    )
     rol = roles.resolver(
         user_id=current_user.id,
         host_id=sesion.host_id,
         es_admin=await is_admin(db, current_user.id),
+        invitados=invitados,
     )
+    # RENUNCIAR SI SE PUEDE. Quien pide entrar solo a mirar recibe un permiso de
+    # publico aunque pudiera publicar: el token que se firma ya no le deja.
+    if peticion is not None and not peticion.publish:
+        rol = roles.RolDeZ.ESPECTADOR
     try:
         credencial = await proveedor.credencial(
             room_id=sesion.provider_room_id,

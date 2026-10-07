@@ -130,11 +130,19 @@ export function BotonDeNotaDeVoz({
   return (
     <>
       {/*
-        LA BARRA DE ESTADO, encima del redactor y ocupando su ancho.
+        LA BARRA DE ESTADO, DENTRO del redactor: ocupa el sitio del campo de
+        texto mientras hay una nota en marcha.
 
         Sin un indicador claro, una grabación en curso es indistinguible de un
         botón atascado. Y en la previa es donde se escucha, se tira y se lee por
         qué no salió: todo lo que hay que decidir, en el mismo sitio.
+
+        ANTES FLOTABA ENCIMA DEL REDACTOR, fuera de su recuadro y sobre los
+        mensajes, con la papelera al final. Reportado el 06/10/2026: «cuando un
+        audio está grabado debe haber un icono de borrar el audio antes de
+        enviarlo». Lo había, pero donde no se buscaba. Ahora va en la fila, y
+        la PAPELERA ES LO PRIMERO, a la izquierda: tirar a un lado, enviar al
+        otro, como en cualquier chat.
       */}
       {fase === 'grabando' ? (
         <View
@@ -146,6 +154,16 @@ export function BotonDeNotaDeVoz({
             { backgroundColor: colors.surface, borderColor: colors.danger },
           ]}
         >
+          <Pulsable
+            onPress={cancelar}
+            accessibilityRole="button"
+            accessibilityLabel={t('chat.discardRecording')}
+            hitSlop={10}
+            escala={ESCALA_AL_PULSAR.icono}
+            style={[styles.accion, styles.circulo, { borderColor: colors.border }]}
+          >
+            <Feather name="trash-2" size={16} color={colors.danger} />
+          </Pulsable>
           <PuntoQueLate color={colors.danger} />
           <Text style={[styles.grabando, { color: colors.danger }]}>
             {t('chat.recording')}
@@ -164,17 +182,6 @@ export function BotonDeNotaDeVoz({
           */}
           <OndaDeVoz nivel={nivel} latido={segundos} color={colors.text} />
 
-          <Pulsable
-            onPress={cancelar}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.discardRecording')}
-            hitSlop={10}
-            escala={ESCALA_AL_PULSAR.icono}
-            style={[styles.accion, styles.circulo, { borderColor: colors.border }]}
-          >
-            <Feather name="trash-2" size={16} color={colors.danger} />
-          </Pulsable>
-
           {/* Cuánto queda hasta el tope. Aparece cuando de verdad importa. */}
           {avance > 0.75 ? (
             <View style={[styles.barra, { backgroundColor: colors.border }]}>
@@ -191,6 +198,16 @@ export function BotonDeNotaDeVoz({
 
       {enPrevia ? (
         <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Pulsable
+            onPress={eliminar}
+            accessibilityRole="button"
+            accessibilityLabel={t('chat.deleteRecording')}
+            hitSlop={10}
+            escala={ESCALA_AL_PULSAR.icono}
+            style={[styles.accion, styles.circulo, { borderColor: colors.border }]}
+          >
+            <Feather name="trash-2" size={16} color={colors.danger} />
+          </Pulsable>
           {sonando && uri ? (
             <NotaSonando uri={uri} duracion={segundos} color={colors.text} alTerminar={() => setSonando(false)} />
           ) : (
@@ -220,18 +237,10 @@ export function BotonDeNotaDeVoz({
           >
             {fase === 'fallida' ? t('chat.recordingFailed') : t('chat.recordingReady')}
           </Text>
-
-          <Pulsable
-            onPress={eliminar}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.deleteRecording')}
-            hitSlop={10}
-            style={styles.accion}
-          >
-            <Feather name="trash-2" size={18} color={colors.danger} />
-          </Pulsable>
         </View>
       ) : null}
+
+      {preparando ? <View style={styles.hueco} /> : null}
 
       {fase === 'enviando' ? (
         <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -463,12 +472,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // EN LA FILA del redactor, no flotando sobre los mensajes: ocupa lo que
+  // ocupaba el campo de texto. `overflow` por la barra de avance, que va
+  // pegada al borde redondeado.
   aviso: {
-    position: 'absolute',
-    left: spacing.md,
-    right: spacing.md,
-    bottom: '100%',
-    marginBottom: spacing.sm,
+    flex: 1,
+    minHeight: 44,
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -480,6 +490,7 @@ const styles = StyleSheet.create({
   // Mas alta y con mas aire que las otras barras: es la que tiene que verse.
   avisoGrabando: { paddingVertical: spacing.sm + 2, borderWidth: 1.5 },
   grabando: { fontSize: 12, fontWeight: '800' },
+  hueco: { flex: 1 },
   circulo: {
     width: 32,
     height: 32,

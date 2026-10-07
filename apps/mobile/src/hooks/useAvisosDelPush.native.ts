@@ -17,6 +17,7 @@ import {
   rutaDelPush,
 } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
+import { esUnTono } from '@/lib/tonosDelChat';
 import { hayMensajeNuevoEn } from '@/services/contadores';
 
 /**
@@ -51,6 +52,10 @@ export function useAvisosDelPush(): void {
   useEffect(() => {
     const oyente = Notifications.addNotificationReceivedListener((notificacion) => {
       const { title, body, data } = notificacion.request.content;
+
+      // El tono de un mensaje enviado o recibido viaja como aviso local
+      // (`sonarTono`). No anuncia nada: ni se pinta ni mueve contadores.
+      if (esUnTono(data)) return;
 
       const conversacion = conversacionDelPush(data);
       // El chat de esa conversación, si está abierto, pregunta lo que le falta:

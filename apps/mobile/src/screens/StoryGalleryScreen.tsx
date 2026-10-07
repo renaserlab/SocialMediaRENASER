@@ -11,6 +11,7 @@ import { Text } from '@/components/Text';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { pickImage, type PickedMedia } from '@/services/storage';
 import { notify } from '@/lib/confirm';
+import { ALTO_SELECTOR } from '@/lib/controlesDeCamara';
 import { describeError } from '@/lib/describeError';
 import { MAX_HISTORIA_MS } from '@/lib/historias';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -33,6 +34,9 @@ const TILE = (Dimensions.get('window').width - GAP * (COLUMNS - 1)) / COLUMNS;
 /** Cuantos elementos se piden de golpe. */
 const PAGE = 60;
 
+/** Alto del enlace secundario del pie («Escribir sin foto»): un toque comodo. */
+const ALTO_ALTERNATIVA = 44;
+
 type Props = {
   onSelect: (media: PickedMedia) => void;
   onClose: () => void;
@@ -44,8 +48,8 @@ type Props = {
    */
   soloVideo?: boolean;
   /**
-   * Selector de modo de Crear. Se pinta sobre la cuadricula, encima de la barra
-   * de secciones: es donde se espera poder cambiar de tipo de publicacion sin
+   * La barra de tipos de publicacion de Crear. Se pinta sobre la cuadricula,
+   * abajo del todo: es donde se espera poder cambiar de tipo de publicacion sin
    * salir antes del carrete.
    */
   pie?: React.ReactNode;
@@ -89,12 +93,22 @@ export function StoryGalleryScreen({
 }: Props) {
   const { t } = useTranslation();
   /*
-    Cuanto ocupa la barra flotante EN ESTE aparato. Antes estaba escrito en la
-    hoja de estilos como `espacioParaLaBarra(0)`, o sea, midiendo la capsula sin
-    la zona segura: 26 px de menos en cualquier telefono con indicador de
-    inicio, justo los que dejaban el pie asomando por detras de la barra.
+    Lo que hay que dejar libre abajo EN ESTE aparato, contando su zona segura.
+    Antes estaba escrito en la hoja de estilos como un numero fijo, sin la zona
+    segura: 26 px de menos en cualquier telefono con indicador de inicio.
   */
   const espacioInferior = useEspacioInferior();
+  /*
+    Lo que tapa el pie, para que la cuadricula termine por ENCIMA de el.
+
+    La barra de tipos de publicacion tiene fondo propio: sin este margen las
+    ultimas fotos del carrete quedarian debajo y no habria forma de subirlas
+    para elegirlas.
+  */
+  const altoDelPie =
+    (pie ? ALTO_SELECTOR : 0) + (alternativa ? ALTO_ALTERNATIVA + spacing.sm : 0);
+  const finDeLaCuadricula =
+    altoDelPie > 0 ? espacioInferior + altoDelPie + spacing.sm : espacioInferior;
   const [permission, setPermission] = useState<MediaLibrary.PermissionResponse | null>(null);
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -177,17 +191,34 @@ export function StoryGalleryScreen({
     });
   };
 
+  /*
+    La barra de tipos de publicacion, sola, para los dos estados sin cuadricula.
+
+    Mientras el carrete carga y cuando falta el permiso no se pintaba. Con la
+    barra de secciones debajo no se notaba; sin ella, al abrir el carrete el
+    borde de abajo se quedaba vacio un momento y la barra reaparecia despues.
+  */
+  const barraSola = pie ? (
+    <View style={[styles.pie, { bottom: espacioInferior }]} pointerEvents="box-none">
+      {pie}
+    </View>
+  ) : null;
+
   if (loading) {
     return (
-      <View style={[styles.root, styles.center]}>
-        <ActivityIndicator color={media.text} />
+      <View style={styles.root}>
+        <View style={[styles.center, styles.lleno]}>
+          <ActivityIndicator color={media.text} />
+        </View>
+        {barraSola}
       </View>
     );
   }
 
   if (permission && !permission.granted) {
     return (
-      <View style={[styles.root, styles.center]}>
+      <View style={styles.root}>
+      <View style={[styles.center, styles.lleno]}>
         <Feather name="image" size={34} color={media.textMuted} />
         <Text variant="body" weight="700" color={media.text} style={styles.deniedTitle}>
           {t('media.noPhotoAccess')}
@@ -235,6 +266,8 @@ export function StoryGalleryScreen({
           </Text>
         </Pressable>
       </View>
+      {barraSola}
+      </View>
     );
   }
 
@@ -271,7 +304,7 @@ export function StoryGalleryScreen({
       ) : null}
 
       {assets.length === 0 ? (
-        <View style={[styles.center, { flex: 1 }]}>
+        <View style={[styles.center, styles.lleno]}>
           <Text variant="secondary" color={media.textMuted}>
             {t('media.noMediaOnDevice')}
           </Text>
@@ -285,6 +318,7 @@ export function StoryGalleryScreen({
             if (hasMore && cursor) void load(cursor);
           }}
           onEndReachedThreshold={0.6}
+          contentContainerStyle={{ paddingBottom: finDeLaCuadricula }}
           renderItem={({ item }) => {
             const esVideo = item.mediaType === 'video';
             const largo = esVideo && item.duration * 1000 > MAX_STORY_MS;
@@ -330,9 +364,8 @@ export function StoryGalleryScreen({
       )}
 
       {/*
-        El pie va por ENCIMA de la cuadricula y apartado de la barra de
-        secciones, no dentro del desplazamiento: tiene que seguir ahi despues de
-        bajar cien fotos.
+        El pie va por ENCIMA de la cuadricula y no dentro del desplazamiento:
+        tiene que seguir ahi despues de bajar cien fotos.
       */}
       {pie || alternativa ? (
         <View style={[styles.pie, { bottom: espacioInferior }]} pointerEvents="box-none">
@@ -369,16 +402,23 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     // `bottom` lo pone el componente: sale de `useEspacioInferior`, que ya
-    // cuenta la capsula flotante y la zona segura del aparato.
+    // cuenta la zona segura del aparato.
     gap: spacing.sm,
   },
   alternativa: {
     alignSelf: 'center',
-    minHeight: 44,
+    minHeight: ALTO_ALTERNATIVA,
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
+    // Va encima de las fotos del carrete: sin fondo propio, sobre una foto
+    // clara la letra blanca no se lee.
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: media.glassBorder,
+    backgroundColor: media.overlay,
   },
   center: { alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
+  lleno: { flex: 1 },
   deniedTitle: { marginTop: spacing.lg },
   deniedBody: { textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 },
   deniedCta: { marginTop: spacing.xl, minWidth: 200 },

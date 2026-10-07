@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { SalirDeCrear } from '@/components/crear/SalirDeCrear';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
@@ -18,6 +19,11 @@ const media = palette('dark');
 
 type Props = {
   pie?: React.ReactNode;
+  /**
+   * Salir de Crear. Este modo no tiene camara ni carrete que traigan su `X`, y
+   * en Crear ya no esta la barra de secciones para irse por ella.
+   */
+  alSalir: () => void;
   /** Salida util: lo mas parecido que SI se puede hacer hoy. */
   alGrabarReel: () => void;
 };
@@ -58,23 +64,25 @@ function useDirectoDisponible(): boolean | null {
  * Con ellos, se crea la emision —sin `scheduled_for`, o sea que nace ya en
  * directo— y se abre su sala.
  */
-export function ModoVivo({ pie, alGrabarReel }: Props) {
+export function ModoVivo({ pie, alSalir, alGrabarReel }: Props) {
   const { t } = useTranslation();
   const espacioInferior = useEspacioInferior();
   const disponible = useDirectoDisponible();
   if (disponible === null) {
     return (
       <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+        <SalirDeCrear alSalir={alSalir} />
         <View style={styles.centro}>
           <ActivityIndicator color={media.text} />
         </View>
-        {pie ? <View style={styles.pie}>{pie}</View> : null}
+        {pie}
       </View>
     );
   }
   if (!disponible) {
     return (
       <View style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+        <SalirDeCrear alSalir={alSalir} />
         <View style={styles.centro}>
           <View style={[styles.icono, { borderColor: media.border }]}>
             <Feather name="radio" size={26} color={media.text} />
@@ -97,12 +105,12 @@ export function ModoVivo({ pie, alGrabarReel }: Props) {
           </Pressable>
         </View>
 
-        {pie ? <View style={styles.pie}>{pie}</View> : null}
+        {pie}
       </View>
     );
   }
 
-  return <CrearEmision pie={pie} />;
+  return <CrearEmision pie={pie} alSalir={alSalir} />;
 }
 
 /**
@@ -113,7 +121,7 @@ export function ModoVivo({ pie, alGrabarReel }: Props) {
  * `PATCH`, y programarla para mas tarde es otro flujo, no un campo mas en el
  * boton de «empezar ahora».
  */
-function CrearEmision({ pie }: { pie?: React.ReactNode }) {
+function CrearEmision({ pie, alSalir }: { pie?: React.ReactNode; alSalir: () => void }) {
   const { t } = useTranslation();
   const espacioInferior = useEspacioInferior();
   const router = useRouter();
@@ -146,6 +154,7 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
     // El titulo se escribe aqui mismo: sin el patron compartido, en un telefono
     // corto el teclado se comia el campo y el boton de empezar.
     <SinTecladoDelante style={[styles.raiz, { paddingBottom: espacioInferior }]}>
+      <SalirDeCrear alSalir={alSalir} />
       <View style={styles.centro}>
         <View style={[styles.icono, { borderColor: media.border }]}>
           <Feather name="radio" size={26} color={media.text} />
@@ -202,7 +211,12 @@ function CrearEmision({ pie }: { pie?: React.ReactNode }) {
         </Pressable>
       </View>
 
-      {pie ? <View style={styles.pie}>{pie}</View> : null}
+      {/*
+        La barra de tipos de publicacion, sin aire de mas por debajo: tiene que
+        caer a la misma altura que en la camara y en el carrete, o daria un
+        salto al pasar de «Reel» a «Vivo».
+      */}
+      {pie}
     </SinTecladoDelante>
   );
 }
@@ -243,5 +257,4 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
-  pie: { paddingBottom: spacing.xl },
 });

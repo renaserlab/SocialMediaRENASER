@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS, useSharedValue, withTiming } from 'react-native-reanimated';
+import { runOnJS } from 'react-native-reanimated';
 
 import { AppHeader } from '@/components/AppHeader';
+import { SinBarraDeSecciones } from '@/components/espacioInferior';
 import { StateView } from '@/components/StateView';
 import { ModoHistoria } from '@/components/crear/ModoHistoria';
 import { ModoPublicacion } from '@/components/crear/ModoPublicacion';
@@ -17,10 +18,10 @@ import {
   posicionDeModo,
   type ModoDeCreacion,
 } from '@/components/crear/SelectorDeModo';
+import { useHaceFaltaCuenta } from '@/hooks/useRequireAuth';
 import { useTranslation } from '@/i18n/useTranslation';
 import { useSeccionActiva } from '@/navigation/foco';
 import { ProveedorDeGestoDeSeccion, useGestoDeSeccion } from '@/navigation/tabSwipe';
-import { useAuthStore } from '@/store/useAuthStore';
 import { palette } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -34,13 +35,18 @@ const UMBRAL_VELOCIDAD = 450;
 /**
  * Crear: publicacion, historia, reel o vivo.
  *
- * COMO SE CAMBIA DE MODO. Arrastrando en horizontal o tocando la etiqueta, que
- * es lo que pedia el documento. Lo que se mueve mientras el dedo va es la FILA
- * de nombres, no la camara: recrear cuatro pantallas —dos de ellas con una
- * sesion de captura viva— para arrastrarlas de lado seria caro, lento y en la
- * practica imposible (no se pueden tener dos camaras abiertas a la vez). Es
- * tambien como se comporta la aplicacion de referencia: el visor se queda
- * quieto y lo que corre es el selector.
+ * LA BARRA DE ABAJO ES LA SUYA. En Crear la barra de secciones se retira y en
+ * su sitio van los cuatro tipos de publicacion (`SelectorDeModo`). Por eso todo
+ * lo que hay aqui dentro se envuelve en `SinBarraDeSecciones`: lo que haya que
+ * dejar libre abajo ya no es la capsula de secciones. Y por eso cada paso tiene
+ * su propia salida (`alSalir`): ya no se sale por la barra.
+ *
+ * COMO SE CAMBIA DE MODO. Tocando la opcion en la barra o arrastrando en
+ * horizontal. La camara no se mueve con el dedo: recrear cuatro pantallas —dos
+ * de ellas con una sesion de captura viva— para arrastrarlas de lado seria
+ * caro, lento y en la practica imposible (no se pueden tener dos camaras
+ * abiertas a la vez). El visor se queda quieto y lo que cambia es la opcion
+ * marcada.
  *
  * POR QUE EL GESTO NO SE ESCAPA A OTRA SECCION. Dentro de las pestanas, el
  * arrastre horizontal pertenece al carrusel de secciones. Aqui se declara un
@@ -72,8 +78,13 @@ export function CrearScreen() {
     desde los ajustes no servia de nada hasta reiniciar la aplicacion.
   */
   const enfocada = useSeccionActiva();
-  const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
-  const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  /*
+    La MISMA pregunta que se hace el layout de las pestañas para decidir si
+    retira la barra de secciones. Tienen que coincidir: sin cuenta aqui no hay
+    barra de tipos de publicacion, y si la otra se quitara igualmente no
+    quedaria ninguna.
+  */
+  const haceFaltaCuenta = useHaceFaltaCuenta();
 
   /*
     Con que modo se abre. Llega por la URL para que todos los accesos a crear
@@ -97,8 +108,6 @@ export function CrearScreen() {
   useEffect(() => {
     if (modoPedido) setModo(modoDesdeParametro(modoPedido));
   }, [modoPedido]);
-  /** Avance del arrastre en huecos (-1..1). Lo lee la fila de nombres. */
-  const arrastre = useSharedValue(0);
 
   const gestoDeSeccion = useGestoDeSeccion();
 
@@ -120,12 +129,6 @@ export function CrearScreen() {
       */
       .activeOffsetX([-20, 20])
       .failOffsetY([-18, 18])
-      .onUpdate((evento) => {
-        const posicion = -evento.translationX / 116;
-        // Resistencia en los extremos: se nota que responde, y se entiende
-        // enseguida que por ahi se acaba el camino.
-        arrastre.value = Math.max(-1, Math.min(1, posicion));
-      })
       .onEnd((evento) => {
         const pasa =
           Math.abs(evento.translationX) > UMBRAL_PX ||
@@ -133,10 +136,6 @@ export function CrearScreen() {
         if (pasa) {
           runOnJS(cambiarPorGesto)(evento.translationX < 0 ? 1 : -1);
         }
-        arrastre.value = withTiming(0, { duration: 160 });
-      })
-      .onFinalize(() => {
-        arrastre.value = withTiming(0, { duration: 160 });
       });
 
     /*
@@ -145,18 +144,18 @@ export function CrearScreen() {
     */
     if (gestoDeSeccion) pan = pan.blocksExternalGesture(gestoDeSeccion);
     return pan;
-  }, [arrastre, cambiarPorGesto, gestoDeSeccion]);
+  }, [cambiarPorGesto, gestoDeSeccion]);
 
   const salir = useCallback(() => router.navigate('/(tabs)/home'), [router]);
 
-  const selector = <SelectorDeModo activo={modo} alCambiar={irA} arrastre={arrastre} />;
+  const selector = <SelectorDeModo activo={modo} alCambiar={irA} visible={enfocada} />;
 
   /*
     Publicar es la accion que mas claramente necesita cuenta: lo que se
     comparte queda firmado. Se explica en la propia pantalla en vez de saltar
     un dialogo encima, que interrumpe sin decir donde se ha entrado.
   */
-  if (supabaseEnabled && !signedIn) {
+  if (haceFaltaCuenta) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader title={t('create.headerTitle')} />
@@ -183,6 +182,7 @@ export function CrearScreen() {
       `SinCambioDeSeccion` de aqui dentro lo bloquea tambien, sin tener que
       saber que existe.
     */
+    <SinBarraDeSecciones>
     <ProveedorDeGestoDeSeccion gesto={gesto}>
     <GestureDetector gesture={gesto}>
       <View
@@ -203,11 +203,12 @@ export function CrearScreen() {
         ) : modo === 'reel' ? (
           <ModoReel pie={selector} alSalir={salir} activo={enfocada} />
         ) : (
-          <ModoVivo pie={selector} alGrabarReel={() => irA('reel')} />
+          <ModoVivo pie={selector} alSalir={salir} alGrabarReel={() => irA('reel')} />
         )}
       </View>
     </GestureDetector>
     </ProveedorDeGestoDeSeccion>
+    </SinBarraDeSecciones>
   );
 }
 

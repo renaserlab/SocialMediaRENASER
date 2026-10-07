@@ -188,7 +188,15 @@ export function Toast({
         accessibilityLiveRegion="none"
         style={[
           styles.container,
-          { top: arriba, backgroundColor: colors.primary, shadowColor: colors.glassShadow },
+          {
+            top: arriba,
+            backgroundColor: colors.primary,
+            shadowColor: colors.glassShadow,
+            // El aviso es del color de la acción —negro en claro— y el inicio
+            // es un vídeo a pantalla completa, también negro: sin este filo
+            // se quedaba en un icono y dos renglones flotando sin caja.
+            borderColor: colors.textMuted,
+          },
           animado,
         ]}
       >
@@ -245,6 +253,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: radius.lg,
+    borderWidth: 1,
     paddingVertical: spacing.sm + 2,
     paddingLeft: spacing.md,
     paddingRight: spacing.sm,

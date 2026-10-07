@@ -3,9 +3,9 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   TextInput,
-  useWindowDimensions,
   View,
   type TextStyle,
 } from 'react-native';
@@ -17,13 +17,25 @@ import { ScrimDeMedio } from '@/components/CapaDeContraste';
 import { Pulsable } from '@/components/Pulsable';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Text } from '@/components/Text';
-import { ChatDeDirecto, type ChatDeDirectoRef } from '@/components/live/ChatDeDirecto';
+import { CabeceraDeDirecto } from '@/components/live/CabeceraDeDirecto';
+import {
+  ChatDeDirecto,
+  altoDelChatPara,
+  type ChatDeDirectoRef,
+} from '@/components/live/ChatDeDirecto';
+import { EscenarioDeVideo } from '@/components/live/EscenarioDeVideo';
+import { FinDeDirecto } from '@/components/live/FinDeDirecto';
 import { HojaDeCalidad } from '@/components/live/HojaDeCalidad';
 import { HojaDeEfectos } from '@/components/live/HojaDeEfectos';
+import { HojaDeInvitados } from '@/components/live/HojaDeInvitados';
+import { InvitacionAlEscenario } from '@/components/live/InvitacionAlEscenario';
 import { ReaccionesDeDirecto } from '@/components/live/ReaccionesDeDirecto';
+import { useAudienciaDeDirecto } from '@/hooks/useAudienciaDeDirecto';
+import { useEscenarioDeDirecto } from '@/hooks/useEscenarioDeDirecto';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { useSesionDeDirecto } from '@/hooks/useSesionDeDirecto';
 import { describeError } from '@/lib/describeError';
+import { compartirDirecto } from '@/lib/enlaces';
 import { abrirAjustes } from '@/lib/permisos';
 import { esperaRestanteMs, puedeEnviarMensaje, registrarEnvio } from '@/lib/ritmoDeChat';
 import {
@@ -32,7 +44,8 @@ import {
   type EstadoDeDirecto,
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
-import { elegirPistaPrincipal } from '@/live/salaDeVideo';
+import { elegirPistasDeEscenario } from '@/live/escenario';
+import { volverA } from '@/navigation/salirDelTramite';
 import {
   LiveRepository,
   type Emision,
@@ -77,10 +90,17 @@ const media = palette('dark');
 /** El velo de los botones que van encima de la imagen. */
 const VELO = 'rgba(0,0,0,0.45)';
 
-/** Cuanto de la pantalla puede ocupar el chat, y entre que limites. */
-const PARTE_DEL_CHAT = 0.32;
-const ALTO_MINIMO_DEL_CHAT = 150;
-const ALTO_MAXIMO_DEL_CHAT = 300;
+/** El tema va en claro: su letra, en oscuro. */
+const TINTA_DEL_TEMA = '#111111';
+
+/**
+ * Cuantos comentarios se ven a la vez. El resto se alcanza deslizando.
+ *
+ * Eran ocho o nueve —un tercio de la pantalla— y tapaban la emision. Cuatro,
+ * como en las aplicaciones de referencia: el chat acompana, no manda. Cuanto
+ * mide eso lo dice el propio chat (`altoDelChatPara`).
+ */
+const COMENTARIOS_A_LA_VISTA = 4;
 
 /**
  * En web el campo de texto enfocado lleva el anillo del navegador
@@ -326,6 +346,69 @@ function BotonDeTexto({
   );
 }
 
+/**
+ * Cortar la emision. Rojo, con su icono de parar y su palabra.
+ *
+ * Era un boton de texto con borde, igual que «Empezar ahora»: quien emitia no
+ * lo distinguia de los demas. Terminar no se puede deshacer, asi que es el
+ * unico boton relleno de la sala, y lleva icono Y palabra para que no haya que
+ * adivinar que hace. La confirmacion sigue estando en la maquina.
+ */
+function BotonDeTerminar({
+  texto,
+  etiqueta,
+  alPulsar,
+  desactivado,
+}: {
+  texto: string;
+  etiqueta: string;
+  alPulsar: () => void;
+  desactivado: boolean;
+}) {
+  return (
+    <Pulsable
+      onPress={alPulsar}
+      disabled={desactivado}
+      opacidad={desactivado ? 0.45 : 1}
+      accessibilityRole="button"
+      accessibilityLabel={etiqueta}
+      accessibilityState={{ disabled: desactivado }}
+      style={[estilos.terminar, { backgroundColor: media.danger }]}
+    >
+      <Feather name="square" size={13} color={media.text} />
+      <Text variant="secondary" weight="800" color={media.text}>
+        {texto}
+      </Text>
+    </Pulsable>
+  );
+}
+
+/** De que va el directo: el titulo que le puso quien lo creo. */
+function TemaDeDirecto({ titulo }: { titulo: string }) {
+  const { t } = useTranslation();
+  const texto = titulo.trim();
+  if (!texto) return null;
+  return (
+    <View
+      style={estilos.tema}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={t('live.topic', { titulo: texto })}
+    >
+      <Feather name="radio" size={13} color={TINTA_DEL_TEMA} />
+      <Text
+        variant="secondary"
+        weight="800"
+        color={TINTA_DEL_TEMA}
+        numberOfLines={1}
+        style={estilos.textoDelTema}
+      >
+        {texto}
+      </Text>
+    </View>
+  );
+}
+
 /* -------------------------------------------------------------- Escribir --- */
 
 /**
@@ -424,13 +507,15 @@ export function LiveScreen() {
   const parametros = useLocalSearchParams<{ id: string }>();
   const emisionId = typeof parametros.id === 'string' ? parametros.id : '';
   const reduceMotion = useReduceMotion();
-  const { height: altoDeVentana } = useWindowDimensions();
 
   const [emision, setEmision] = useState<Emision | null>(null);
   const [errorDeCarga, setErrorDeCarga] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [hojaDeEfectos, setHojaDeEfectos] = useState(false);
   const [hojaDeCalidad, setHojaDeCalidad] = useState(false);
+  const [hojaDeInvitados, setHojaDeInvitados] = useState(false);
+  /** La emision termino CON ESTA PERSONA DELANTE, no antes de que entrara. */
+  const [terminoMirando, setTerminoMirando] = useState(false);
 
   const estadoAnterior = useRef<EstadoDeEmision | null>(null);
   const chat = useRef<ChatDeDirectoRef | null>(null);
@@ -473,6 +558,7 @@ export function LiveScreen() {
     const dejarEstado = suscribirseAlEstado(emisionId, (fila) => {
       const anterior = estadoAnterior.current;
       estadoAnterior.current = fila.status;
+      if (anterior === 'live' && fila.status === 'ended') setTerminoMirando(true);
       setEmision((previa) =>
         previa
           ? {
@@ -583,6 +669,48 @@ export function LiveScreen() {
     });
   }, [sesion, router]);
 
+  /**
+   * Compartir la sala. El enlace lo construye `lib/enlaces` —el mismo sitio
+   * que el de una publicacion— y lleva a ESTE directo. Sin direccion de la
+   * web configurada sale el texto a secas, que es mejor que una URL rota.
+   */
+  const compartir = useCallback(() => {
+    if (!emision) return;
+    const { message } = compartirDirecto({
+      emisionId: emision.id,
+      anfitrion: emision.anfitrionNombre,
+      traducir: t,
+    });
+    Share.share({ message }).catch(() => {
+      // La persona cancelo, o el navegador no expone `navigator.share`.
+    });
+  }, [emision, t]);
+
+  /** A Inicio, sin dejar la sala debajo: es a donde se va al terminar. */
+  const irAInicio = useCallback(() => volverA(router, '/(tabs)/home'), [router]);
+
+  const viendo = useAudienciaDeDirecto({
+    emisionId,
+    enDirecto: emision?.estado === 'live',
+    anfitrionId: emision?.anfitrionId ?? null,
+  });
+
+  /*
+    El escenario: a quien ha invitado quien emite a salir con su camara, y que
+    me pasa a mi. Aqui no se decide nada —lo decide el servidor—; el hook
+    pregunta, manda los gestos y le dice a la sesion cuando subir o bajar.
+  */
+  const alQuitarme = useCallback(() => setAviso(t('live.stageRemovedYou')), [t]);
+  const escena = useEscenarioDeDirecto({
+    emisionId,
+    enDirecto: emision?.estado === 'live',
+    gestiono: puedeGestionar,
+    anfitrionId: emision?.anfitrionId ?? null,
+    sesion,
+    alFallar: setAviso,
+    alQuitarme,
+  });
+
   if (errorDeCarga) {
     return (
       <View style={estilos.fondo}>
@@ -624,14 +752,16 @@ export function LiveScreen() {
   }
 
   /*
-    Que imagen ocupa la pantalla. La propia para quien emite (su vista previa),
-    la del anfitrion para quien mira; `null` = no hay imagen y se pinta el
-    cartel del estado. Lo decide `elegirPistaPrincipal`, no esta pantalla.
+    Que imagenes ocupan la pantalla. Con una sola persona, lo de siempre: la
+    propia para quien emite (su vista previa), la de quien emite para quien
+    mira. Con invitados, todas, repartidas. Ninguna = no hay imagen y se pinta
+    el cartel del estado. Lo decide `elegirPistasDeEscenario`, no esta pantalla.
   */
-  const pista = ESTADOS_CON_IMAGEN.includes(vista.estado)
-    ? elegirPistaPrincipal(pistas.video, { emito: vista.puedePublicar })
-    : null;
-  const hayImagen = Boolean(pista && VistaDePista);
+  const enEscena = ESTADOS_CON_IMAGEN.includes(vista.estado)
+    ? elegirPistasDeEscenario(pistas.video, { emito: vista.puedePublicar })
+    : [];
+  const hayImagen = enEscena.length > 0 && Boolean(VistaDePista);
+  const variasEnPantalla = enEscena.length > 1;
 
   const cartel = cartelDelEstado(vista.estado, emision.puedeGestionar);
   // Con imagen, el estado de la conexion se dice en una linea: la imagen se
@@ -641,76 +771,48 @@ export function LiveScreen() {
       ? t(cartel.titulo as TranslationKey)
       : null;
 
-  const altoDelChat = Math.max(
-    ALTO_MINIMO_DEL_CHAT,
-    Math.min(ALTO_MAXIMO_DEL_CHAT, Math.round(altoDeVentana * PARTE_DEL_CHAT)),
-  );
+  const altoDelChat = altoDelChatPara(COMENTARIOS_A_LA_VISTA);
   const enDirecto = emision.estado === 'live';
+  const terminada = emision.estado === 'ended';
 
   return (
     <View style={estilos.fondo}>
-      {/* La imagen, a pantalla completa y por detras de todo. */}
-      {pista && VistaDePista ? (
-        <View style={StyleSheet.absoluteFill}>
-          <VistaDePista
-            pistaId={pista.id}
-            // Espejo solo en la camara frontal PROPIA: a los demas se les ve
-            // como son, y la trasera no se refleja.
-            espejo={pista.local && vista.camaraFrontal}
-            estilo={StyleSheet.absoluteFill}
-            // Mientras la persona no fije una calidad, la elige el proveedor.
-            capaAutomatica={calidad.estado.elegida === 'automatica'}
-          />
-        </View>
+      {/*
+        La imagen, por detras de todo: a pantalla completa con una persona, o
+        repartida arriba cuando quien emite ha subido a alguien.
+      */}
+      {hayImagen && VistaDePista ? (
+        <EscenarioDeVideo
+          pistas={enEscena}
+          VistaDePista={VistaDePista}
+          camaraFrontal={vista.camaraFrontal}
+          // Mientras la persona no fije una calidad, la elige el proveedor.
+          capaAutomatica={calidad.estado.elegida === 'automatica'}
+        />
       ) : null}
 
       {/* Solo se oscurecen las dos franjas donde hay texto encima. */}
       {hayImagen ? <ScrimDeMedio borde="arriba" alto={150} /> : null}
-      {hayImagen ? <ScrimDeMedio borde="abajo" alto={altoDelChat + 220} /> : null}
+      {/* Con varias personas el chat va DEBAJO de la rejilla, sobre el fondo
+          oscuro de la sala: ahi no hay imagen que apagar. */}
+      {hayImagen && !variasEnPantalla ? (
+        <ScrimDeMedio borde="abajo" alto={altoDelChat + 260} />
+      ) : null}
 
       <SafeAreaView style={estilos.seguro}>
         <SinTecladoDelante style={estilos.columna}>
-          {/* Cabecera */}
-          <View style={estilos.cabecera}>
-            <Pulsable
-              onPress={salir}
-              accessibilityLabel={t('live.leave')}
-              accessibilityRole="button"
-              style={[estilos.botonRedondo, hayImagen ? estilos.sobreImagen : null]}
-            >
-              <Feather name="arrow-left" size={22} color={media.text} />
-            </Pulsable>
-
-            <View style={estilos.tituloDeSala}>
-              <Text variant="body" weight="800" color={media.text} numberOfLines={1}>
-                {emision.titulo}
-              </Text>
-              <Text variant="caption" color={media.textMuted} numberOfLines={1}>
-                {emision.anfitrionNombre}
-                {emision.picoDeEspectadores > 0
-                  ? ` · ${emision.picoDeEspectadores} en el pico`
-                  : ''}
-              </Text>
-            </View>
-
-            <Insignia estado={emision.estado} />
-
-            {/*
-              La calidad solo se ofrece si hay capas entre las que elegir
-              (Simulcast en la plantilla del proveedor). Sin ellas, no hay
-              boton: uno que no cambia nada seria prometer algo que no existe.
-            */}
-            {calidad.estado.opciones.length > 0 ? (
-              <Pulsable
-                onPress={() => setHojaDeCalidad(true)}
-                accessibilityRole="button"
-                accessibilityLabel={t('live.quality')}
-                style={[estilos.botonRedondo, estilos.sobreImagen]}
-              >
-                <Feather name="sliders" size={18} color={media.text} />
-              </Pulsable>
-            ) : null}
-          </View>
+          {/*
+            Cabecera: quien emite, cuanta gente mira y el estado. El TITULO ya
+            no va aqui: va abajo, junto al chat (`TemaDeDirecto`).
+          */}
+          <CabeceraDeDirecto
+            emision={emision}
+            viendo={viendo}
+            sobreImagen={hayImagen}
+            alSalir={salir}
+            alFallar={setAviso}
+            insignia={<Insignia estado={emision.estado} />}
+          />
 
           {avisoDeConexion ? (
             <View style={estilos.avisoSobreImagen} accessibilityLiveRegion="polite">
@@ -730,19 +832,43 @@ export function LiveScreen() {
                   desactivado={vista.ocupado}
                 />
               ) : (
-                <BotonDeTexto
-                  texto={t('live.endBroadcast')}
+                <BotonDeTerminar
+                  texto={t('live.end')}
+                  etiqueta={t('live.endBroadcast')}
                   alPulsar={terminar}
                   desactivado={vista.ocupado}
-                  peligro
                 />
               )}
             </View>
           ) : null}
 
+          {/*
+            Bajarse del escenario, para quien salio invitado. En el mismo sitio
+            donde quien emite tiene «Terminar»: es la misma clase de boton —el
+            que corta lo propio— y cada cual solo ve el suyo.
+          */}
+          {escena.enPantalla && emision.estado === 'live' ? (
+            <View style={estilos.filaDeGestion}>
+              <BotonDeTexto
+                texto={t('live.stageLeave')}
+                alPulsar={() => void escena.bajarme()}
+                desactivado={escena.ocupado}
+              />
+            </View>
+          ) : null}
+
           {/* El hueco por el que se ve la emision. Sin imagen, aqui va el cartel. */}
           <View style={estilos.hueco} pointerEvents="box-none">
-            {hayImagen ? null : <CartelDeVideo emision={emision} estado={vista.estado} />}
+            {terminada ? (
+              <FinDeDirecto
+                emision={emision}
+                // A quien emitia no se le mueve: acaba de terminar el.
+                volverSolo={terminoMirando && !puedeGestionar}
+                alIrAInicio={irAInicio}
+              />
+            ) : hayImagen ? null : (
+              <CartelDeVideo emision={emision} estado={vista.estado} />
+            )}
 
             {/*
               La salida del estado, cuando la hay. Un cartel que solo explica el
@@ -757,6 +883,29 @@ export function LiveScreen() {
               <BotonDeTexto texto={t('live.openSettings')} alPulsar={abrirAjustes} />
             ) : vista.estado === 'error_definitivo' ? (
               <BotonDeTexto texto={t('live.retry')} alPulsar={() => sesion.reintentar()} />
+            ) : null}
+
+            {/*
+              Quien acepto salir y luego no dio el permiso de camara se queda
+              sin emitir Y sin ver: la sala no le deja entrar a medias. Tiene
+              que poder volver a mirar sin ir a los ajustes.
+            */}
+            {escena.enPantalla && pideAccionDeLaPersona(vista.estado) ? (
+              <BotonDeTexto
+                texto={t('live.stageKeepWatching')}
+                alPulsar={() => void escena.bajarme()}
+                desactivado={escena.ocupado}
+              />
+            ) : null}
+
+            {/* Quien emite me invita a salir con mi camara. */}
+            {escena.meInvitan ? (
+              <InvitacionAlEscenario
+                anfitrion={emision.anfitrionNombre}
+                ocupado={escena.ocupado}
+                alAceptar={() => void escena.aceptar()}
+                alRechazar={() => void escena.rechazar()}
+              />
             ) : null}
 
             {vista.puedePublicar && !enDirecto ? (
@@ -780,6 +929,49 @@ export function LiveScreen() {
                 alFallar={alFallarElChat}
               />
             </View>
+            <View style={estilos.ladoDeAcciones}>
+              {/*
+                Compartir, para quien emite y para quien mira. Solo en
+                directo: un enlace a una sala cerrada no lleva a nada.
+              */}
+              {enDirecto ? (
+                <BotonDeControl
+                  icono="share-2"
+                  etiqueta={t('live.share')}
+                  activo={false}
+                  desactivado={false}
+                  alPulsar={compartir}
+                />
+              ) : null}
+              {/*
+                Invitar a alguien a salir con su camara. Solo para quien
+                gestiona, y solo si el servidor dice que se puede: sin la tabla
+                de invitados, o con el tope en cero, el boton no existe.
+              */}
+              {enDirecto && escena.disponible && escena.escenario.puedeInvitar ? (
+                <BotonDeControl
+                  icono="user-plus"
+                  etiqueta={t('live.stageInviteButton')}
+                  activo={false}
+                  desactivado={false}
+                  alPulsar={() => setHojaDeInvitados(true)}
+                />
+              ) : null}
+              {/*
+                La calidad solo se ofrece si hay capas entre las que elegir
+                (Simulcast en la plantilla del proveedor). Sin ellas, no hay
+                boton: uno que no cambia nada seria prometer algo que no
+                existe.
+              */}
+              {calidad.estado.opciones.length > 0 ? (
+                <BotonDeControl
+                  icono="sliders"
+                  etiqueta={t('live.quality')}
+                  activo={false}
+                  desactivado={false}
+                  alPulsar={() => setHojaDeCalidad(true)}
+                />
+              ) : null}
             <ControlesDeAnfitrion
               vista={vista}
               hayEfectos={efectos.capacidad.admitidos}
@@ -789,6 +981,7 @@ export function LiveScreen() {
               alCambiarCamara={() => void sesion.cambiarCamara()}
               alAbrirEfectos={() => setHojaDeEfectos(true)}
             />
+            </View>
           </View>
 
           {aviso ? (
@@ -798,6 +991,12 @@ export function LiveScreen() {
               </Text>
             </View>
           ) : null}
+
+          {/*
+            El tema del directo: debajo de los comentarios y encima de las
+            reacciones, con su propio aire para que no se pegue a ninguno.
+          */}
+          <TemaDeDirecto titulo={emision.titulo} />
 
           <ReaccionesDeDirecto
             emisionId={emision.id}
@@ -826,6 +1025,12 @@ export function LiveScreen() {
         capacidad={efectos.capacidad}
         estado={efectos.estado}
         alElegir={efectos.aplicar}
+      />
+      <HojaDeInvitados
+        visible={hojaDeInvitados && escena.disponible && escena.escenario.puedeInvitar}
+        alCerrar={() => setHojaDeInvitados(false)}
+        escena={escena}
+        anfitrionId={emision.anfitrionId}
       />
       <HojaDeCalidad
         visible={hojaDeCalidad && calidad.estado.opciones.length > 0}
@@ -877,13 +1082,6 @@ const estilos = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   centrado: { textAlign: 'center' },
-  cabecera: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  tituloDeSala: { flex: 1 },
   botonRedondo: {
     width: 44,
     height: 44,
@@ -931,7 +1129,32 @@ const estilos = StyleSheet.create({
   },
   filaInferior: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, flexShrink: 1 },
   ladoDelChat: { flex: 1, minWidth: 0, flexShrink: 1 },
+  ladoDeAcciones: { gap: spacing.sm, alignItems: 'center' },
   columnaDeControles: { gap: spacing.sm, paddingBottom: spacing.xs },
+  // El tema se distingue de los comentarios por el color: ellos van sobre
+  // velo oscuro, el va en claro. Y por el aire de arriba y de abajo.
+  tema: {
+    alignSelf: 'flex-start',
+    maxWidth: '88%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 30,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+  },
+  textoDelTema: { flexShrink: 1 },
+  terminar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 40,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+  },
   botonDeTexto: {
     borderWidth: 1,
     borderRadius: radius.pill,

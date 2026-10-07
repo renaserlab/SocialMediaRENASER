@@ -9,13 +9,17 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { TextoConEnlaces } from '@/components/TextoConEnlaces';
 import { Aparecer } from '@/components/Aparecer';
 import { BotonDeEnviar } from '@/components/BotonDeEnviar';
 import { BotonDeNotaDeVoz } from '@/components/BotonDeNotaDeVoz';
@@ -43,6 +47,9 @@ import {
 } from '@/services/contadores';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { unaALaVez } from '@/lib/unaALaVez';
+import { estaPegadoAlFinal, queHacerConLoUltimo } from '@/lib/chatAlFinal';
+import { suenaLoQueLlega } from '@/lib/tonosDelChat';
+import { sonarTono } from '@/services/notifications';
 import { confirm, notify } from '@/lib/confirm';
 import {
   descartarEnvio,
@@ -158,6 +165,11 @@ function mismaRafaga(actual: Message, anterior?: Message): boolean {
  * REAL ESTÁ CAÍDO. Con el canal enganchado no se pregunta: llegan solos.
  */
 const SONDEO_SIN_TIEMPO_REAL_MS = 4_000;
+/**
+ * Cuánto después de bajar al final se repasa, ya sin recorrido. Más que lo que
+ * dura el desplazamiento animado, para no cortarlo a medias.
+ */
+const REPASO_DE_LA_BAJADA_MS = 400;
 
 export function ChatScreen() {
   const { colors } = useAppTheme();
@@ -667,6 +679,119 @@ export function ChatScreen() {
   );
 
   // -------------------------------------------------------------------------
+  // Seguir el final de la conversación
+  // -------------------------------------------------------------------------
+
+  /*
+    LO ÚLTIMO SE VE SIN DESLIZAR. Reportado el 06/10/2026, en teléfono: al
+    abrir un chat a veces había que bajar a mano; y con el teclado abierto, el
+    mensaje recién enviado —o el que llegaba— quedaba por debajo del redactor.
+    «El usuario tiene que deslizar para ver el mensaje que publicó, de lo
+    contrario va a pensar que no se escribió nada».
+
+    La lista ya seguía el final, pero solo si se estaba CASI abajo, y lo medía
+    contra el alto que tiene a la vista. El teclado deja ese alto en la mitad:
+    lo último pasa a estar «lejos» y dejaba de seguir nada. Aquí se recuerda si
+    se estaba abajo ANTES de que el alto cambiara, y la regla la decide
+    `lib/chatAlFinal`: lo propio baja siempre; lo ajeno, si se estaba abajo; a
+    quien subió a leer el historial se le avisa con un botón.
+  */
+  const lista = useRef<FlashListRef<Message>>(null);
+  /** Se está viendo lo último. Empieza en `true`: un chat se abre por el final. */
+  const pegadoAlFinal = useRef(true);
+  /** El alto a la vista en la última medida, para notar que el teclado lo cambia. */
+  const altoDeLaLista = useRef(0);
+  const altoAlDesplazar = useRef(0);
+  /** Pinta el botón de «ir a lo último». */
+  const [lejosDelFinal, setLejosDelFinal] = useState(false);
+  /** Ha llegado algo mientras se leía el historial. */
+  const [hayNuevosAbajo, setHayNuevosAbajo] = useState(false);
+  const bajadaPendiente = useRef<number | null>(null);
+  const repasoDeLaBajada = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const bajarAlFinal = useCallback((animado: boolean) => {
+    pegadoAlFinal.current = true;
+    setLejosDelFinal(false);
+    setHayNuevosAbajo(false);
+    if (bajadaPendiente.current !== null) cancelAnimationFrame(bajadaPendiente.current);
+    // Un fotograma de margen: la lista tiene que haber medido lo recién llegado.
+    bajadaPendiente.current = requestAnimationFrame(() => {
+      bajadaPendiente.current = null;
+      void lista.current?.scrollToEnd({ animated: animado });
+    });
+    // Una burbuja puede crecer después de pintarse (una foto, la tarjeta de
+    // una sesión): un repaso sin recorrido la alcanza.
+    if (repasoDeLaBajada.current) clearTimeout(repasoDeLaBajada.current);
+    repasoDeLaBajada.current = setTimeout(() => {
+      repasoDeLaBajada.current = null;
+      if (pegadoAlFinal.current) void lista.current?.scrollToEnd({ animated: false });
+    }, REPASO_DE_LA_BAJADA_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (bajadaPendiente.current !== null) cancelAnimationFrame(bajadaPendiente.current);
+      if (repasoDeLaBajada.current) clearTimeout(repasoDeLaBajada.current);
+    },
+    [],
+  );
+
+  /*
+    EL ALTO A LA VISTA CAMBIA SIN QUE NADIE DESPLACE: se abre o se cierra el
+    teclado, aparece la tira de adjuntos elegidos. Si se estaba abajo, se
+    sigue abajo.
+  */
+  const alMedirLaLista = useCallback(
+    (evento: LayoutChangeEvent) => {
+      const alto = evento.nativeEvent.layout.height;
+      const antes = altoDeLaLista.current;
+      altoDeLaLista.current = alto;
+      if (antes > 0 && Math.abs(alto - antes) > 1 && pegadoAlFinal.current) bajarAlFinal(false);
+    },
+    [bajarAlFinal],
+  );
+
+  /** El contenido crece después de pintarse y se estaba abajo: se sigue. */
+  const alCrecerElContenido = useCallback(() => {
+    if (!pegadoAlFinal.current) return;
+    // Ya hay una bajada en camino: ella llega al final nuevo.
+    if (bajadaPendiente.current !== null || repasoDeLaBajada.current !== null) return;
+    bajadaPendiente.current = requestAnimationFrame(() => {
+      bajadaPendiente.current = null;
+      void lista.current?.scrollToEnd({ animated: false });
+    });
+  }, []);
+
+  const ultimoElemento = elementos.length > 0 ? elementos[elementos.length - 1] : undefined;
+  const idDeLoUltimo = ultimoElemento?.id ?? null;
+  const loUltimoEsMio = ultimoElemento?.sender === 'me';
+  const ultimoVisto = useRef<string | null>(null);
+  useEffect(() => {
+    const queHacer = queHacerConLoUltimo({
+      antes: ultimoVisto.current,
+      ahora: idDeLoUltimo,
+      mio: loUltimoEsMio,
+      pegado: pegadoAlFinal.current,
+    });
+    // El tono de «recibido»: solo lo ajeno, solo si es una novedad y solo si
+    // se está mirando. Con el chat detrás, ya suena el push.
+    if (
+      suenaLoQueLlega({
+        antes: ultimoVisto.current,
+        ahora: idDeLoUltimo,
+        mio: loUltimoEsMio,
+        seEstaMirando: aLaVista.current && AppState.currentState === 'active',
+      })
+    ) {
+      void sonarTono('recibido');
+    }
+    ultimoVisto.current = idDeLoUltimo;
+    if (queHacer === 'bajar') bajarAlFinal(true);
+    else if (queHacer === 'bajar-sin-animar') bajarAlFinal(false);
+    else if (queHacer === 'avisar') setHayNuevosAbajo(true);
+  }, [idDeLoUltimo, loUltimoEsMio, bajarAlFinal]);
+
+  // -------------------------------------------------------------------------
   // Elegir archivos
   // -------------------------------------------------------------------------
 
@@ -760,6 +885,9 @@ export function ChatScreen() {
         );
         aplicar(reconciliarEnvio(mensajesRef.current, idTemporal, guardado));
         ultimoEnvioDe.current.delete(idTemporal);
+        // El tono de «enviado» suena cuando el servidor lo ha guardado, no al
+        // tocar el botón: si el envío falla, no hay nada que celebrar.
+        void sonarTono('enviado');
       } catch (error) {
         /*
           La burbuja se QUEDA, marcada como fallida y con su botón de reintentar.
@@ -1323,6 +1451,32 @@ export function ChatScreen() {
   const hayQueEnviar =
     !grabadora.ocupada && (text.trim().length > 0 || elegidos.length > 0);
 
+  /*
+    Arriba del todo se pide más historial; y en cada desplazamiento se anota si
+    se sigue viendo el final. Un evento que llega con OTRO alto a la vista no
+    lo ha hecho un dedo —es el teclado— y no cuenta como haber subido.
+  */
+  const alDesplazar = (evento: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = evento.nativeEvent;
+    if (contentOffset.y <= 24) cargarMasHistorial();
+
+    const altoAntes = altoAlDesplazar.current;
+    altoAlDesplazar.current = layoutMeasurement.height;
+    if (altoAntes > 0 && Math.abs(layoutMeasurement.height - altoAntes) > 1) {
+      if (pegadoAlFinal.current) bajarAlFinal(false);
+      return;
+    }
+
+    const abajo = estaPegadoAlFinal({
+      desplazado: contentOffset.y,
+      alto: layoutMeasurement.height,
+      contenido: contentSize.height,
+    });
+    pegadoAlFinal.current = abajo;
+    setLejosDelFinal(!abajo);
+    if (abajo) setHayNuevosAbajo(false);
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/*
@@ -1353,9 +1507,12 @@ export function ChatScreen() {
         </Text>
       ) : null}
       <SinTecladoDelante>
+        <View style={styles.zonaDeMensajes} onLayout={alMedirLaLista}>
         <FlashList
+          ref={lista}
           data={elementos}
           extraData={extraDeSesiones}
+          onContentSizeChange={alCrecerElContenido}
           keyExtractor={(item: Message) => item.id}
           contentContainerStyle={styles.messages}
           showsVerticalScrollIndicator={false}
@@ -1404,10 +1561,8 @@ export function ChatScreen() {
           // El historial se pide al llegar ARRIBA, que en una lista de chat es
           // el final de la lista invertida... y esta no lo está, así que se usa
           // el desplazamiento: `onStartReached` no existe en esta versión.
-          onScroll={(evento) => {
-            if (evento.nativeEvent.contentOffset.y <= 24) cargarMasHistorial();
-          }}
-          scrollEventThrottle={200}
+          onScroll={alDesplazar}
+          scrollEventThrottle={100}
           ListHeaderComponent={
             cargandoHistorial ? (
               <View style={styles.cargandoHistorial}>
@@ -1603,10 +1758,17 @@ export function ChatScreen() {
                         mine && !item.estado ? t('chat.holdForActions') : undefined
                       }
                     >
+                      {/*
+                        Los enlaces se pueden tocar (07/10/2026): el de una
+                        reunión pegado aquí se abre con un toque. Sin
+                        enlaces se pinta exactamente lo de antes.
+                      */}
                       {item.text ? (
-                        <Text style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 22 }}>
-                          {item.text}
-                        </Text>
+                        <TextoConEnlaces
+                          texto={item.text}
+                          colorDelTexto={mine ? colors.onPrimary : colors.text}
+                          style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 22 }}
+                        />
                       ) : null}
 
                       {item.progreso !== undefined ? (
@@ -1699,6 +1861,27 @@ export function ChatScreen() {
             );
           }}
         />
+        {/*
+          IR A LO ÚLTIMO. Solo cuando se ha subido a leer: abajo no hay a dónde
+          ir. El punto dice que, mientras tanto, ha llegado algo.
+        */}
+        {lejosDelFinal ? (
+          <Pulsable
+            onPress={() => bajarAlFinal(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('chat.goToLatest')}
+            escala={ESCALA_AL_PULSAR.icono}
+            style={[styles.irAlFinal, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Feather name="chevron-down" size={22} color={colors.text} />
+            {hayNuevosAbajo ? (
+              <View
+                style={[styles.irAlFinalPunto, { backgroundColor: colors.primary, borderColor: colors.surface }]}
+              />
+            ) : null}
+          </Pulsable>
+        ) : null}
+        </View>
 
         {/* Lo elegido y todavía sin enviar. Ver lo que se va a mandar antes de
             mandarlo es lo que evita el «he enviado la foto que no era». */}
@@ -1760,29 +1943,32 @@ export function ChatScreen() {
           ]}
         >
           {/*
-            El `+` es un botón: lleva su círculo y se hunde al tocarlo. Suelto
-            sobre el fondo parecía un signo, no algo que se pulsa.
+            MIENTRAS HAY UNA NOTA DE VOZ EN MARCHA, LA FILA ES DE LA GRABADORA.
+            El `+` y el campo de texto se apartan y su sitio lo ocupa la barra
+            de la nota (`BotonDeNotaDeVoz`), con la papelera a la izquierda y
+            el envío a la derecha. Dejarlos daría dos modos a la vez —hablando
+            y escribiendo—, y la barra tendría que flotar sobre los mensajes,
+            que es donde estaba y donde no se encontraba la papelera.
           */}
-          <Pulsable
-            accessibilityLabel={t('chat.attach')}
-            accessibilityRole="button"
-            onPress={() => setMenuAbierto(true)}
-            disabled={!supabaseEnabled || grabadora.ocupada}
-            escala={ESCALA_AL_PULSAR.icono}
-            opacidad={supabaseEnabled && !grabadora.ocupada ? 1 : 0.4}
-            style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
-          >
-            <Feather name="plus" size={22} color={colors.text} />
-          </Pulsable>
+          {grabadora.ocupada ? null : (
+            /*
+              El `+` es un botón: lleva su círculo y se hunde al tocarlo.
+              Suelto sobre el fondo parecía un signo, no algo que se pulsa.
+            */
+            <Pulsable
+              accessibilityLabel={t('chat.attach')}
+              accessibilityRole="button"
+              onPress={() => setMenuAbierto(true)}
+              disabled={!supabaseEnabled}
+              escala={ESCALA_AL_PULSAR.icono}
+              opacidad={supabaseEnabled ? 1 : 0.4}
+              style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+            >
+              <Feather name="plus" size={22} color={colors.text} />
+            </Pulsable>
+          )}
 
-          {/*
-            MIENTRAS HAY UNA NOTA DE VOZ EN MARCHA, EL CAMPO DE TEXTO SE APARTA.
-            Dejarlo daría dos modos a la vez —hablando y escribiendo— y la barra
-            de la grabadora no tendría dónde ponerse sin tapar lo que se escribe.
-          */}
-          {grabadora.ocupada ? (
-            <View style={styles.inputContainer} />
-          ) : (
+          {grabadora.ocupada ? null : (
             <Input
               value={text}
               onChangeText={setText}
@@ -1877,6 +2063,28 @@ export function ChatScreen() {
 const styles = StyleSheet.create({
   // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
   messages: { padding: spacing.lg },
+  // La lista y, encima, el botón de «ir a lo último».
+  zonaDeMensajes: { flex: 1 },
+  irAlFinal: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  irAlFinalPunto: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
+  },
   cargandoHistorial: { paddingVertical: spacing.md, alignItems: 'center' },
   dia: { alignItems: 'center', marginVertical: spacing.md },
   diaTexto: {

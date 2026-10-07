@@ -1,3 +1,4 @@
+import { leerEscenario, type Escenario } from '@/live/escenario';
 import {
   clasificarFalloDeCredencial,
   type FalloDeCredencial,
@@ -369,11 +370,20 @@ export const LiveRepository = {
    * video, no como excepcion. Quien decide que se pinta es
    * `live/maquinaDeDirecto.ts`, y a los dos casos les toca el mismo cartel.
    */
-  async solicitarCredencial(emisionId: string): Promise<CredencialDeVideo> {
+  async solicitarCredencial(
+    emisionId: string,
+    { publicar = true }: { publicar?: boolean } = {},
+  ): Promise<CredencialDeVideo> {
     let bruto: unknown;
     try {
       bruto = await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/credential`, {
         method: 'POST',
+        /*
+          Lo unico que se le puede decir al servidor: que NO se quiere publicar.
+          El rol lo sigue decidiendo el; `publish: true` sin derecho no da nada.
+          Ver `EntornoDeDirecto.pedirCredencial`.
+        */
+        body: JSON.stringify({ publish: publicar }),
       });
     } catch (error) {
       throw fallo(error);
@@ -394,6 +404,63 @@ export const LiveRepository = {
 
   /** Atajo: `true` si esta credencial da video de verdad. */
   hayVideo: hayVideoEnLaCredencial,
+
+  /* ------------------------------------------------------- El escenario -- */
+  /*
+    A quien se invita a salir con su camara (`live/escenario.ts`). Todas
+    devuelven el escenario ENTERO tal como queda, visto por quien pregunta:
+    asi la pantalla no tiene que componer el estado nuevo a partir del gesto,
+    que es como acaba diciendo una cosa mientras el servidor dice otra.
+
+    Un servidor sin la migracion 0098 contesta 503 `live_guests_not_available`
+    y uno anterior a esta funcion, 404. Las dos cosas significan «aqui no se
+    puede invitar»: lo decide `sinInvitados`.
+  */
+
+  /** El escenario de una emision. */
+  async escenario(emisionId: string): Promise<Escenario> {
+    return aEscenario(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/guests`),
+    );
+  },
+
+  /** Invitar a una persona. Solo quien gestiona la emision. */
+  async invitar(emisionId: string, usuarioId: string): Promise<Escenario> {
+    return aEscenario(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/guests`, {
+        method: 'POST',
+        body: JSON.stringify({ user_id: usuarioId }),
+      }),
+    );
+  },
+
+  /** Quitar a alguien de la pantalla, o retirarle la invitacion. */
+  async quitarInvitado(emisionId: string, usuarioId: string): Promise<Escenario> {
+    return aEscenario(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/guests/${usuarioId}`, {
+        method: 'DELETE',
+      }),
+    );
+  },
+
+  /** Contestar a la invitacion propia. */
+  async responderInvitacion(emisionId: string, acepta: boolean): Promise<Escenario> {
+    return aEscenario(
+      await apiRequest<unknown>(
+        `${API_V1}/live/sessions/${emisionId}/guests/me/${acepta ? 'accept' : 'decline'}`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  /** Bajarse. Siempre se puede. */
+  async dejarEscenario(emisionId: string): Promise<Escenario> {
+    return aEscenario(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/guests/me/leave`, {
+        method: 'POST',
+      }),
+    );
+  },
 
   /**
    * Si el servidor tiene proveedor de video ahora mismo.
@@ -422,6 +489,25 @@ export const LiveRepository = {
  * `entorno.clasificarFallo`: asi la pantalla no tiene que capturar el error,
  * mirarlo y volver a lanzarlo.
  */
+function aEscenario(bruto: unknown): Escenario {
+  const escenario = leerEscenario(bruto);
+  // Un 200 que no es un escenario: contrato roto, no «no hay invitados».
+  if (!escenario) throw new Error('El servidor no devolvió el escenario.');
+  return escenario;
+}
+
+/**
+ * ¿Este fallo significa «en este servidor no se puede invitar»?
+ *
+ * Es lo que hace que la aplicacion NO ensene el boton de invitar: el servidor
+ * todavia no tiene la tabla, o es anterior a la funcion. Cualquier otro fallo
+ * —la red, un 500— no dice eso y no puede esconder el boton.
+ */
+export function sinInvitados(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  return error.code === 'live_guests_not_available' || error.status === 404;
+}
+
 export function fallo(error: unknown): FalloDeCredencial {
   if (error instanceof ApiError) {
     /*

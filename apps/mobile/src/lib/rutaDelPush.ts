@@ -72,7 +72,9 @@ export function rutaDelPush(datos: unknown, opciones: Opciones = {}): string | n
   const d = datos as Record<string, unknown>;
   const tipo = typeof d.type === 'string' ? d.type : '';
 
-  if (tipo === 'live_started') {
+  // «Juan está en vivo» y «Juan te invita a su directo» abren lo mismo: la
+  // sala. La invitación se contesta dentro, no desde la pantalla de bloqueo.
+  if (tipo === 'live_started' || tipo === 'live_invited') {
     const directo = uuid(d.liveId);
     return directo ? `/live/${directo}` : RUTA_DE_LA_BANDEJA;
   }

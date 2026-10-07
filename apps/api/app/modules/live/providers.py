@@ -146,6 +146,24 @@ class ProveedorDeDirecto(ABC):
         """
         return EstadoDeSala(existe=True, activa=True)
 
+    async def bajar_del_escenario(
+        self, *, room_id: str, user_id: str, de_rol: str, a_rol: str
+    ) -> int:
+        """Quita el permiso de publicar a quien YA está conectado con él.
+
+        POR QUÉ HACE FALTA. Dejar de dar credenciales de invitado no basta: una
+        conexión ya abierta sigue publicando hasta que se va. La aplicación se
+        va sola cuando el servidor se lo dice; esto es para la que no obedece.
+
+        Solo toca las conexiones de esa persona que tengan `de_rol`. Si ya
+        volvió a entrar como público, esa conexión no se toca.
+
+        Devuelve cuántas conexiones cambió. NO es abstracto: un proveedor que
+        no sepa hacerlo no cambia ninguna, y lo que protege entonces es que su
+        credencial de invitado ya no se renueva.
+        """
+        return 0
+
     def interpretar_evento(self, cuerpo: dict) -> EventoDeProveedor | None:
         """De un aviso del proveedor a algo que el dominio entiende.
 

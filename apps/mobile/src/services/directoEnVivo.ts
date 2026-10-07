@@ -1,4 +1,5 @@
 import { INTERVALO_DE_RESUMEN_MS } from '@/lib/ritmoDeChat';
+import { contarAudiencia, topicoDeAudiencia } from '@/live/audiencia';
 import {
   crearCanalDeReacciones,
   crearTransporteDeRealtime,
@@ -10,6 +11,7 @@ import {
 import { mantenerSuscripcion } from '@/live/suscripcionViva';
 import { topicoDeAvisosDelChat, type FilaDeChat } from '@/live/ventanaDeChat';
 import { LiveRepository, type EstadoDeEmision } from '@/repositories/LiveRepository';
+import { avisoDeEscenario, topicoDeEscenario } from '@/live/escenario';
 import { supabase } from '@/services/supabase';
 
 /**
@@ -246,6 +248,97 @@ export function canalDeReacciones(
     ahora: () => Date.now(),
     alResumir,
   });
+}
+
+/**
+ * Cuánta gente tiene abierta la sala, según se apunta y se va.
+ *
+ * Es PRESENCIA, no Broadcast ni la base: cada teléfono se apunta en el canal
+ * con su clave y el canal reparte la lista a todos. `clave` es la persona —su
+ * identificador— o, si mira sin cuenta, una propia de este teléfono; las
+ * reglas de qué cuenta y qué no están en `live/audiencia.ts`.
+ *
+ * EL TÓPICO ES EL MISMO EN TODOS LOS TELÉFONOS, sin contador: aquí el tópico
+ * ES la sala, igual que en las reacciones. Por eso, antes de abrir, se quita el
+ * canal que pudiera quedar de una visita anterior a la misma emisión: el
+ * cliente devolvería ese mismo objeto, ya suscrito, y no admitiría el oyente.
+ *
+ * Hay que volver a apuntarse CADA VEZ que el canal se suscribe: tras una
+ * caída el servidor ya no recuerda a este teléfono.
+ *
+ * Sin Supabase configurado no hay a quién preguntar: no se llama a
+ * `alCambiar` y la pantalla no enseña número, que es mejor que enseñar un 0
+ * que parece cierto.
+ */
+export function seguirAudiencia(
+  emisionId: string,
+  clave: string,
+  anfitrionId: string | null,
+  alCambiar: (viendo: number) => void,
+): () => void {
+  const cliente = supabase;
+  if (!cliente || !emisionId || !clave) return () => {};
+
+  const topico = topicoDeAudiencia(emisionId);
+  let vigente = true;
+  const dejar = mantenerSuscripcion({
+    programar,
+    abrir: (alCambiarEstado) => {
+      const anterior = cliente.getChannels().find((canal) => canal.topic === `realtime:${topico}`);
+      if (anterior) void cliente.removeChannel(anterior);
+
+      const canal = cliente.channel(topico, { config: { presence: { key: clave } } });
+      canal
+        .on('presence', { event: 'sync' }, () => {
+          if (vigente) alCambiar(contarAudiencia(canal.presenceState(), anfitrionId));
+        })
+        .subscribe((estado) => {
+          if (estado === 'SUBSCRIBED' && vigente) void canal.track({ desde: Date.now() });
+          alCambiarEstado(estado);
+        });
+      return () => {
+        void cliente.removeChannel(canal);
+      };
+    },
+  });
+
+  return () => {
+    vigente = false;
+    dejar();
+  };
+}
+
+export type AvisosDelEscenario = {
+  /** «El escenario ha cambiado». `para` = a quien le incumbe, o `null`. */
+  avisar: (paraUsuarioId: string | null) => boolean;
+  cerrar: () => void;
+};
+
+/**
+ * El aviso de que alguien ha sido invitado, ha contestado o se ha bajado.
+ *
+ * Es Broadcast y no la base, igual que el aviso de moderacion del chat: la
+ * tabla de invitados no se puede leer desde el cliente, asi que no hay cambio
+ * que Realtime pueda entregar. Quien hace el gesto avisa, y quien recibe el
+ * aviso le PREGUNTA al servidor.
+ *
+ * EL AVISO NO TIENE AUTORIDAD (ver `meTocaElAviso`): solo provoca la pregunta.
+ * Si se pierde —o no hay tiempo real—, la persona se entera igual por la
+ * notificacion y al volver a entrar en la sala.
+ */
+export function avisosDelEscenario(
+  emisionId: string,
+  alAvisar: (carga: unknown) => void,
+): AvisosDelEscenario {
+  if (!transporte || !emisionId) return { avisar: () => false, cerrar: () => {} };
+  const conexion = transporte.abrir(topicoDeEscenario(emisionId), {
+    alRecibir: (carga) => alAvisar(carga),
+    alCambiarEstado: () => {},
+  });
+  return {
+    avisar: (paraUsuarioId) => conexion.enviar(avisoDeEscenario(paraUsuarioId)),
+    cerrar: () => conexion.cerrar(),
+  };
 }
 
 export type AvisosDelChat = {
