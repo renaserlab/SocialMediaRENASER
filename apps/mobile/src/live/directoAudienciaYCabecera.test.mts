@@ -280,3 +280,34 @@ describe('los emojis no salen cortados', () => {
     assert.ok(!/simbolo(Grande)?: \{ fontSize/.test(REACCIONES));
   });
 });
+
+describe('los fondos de quien emite', () => {
+  const FONDOS = fuente('live/fondosVirtuales.ts');
+  const imagenes = [...FONDOS.matchAll(/require\('\.\.\/\.\.\/(assets\/live\/fondos\/[^']+)'\)/g)].map((m) => m[1] as string);
+  const ids = [...FONDOS.matchAll(/\n {4}id: '([^']+)',/g)].map((m) => m[1] as string);
+
+  it('hay pantalla verde y paisajes, además de los estudios', () => {
+    for (const id of ['estudio-oscuro', 'estudio-claro', 'sala-gris', 'pantalla-verde', 'atardecer', 'montanas']) {
+      assert.ok(ids.includes(id), `falta el fondo ${id}`);
+    }
+    assert.equal(new Set(ids).size, ids.length, 'un id no se reutiliza');
+    assert.equal(imagenes.length, ids.length);
+  });
+
+  it('cada fondo trae su imagen, con nombre de recurso de Android', () => {
+    for (const imagen of imagenes) {
+      // Minúsculas y guion bajo: en Android la imagen se busca por su nombre.
+      assert.match(imagen, /^assets\/live\/fondos\/[a-z_]+\.png$/, imagen);
+      const datos = readFileSync(join(SRC, '..', imagen));
+      assert.equal(datos.subarray(1, 4).toString('latin1'), 'PNG', imagen);
+      // Verticales, como la cámara de quien emite.
+      assert.ok(datos.readUInt32BE(20) > datos.readUInt32BE(16), `${imagen} no es vertical`);
+    }
+  });
+
+  it('la pantalla verde es verde de croma, liso', () => {
+    // Un PNG liso comprime a casi nada: si pesa, es que ya no es liso.
+    const verde = readFileSync(join(SRC, '..', 'assets', 'live', 'fondos', 'pantalla_verde.png'));
+    assert.ok(verde.length < 8 * 1024, `${verde.length} bytes`);
+  });
+});

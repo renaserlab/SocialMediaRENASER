@@ -5,8 +5,10 @@ import type { TranslationKey } from '@/i18n';
 /**
  * LOS FONDOS VIRTUALES QUE TRAE LA APLICACION. Lista cerrada.
  *
- * SON LOCALES Y SON DE Z. Tres degradados generados para esto, sin fotografias
- * ni recursos de terceros. Viajan dentro de la aplicacion: NO se descarga
+ * SON LOCALES Y SON DE Z. Imagenes generadas para esto —tres estudios, una
+ * pantalla verde y dos paisajes dibujados (07/10/2026)—, sin fotografias ni
+ * recursos de terceros. Un paisaje FOTOGRAFICO necesita una foto con derechos de
+ * uso: cuando la empresa las entregue, se anaden aqui igual que estas. Viajan dentro de la aplicacion: NO se descarga
  * ninguna imagen para usarla de fondo, ni de un servidor propio ni de una
  * direccion que alguien pegue. Una imagen arbitraria detras de una persona, en
  * una emision publica, es contenido sin revisar; y descargarla en mitad de un
@@ -43,6 +45,23 @@ export const FONDOS_VIRTUALES: readonly FondoVirtual[] = [
     id: 'sala-gris',
     nombre: 'live.effectBackgroundRoom',
     imagen: require('../../assets/live/fondos/sala_gris.png') as ImageRequireSource,
+  },
+  {
+    // El verde de croma, liso: para quien quiere cambiar el fondo despues, al
+    // editar el video.
+    id: 'pantalla-verde',
+    nombre: 'live.effectBackgroundGreen',
+    imagen: require('../../assets/live/fondos/pantalla_verde.png') as ImageRequireSource,
+  },
+  {
+    id: 'atardecer',
+    nombre: 'live.effectBackgroundSunset',
+    imagen: require('../../assets/live/fondos/atardecer.png') as ImageRequireSource,
+  },
+  {
+    id: 'montanas',
+    nombre: 'live.effectBackgroundMountains',
+    imagen: require('../../assets/live/fondos/montanas.png') as ImageRequireSource,
   },
 ];
 

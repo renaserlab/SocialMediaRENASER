@@ -2826,3 +2826,95 @@ recorte van dentro del binario.
 blanca y sobre una foto clara apenas se ve. Esa pantalla es de la biblioteca
 de fotos y no deja cambiar ese color; hacerlo exige una pantalla de recorte
 propia, que necesita añadir un paquete (`expo-image-manipulator`).
+
+## Pantalla gris, teclado, directo, enlaces y portada (07/10/2026)
+
+Del documento «Z bugs y nuevas funcionalidades». No cambia nada del servidor ni
+de la base: basta una compilación nueva de la aplicación. La versión sigue
+siendo la 1.2.1 (no entra ningún componente nativo nuevo).
+
+En la copia web local se ha visto: el directo con su cabecera nueva, el tema
+abajo y el cartel de fin; «Seguir»; la vuelta a Inicio; el enlace dentro de un
+mensaje; el perfil sin el botón largo; y la contraseña, que termina en Inicio
+con el aviso un instante después de llegar. **La pantalla gris, el teclado y
+el número de personas viendo solo se pueden comprobar en teléfono.**
+
+**Anotar en cada fila la versión instalada y el modelo del teléfono.**
+
+### La pantalla gris
+
+No se pudo reproducir fuera del teléfono. Se cambió lo que tenían en común los
+dos casos (el aviso de «hecho» pedido en el mismo instante en que se sustituía
+la pantalla). Si alguna de estas filas vuelve a salir gris, hace falta una
+captura y saber si la aplicación estaba abierta de fondo o cerrada.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Recuperar contraseña con la aplicación ABIERTA de fondo: tras guardar se llega a Inicio, con contenido | | | |
+| Lo mismo con la aplicación CERRADA del todo antes de tocar el enlace del correo | | | |
+| El aviso «Contraseña actualizada» aparece ya en Inicio, no antes | | | |
+| Desde ese Inicio, «Atrás» NO devuelve a la pantalla de entrar ni a la del correo | | | |
+| Crear un curso, completar los pasos y publicarlo: se llega a Cursos, con contenido | | | |
+| El curso recién publicado aparece el primero de «Todo el catálogo» | | | |
+| Desde Cursos, «Atrás» NO devuelve al asistente del curso | | | |
+| Publicar un producto y enviar un servicio a revisión: la pantalla siguiente se ve, y el aviso sale al llegar | | | |
+
+### El teclado
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Directo: tocar el campo y ESCRIBIR varias letras (sale la fila de sugerencias): el campo sigue entero encima del teclado | | | |
+| Directo: abrir el panel de emojis del teclado: el campo sigue a la vista | | | |
+| Comentarios de una publicación: lo mismo, escribiendo varias letras | | | |
+| Crear › Publicación: escribir la descripción; el campo no queda tapado | | | |
+| Cerrar el teclado en cada una: no queda hueco debajo | | | |
+| Un formulario largo (crear producto, postular como prestador): al tocar el último campo, se ve encima del teclado | | | |
+| Una hoja inferior con campos (crear curso, crear evento desde el perfil): el campo se ve al escribir | | | |
+| Entrar con la cuenta y crear cuenta: sin cambios respecto a antes | | | |
+
+### El directo
+
+Hace falta un teléfono que emita y al menos dos que miren.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Arriba a la izquierda: foto y nombre de quien emite | | | |
+| Quien MIRA y no sigue a quien emite ve «Seguir» debajo del nombre; al tocarlo desaparece y queda siguiéndole | | | |
+| Quien EMITE no ve «Seguir» | | | |
+| A la izquierda de «EN VIVO»: un ojo con el número de personas viendo | | | |
+| Con dos teléfonos mirando marca 2; al salir uno, baja a 1 en unos segundos | | | |
+| Quien emite no se cuenta a sí mismo | | | |
+| Se ven cuatro comentarios; los anteriores se alcanzan deslizando | | | |
+| Al llegar un comentario nuevo estando abajo, la lista lo sigue | | | |
+| El título del directo está debajo de los comentarios y encima de las reacciones, en un recuadro claro, sin pegarse a ninguno | | | |
+| Un título largo se corta con puntos suspensivos, sin salirse | | | |
+| Las reacciones (botones y las que suben) se ven enteras, sin recortar | | | |
+| Botón de compartir, a la derecha, para quien emite y para quien mira: abre el menú de compartir con un enlace | | | |
+| Abrir ese enlace en otro teléfono lleva a ESE directo | | | |
+| Quien emite: «Terminar» es rojo, con un cuadrado; pide confirmación | | | |
+| Efectos: aparecen «Pantalla verde», «Atardecer» y «Montañas», y se aplican detrás de la persona | | | |
+| Al terminar, quien miraba ve «El directo ha terminado» y una cuenta atrás; a los 8 s vuelve a Inicio | | | |
+| «Quedarme a leer el chat» para la cuenta atrás y deja leer | | | |
+| «Ir a Inicio» lleva a Inicio; «Atrás» desde ahí no vuelve a la sala | | | |
+| Abrir una emisión que ya había terminado: se ve el cartel, SIN cuenta atrás | | | |
+| Quien emitía ve el cartel sin cuenta atrás | | | |
+| Tras una emisión con público, la ficha guarda el máximo de espectadores | | | |
+
+### Mensajes, eventos y perfil
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Enviar por chat el enlace de un Meet: sale celeste y subrayado, en la burbuja propia y en la ajena | | | |
+| Tocarlo abre la reunión | | | |
+| El punto o la coma que va detrás del enlace no forma parte de él | | | |
+| Un correo (`nombre@gmail.com`) no sale subrayado | | | |
+| Pegar en un chat el enlace de un directo de Z: al tocarlo se abre DENTRO de la aplicación | | | |
+| Mantener pulsado un mensaje propio sigue abriendo sus acciones | | | |
+| Eventos › Crear evento: arriba hay un recuadro «Portada o flyer del evento»; al tocarlo se elige la imagen | | | |
+| Con portada puesta, se ve entera y un botón «Cambiar portada» sobre ella | | | |
+| Perfil propio y ajeno: ya no está el botón largo «Publicaciones N»; la cuadrícula empieza justo debajo de los accesos | | | |
+
+**Lo que NO entra en esta entrega** y necesita servidor, una migración o una
+decisión: fijar mensajes en el directo, el texto animado de quien emite, la
+descarga del directo, los clips con IA, la agenda de disponibilidad y la moneda
+de los cursos.
