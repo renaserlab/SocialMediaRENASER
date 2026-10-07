@@ -97,14 +97,16 @@ APLICADAS = {
     # entonces tampoco se edita: se corrige hacia delante, con otra.
     "0097_sesiones_en_el_chat.sql": "6bff20e6bd058c0007fe6c669eaf4ce635481618",
     # TAMPOCO ES DE SERVICIOS (son los invitados en el directo). Edson la
-    # ejecutó a mano en Supabase el 07/10/2026 y así lo comunicó. Su propio
-    # bloque final se niega a terminar si la tabla queda sin RLS o con alguna
-    # política, así que haber corrido sin error ya dice esas dos cosas. LA
-    # COMPROBACIÓN EN SOLO LECTURA —columnas, claves, índices, que no esté en
-    # la publicación de tiempo real— ESTÁ PENDIENTE de que pegue su resultado:
-    # desde este equipo no se llega a la base. Se registra ya porque lo que
-    # importa de este registro es que el fichero deje de editarse desde el
-    # momento en que está aplicado; se corrige hacia delante, con otra.
+    # ejecutó a mano en Supabase el 07/10/2026 y así lo comunicó. COMPROBADA
+    # ESE MISMO DÍA, EN SOLO LECTURA Y SIN DIVERGENCIAS: once comprobaciones,
+    # las once en OK, vistas en la captura del resultado que pegó Edson —la
+    # tabla existe; sus siete columnas con su tipo, si admiten nulo y su valor
+    # por defecto; la clave primaria; las tres claves ajenas y lo que hace
+    # cada una al borrar; los cinco estados; los tres índices; RLS activada;
+    # ninguna política; fuera de la publicación de tiempo real; ningún
+    # disparador propio; cero filas—. La igualdad entre lo esperado y lo
+    # obtenido la calcula la propia base, no quien lee la captura. Desde que
+    # está aplicada no se edita: se corrige hacia delante, con otra.
     "0098_invitados_en_el_directo.sql": "edb58a1c64883b73b6bdf9902b0544ef84d5e41b",
 }
 

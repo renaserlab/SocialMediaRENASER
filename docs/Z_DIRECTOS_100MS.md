@@ -846,9 +846,17 @@ compilación nueva de la aplicación.
 Edson a mano) y su fichero ya no se edita: su huella consta en `APLICADAS`
 (`apps/api/tests/test_servicios_migracion_0090.py`). Que corriera sin error ya
 dice que la tabla quedó con RLS y sin ninguna política —su bloque final se
-niega a terminar si no—. La comprobación en solo lectura del resto (columnas,
-claves, índices, que no esté en la publicación de tiempo real) está pendiente
-de su resultado.
+niega a terminar si no—.
+
+**Comprobada ese mismo día, en solo lectura y sin divergencias.** Una consulta
+de once comprobaciones devolvió las once en `OK`: la tabla existe; sus siete
+columnas, con su tipo, si admiten nulo y su valor por defecto; la clave
+primaria; las tres claves ajenas y lo que hace cada una al borrar; los cinco
+estados admitidos; los tres índices; RLS activada; ninguna política; fuera de
+la publicación de tiempo real; ningún disparador propio; y cero filas. La
+igualdad entre lo esperado y lo obtenido la calcula la propia base. Producción
+seguía entonces con el código anterior: hasta que se despliegue, nada escribe
+en esa tabla.
 
 ### Qué había ya y qué faltaba
 
