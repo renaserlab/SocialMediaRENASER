@@ -126,7 +126,7 @@ def token_de_sala(
 
 
 class Cliente100ms:
-    """Las cinco llamadas HTTP que necesita el módulo."""
+    """Las llamadas HTTP que necesita el módulo: salas y quién hay dentro."""
 
     def __init__(
         self,
@@ -199,6 +199,39 @@ class Cliente100ms:
             "POST",
             f"/active-rooms/{room_id}/end-room",
             json={"reason": motivo[:100], "lock": True},
+        )
+
+    async def participantes(self, *, room_id: str, user_id: str = "") -> list[dict]:
+        """Quién está conectado a la sala AHORA, opcionalmente solo una persona.
+
+        `user_id` es el que va firmado dentro del token de sala
+        (`token_de_sala`), o sea, el identificador de la persona en Z.
+
+        100ms devuelve `peers` como un objeto indexado por identificador de
+        conexión, y como lista vacía cuando no hay nadie. Se admiten las dos
+        formas y se devuelve siempre una lista.
+        """
+        datos = await self._pedir(
+            "GET",
+            f"/active-rooms/{room_id}/peers",
+            params={"user_id": user_id} if user_id else None,
+        )
+        pares = datos.get("peers")
+        if isinstance(pares, dict):
+            return [par for par in pares.values() if isinstance(par, dict)]
+        if isinstance(pares, list):
+            return [par for par in pares if isinstance(par, dict)]
+        return []
+
+    async def cambiar_rol(self, *, room_id: str, peer_id: str, rol: str) -> dict:
+        """Cambia el rol de UNA conexión que ya está dentro.
+
+        Lo hace el servidor con el token de administración: no depende de que
+        nadie en la sala tenga permiso para cambiar roles, que en la plantilla
+        están todos apagados a propósito.
+        """
+        return await self._pedir(
+            "POST", f"/active-rooms/{room_id}/peers/{peer_id}", json={"role": rol}
         )
 
     # ------------------------------------------------------------------ #

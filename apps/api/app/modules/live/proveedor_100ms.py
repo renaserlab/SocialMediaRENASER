@@ -159,6 +159,38 @@ class Proveedor100ms(ProveedorDeDirecto):
             activa=bool(datos.get("enabled", False)),
         )
 
+    async def bajar_del_escenario(
+        self, *, room_id: str, user_id: str, de_rol: str, a_rol: str
+    ) -> int:
+        """Pasa a `a_rol` las conexiones de esa persona que siguen en `de_rol`.
+
+        Se le CAMBIA EL ROL en vez de echarla: sigue viendo la emisión, como
+        cualquiera del público, y su cámara deja de salir. Echarla le dejaría
+        la pantalla en un error del que no se sale solo.
+
+        Sin sesión activa 100ms contesta 404: nadie dentro, nada que bajar.
+        """
+        try:
+            pares = await self._cliente.participantes(room_id=room_id, user_id=user_id)
+        except ErrorDe100ms as error:
+            if error.estado == 404:
+                return 0
+            raise
+        cambiadas = 0
+        for par in pares:
+            peer_id = par.get("id")
+            if par.get("role") != de_rol or not isinstance(peer_id, str) or not peer_id:
+                continue
+            try:
+                await self._cliente.cambiar_rol(room_id=room_id, peer_id=peer_id, rol=a_rol)
+            except ErrorDe100ms as error:
+                # Se fue entre que se listó y que se le cambió: ya no publica.
+                if error.estado == 404:
+                    continue
+                raise
+            cambiadas += 1
+        return cambiadas
+
     # ---------------------------------------------------- credenciales -- #
 
     async def credencial(

@@ -64,6 +64,14 @@ LIMITE_POR_ENVIO = 200
 ENVIOS_POR_VENTANA = 10
 VENTANA_DE_REACCIONES = timedelta(seconds=30)
 
+#: Cuantas invitaciones puede mandar quien gestiona UNA emision en su ventana.
+#:
+#: Cada invitacion hace sonar el telefono de alguien. Veinte en cinco minutos
+#: es mucho mas de lo que da tiempo a hacer con intencion —caben tres personas
+#: en pantalla— y corta a quien use el boton para molestar.
+INVITACIONES_POR_VENTANA = 20
+VENTANA_DE_INVITACIONES = timedelta(minutes=5)
+
 #: Cuantas personas se recuerdan como mucho, para que esto no crezca sin fin.
 #: Al pasarse se olvida a la mas antigua: perder el limite de alguien que lleva
 #: media hora sin escribir no tiene ninguna consecuencia.
@@ -110,12 +118,14 @@ class VentanaDeslizante:
 chat = VentanaDeslizante(MENSAJES_POR_VENTANA, VENTANA_DE_CHAT)
 reacciones = VentanaDeslizante(ENVIOS_POR_VENTANA, VENTANA_DE_REACCIONES)
 credenciales = VentanaDeslizante(CREDENCIALES_POR_VENTANA, VENTANA_DE_CREDENCIALES)
+invitaciones = VentanaDeslizante(INVITACIONES_POR_VENTANA, VENTANA_DE_INVITACIONES)
 
 
 def vaciar() -> None:
     chat.vaciar()
     reacciones.vaciar()
     credenciales.vaciar()
+    invitaciones.vaciar()
 
 
 def acotar_envio(counts: dict[str, int]) -> dict[str, int]:

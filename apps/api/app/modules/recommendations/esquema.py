@@ -128,6 +128,24 @@ async def hay_directos(db: AsyncSession) -> bool:
     return _cache["live_sessions"]
 
 
+async def hay_invitados_de_directo(db: AsyncSession) -> bool:
+    """Si existe `live_guests` (migracion 0098).
+
+    SIN LA 0098 el directo funciona entero y como siempre; lo unico que no hay
+    es donde apuntar a quien se invita, asi que no se puede invitar. Nadie se
+    queda sin emitir ni sin mirar por esto: se degrada lo nuevo, nunca lo que ya
+    habia.
+    """
+    if "live_guests" not in _cache:
+        _cache["live_guests"] = await _hay_tabla(db, "live_guests")
+        if not _cache["live_guests"]:
+            logger.warning(
+                "La migracion 0098 no esta aplicada: en los directos no se "
+                "puede invitar a nadie."
+            )
+    return _cache["live_guests"]
+
+
 async def hay_resenas_de_perfil(db: AsyncSession) -> bool:
     """Si existe `profile_reviews` (migracion 0030).
 

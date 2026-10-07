@@ -165,3 +165,58 @@ class LiveCredential(BaseModel):
     role: str = ""
     #: Identificador publico de la sala, para correlacionar registros.
     room_id: str = ""
+
+
+class LiveCredentialRequest(BaseModel):
+    """Lo unico que el cliente puede decir al pedir permiso: que NO quiere emitir.
+
+    EL ROL NO SE PIDE, SE RENUNCIA. Quien puede publicar —quien emite, un
+    invitado que acepto— puede pedir entrar solo a mirar, y el servidor le da
+    entonces un permiso de publico. Al reves no existe: mandar `publish: true`
+    sin tener derecho no da nada.
+
+    Hace falta para que nadie salga al aire sin haberlo decidido EN ESTA
+    VISITA: un invitado que acepto, cerro la aplicacion y vuelve a entrar
+    seguiria constando como aceptado, y sin esto su camara se encenderia sola
+    delante del publico al abrir la pantalla.
+
+    El cuerpo es opcional. Sin el vale `true`, que es lo que hacian todas las
+    versiones anteriores de la aplicacion.
+    """
+
+    publish: bool = True
+
+
+class LiveGuestInvite(BaseModel):
+    """A quien se invita a salir en la emision."""
+
+    user_id: str = Field(min_length=1, max_length=64)
+
+
+class LiveGuestRead(BaseModel):
+    """Una persona invitada, con lo justo para pintarla en una lista."""
+
+    user_id: str
+    name: str = ""
+    username: str | None = None
+    avatar_path: str | None = None
+    #: `invited`, `accepted` o `declined`. Quien se fue o fue retirado no sale.
+    status: str
+    invited_at: datetime | None = None
+
+
+class LiveStageRead(BaseModel):
+    """El escenario de una emision, visto por quien pregunta.
+
+    Quien gestiona ve a quien invito y que contesto cada uno. El resto solo ve
+    quien esta en pantalla —que es publico: se le esta viendo— y lo SUYO.
+    """
+
+    #: Cuantas personas invitadas caben a la vez, ademas de quien emite.
+    max_guests: int
+    #: Si quien pregunta puede invitar ahora mismo.
+    can_invite: bool
+    guests: list[LiveGuestRead]
+    #: Lo que le pasa a QUIEN PREGUNTA: `invited`, `accepted`, `declined`,
+    #: `left`, `removed`, o nada si nunca se le invito.
+    me: str | None = None

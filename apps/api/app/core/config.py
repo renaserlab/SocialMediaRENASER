@@ -352,6 +352,11 @@ class Settings(BaseSettings):
     live_max_concurrent: int = 3
     #: Duracion maxima de una emision. Pasada, se puede cerrar por conciliacion.
     live_max_duration_minutes: int = 180
+    #: Cuantas personas invitadas caben A LA VEZ en una emision, ademas de quien
+    #: emite. Cada una es un video mas que descarga y decodifica el telefono de
+    #: todo el que mira: tres dan cuatro imagenes en pantalla, que es lo que un
+    #: telefono corriente mueve sin calentarse. Cero apaga la funcion.
+    live_max_guests: int = 3
 
     @property
     def live_configurado(self) -> bool:
