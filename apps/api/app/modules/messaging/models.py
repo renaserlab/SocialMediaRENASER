@@ -8,7 +8,9 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -18,9 +20,15 @@ from sqlalchemy import (
     Uuid,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.database import Base
+
+
+#: `jsonb` en PostgreSQL, JSON en SQLite (la base de los tests), igual que en
+#: `catalog/models.py`.
+_DOCUMENTO = JSONB().with_variant(JSON, "sqlite")
 
 
 def _uuid() -> str:
@@ -273,5 +281,51 @@ class MessageBookingContext(Base):
     #: requested | accepted | rejected | cancelled | reschedule_requested | completed
     event: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ConversationFilter(Base):
+    """Un filtro personalizado de un grupo (migracion 0102).
+
+    ES UNA PREGUNTA GUARDADA, no una lista de mensajes. `criteria` dice que
+    mensajes le pertenecen —tipos de contenido, palabras, autores— y la
+    respuesta se calcula al consultarlo (`vistas.py`). Por eso no hay tabla de
+    pertenencia que mantener: un mensaje nuevo entra solo, uno borrado sale
+    solo, y cambiar los criterios cambia el resultado en la siguiente lectura.
+
+    TABLA APARTE, por lo mismo que `MessageAttachment`: nada de lo que ya
+    funcionaba la consulta, asi que el codigo desplegado antes que la migracion
+    sigue leyendo conversaciones y mensajes. Quien comprueba que existe es
+    `esquema.hay_filtros_de_conversacion`.
+
+    BORRAR UN FILTRO BORRA ESTA FILA Y NADA MAS. No hay clave ajena desde
+    `messages` hacia aqui, a proposito.
+    """
+
+    __tablename__ = "conversation_filters"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    icon: Mapped[str] = mapped_column(String(32), default="filter", server_default="filter")
+    #: La forma la valida `vistas.Criterios` antes de guardar y al leer.
+    criteria: Mapped[dict] = mapped_column(_DOCUMENTO)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

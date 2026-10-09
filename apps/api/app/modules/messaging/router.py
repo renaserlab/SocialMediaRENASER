@@ -53,6 +53,7 @@ from app.modules.messaging.schemas import (
     MessagingAvailability,
     StoryContextRead,
 )
+from app.modules.messaging.vistas import router as vistas_router
 from app.modules.notifications.push import encolar_push
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -70,6 +71,11 @@ router = APIRouter(prefix="/conversations", tags=["messaging"])
 # que alguien anada un `GET /{conversation_id}` aqui, `/conversations/labels`
 # seguiria leyendose como lo que es y no como un id de conversacion.
 router.include_router(etiquetas_router)
+
+# Las vistas de una conversacion —categorias automaticas y filtros de grupo—
+# (`vistas.py`). Sus rutas cuelgan todas de `/{conversation_id}/views` y
+# `/{conversation_id}/filters`, que no chocan con ninguna de este fichero.
+router.include_router(vistas_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
