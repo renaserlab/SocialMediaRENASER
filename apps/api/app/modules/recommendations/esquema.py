@@ -146,6 +146,23 @@ async def hay_invitados_de_directo(db: AsyncSession) -> bool:
     return _cache["live_guests"]
 
 
+async def hay_destacado_de_directo(db: AsyncSession) -> bool:
+    """Si existe `live_spotlights` (migracion 0099).
+
+    SIN LA 0099 el directo funciona entero y como siempre; lo unico que no hay
+    es donde guardar el mensaje fijado y el rotulo de quien emite. Se degrada
+    lo nuevo, nunca lo que ya habia.
+    """
+    if "live_spotlights" not in _cache:
+        _cache["live_spotlights"] = await _hay_tabla(db, "live_spotlights")
+        if not _cache["live_spotlights"]:
+            logger.warning(
+                "La migracion 0099 no esta aplicada: en los directos no se "
+                "puede fijar un mensaje ni poner un rotulo."
+            )
+    return _cache["live_spotlights"]
+
+
 async def hay_resenas_de_perfil(db: AsyncSession) -> bool:
     """Si existe `profile_reviews` (migracion 0030).
 

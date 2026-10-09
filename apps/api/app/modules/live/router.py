@@ -39,11 +39,26 @@ from app.core.exceptions import (
     ServiceUnavailableError,
 )
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.live import avisos, escenario, limites, providers, roles, webhooks
-from app.modules.live.models import LiveMessage, LiveReactionTotal, LiveSession
+from app.modules.live import (
+    avisos,
+    destacado,
+    escenario,
+    limites,
+    providers,
+    roles,
+    webhooks,
+)
+from app.modules.live.models import (
+    LiveMessage,
+    LiveReactionTotal,
+    LiveSession,
+    LiveSpotlight,
+)
 from app.modules.live.schemas import (
     REACCIONES,
     LiveAvailability,
+    LiveBannerRead,
+    LiveBannerWrite,
     LiveCredential,
     LiveCredentialRequest,
     LiveGuestInvite,
@@ -53,6 +68,8 @@ from app.modules.live.schemas import (
     LiveSessionCreate,
     LiveSessionRead,
     LiveSessionUpdate,
+    LiveSpotlightPin,
+    LiveSpotlightRead,
     LiveStageRead,
     ReactionFlush,
     ReactionTotals,
@@ -877,6 +894,10 @@ async def esconder(
 
     mensaje.hidden_at = _ahora()
     mensaje.hidden_by = current_user.id
+    # Un mensaje escondido no puede seguir fijado en lo alto de la pantalla.
+    # En la MISMA transaccion: si no, durante un instante estaria las dos cosas.
+    if await esquema.hay_destacado_de_directo(db):
+        await destacado.al_esconder(db, mensaje.id)
     await db.commit()
     await db.refresh(mensaje)
 
@@ -955,6 +976,178 @@ async def sumar_reacciones(
 
     totales = await _totales(db, [sesion.id])
     return ReactionTotals(session_id=sesion.id, totals=totales[sesion.id])
+
+
+# --------------------------------------------------------------------------- #
+# Lo destacado: el mensaje fijado y el rotulo de quien emite
+# --------------------------------------------------------------------------- #
+#
+# LO DECIDE ESTE SERVIDOR. Quien gestiona la emision fija un mensaje o pone un
+# rotulo; los demas solo lo leen. Las reglas estan en `destacado.py`.
+#
+# COMO SE ENTERAN LOS TELEFONOS. Igual que con el escenario: estas rutas no
+# empujan nada. Quien cambia algo manda despues una difusion por tiempo real
+# («lo destacado cambio») y cada aplicacion vuelve a preguntar aqui. La difusion
+# no lleva el texto ni el mensaje —cualquiera puede mandar una falsa—: lo unico
+# que consigue es que se pregunte, y la respuesta siempre sale de la tabla.
+
+
+async def _exigir_destacado(db: AsyncSession) -> None:
+    """Sin la migracion 0099 no hay donde guardar lo destacado.
+
+    503 y no 500, igual que `_exigir_escenario`: no se ha roto nada, es que
+    esta parte todavia no esta montada. La aplicacion lo lee como «aqui no se
+    puede destacar» y no ensena esas opciones.
+    """
+    await _exigir_esquema(db)
+    if not await esquema.hay_destacado_de_directo(db):
+        raise ServiceUnavailableError(
+            "Destacar en una transmisión todavía no está disponible.",
+            code="live_spotlight_not_available",
+        )
+
+
+async def _leer_destacado(
+    db: AsyncSession, sesion: LiveSession, uid: str | None
+) -> LiveSpotlightRead:
+    """Lo destacado de la emision, tal y como lo puede ver quien pregunta."""
+    puede = await _puede_gestionar(db, uid, sesion)
+
+    # Fuera del directo no hay nada que ensenar: lo que se fijo en una emision
+    # no es un cartel que se quede colgado en su ficha cuando termina.
+    if sesion.status != "live":
+        return LiveSpotlightRead(can_manage=False)
+
+    fila: LiveSpotlight | None = await destacado.fila(db, sesion.id)
+    if fila is None:
+        return LiveSpotlightRead(can_manage=puede)
+
+    fijado: LiveMessageRead | None = None
+    if fila.pinned_message_id:
+        mensaje = await db.get(LiveMessage, fila.pinned_message_id)
+        # Las mismas dos reglas que el historial del chat: lo escondido no se
+        # entrega, y lo de alguien bloqueado —en cualquier sentido— tampoco.
+        visible = (
+            mensaje is not None
+            and mensaje.session_id == sesion.id
+            and mensaje.hidden_at is None
+        )
+        if visible and uid and mensaje.user_id in await _bloqueados(db, uid):
+            visible = False
+        if visible:
+            autor = await db.get(Profile, mensaje.user_id)
+            fijado = LiveMessageRead(
+                id=mensaje.id,
+                session_id=mensaje.session_id,
+                user_id=mensaje.user_id,
+                user_name=autor.full_name if autor else "",
+                user_avatar_path=autor.avatar_path if autor else None,
+                body=mensaje.body,
+                created_at=mensaje.created_at,
+                hidden=False,
+            )
+
+    rotulo = (
+        LiveBannerRead(
+            text=fila.banner_text, style=fila.banner_style, set_at=fila.banner_at
+        )
+        if fila.banner_text
+        else None
+    )
+    return LiveSpotlightRead(pinned=fijado, banner=rotulo, can_manage=puede)
+
+
+async def _para_destacar(
+    db: AsyncSession, session_id: str, uid: str, *, con_limite: bool
+) -> LiveSession:
+    """La emision, si esta persona puede cambiar lo destacado en ella."""
+    await _exigir_destacado(db)
+    sesion = await _sesion_visible(db, session_id, uid)
+    if not await _puede_gestionar(db, uid, sesion):
+        raise ForbiddenError("Solo quien emite puede destacar algo en su transmisión.")
+    # Quitar no se limita: retirar algo de la vista tiene que poder hacerse
+    # siempre, tambien justo despues de haber cambiado muchas cosas.
+    if con_limite and not limites.destacados.permitido(sesion.id):
+        raise ConflictError(
+            "Has cambiado lo destacado demasiadas veces seguidas. Espera un momento.",
+            code="live_spotlight_rate_limited",
+        )
+    return sesion
+
+
+@router.get("/sessions/{session_id}/spotlight", response_model=LiveSpotlightRead)
+async def ver_destacado(
+    session_id: str,
+    current_user: AuthUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveSpotlightRead:
+    """El mensaje fijado y el rotulo. Lo lee cualquiera que pueda ver la sala,
+    tambien sin cuenta: lo esta viendo en pantalla."""
+    await _exigir_destacado(db)
+    uid = current_user.id if current_user else None
+    sesion = await _sesion_visible(db, session_id, uid)
+    return await _leer_destacado(db, sesion, uid)
+
+
+@router.put("/sessions/{session_id}/spotlight/pin", response_model=LiveSpotlightRead)
+async def fijar_mensaje(
+    session_id: str,
+    payload: LiveSpotlightPin,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveSpotlightRead:
+    """Fija un mensaje del chat. Sustituye al que hubiera fijado."""
+    sesion = await _para_destacar(db, session_id, current_user.id, con_limite=True)
+    ensure_uuid(payload.message_id, "Mensaje no encontrado.")
+    await destacado.fijar(
+        db, sesion=sesion, por=current_user.id, message_id=payload.message_id
+    )
+    await db.commit()
+    return await _leer_destacado(db, sesion, current_user.id)
+
+
+@router.delete("/sessions/{session_id}/spotlight/pin", response_model=LiveSpotlightRead)
+async def soltar_mensaje(
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveSpotlightRead:
+    """Quita el mensaje fijado. Si no habia ninguno, no pasa nada."""
+    sesion = await _para_destacar(db, session_id, current_user.id, con_limite=False)
+    await destacado.soltar(db, sesion=sesion)
+    await db.commit()
+    return await _leer_destacado(db, sesion, current_user.id)
+
+
+@router.put("/sessions/{session_id}/spotlight/banner", response_model=LiveSpotlightRead)
+async def poner_rotulo(
+    session_id: str,
+    payload: LiveBannerWrite,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveSpotlightRead:
+    """Pone o cambia el texto que quien emite ensena sobre la imagen."""
+    sesion = await _para_destacar(db, session_id, current_user.id, con_limite=True)
+    await destacado.poner_rotulo(
+        db, sesion=sesion, por=current_user.id, texto=payload.text, estilo=payload.style
+    )
+    await db.commit()
+    return await _leer_destacado(db, sesion, current_user.id)
+
+
+@router.delete(
+    "/sessions/{session_id}/spotlight/banner", response_model=LiveSpotlightRead
+)
+async def quitar_rotulo(
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveSpotlightRead:
+    """Quita el rotulo. Si no habia ninguno, no pasa nada."""
+    sesion = await _para_destacar(db, session_id, current_user.id, con_limite=False)
+    await destacado.quitar_rotulo(db, sesion=sesion)
+    await db.commit()
+    return await _leer_destacado(db, sesion, current_user.id)
 
 
 # --------------------------------------------------------------------------- #

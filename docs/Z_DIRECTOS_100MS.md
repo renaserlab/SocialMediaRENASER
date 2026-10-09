@@ -947,3 +947,80 @@ el código que la usa, y ese despliegue arranca la API de nuevo.
 - Que una persona PIDA subir.
 - Silenciar el micrófono de un invitado sin quitarlo.
 - Guardar el reparto de la pantalla o dejar elegirlo.
+
+## 19. Lo destacado: el mensaje fijado y el texto de quien emite (09/10/2026)
+
+Dos cosas pedidas en el documento «Z bugs y nuevas funcionalidades» (07/10):
+que quien emite pueda **fijar un mensaje** del chat y poner **un texto propio
+sobre la imagen**, a la vista de toda la audiencia. **Hecho en el código; sin
+ver en teléfonos, sin la migración aplicada y sin desplegar.**
+
+### Dónde se guarda
+
+Tabla `live_spotlights` (migración **0099**, sin aplicar): una fila por
+emisión, con lo vigente —no un historial—. Va en su tabla y no en columnas de
+`live_sessions` a propósito: con columnas nuevas ahí, el código desplegado
+antes que la migración no podría ni leer una emisión.
+
+RLS activada y **ninguna política**, igual que `live_guests`: desde la
+aplicación no se lee ni se escribe; solo la API.
+
+### Las reglas (`live/destacado.py`)
+
+- Solo quien gestiona la emisión —quien emite o la administración— fija,
+  suelta, pone o quita.
+- Solo mientras la emisión está en directo. Quitar se puede siempre.
+- Se fija un mensaje **de esa sala y visible**: uno de otra emisión es «no
+  encontrado»; uno escondido, 409 (`live_message_hidden`).
+- **Esconder el mensaje fijado lo suelta**, en la misma transacción.
+- Lo fijado pasa por las reglas del chat al leerlo: a quien tiene bloqueado al
+  autor (o al revés) no se le enseña.
+- El texto se guarda en **una línea**, sin invisibles ni espacios de más, y
+  hasta **80 caracteres** contados después de limpiar. Tres formas de moverse:
+  `slide`, `pulse` y `ticker`.
+- Treinta cambios por minuto y emisión (`live_spotlight_rate_limited`).
+- Al terminar la emisión no queda nada destacado a la vista.
+
+### Las rutas
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/live/sessions/{id}/spotlight` | Lo destacado, visto por quien pregunta. Sin cuenta también |
+| PUT | `…/spotlight/pin` | Fija un mensaje (`message_id`). Sustituye al anterior |
+| DELETE | `…/spotlight/pin` | Deja de fijar |
+| PUT | `…/spotlight/banner` | Pone o cambia el texto (`text`, `style`) |
+| DELETE | `…/spotlight/banner` | Quita el texto |
+
+Todas devuelven lo destacado entero tal como queda.
+
+### Cómo se entera cada teléfono
+
+Igual que con los invitados: quien cambia algo manda una difusión **sin
+contenido** por el tópico `live-destacado:{id}`, y cada aplicación le pregunta
+a la API. El aviso no lleva el texto —lo podría mandar cualquiera—, así que lo
+único que consigue es una pregunta. Y las preguntas van con medida: cada
+teléfono pregunta como mucho una vez cada dos segundos, y una ráfaga de avisos
+se junta en una sola (`crearRepaso`, en `live/destacado.ts`). También se
+pregunta al entrar, al volver a primer plano y cuando el canal se recupera.
+
+### En la aplicación
+
+- **Mensaje fijado**: encima del chat, con chincheta. Quien gestiona lo suelta
+  con la `X`, o mantiene pulsado un mensaje y elige «Fijar mensaje».
+- **Texto en pantalla**: bajo la cabecera. Quien gestiona lo pone con el botón
+  `T` de la columna derecha, con vista previa, y lo toca para cambiarlo.
+- La entrada del texto se anima una vez por texto, no cada vez que se vuelve a
+  preguntar. La cinta solo corre si el texto no cabe. Con «reducir
+  movimiento», nada se mueve.
+
+### Sin la migración 0099
+
+El servidor contesta 503 (`live_spotlight_not_available`), la aplicación no
+enseña ninguna de las dos opciones y mantener pulsado un mensaje sigue
+sirviendo solo para ocultarlo. Tras aplicarla hay que reiniciar la API.
+
+### Lo que no se hizo
+
+- Elegir color o posición del texto.
+- Fijar más de un mensaje, o un historial de lo fijado.
+- Programar un texto para una hora.

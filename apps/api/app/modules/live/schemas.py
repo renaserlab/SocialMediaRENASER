@@ -220,3 +220,71 @@ class LiveStageRead(BaseModel):
     #: Lo que le pasa a QUIEN PREGUNTA: `invited`, `accepted`, `declined`,
     #: `left`, `removed`, o nada si nunca se le invito.
     me: str | None = None
+
+
+class LiveSpotlightPin(BaseModel):
+    """Que mensaje del chat se fija."""
+
+    message_id: str = Field(min_length=1, max_length=64)
+
+
+class LiveBannerWrite(BaseModel):
+    """El rotulo que quien emite pone sobre la imagen.
+
+    EL TEXTO SE LIMPIA AQUI, antes de medirlo: se queda en una sola linea, sin
+    caracteres invisibles ni espacios de mas (ver `destacado.limpiar_rotulo`).
+    Medirlo antes de limpiarlo dejaria pasar ochenta saltos de linea.
+    """
+
+    #: Se admite algo mas largo que el tope al llegar, porque lo que cuenta es
+    #: lo que queda DESPUES de limpiar; el tope real se comprueba abajo.
+    text: str = Field(min_length=1, max_length=400)
+    #: `slide`, `pulse` o `ticker`. Uno que no se conozca es un error, no un
+    #: valor por omision silencioso: quien lo manda cree que ha elegido algo.
+    style: str = "slide"
+
+    @field_validator("text")
+    @classmethod
+    def _una_linea_que_diga_algo(cls, v: str) -> str:
+        from app.modules.live import destacado
+
+        limpio = destacado.limpiar_rotulo(v)
+        if not limpio or not destacado.dice_algo(limpio):
+            raise ValueError("El texto no puede estar vacío.")
+        if len(limpio) > destacado.MAXIMO_DE_ROTULO:
+            raise ValueError(
+                f"El texto no puede pasar de {destacado.MAXIMO_DE_ROTULO} caracteres."
+            )
+        return limpio
+
+    @field_validator("style")
+    @classmethod
+    def _estilo_conocido(cls, v: str) -> str:
+        from app.modules.live import destacado
+
+        if v not in destacado.ESTILOS:
+            raise ValueError(f"Estilo no reconocido: '{v}'.")
+        return v
+
+
+class LiveBannerRead(BaseModel):
+    text: str
+    style: str
+    #: Cuando se puso. La aplicacion lo usa para saber si es OTRO rotulo —y
+    #: volver a animar su entrada— o el mismo que ya estaba ensenando.
+    set_at: datetime | None = None
+
+
+class LiveSpotlightRead(BaseModel):
+    """Lo destacado de una emision, visto por quien pregunta.
+
+    Lo que no hay viene a nulo, no ausente. `pinned` pasa por las mismas reglas
+    que el chat: un mensaje escondido no llega fijado, ni el de alguien a quien
+    quien mira tiene bloqueado.
+    """
+
+    pinned: LiveMessageRead | None = None
+    banner: LiveBannerRead | None = None
+    #: Si quien pregunta puede fijar y poner rotulo. Lo decide el servidor y se
+    #: vuelve a comprobar en cada escritura.
+    can_manage: bool = False
