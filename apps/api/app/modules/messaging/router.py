@@ -33,6 +33,7 @@ from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import audio, avisos, esquema, historias, sesiones
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.etiquetas import router as etiquetas_router
+from app.modules.messaging.grupos import router as grupos_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
     Conversation,
@@ -53,6 +54,7 @@ from app.modules.messaging.schemas import (
     MessagingAvailability,
     StoryContextRead,
 )
+from app.modules.messaging.vistas import router as vistas_router
 from app.modules.notifications.push import encolar_push
 from app.modules.profiles.models import Profile
 from app.modules.recommendations.signals import registrar_senal
@@ -70,6 +72,16 @@ router = APIRouter(prefix="/conversations", tags=["messaging"])
 # que alguien anada un `GET /{conversation_id}` aqui, `/conversations/labels`
 # seguiria leyendose como lo que es y no como un id de conversacion.
 router.include_router(etiquetas_router)
+
+# Las vistas de una conversacion —categorias automaticas y filtros de grupo—
+# (`vistas.py`). Sus rutas cuelgan todas de `/{conversation_id}/views` y
+# `/{conversation_id}/filters`, que no chocan con ninguna de este fichero.
+router.include_router(vistas_router)
+
+# Los grupos (`grupos.py`): crearlos, ver quién está y cambiar sus miembros.
+# `POST /groups` se declara antes que las rutas con `{conversation_id}` de
+# este fichero por la misma precaución que las etiquetas.
+router.include_router(grupos_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
@@ -998,12 +1010,16 @@ async def send_message(
         a_quien = await avisos.destinatarios(
             db, conversation_id=conversation_id, remitente_id=current_user.id
         )
+        # En un grupo el aviso dice QUIÉN y EN CUÁL: «Ana envió un mensaje al
+        # grupo «Aula»». Los datos son los mismos: lleva a la conversación.
+        grupo = await avisos.grupo_de(db, conversation_id)
         encolar_push(
             background,
             user_ids=a_quien,
-            notification_type=avisos.TIPO,
+            notification_type=avisos.TIPO if grupo is None else avisos.TIPO_EN_GRUPO,
             actor_name=avisos.nombre_para_el_aviso(profile),
             data=avisos.datos_del_aviso(conversation_id, str(message_id)),
+            grupo=grupo,
         )
     except Exception:  # noqa: BLE001 - el aviso nunca tumba el envio
         logger.warning("[mensajes] no se pudo programar el aviso", exc_info=True)

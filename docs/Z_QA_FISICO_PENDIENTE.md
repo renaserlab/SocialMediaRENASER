@@ -3123,3 +3123,102 @@ teléfono ni con una grabación de verdad.
 | El vídeo dura lo que duró el directo y se oye | | | |
 | Anotar cuánto tarda en estar lista y, días después, si el enlace sigue abriendo | | | |
 | Un directo sin grabación se termina y se ve exactamente como antes | | | |
+
+## Contenido del chat por vistas (09/10/2026)
+
+Hace falta el servidor desplegado y una compilación nueva. **No hace falta la
+migración 0102** para esto: las categorías salen de los mensajes que ya hay.
+Sin ver en teléfono ni en la copia web.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En un chat, arriba a la derecha hay un botón de cuadrícula; abre «Contenido» | | | |
+| Solo salen las pestañas que tienen algo (más «Todo»), con su número | | | |
+| «Fotos» enseña solo mensajes con foto; «Archivos», solo con archivo; igual vídeos, audios y enlaces | | | |
+| Un mensaje con foto y enlace sale en «Fotos» y en «Enlaces», una vez en cada una | | | |
+| Tocar una foto la amplía; un archivo o un vídeo se abren fuera; una nota de voz suena | | | |
+| Buscar una palabra encuentra por el texto y por el nombre del archivo | | | |
+| Cambiar deprisa de pestaña no deja la lista de una pestaña en otra | | | |
+| Con más de 30 resultados, al bajar se cargan más sin repetirse | | | |
+| Con la pantalla abierta, mandar una foto desde otro teléfono la hace aparecer en unos segundos | | | |
+| Borrar un mensaje en el chat y volver: ya no está en su pestaña | | | |
+| Al volver atrás, el chat está donde se dejó | | | |
+| Un chat sin fotos ni archivos enseña solo «Todo» | | | |
+
+Los filtros personalizados son de los grupos: ver la sección siguiente.
+
+## Grupos de mensajería, sus avisos y sus filtros (09/10/2026)
+
+Hace falta el servidor desplegado, una compilación nueva y **dos teléfonos con
+cuentas distintas** (tres, para ver bien los nombres en el chat). La migración
+0102 está aplicada; la 0103 conviene aplicarla antes de probar «sacar a
+alguien» (sin ella la regla se puede saltar, aunque no desde la aplicación).
+
+Visto en la copia web con datos inventados: la bandeja, el chat de grupo, la
+ficha, crear un grupo, crear un filtro y Contenido. Nada visto en teléfono.
+
+### Crear y usar un grupo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En Mensajes, arriba a la derecha hay un botón de personas; abre «Nuevo grupo» | | | |
+| Sin nombre o sin personas, «Crear grupo» dice qué falta y no crea nada | | | |
+| Al buscar personas no sale alguien con quien haya un bloqueo | | | |
+| Al crear, se entra en el chat del grupo: arriba su nombre y «Miembros: N» | | | |
+| El grupo aparece en la bandeja de todos sus miembros, aunque nadie haya escrito | | | |
+| A quien se añadió le llega el aviso «X te añadió al grupo «Y»» | | | |
+| En el chat, cada mensaje ajeno lleva encima el nombre de quien lo escribió | | | |
+| Varios mensajes seguidos de la misma persona llevan el nombre solo en el primero | | | |
+| Mensajes seguidos de dos personas distintas no se pegan en un bloque | | | |
+| Fotos, archivos y notas de voz se mandan y se ven igual que en un chat de dos | | | |
+| Un chat de dos personas se ve exactamente como antes | | | |
+
+### Avisos
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Con la aplicación cerrada, un mensaje en el grupo avisa «X envió un mensaje al grupo «Y»» | | | |
+| El aviso NO lleva el texto del mensaje | | | |
+| Tocar el aviso abre el chat del grupo | | | |
+| A quien escribe no le llega su propio aviso | | | |
+| Un mensaje en un chat de dos sigue avisando «X te envió un mensaje» | | | |
+| Si A bloquea a B estando los dos en un grupo, los mensajes de B no hacen sonar el teléfono de A | | | |
+
+### Ficha del grupo (tocando su nombre en el chat)
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Sale la lista de miembros, con «Administra el grupo» en quien lo creó | | | |
+| Quien administra puede cambiar el nombre, y todos lo ven cambiado | | | |
+| Quien administra puede añadir personas; a ellas les llega el aviso | | | |
+| Quien administra puede sacar a alguien (pide confirmación) | | | |
+| A quien se sacó le desaparece el grupo y ya no puede abrirlo; sus mensajes siguen | | | |
+| Quien NO administra no ve esos botones, y sí «Salir del grupo» | | | |
+| Al salir, el grupo desaparece de su bandeja | | | |
+| Quien administra no tiene «Salir del grupo» y lee por qué | | | |
+
+### Filtros del grupo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra ve «Filtros del grupo» en la ficha y un botón de ajustes en Contenido | | | |
+| Los demás miembros no ven ninguno de los dos | | | |
+| Crear un filtro sin nombre o sin ningún criterio dice qué falta | | | |
+| Un filtro por tipo «Archivos» y palabra «examen» enseña solo los archivos cuyo mensaje dice examen | | | |
+| Con dos palabras, «Basta una» y «Todas» dan resultados distintos | | | |
+| Un filtro «Escrito por» enseña solo lo de esa persona | | | |
+| El filtro aparece en Contenido como una pestaña más, separada de las categorías, para todos los miembros | | | |
+| Un mismo mensaje sale en su categoría y en el filtro; borrarlo en el chat lo quita de los dos | | | |
+| Editar los criterios y volver a Contenido cambia lo que enseña el filtro | | | |
+| «Oculto» lo quita de la vista de los demás miembros; quien administra lo sigue viendo | | | |
+| Borrar un filtro pide confirmación, y los mensajes siguen en el chat | | | |
+| Dos filtros con el mismo nombre no se dejan crear | | | |
+
+### Ir al mensaje y borrados
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En Contenido, la flecha de cada resultado vuelve al chat y sube hasta ese mensaje, que se resalta un momento | | | |
+| Con un mensaje antiguo (hay que subir bastante), también llega | | | |
+| Tras llegar, el botón de «ir a lo último» devuelve al final | | | |
+| Con Contenido abierto, borrar un mensaje desde otro teléfono lo quita de la lista en unos segundos | | | |

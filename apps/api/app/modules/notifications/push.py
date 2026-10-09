@@ -53,6 +53,12 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     # Un mensaje de chat. SIN EL TEXTO DEL MENSAJE: un push se lee en la
     # pantalla bloqueada. Dice quién escribe; el contenido se lee dentro.
     "message": ("Nuevo mensaje", "{actor} te envió un mensaje."),
+    # El mismo aviso, en un GRUPO: dice quién y en cuál, porque «te envió un
+    # mensaje» sería mentira —no era para ti solo— y sin el nombre del grupo
+    # no se sabe ni dónde mirar. Tampoco lleva el texto del mensaje.
+    "message_group": ("Nuevo mensaje", "{actor} envió un mensaje al grupo «{grupo}»."),
+    # Te han metido en un grupo. Sin esto aparecería en la bandeja sin más.
+    "group_added": ("Nuevo grupo", "{actor} te añadió al grupo «{grupo}»."),
     # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
     # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
     "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
@@ -104,6 +110,8 @@ CHANNELS: dict[str, str] = {
     "refund_refunded": "contenido",
     "follow": "interacciones",
     "message": "mensajes",
+    "message_group": "mensajes",
+    "group_added": "mensajes",
     # Con los seguidores y los «me gusta»: es alguien a quien sigues haciendo
     # algo, no una gestion tuya.
     "live_started": "interacciones",
@@ -171,15 +179,24 @@ def nombre_visible(full_name: str | None, username: str | None) -> str | None:
     return (full_name or "").strip() or (username or "").strip() or None
 
 
-def build_message(notification_type: str, actor_name: str | None) -> tuple[str, str] | None:
-    """Título y cuerpo del aviso, o None si el tipo no tiene texto definido."""
+def build_message(
+    notification_type: str, actor_name: str | None, grupo: str | None = None
+) -> tuple[str, str] | None:
+    """Título y cuerpo del aviso, o None si el tipo no tiene texto definido.
+
+    `grupo` es el nombre del grupo, para los avisos que hablan de uno. Lo
+    escribe una persona, y por eso entra como VALOR de la plantilla y nunca
+    como plantilla: unas llaves dentro del nombre salen tal cual.
+    """
     template = TEMPLATES.get(notification_type)
     if template is None:
         return None
     title, body = template
     # Sin nombre se usa un genérico: es preferible a un aviso que diga
     # «None comentó tu publicación».
-    return title, body.format(actor=actor_name or "Alguien")
+    return title, body.format(
+        actor=actor_name or "Alguien", grupo=(grupo or "").strip() or "un grupo"
+    )
 
 
 async def send_push(
@@ -403,6 +420,7 @@ async def _enviar_con_sesion_propia(
     notification_type: str,
     actor_name: str | None,
     data: dict | None,
+    grupo: str | None = None,
 ) -> None:
     """El envío real, ya fuera de la petición y con su propia sesión.
 
@@ -420,7 +438,7 @@ async def _enviar_con_sesion_propia(
     """
     if not user_ids:
         return
-    message = build_message(notification_type, actor_name)
+    message = build_message(notification_type, actor_name, grupo)
     if message is None:
         return
     title, body = message
@@ -454,6 +472,7 @@ def encolar_push(
     notification_type: str,
     actor_name: str | None = None,
     data: dict | None = None,
+    grupo: str | None = None,
 ) -> None:
     """Programa el aviso para DESPUÉS de responder. Úsese siempre esto.
 
@@ -484,6 +503,7 @@ def encolar_push(
         notification_type,
         actor_name,
         data,
+        grupo,
     )
 
 

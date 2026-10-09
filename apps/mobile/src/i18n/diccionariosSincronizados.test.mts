@@ -141,6 +141,8 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Contenido del chat: «Vídeos» se escribe igual en portugués.
+    'chatViews.videos',
     // Servicios, Incremento 6: «Casos», «Caso», «Caso retirado», «Reserva
     // confirmada», «Cancelada», «Publicada», «Publicar», «Nota interna» y
     // «Marcar como realizada» se escriben EXACTAMENTE igual en portugués;

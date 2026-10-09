@@ -29,6 +29,15 @@ type Props = {
   maximo?: number;
   /** Paleta de superficie sobre vídeo (Crear) vs. pantalla normal (Editar). */
   variante?: 'clara' | 'sobreMedia';
+  /**
+   * El encabezado y la ayuda, cuando NO se está etiquetando.
+   *
+   * Por omisión son los de etiquetar («¿Quién sale aquí?»), que es para lo
+   * que nació. Añadir gente a un grupo usa la misma lista —la filtra el
+   * servidor igual, sin bloqueos— pero esa pregunta ahí no tiene sentido.
+   */
+  titulo?: string;
+  ayuda?: string;
 };
 
 /**
@@ -54,6 +63,8 @@ export function SelectorDePersonas({
   alCambiar,
   maximo = MAXIMO_POR_DEFECTO,
   variante = 'clara',
+  titulo,
+  ayuda,
 }: Props) {
   const { t } = useTranslation();
   const { colors } = useAppTheme();
@@ -114,7 +125,7 @@ export function SelectorDePersonas({
     <View style={styles.raiz}>
       <View style={styles.cabecera}>
         <Text variant="secondary" weight="700" color={superficie.text} accessibilityRole="header">
-          {t('tagging.question')}
+          {titulo ?? t('tagging.question')}
         </Text>
         {/*
           El aviso del tope ocupa el sitio de la ayuda en vez de añadirse
@@ -124,7 +135,7 @@ export function SelectorDePersonas({
         <Text variant="caption" color={superficie.textMuted}>
           {alTope
             ? `Máximo ${maximo}. Quita a alguien para añadir a otra persona.`
-            : `Etiqueta hasta ${maximo} personas`}
+            : (ayuda ?? `Etiqueta hasta ${maximo} personas`)}
         </Text>
       </View>
 

@@ -146,6 +146,7 @@ export function toConversation(dto: ConversationDto): Conversation {
   return {
     id: dto.id,
     name: dto.other?.full_name || dto.title || 'Conversación',
+    esGrupo: dto.kind === 'group',
     subtitle: dto.last_message ?? 'Sin mensajes aún',
     unread: dto.unread_count,
     messages: [],
@@ -212,6 +213,8 @@ export function toMessage(dto: MessageDto, currentUserId?: string | null): Messa
     id: dto.id,
     text: dto.body,
     sender: currentUserId && dto.sender.id === currentUserId ? 'me' : 'them',
+    autorId: dto.sender.id,
+    autorNombre: dto.sender.full_name || dto.sender.username || undefined,
     createdAt: formatTime(dto.created_at),
     // El instante sin formatear: es lo que ordena la lista y lo que se manda
     // como `before`/`after`. `createdAt` solo lleva hora y minuto.
@@ -244,6 +247,9 @@ export function toMessageFromRow(row: MessageRow, currentUserId?: string | null)
     id: row.id,
     text: row.body,
     sender: currentUserId && row.sender_id === currentUserId ? 'me' : 'them',
+    // El nombre no viene en la fila; en un grupo se saca de la lista de
+    // miembros por este identificador (`nombreDelAutor`).
+    autorId: row.sender_id,
     createdAt: formatTime(row.created_at),
     createdAtIso: row.created_at,
   };

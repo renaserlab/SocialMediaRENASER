@@ -122,6 +122,22 @@ APLICADAS = {
     "0099_destacado_del_directo.sql": "13c5890fbbe3be5533ccfa7f06bdd25f4a86a329",
     "0100_disponibilidad_para_sesiones.sql": "d5269ccc65760f98aa69304281ffd651515284de",
     "0101_grabacion_del_directo.sql": "5d8ab69d8192828601c3910492c7c305bafa485b",
+    # 0102 (filtros personalizados de un grupo) y 0103 (las conversaciones y
+    # sus miembros solo se crean por la API: quita las dos politicas de alta
+    # de la 0001). Edson ejecuto las dos a mano en Supabase el 09/10/2026 y
+    # asi lo comunico. COMPROBADAS ESE MISMO DIA, EN SOLO LECTURA Y SIN
+    # DIVERGENCIAS: una consulta de 16 comprobaciones, las 16 en OK, vistas en
+    # las dos capturas que pego Edson. Nueve de la 0102 —columnas con su tipo
+    # y nulo; valores por defecto; claves ajenas y que hace cada una al
+    # borrar; restricciones; indices; el indice unico del nombre; RLS
+    # activada; ninguna politica; fuera de la publicacion de tiempo real— y
+    # siete de la 0103 —ninguna politica de alta en `conversations` ni en
+    # `conversation_members`; RLS activada en las dos; las dos conservan su
+    # politica de lectura; y las tres politicas de `messages` siguen como
+    # estaban—. La igualdad la calcula la propia base. Desde que estan
+    # aplicadas no se editan: se corrige hacia delante, con otra.
+    "0102_filtros_de_conversacion.sql": "82e1ea3c385d3ab5ca3071ed530c9d71dac78ea1",
+    "0103_miembros_solo_por_la_api.sql": "ea57ad6565e3146ee81c9aa5d72ffbe08e0b5b7d",
 }
 
 

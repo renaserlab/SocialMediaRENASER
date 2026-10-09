@@ -321,9 +321,16 @@ describe('la cabecera del chat', () => {
       !/rightIcon="video"/.test(CHAT_CODIGO),
       'Ha vuelto la cámara de videollamada a la cabecera del chat.',
     );
+    // Desde el 09/10 la cabecera SÍ tiene una acción derecha: abrir el
+    // contenido del chat por vistas. Lo que no puede volver es el botón que no
+    // hace nada: el icono solo se pinta si hay a dónde ir, y va con su acción.
+    assert.match(
+      sinComentarios(CABECERA),
+      /rightIcon=\{alAbrirContenido \? 'grid' : undefined\}\s*onRightPress=\{alAbrirContenido\}/,
+    );
     assert.ok(
-      !/rightIcon/.test(sinComentarios(CABECERA)),
-      'La cabecera del chat no tiene ninguna acción derecha que ofrecer.',
+      (sinComentarios(CABECERA).match(/rightIcon/g) ?? []).length === 1,
+      'La cabecera del chat tiene una sola acción derecha, y es la del contenido.',
     );
   });
 

@@ -271,6 +271,27 @@ async def hay_sesiones_en_el_chat(db: AsyncSession) -> bool:
     return _cache["message_booking_context"]
 
 
+async def hay_filtros_de_conversacion(db: AsyncSession) -> bool:
+    """Si existe `conversation_filters` (migracion 0102).
+
+    SIN LA 0102: las categorias automaticas de un chat (fotos, videos, archivos,
+    audios, enlaces) funcionan igual, porque salen de `messages` y de
+    `message_attachments`. Lo que no hay son filtros personalizados: listarlos
+    devuelve vacio y crearlos responde 503.
+    """
+    if "conversation_filters" not in _cache:
+        conexion = await db.connection()
+        _cache["conversation_filters"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("conversation_filters")
+        )
+        if not _cache["conversation_filters"]:
+            logger.warning(
+                "La migracion 0102 no esta aplicada: los grupos no tienen "
+                "filtros personalizados; las categorias automaticas si."
+            )
+    return _cache["conversation_filters"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 
