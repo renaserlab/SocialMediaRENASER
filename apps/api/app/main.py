@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.modules.bookings.disponibilidad import router as disponibilidad_router
 from app.modules.bookings.router import router as bookings_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.communities.router import router as communities_router
@@ -273,6 +274,9 @@ def create_app() -> FastAPI:
     app.include_router(notifications_admin_router, prefix=prefix)
     app.include_router(moderation_router, prefix=prefix)
     app.include_router(bookings_router, prefix=prefix)
+    # `/availability/...`: la semana tipo de cada persona para las sesiones
+    # 1:1. Prefijo propio; no choca con `/services/.../availability`.
+    app.include_router(disponibilidad_router, prefix=prefix)
     # Resenas entre personas. Se monta siempre: sin la migracion 0030 los
     # listados responden vacio y las escrituras 503, en vez de reventar.
     app.include_router(reviews_router, prefix=prefix)

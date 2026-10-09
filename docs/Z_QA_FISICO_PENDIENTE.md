@@ -3073,3 +3073,35 @@ Solo de la aplicación. El precio se guarda y se enseña en la moneda elegida,
 | Editar un curso en dólares: la hoja y el asistente abren con Dólares marcado | | | |
 | Cambiarlo a soles y guardar: el precio pasa a verse en soles, con la misma cifra | | | |
 | Un curso gratuito no enseña el selector y sigue diciendo «Gratis» | | | |
+
+## Disponibilidad para las sesiones 1:1 (09/10/2026) — prototipo
+
+Hacen falta **la migración 0100 aplicada, el servidor desplegado y una
+compilación nueva**. Es una semana que se repite, con sesiones de una hora; no
+hay excepciones por fecha, y pedir una sesión fuera de los horarios se sigue
+pudiendo. En la copia web se vio «Mi disponibilidad» añadir un horario y
+guardarlo; **los horarios dentro de la hoja de pedir sesión, no. Sin ver en
+teléfono.**
+
+Hacen falta dos cuentas: A pone su semana y B le pide una sesión.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A: en Agenda hay una fila «Mi disponibilidad» que abre la pantalla | | | |
+| Se ven los siete días, cada uno con «Sin horario» y un botón «Añadir» | | | |
+| «Añadir» en martes: aparecen «Desde» y «Hasta»; al elegir 9:00 y 12:00 y añadir, sale la franja | | | |
+| Una franja de menos de una hora dice que tiene que durar al menos una hora | | | |
+| Una franja que se pisa con otra del mismo día dice que se pisa | | | |
+| La quinta franja de un mismo día dice que ya no caben más | | | |
+| La `X` de una franja la quita | | | |
+| «Guardar disponibilidad» se enciende solo si hay cambios; al guardar dice «Disponibilidad guardada» | | | |
+| Salir y volver a entrar: la semana sigue como se guardó | | | |
+| B: en el perfil de A, al pedir una sesión, salen «Horarios disponibles de A» de los próximos días | | | |
+| Los horarios van de hora en hora y ninguno es de hace un rato ni empieza en menos de una hora | | | |
+| Tocar un horario lo marca y rellena el día y la hora de abajo | | | |
+| Confirmar crea la sesión como siempre: llega al chat y a la agenda de los dos | | | |
+| A acepta esa sesión; B vuelve a abrir la hoja: ese horario ya no se ofrece | | | |
+| B puede proponer otro momento con los campos de día y hora, aunque no esté entre los ofrecidos | | | |
+| Pedir una sesión a alguien SIN semana puesta: la hoja es la de siempre, sin horarios | | | |
+| A vacía su semana y guarda: a B ya no se le ofrece ningún horario | | | |
+| B con el teléfono en otra zona horaria: ve los horarios en SU hora | | | |

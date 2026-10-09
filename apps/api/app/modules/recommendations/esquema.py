@@ -163,6 +163,22 @@ async def hay_destacado_de_directo(db: AsyncSession) -> bool:
     return _cache["live_spotlights"]
 
 
+async def hay_disponibilidad(db: AsyncSession) -> bool:
+    """Si existe `availability_slots` (migracion 0100).
+
+    Sin ella nadie puede decir cuando esta disponible; pedir una sesion sigue
+    funcionando como siempre, proponiendo el momento a mano.
+    """
+    if "availability_slots" not in _cache:
+        _cache["availability_slots"] = await _hay_tabla(db, "availability_slots")
+        if not _cache["availability_slots"]:
+            logger.warning(
+                "La migracion 0100 no esta aplicada: no hay disponibilidad "
+                "para las sesiones 1:1."
+            )
+    return _cache["availability_slots"]
+
+
 async def hay_resenas_de_perfil(db: AsyncSession) -> bool:
     """Si existe `profile_reviews` (migracion 0030).
 

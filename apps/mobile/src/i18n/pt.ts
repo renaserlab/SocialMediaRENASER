@@ -1178,6 +1178,66 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'common.changesSaved': 'Alterações salvas',
 
   'agenda.headerTitle': 'AGENDA',
+
+  'agenda.myAvailability': 'Minha disponibilidade',
+
+  'availability.title': 'Minha disponibilidade',
+
+  'availability.body': 'Marque em quais dias e horários podem pedir uma sessão 1:1 com você. É uma semana que se repete. Quem pedir uma sessão verá estes horários, de hora em hora.',
+
+  'availability.day0': 'Segunda-feira',
+
+  'availability.day1': 'Terça-feira',
+
+  'availability.day2': 'Quarta-feira',
+
+  'availability.day3': 'Quinta-feira',
+
+  'availability.day4': 'Sexta-feira',
+
+  'availability.day5': 'Sábado (dia)',
+
+  'availability.day6': 'Domingo (dia)',
+
+  'availability.add': 'Adicionar',
+
+  'availability.addTo': 'Adicionar um horário em {dia}',
+
+  'availability.addRange': 'Adicionar este horário',
+
+  'availability.from': 'Das',
+
+  'availability.to': 'Até as',
+
+  'availability.none': 'Sem horário',
+
+  'availability.remove': 'Remover o horário {franja}',
+
+  'availability.save': 'Salvar disponibilidade',
+
+  'availability.saved': 'Disponibilidade salva',
+
+  'availability.saveFailed': 'Não foi possível salvar. Tente de novo.',
+
+  'availability.loadFailed': 'Não foi possível carregar sua disponibilidade',
+
+  'availability.needTimes': 'Escolha a hora de início e a de fim.',
+
+  'availability.tooShort': 'O horário precisa durar pelo menos uma hora.',
+
+  'availability.overlap': 'Esse horário se sobrepõe a outro no mesmo dia.',
+
+  'availability.dayFull': 'Esse dia já tem todos os horários que cabem.',
+
+  'availability.note': 'Os horários são os do seu telefone. As sessões duram uma hora.',
+
+  'availability.unavailableTitle': 'Ainda não disponível',
+
+  'availability.unavailableBody': 'A disponibilidade para sessões será ativada em breve.',
+
+  'booking.openings': 'Horários disponíveis de {nombre}',
+
+  'booking.openingsHint': 'Escolha um, ou proponha outro momento abaixo.',
   'agenda.statePending': 'Pendente',
   'agenda.stateAccepted': 'Confirmada',
   'agenda.stateRejected': 'Recusada',
