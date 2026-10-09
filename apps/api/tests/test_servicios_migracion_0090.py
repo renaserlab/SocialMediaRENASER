@@ -128,6 +128,13 @@ APLICADAS = {
     # consulta de comprobacion en solo lectura. Desde que esta aplicada no se
     # edita: se corrige hacia delante, con otra.
     "0102_filtros_de_conversacion.sql": "82e1ea3c385d3ab5ca3071ed530c9d71dac78ea1",
+    # 0103 (las conversaciones y sus miembros solo se crean por la API: quita
+    # las dos politicas de alta de la 0001). Edson la ejecuto a mano en
+    # Supabase el 09/10/2026 y asi lo comunico. La migracion se niega a
+    # terminar si alguna de las dos tablas queda sin RLS, con una politica
+    # de alta o sin su politica de lectura. PENDIENTE la consulta de
+    # comprobacion en solo lectura, igual que la de la 0102.
+    "0103_miembros_solo_por_la_api.sql": "ea57ad6565e3146ee81c9aa5d72ffbe08e0b5b7d",
 }
 
 
