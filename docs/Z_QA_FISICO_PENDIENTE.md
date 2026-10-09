@@ -3123,3 +3123,27 @@ teléfono ni con una grabación de verdad.
 | El vídeo dura lo que duró el directo y se oye | | | |
 | Anotar cuánto tarda en estar lista y, días después, si el enlace sigue abriendo | | | |
 | Un directo sin grabación se termina y se ve exactamente como antes | | | |
+
+## Contenido del chat por vistas (09/10/2026)
+
+Hace falta el servidor desplegado y una compilación nueva. **No hace falta la
+migración 0102** para esto: las categorías salen de los mensajes que ya hay.
+Sin ver en teléfono ni en la copia web.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En un chat, arriba a la derecha hay un botón de cuadrícula; abre «Contenido» | | | |
+| Solo salen las pestañas que tienen algo (más «Todo»), con su número | | | |
+| «Fotos» enseña solo mensajes con foto; «Archivos», solo con archivo; igual vídeos, audios y enlaces | | | |
+| Un mensaje con foto y enlace sale en «Fotos» y en «Enlaces», una vez en cada una | | | |
+| Tocar una foto la amplía; un archivo o un vídeo se abren fuera; una nota de voz suena | | | |
+| Buscar una palabra encuentra por el texto y por el nombre del archivo | | | |
+| Cambiar deprisa de pestaña no deja la lista de una pestaña en otra | | | |
+| Con más de 30 resultados, al bajar se cargan más sin repetirse | | | |
+| Con la pantalla abierta, mandar una foto desde otro teléfono la hace aparecer en unos segundos | | | |
+| Borrar un mensaje en el chat y volver: ya no está en su pestaña | | | |
+| Al volver atrás, el chat está donde se dejó | | | |
+| Un chat sin fotos ni archivos enseña solo «Todo» | | | |
+
+**Los filtros personalizados no se pueden probar todavía**: son de los grupos,
+y la aplicación no tiene aún forma de crear un grupo.

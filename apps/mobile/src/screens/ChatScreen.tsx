@@ -1494,6 +1494,19 @@ export function ChatScreen() {
         idDeRespaldo={demoConversation?.otherId}
         resolverEnElServidor={supabaseEnabled && !!params.id}
         onBack={() => void salirDelChat()}
+        // El contenido por vistas se pide al servidor: sin él (modo de
+        // muestra) no hay nada que abrir, y el botón no se pinta.
+        alAbrirContenido={
+          supabaseEnabled && params.id
+            ? () =>
+                router.push({
+                  // `as never`: los tipos de rutas se generan al arrancar Expo
+                  // y todavía no conocen esta, igual que `/disponibilidad`.
+                  pathname: '/chat/contenido/[id]' as never,
+                  params: { id: params.id, name: headerName },
+                })
+            : undefined
+        }
       />
       {/*
         La franja roja solo cuando YA hay algo pintado (una burbuja propia, un

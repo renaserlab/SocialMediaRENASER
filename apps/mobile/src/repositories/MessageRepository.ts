@@ -2,17 +2,27 @@ import { apiRequest, API_V1 } from '@/services/api';
 import {
   ConversationDto,
   MessageDto,
+  toAttachment,
   toConversation,
   toMessage,
 } from '@/mappers/messageMapper';
 import { firmarAdjuntos, type AdjuntoSubido } from '@/services/messageMedia';
-import { signMediaUrls } from '@/services/storage';
+import { profileImageUrl, signMediaUrls } from '@/services/storage';
+import {
+  SIN_VISTAS,
+  leerCursor,
+  leerVistas,
+  parametrosDeVista,
+  type CursorDeVista,
+  type VistaElegida,
+  type VistasDeChat,
+} from '@/lib/vistasDeChat';
 import {
   CONSULTA_VACIA,
   parametrosDeBandeja,
   type ConsultaDeBandeja,
 } from '@/lib/bandeja';
-import type { Conversation, Message } from '@/types';
+import type { Conversation, Message, MessageAttachment } from '@/types';
 
 /**
  * Cuántas conversaciones se piden de una vez.
@@ -109,6 +119,30 @@ async function completar(mensajes: Message[]): Promise<Message[]> {
   return conMiniaturasDeHistoria(await conUrlsFirmadas(mensajes));
 }
 
+/**
+ * Un mensaje tal como se enseña en una VISTA del chat (fotos, archivos, un
+ * filtro del grupo…).
+ *
+ * ES EL MISMO MENSAJE del chat, con su mismo `id`. Lleva a su autor con nombre
+ * —y no el «mío / suyo» de `Message`— porque en una vista los mensajes salen
+ * fuera de su conversación, uno debajo de otro, y hay que decir de quién es
+ * cada uno.
+ */
+export type MensajeDeVista = {
+  id: string;
+  texto: string;
+  fechaIso: string;
+  mio: boolean;
+  autor: { id: string; nombre: string; avatarUrl?: string };
+  adjuntos: MessageAttachment[];
+};
+
+export type PaginaDeVista = {
+  mensajes: MensajeDeVista[];
+  /** `null` cuando no hay más páginas. */
+  siguiente: CursorDeVista | null;
+};
+
 /** Lo que el servidor dice que se puede hacer en esta instalación. */
 export type FuncionesDelChat = {
   /** Se pueden mandar notas de voz (migración 0044 aplicada). */
@@ -144,6 +178,83 @@ export const MessageRepository = {
     } catch {
       return { notasDeVoz: false, respuestasAHistorias: false };
     }
+  },
+
+  /**
+   * Qué vistas tiene una conversación: cuántos mensajes hay de cada categoría
+   * y, en un grupo, sus filtros.
+   *
+   * UN FALLO NO ROMPE NADA: devuelve `SIN_VISTAS`, que es «solo Todo». Vale
+   * igual para una API antigua que no conozca la ruta.
+   */
+  async vistas(conversationId: string, signal?: AbortSignal): Promise<VistasDeChat> {
+    try {
+      return leerVistas(
+        await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/views`, { signal }),
+      );
+    } catch {
+      return SIN_VISTAS;
+    }
+  },
+
+  /**
+   * Una página de una vista, de lo más reciente a lo más antiguo.
+   *
+   * QUÉ MENSAJES ENTRAN LO DECIDE EL SERVIDOR. Aquí no se filtra nada: filtrar
+   * lo ya descargado solo vería las páginas cargadas.
+   *
+   * `signal` deja cancelar la petición cuando se cambia de pestaña antes de
+   * que conteste.
+   */
+  async mensajesDeVista(
+    conversationId: string,
+    vista: VistaElegida,
+    {
+      buscar,
+      cursor,
+      signal,
+      currentUserId,
+    }: {
+      buscar?: string;
+      cursor?: CursorDeVista | null;
+      signal?: AbortSignal;
+      currentUserId?: string | null;
+    } = {},
+  ): Promise<PaginaDeVista> {
+    const dto = await apiRequest<{ items?: MessageDto[] }>(
+      `${API_V1}/conversations/${conversationId}/views/messages?${parametrosDeVista(vista, {
+        buscar,
+        cursor,
+      })}`,
+      { signal },
+    );
+    const filas = Array.isArray(dto?.items) ? dto.items : [];
+    // Todas las firmas de la página en UNA llamada, igual que en el chat.
+    const rutas = filas.flatMap((fila) => (fila.attachments ?? []).map((a) => a.storage_path));
+    let firmas: Record<string, string> = {};
+    try {
+      firmas = await firmarAdjuntos(rutas);
+    } catch {
+      // Sin firma el adjunto enseña su hueco; el mensaje se lee igual.
+    }
+    return {
+      mensajes: filas.map((fila) => ({
+        id: fila.id,
+        texto: fila.body ?? '',
+        fechaIso: fila.created_at,
+        mio: !!currentUserId && fila.sender?.id === currentUserId,
+        autor: {
+          id: fila.sender?.id ?? '',
+          nombre: fila.sender?.full_name ?? '',
+          avatarUrl: profileImageUrl(fila.sender?.avatar_path) ?? undefined,
+        },
+        adjuntos: (fila.attachments ?? []).map((a) => ({
+          ...toAttachment(a),
+          url: firmas[a.storage_path],
+        })),
+      })),
+      siguiente: leerCursor(dto),
+    };
   },
 
   /**

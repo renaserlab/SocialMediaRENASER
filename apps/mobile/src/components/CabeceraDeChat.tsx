@@ -105,6 +105,12 @@ type Props = {
   /** `false` sin Supabase: no hay servidor al que preguntar. */
   resolverEnElServidor: boolean;
   onBack: () => void;
+  /**
+   * Abre el contenido del chat por vistas (fotos, archivos, enlaces…).
+   *
+   * OPCIONAL: sin él la cabecera queda exactamente como estaba, sin botón.
+   */
+  alAbrirContenido?: () => void;
 };
 
 export function CabeceraDeChat({
@@ -115,6 +121,7 @@ export function CabeceraDeChat({
   idDeRespaldo,
   resolverEnElServidor,
   onBack,
+  alAbrirContenido,
 }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -154,6 +161,9 @@ export function CabeceraDeChat({
   return (
     <AppHeader
       onBack={onBack}
+      rightIcon={alAbrirContenido ? 'grid' : undefined}
+      onRightPress={alAbrirContenido}
+      rightLabel={alAbrirContenido ? t('chatViews.open') : undefined}
       center={
         <Pressable
           onPress={() => irAlPerfil(router, idDelPerfil)}
