@@ -846,9 +846,17 @@ compilación nueva de la aplicación.
 Edson a mano) y su fichero ya no se edita: su huella consta en `APLICADAS`
 (`apps/api/tests/test_servicios_migracion_0090.py`). Que corriera sin error ya
 dice que la tabla quedó con RLS y sin ninguna política —su bloque final se
-niega a terminar si no—. La comprobación en solo lectura del resto (columnas,
-claves, índices, que no esté en la publicación de tiempo real) está pendiente
-de su resultado.
+niega a terminar si no—.
+
+**Comprobada ese mismo día, en solo lectura y sin divergencias.** Una consulta
+de once comprobaciones devolvió las once en `OK`: la tabla existe; sus siete
+columnas, con su tipo, si admiten nulo y su valor por defecto; la clave
+primaria; las tres claves ajenas y lo que hace cada una al borrar; los cinco
+estados admitidos; los tres índices; RLS activada; ninguna política; fuera de
+la publicación de tiempo real; ningún disparador propio; y cero filas. La
+igualdad entre lo esperado y lo obtenido la calcula la propia base. Producción
+seguía entonces con el código anterior: hasta que se despliegue, nada escribe
+en esa tabla.
 
 ### Qué había ya y qué faltaba
 
@@ -939,3 +947,139 @@ el código que la usa, y ese despliegue arranca la API de nuevo.
 - Que una persona PIDA subir.
 - Silenciar el micrófono de un invitado sin quitarlo.
 - Guardar el reparto de la pantalla o dejar elegirlo.
+
+## 19. Lo destacado: el mensaje fijado y el texto de quien emite (09/10/2026)
+
+Dos cosas pedidas en el documento «Z bugs y nuevas funcionalidades» (07/10):
+que quien emite pueda **fijar un mensaje** del chat y poner **un texto propio
+sobre la imagen**, a la vista de toda la audiencia. **Hecho en el código; sin
+ver en teléfonos, sin la migración aplicada y sin desplegar.**
+
+### Dónde se guarda
+
+Tabla `live_spotlights` (migración **0099**, aplicada por Edson el 09/10/2026 y
+comprobada ese día en solo lectura, sin divergencias): una fila por
+emisión, con lo vigente —no un historial—. Va en su tabla y no en columnas de
+`live_sessions` a propósito: con columnas nuevas ahí, el código desplegado
+antes que la migración no podría ni leer una emisión.
+
+RLS activada y **ninguna política**, igual que `live_guests`: desde la
+aplicación no se lee ni se escribe; solo la API.
+
+### Las reglas (`live/destacado.py`)
+
+- Solo quien gestiona la emisión —quien emite o la administración— fija,
+  suelta, pone o quita.
+- Solo mientras la emisión está en directo. Quitar se puede siempre.
+- Se fija un mensaje **de esa sala y visible**: uno de otra emisión es «no
+  encontrado»; uno escondido, 409 (`live_message_hidden`).
+- **Esconder el mensaje fijado lo suelta**, en la misma transacción.
+- Lo fijado pasa por las reglas del chat al leerlo: a quien tiene bloqueado al
+  autor (o al revés) no se le enseña.
+- El texto se guarda en **una línea**, sin invisibles ni espacios de más, y
+  hasta **80 caracteres** contados después de limpiar. Tres formas de moverse:
+  `slide`, `pulse` y `ticker`.
+- Treinta cambios por minuto y emisión (`live_spotlight_rate_limited`).
+- Al terminar la emisión no queda nada destacado a la vista.
+
+### Las rutas
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/live/sessions/{id}/spotlight` | Lo destacado, visto por quien pregunta. Sin cuenta también |
+| PUT | `…/spotlight/pin` | Fija un mensaje (`message_id`). Sustituye al anterior |
+| DELETE | `…/spotlight/pin` | Deja de fijar |
+| PUT | `…/spotlight/banner` | Pone o cambia el texto (`text`, `style`) |
+| DELETE | `…/spotlight/banner` | Quita el texto |
+
+Todas devuelven lo destacado entero tal como queda.
+
+### Cómo se entera cada teléfono
+
+Igual que con los invitados: quien cambia algo manda una difusión **sin
+contenido** por el tópico `live-destacado:{id}`, y cada aplicación le pregunta
+a la API. El aviso no lleva el texto —lo podría mandar cualquiera—, así que lo
+único que consigue es una pregunta. Y las preguntas van con medida: cada
+teléfono pregunta como mucho una vez cada dos segundos, y una ráfaga de avisos
+se junta en una sola (`crearRepaso`, en `live/destacado.ts`). También se
+pregunta al entrar, al volver a primer plano y cuando el canal se recupera.
+
+### En la aplicación
+
+- **Mensaje fijado**: encima del chat, con chincheta. Quien gestiona lo suelta
+  con la `X`, o mantiene pulsado un mensaje y elige «Fijar mensaje».
+- **Texto en pantalla**: bajo la cabecera. Quien gestiona lo pone con el botón
+  `T` de la columna derecha, con vista previa, y lo toca para cambiarlo.
+- La entrada del texto se anima una vez por texto, no cada vez que se vuelve a
+  preguntar. La cinta solo corre si el texto no cabe. Con «reducir
+  movimiento», nada se mueve.
+
+### Sin la migración 0099
+
+El servidor contesta 503 (`live_spotlight_not_available`), la aplicación no
+enseña ninguna de las dos opciones y mantener pulsado un mensaje sigue
+sirviendo solo para ocultarlo. Tras aplicarla hay que reiniciar la API.
+
+### Lo que no se hizo
+
+- Elegir color o posición del texto.
+- Fijar más de un mensaje, o un historial de lo fijado.
+- Programar un texto para una hora.
+
+## 20. La grabación del directo (09/10/2026) — prototipo
+
+Pedido: que quien emitió pueda descargar el vídeo de su directo durante un
+tiempo. **Hecho en el código como prototipo; la grabación está APAGADA en el
+panel de 100ms, así que hoy no hace nada.** Sin la migración aplicada, sin
+desplegar y sin probar con una grabación de verdad.
+
+### Quién graba
+
+**Z no graba.** Graba 100ms, y solo si la grabación está encendida en la
+plantilla (hoy está desactivada, a propósito: ver §16). Z no arranca ni para
+ninguna grabación: se limita a escuchar el aviso de que hay una lista.
+
+Encenderla es una decisión de la empresa: **tiene costo por minuto grabado** y
+por almacenamiento. Hay que hacerlo en el panel de 100ms; antes de guiar ese
+paso hace falta una captura de la sección de grabación de la plantilla.
+
+### Qué hace el código
+
+1. 100ms manda al webhook que ya existe un aviso `beam.recording.success` (o
+   `recording.success`) con `recording_presigned_url`, `recording_path`,
+   `duration` y `size`. Los nombres están comprobados en su documentación el
+   09/10/2026; **no se ha recibido ninguno de verdad**.
+2. El servidor guarda ese enlace en `live_recordings` (migración **0101**,
+   aplicada y comprobada sin divergencias el 09/10/2026), en la emisión cuya sala es la del aviso. Solo si el enlace es
+   `https`, y solo si la sala es de una emisión nuestra.
+3. `GET /live/sessions/{id}/recording` se lo entrega **solo a quien gestiona
+   la emisión**. A quien solo miraba, 403.
+4. En la aplicación, quien emitió ve en la pantalla de fin «Descargar la
+   grabación», que abre el enlace fuera. Si todavía no ha llegado, lo dice y
+   deja volver a comprobar.
+
+### Lo que hay que saber
+
+- **El enlace caduca.** Es el temporal que da 100ms; cuánto dura lo decide
+  100ms y no está medido. El prototipo no pide uno nuevo: pasado ese tiempo,
+  la descarga deja de abrir.
+- **El vídeo no lleva comentarios ni reacciones.** Los dibuja la aplicación
+  encima de la imagen; no viajan en la transmisión.
+- **Con invitados**, lo que se graba es la composición que hace 100ms de la
+  sala, no la pantalla repartida de Z.
+- **El webhook solo comprueba un secreto compartido** (ver §«Cómo se comprueba
+  que el aviso es suyo»). Por eso el enlace se limita a `https` y a salas
+  nuestras, y solo lo ve quien emitió.
+- El vídeo queda en el almacenamiento de 100ms, no en el de Z.
+
+### Sin la migración 0101
+
+El aviso de grabación se ignora, la ruta dice que la función no está y la
+aplicación no pinta nada.
+
+### Lo que no se hizo
+
+- Pedir un enlace nuevo cuando caduca.
+- Guardar el vídeo en el almacenamiento de Z, o borrarlo pasado un plazo.
+- Enseñar la grabación a quienes miraron.
+- Los clips con IA, que necesitan esta grabación como punto de partida.

@@ -3000,3 +3000,126 @@ es un fallo de la aplicación.
 | C (que solo mira) no ve en ningún momento el botón de invitar ni la lista de invitados | | | |
 | Una persona sin cuenta que mira: no ve nada de esto y el directo le funciona igual | | | |
 | Un directo sin invitados se ve y se oye exactamente como antes | | | |
+
+## Reel que graba y rojo que se lee (09/10/2026)
+
+Solo de la aplicación: basta una compilación nueva. La versión sigue siendo la
+1.2.1.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Crear › Reel: un TOQUE en el disparador empieza a grabar (no hace foto) | | | |
+| Otro toque termina y lleva a «describe tu reel», con el vídeo reproduciéndose | | | |
+| Mantener pulsado graba y al soltar termina | | | |
+| Manteniendo pulsado, deslizar el dedo hacia arriba acerca la imagen | | | |
+| La primera vez pide el micrófono; al concederlo empieza a grabar sin tener que tocar otra vez | | | |
+| La pista dice «Toca para grabar y otra vez para terminar · Mantén y desliza para acercar» | | | |
+| Mientras graba no se puede girar la cámara, y el anillo avanza | | | |
+| A los tres minutos se corta solo | | | |
+| Crear › Historia y Crear › Publicación: un toque sigue haciendo FOTO y mantener graba, como antes | | | |
+| En el directo, «EN VIVO» y «Terminar» se leen bien (letra blanca sobre rojo oscuro) | | | |
+| La tarjeta de un directo en Inicio y el aviso de «está en directo»: el rótulo rojo se lee igual | | | |
+
+## Mensaje fijado y texto en pantalla (09/10/2026)
+
+Hacen falta **la migración 0099 aplicada, el servidor desplegado y una
+compilación nueva**. En la copia web se vio la hoja del texto con su contador
+y su vista previa, el texto bajo la cabecera (también en cinta, moviéndose), el
+mensaje fijado sobre el chat, el menú al mantener pulsado un mensaje y que quien
+mira no tiene ningún control. **Con teléfonos falta ver que le llega a los
+demás al momento.**
+
+Hacen falta dos: uno emite (A) y uno mira (B).
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A, emitiendo: en la columna derecha hay un botón con una «T» | | | |
+| Al tocarlo se abre «Texto en pantalla», con el campo, el contador `0/80` y tres formas: Deslizar, Latido, Cinta | | | |
+| Al escribir aparece «Así se verá» con el texto tal como saldrá | | | |
+| Escribiendo con espacios de más o saltos de línea, la muestra los quita y el contador no los cuenta | | | |
+| Con más de 80 caracteres el contador se pone rojo, dice cuántos sobran y «Mostrar a todos» se apaga | | | |
+| «Mostrar a todos»: el texto aparece arriba, bajo el nombre, en A y en B, en uno o dos segundos | | | |
+| En B el texto entra deslizándose UNA vez; no vuelve a entrar solo cada poco | | | |
+| «Latido»: entra y late tres veces; después se queda quieto | | | |
+| «Cinta» con un texto largo: corre de lado y se lee entero. Con uno corto, no se mueve | | | |
+| A toca el texto: se abre la hoja con lo que hay puesto; «Actualizar el texto» lo cambia para todos | | | |
+| «Quitar el texto»: desaparece en A y en B | | | |
+| B toca el texto: no pasa nada. B no tiene el botón «T» | | | |
+| Con «reducir movimiento» activado en el teléfono de B: el texto aparece sin moverse | | | |
+| A mantiene pulsado un mensaje del chat: se abre «Acciones del mensaje» con «Fijar mensaje» y «Ocultar mensaje» | | | |
+| «Fijar mensaje»: aparece encima del chat, con chincheta y el nombre de quien lo escribió, en A y en B | | | |
+| Llegan mensajes nuevos: el fijado NO se va con la conversación | | | |
+| A fija otro mensaje: sustituye al anterior | | | |
+| A mantiene pulsado el mensaje fijado: ofrece «Dejar de fijar» | | | |
+| A toca la `X` del fijado: desaparece en A y en B | | | |
+| A oculta el mensaje que está fijado: deja de estar fijado para todos | | | |
+| B entra al directo DESPUÉS de que A fijara y pusiera el texto: ve las dos cosas | | | |
+| B pone la aplicación en segundo plano, A cambia el texto, B vuelve: ve el nuevo | | | |
+| B mantiene pulsado un mensaje: no pasa nada | | | |
+| A termina el directo: no queda ni texto ni mensaje fijado en la pantalla de fin | | | |
+| El texto no tapa el nombre de quien emite ni «EN VIVO», ni con invitados en pantalla | | | |
+
+## Precio del curso en soles o en dólares (09/10/2026) — prototipo
+
+Solo de la aplicación. El precio se guarda y se enseña en la moneda elegida,
+**sin convertir**: no hay tipo de cambio. Las compras siguen apagadas.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Crear curso › De pago: aparece «Moneda» con Soles (S/) y Dólares ($) | | | |
+| Con Dólares, el campo dice «Precio (USD)»; con Soles, «Precio (PEN)» | | | |
+| Un curso guardado en dólares se ve como `$ 25.00` en Cursos, en su ficha y en la vista previa | | | |
+| Uno en soles se sigue viendo como `S/ 25.00` | | | |
+| Editar un curso en dólares: la hoja y el asistente abren con Dólares marcado | | | |
+| Cambiarlo a soles y guardar: el precio pasa a verse en soles, con la misma cifra | | | |
+| Un curso gratuito no enseña el selector y sigue diciendo «Gratis» | | | |
+
+## Disponibilidad para las sesiones 1:1 (09/10/2026) — prototipo
+
+Hacen falta **la migración 0100 aplicada, el servidor desplegado y una
+compilación nueva**. Es una semana que se repite, con sesiones de una hora; no
+hay excepciones por fecha, y pedir una sesión fuera de los horarios se sigue
+pudiendo. En la copia web se vio «Mi disponibilidad» añadir un horario y
+guardarlo; **los horarios dentro de la hoja de pedir sesión, no. Sin ver en
+teléfono.**
+
+Hacen falta dos cuentas: A pone su semana y B le pide una sesión.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A: en Agenda hay una fila «Mi disponibilidad» que abre la pantalla | | | |
+| Se ven los siete días, cada uno con «Sin horario» y un botón «Añadir» | | | |
+| «Añadir» en martes: aparecen «Desde» y «Hasta»; al elegir 9:00 y 12:00 y añadir, sale la franja | | | |
+| Una franja de menos de una hora dice que tiene que durar al menos una hora | | | |
+| Una franja que se pisa con otra del mismo día dice que se pisa | | | |
+| La quinta franja de un mismo día dice que ya no caben más | | | |
+| La `X` de una franja la quita | | | |
+| «Guardar disponibilidad» se enciende solo si hay cambios; al guardar dice «Disponibilidad guardada» | | | |
+| Salir y volver a entrar: la semana sigue como se guardó | | | |
+| B: en el perfil de A, al pedir una sesión, salen «Horarios disponibles de A» de los próximos días | | | |
+| Los horarios van de hora en hora y ninguno es de hace un rato ni empieza en menos de una hora | | | |
+| Tocar un horario lo marca y rellena el día y la hora de abajo | | | |
+| Confirmar crea la sesión como siempre: llega al chat y a la agenda de los dos | | | |
+| A acepta esa sesión; B vuelve a abrir la hoja: ese horario ya no se ofrece | | | |
+| B puede proponer otro momento con los campos de día y hora, aunque no esté entre los ofrecidos | | | |
+| Pedir una sesión a alguien SIN semana puesta: la hoja es la de siempre, sin horarios | | | |
+| A vacía su semana y guarda: a B ya no se le ofrece ningún horario | | | |
+| B con el teléfono en otra zona horaria: ve los horarios en SU hora | | | |
+
+## Descarga de la grabación del directo (09/10/2026) — prototipo
+
+**No se puede probar hasta que la empresa decida encender la grabación en el
+panel de 100ms** (tiene costo por minuto). Además hacen falta la migración
+0101 aplicada, el servidor desplegado y una compilación nueva. Sin ver en
+teléfono ni con una grabación de verdad.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Con la grabación APAGADA en 100ms: al terminar un directo, quien emitió ve «Si la grabación está activada, aparecerá aquí…» y nada más | | | |
+| Quien solo miraba no ve nada de la grabación | | | |
+| Con la grabación ENCENDIDA: unos minutos después de terminar, «Volver a comprobar» pasa a «Descargar la grabación» | | | |
+| Debajo del botón dice cuánto dura y cuánto pesa, y que el enlace caduca | | | |
+| Al tocarlo se abre el vídeo fuera de la aplicación y se puede guardar | | | |
+| El vídeo dura lo que duró el directo y se oye | | | |
+| Anotar cuánto tarda en estar lista y, días después, si el enlace sigue abriendo | | | |
+| Un directo sin grabación se termina y se ve exactamente como antes | | | |

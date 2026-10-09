@@ -177,10 +177,10 @@ describe('se lee con cualquier cosa detrás', () => {
   it('la pista de la cámara va sobre una superficie, con letra clara y márgenes', () => {
     assert.match(
       CAMARA,
-      /<SuperficieSobreMedio forma="pildora"[^>]*>\s*<Text[^>]*color=\{media\.text\}[^>]*numberOfLines=\{2\}[^>]*>\s*\{t\('camera\.hint'\)\}/,
+      /<SuperficieSobreMedio forma="pildora"[^>]*>\s*<Text[^>]*color=\{media\.text\}[^>]*numberOfLines=\{2\}[^>]*>\s*\{t\(soloVideo \? 'camera\.hintVideo' : 'camera\.hint'\)\}/,
     );
     // Antes: gris, sin fondo y sin tope de ancho, así que se salía por los lados.
-    assert.doesNotMatch(CAMARA, /color=\{media\.textMuted\}[^<]*>\s*\{t\('camera\.hint'\)\}/);
+    assert.doesNotMatch(CAMARA, /color=\{media\.textMuted\}[^<]*>\s*\{t\((?:soloVideo \? 'camera\.hintVideo' : )?'camera\.hint'\)\}/);
     assert.match(CAMARA, /hint: \{[^}]*left: spacing\.lg,\s*right: spacing\.lg,\s*height: ALTO_PISTA,/);
   });
 

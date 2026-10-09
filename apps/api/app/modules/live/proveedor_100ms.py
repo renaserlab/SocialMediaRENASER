@@ -29,6 +29,7 @@ from app.modules.live.providers import (
     Credencial,
     EstadoDeSala,
     EventoDeProveedor,
+    GrabacionAvisada,
     ProveedorDeDirecto,
     SalaCreada,
 )
@@ -51,7 +52,30 @@ EVENTOS: dict[str, str] = {
     "peer.leave.success": "participante_salio",
     "session.failure": "fallo",
     "room.end.success": "sala_cerrada",
+    # La grabacion ya esta preparada y se puede bajar. Dos nombres porque 100ms
+    # avisa con uno u otro segun como grabe: `beam.recording.success` para la
+    # grabacion compuesta (la que se enciende en el panel) y `recording.success`
+    # para la del servidor de medios. Los campos que se leen son los mismos.
+    "beam.recording.success": "grabacion_lista",
+    "recording.success": "grabacion_lista",
 }
+
+
+def _entero(valor) -> int | None:
+    """Un numero no negativo, o nada. Lo que llega en un aviso no se da por bueno."""
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        return None
+    return int(valor) if valor >= 0 else None
+
+
+def _grabacion(datos: dict) -> GrabacionAvisada:
+    return GrabacionAvisada(
+        recording_id=str(datos.get("recording_id") or datos.get("beam_id") or ""),
+        ruta=str(datos.get("recording_path") or ""),
+        url=str(datos.get("recording_presigned_url") or ""),
+        duracion_s=_entero(datos.get("duration")),
+        tamano_bytes=_entero(datos.get("size")),
+    )
 
 
 class Proveedor100ms(ProveedorDeDirecto):
@@ -259,6 +283,7 @@ class Proveedor100ms(ProveedorDeDirecto):
             session_id=str(datos.get("room_name") or ""),
             external_session_id=str(datos.get("session_id") or ""),
             ocurrido_en=str(cuerpo.get("timestamp") or ""),
+            grabacion=_grabacion(datos) if significado == "grabacion_lista" else None,
         )
 
 

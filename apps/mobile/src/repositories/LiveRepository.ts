@@ -1,4 +1,6 @@
+import { leerDestacado, type Destacado, type EstiloDeRotulo } from '@/live/destacado';
 import { leerEscenario, type Escenario } from '@/live/escenario';
+import { leerGrabacion, type Grabacion } from '@/live/grabacion';
 import {
   clasificarFalloDeCredencial,
   type FalloDeCredencial,
@@ -463,6 +465,82 @@ export const LiveRepository = {
   },
 
   /**
+   * La grabacion del directo, para quien lo emitio (prototipo).
+   *
+   * NUNCA FALLA: un servidor sin la funcion (404), sin la tabla, sin red o un
+   * 403 se leen todos como «no hay nada que ofrecer», y no se pinta nada.
+   */
+  async grabacion(emisionId: string): Promise<Grabacion> {
+    try {
+      return leerGrabacion(
+        await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/recording`),
+      );
+    } catch {
+      return leerGrabacion(null);
+    }
+  },
+
+  /* ------------------------------------------------------- Lo destacado -- */
+  /*
+    El mensaje fijado y el rotulo de quien emite (`live/destacado.ts`). Igual
+    que con el escenario, todas devuelven lo destacado ENTERO tal como queda:
+    la pantalla pinta lo que contesta el servidor, no lo que cree haber hecho.
+
+    Un servidor sin la migracion 0099 contesta 503
+    `live_spotlight_not_available` y uno anterior a esta funcion, 404. Las dos
+    cosas significan «aqui no se puede destacar»: lo decide `sinDestacado`.
+  */
+
+  /** Lo destacado de una emision. Se puede leer sin cuenta. */
+  async destacado(emisionId: string): Promise<DestacadoDeEmision> {
+    return aDestacado(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight`),
+    );
+  },
+
+  /** Fijar un mensaje del chat. Solo quien gestiona la emision. */
+  async fijarMensaje(emisionId: string, mensajeId: string): Promise<DestacadoDeEmision> {
+    return aDestacado(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight/pin`, {
+        method: 'PUT',
+        body: JSON.stringify({ message_id: mensajeId }),
+      }),
+    );
+  },
+
+  /** Dejar de fijar. Si no habia nada fijado, no pasa nada. */
+  async soltarMensaje(emisionId: string): Promise<DestacadoDeEmision> {
+    return aDestacado(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight/pin`, {
+        method: 'DELETE',
+      }),
+    );
+  },
+
+  /** Poner o cambiar el texto que quien emite ensena sobre la imagen. */
+  async ponerRotulo(
+    emisionId: string,
+    texto: string,
+    estilo: EstiloDeRotulo,
+  ): Promise<DestacadoDeEmision> {
+    return aDestacado(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight/banner`, {
+        method: 'PUT',
+        body: JSON.stringify({ text: texto, style: estilo }),
+      }),
+    );
+  },
+
+  /** Quitar el rotulo. Si no habia ninguno, no pasa nada. */
+  async quitarRotulo(emisionId: string): Promise<DestacadoDeEmision> {
+    return aDestacado(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight/banner`, {
+        method: 'DELETE',
+      }),
+    );
+  },
+
+  /**
    * Si el servidor tiene proveedor de video ahora mismo.
    *
    * Lo pregunta «Vivo» antes de ofrecer emitir: encender los directos es
@@ -489,6 +567,16 @@ export const LiveRepository = {
  * `entorno.clasificarFallo`: asi la pantalla no tiene que capturar el error,
  * mirarlo y volver a lanzarlo.
  */
+/** Lo destacado de una emision, con el mensaje ya en la forma de la aplicacion. */
+export type DestacadoDeEmision = Destacado<MensajeDeEmision>;
+
+function aDestacado(bruto: unknown): DestacadoDeEmision {
+  const destacado = leerDestacado<MensajeDeEmision>(bruto, aMensaje);
+  // Un 200 que no es lo destacado: contrato roto, no «no hay nada destacado».
+  if (!destacado) throw new Error('El servidor no devolvió lo destacado.');
+  return destacado;
+}
+
 function aEscenario(bruto: unknown): Escenario {
   const escenario = leerEscenario(bruto);
   // Un 200 que no es un escenario: contrato roto, no «no hay invitados».

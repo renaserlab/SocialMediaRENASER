@@ -90,6 +90,25 @@ export function aCentavos(texto: string, traducir: Traductor = enEspanol): Impor
   return { ok: true, centavos };
 }
 
+/**
+ * Las monedas en las que se puede poner el precio de un curso.
+ *
+ * Pedido el 07/10/2026: «precio en dólares o en soles». El servidor ya guarda
+ * la moneda de cada curso; la aplicación mandaba siempre soles. El precio se
+ * guarda y se enseña EN LA MONEDA ELEGIDA, tal cual: aquí no hay tipo de
+ * cambio ni conversión, que es una regla que la empresa todavía no ha dado.
+ */
+export const MONEDAS_DE_CURSO = ['PEN', 'USD'] as const;
+export type MonedaDeCurso = (typeof MONEDAS_DE_CURSO)[number];
+
+/** La moneda de un curso ya guardado, o soles si trae una que aquí no se ofrece. */
+export function monedaDeCurso(valor: string | null | undefined): MonedaDeCurso {
+  const codigo = (valor ?? '').trim().toUpperCase();
+  return (MONEDAS_DE_CURSO as readonly string[]).includes(codigo)
+    ? (codigo as MonedaDeCurso)
+    : 'PEN';
+}
+
 const SIMBOLOS: Record<string, string> = {
   PEN: 'S/',
   MXN: '$',

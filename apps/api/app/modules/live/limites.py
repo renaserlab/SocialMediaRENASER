@@ -120,12 +120,24 @@ reacciones = VentanaDeslizante(ENVIOS_POR_VENTANA, VENTANA_DE_REACCIONES)
 credenciales = VentanaDeslizante(CREDENCIALES_POR_VENTANA, VENTANA_DE_CREDENCIALES)
 invitaciones = VentanaDeslizante(INVITACIONES_POR_VENTANA, VENTANA_DE_INVITACIONES)
 
+#: Cuantas veces se puede cambiar lo destacado de una emision en su ventana.
+#:
+#: Cada cambio hace que TODOS los telefonos de la sala vuelvan a preguntar. Con
+#: treinta por minuto se puede fijar, corregir el rotulo y volver a fijar sin
+#: tropezar nunca; un bucle que lo cambie sin parar se queda aqui y no
+#: convierte la sala en un parpadeo ni a la audiencia en un aluvion de
+#: peticiones.
+DESTACADOS_POR_VENTANA = 30
+VENTANA_DE_DESTACADOS = timedelta(minutes=1)
+destacados = VentanaDeslizante(DESTACADOS_POR_VENTANA, VENTANA_DE_DESTACADOS)
+
 
 def vaciar() -> None:
     chat.vaciar()
     reacciones.vaciar()
     credenciales.vaciar()
     invitaciones.vaciar()
+    destacados.vaciar()
 
 
 def acotar_envio(counts: dict[str, int]) -> dict[str, int]:

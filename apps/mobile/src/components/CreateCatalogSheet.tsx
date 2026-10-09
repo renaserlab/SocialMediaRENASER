@@ -13,7 +13,13 @@ import { Text } from '@/components/Text';
 import { FEATURE_PURCHASES } from '@/config/features';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SelectorDeTemas } from '@/components/SelectorDeTemas';
-import { aCentavos, aTextoEditable } from '@/lib/dinero';
+import {
+  aCentavos,
+  aTextoEditable,
+  MONEDAS_DE_CURSO,
+  monedaDeCurso,
+  type MonedaDeCurso,
+} from '@/lib/dinero';
 import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import { useAppStore } from '@/store/useAppStore';
@@ -42,6 +48,8 @@ export type CatalogEditable = {
   whatsappUrl?: string;
   /** Solo cursos: precio en la unidad MENOR. Ver `lib/dinero.ts`. */
   priceMinor?: number;
+  /** Solo cursos: la moneda en la que está puesto ese precio. */
+  currency?: string;
   /** Solo cursos: temas ya elegidos. */
   topicIds?: string[];
 };
@@ -125,6 +133,8 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
    * precio vacio significaba a la vez «gratis» y «todavia no lo he decidido».
    */
   const [dePago, setDePago] = useState(false);
+  /** En qué moneda se cobra. Solo cuenta si el curso es de pago. */
+  const [moneda, setMoneda] = useState<MonedaDeCurso>('PEN');
   const [temas, setTemas] = useState<string[]>([]);
   /** Solo podcast: categoria del episodio, para los filtros. */
   /** Categoria elegida: el ID de una del creador, o null. */
@@ -143,6 +153,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     setDescription(editing.description);
     setPrice(aTextoEditable(editing.priceMinor ?? 0));
     setDePago((editing.priceMinor ?? 0) > 0);
+    setMoneda(monedaDeCurso(editing.currency));
     setTemas(editing.topicIds ?? []);
     setPlace(editing.location ?? '');
     setWhatsapp(editing.whatsappUrl ?? '');
@@ -171,6 +182,7 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
     setEndTime('');
     setWhatsapp('');
     setPrice('');
+    setMoneda('PEN');
     setCategory(null);
     setError(null);
   };
@@ -341,14 +353,18 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           title: title.trim(),
           description: description.trim(),
           priceMinor,
+          // La moneda va con el precio, también al editar: un curso de pago
+          // cuyo precio se cambia de soles a dólares tiene que guardarlo.
+          ...(dePago ? { currency: moneda } : {}),
           topicIds: temas,
           ...(coverPath ? { coverPath } : {}),
         };
         if (editing) await LearningRepository.updateCourse(editing.id, data);
         else {
           const creado = await LearningRepository.createCourse({
-            ...data,
+            // Un curso gratuito nace en soles, como siempre.
             currency: 'PEN',
+            ...data,
             coverPath,
           });
           nuevoCurso = creado.id;
@@ -547,8 +563,16 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
             />
             {dePago ? (
               <>
+                <Text style={[styles.etiqueta, { color: colors.textMuted }]}>
+                  {t('catalog.currency')}
+                </Text>
+                <SegmentedControl
+                  options={MONEDAS_DE_CURSO.map((codigo) => t(`catalog.currency${codigo}`))}
+                  selectedIndex={MONEDAS_DE_CURSO.indexOf(moneda)}
+                  onChange={(indice) => setMoneda(MONEDAS_DE_CURSO[indice] ?? 'PEN')}
+                />
                 <Input
-                  label={t('catalog.price')}
+                  label={t('wizard.priceIn', { moneda })}
                   value={price}
                   onChangeText={setPrice}
                   placeholder="49.90"

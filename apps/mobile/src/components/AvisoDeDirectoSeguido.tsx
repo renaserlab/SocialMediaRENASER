@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
+import { rellenoDePeligro } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -138,8 +139,13 @@ export function AvisoDeDirectoSeguido() {
       >
         <View style={[styles.aro, { borderColor: media.danger }]}>
           <Avatar size={40} image={emision.anfitrionAvatarUrl} name={emision.anfitrionNombre} />
-          <View style={[styles.etiqueta, { backgroundColor: media.danger }]}>
-            <Text variant="caption" weight="800" color={media.onPrimary} style={styles.etiquetaTexto}>
+          <View style={[styles.etiqueta, { backgroundColor: rellenoDePeligro.fondo }]}>
+            <Text
+              variant="caption"
+              weight="800"
+              color={rellenoDePeligro.texto}
+              style={styles.etiquetaTexto}
+            >
               {t('live.badgeLive')}
             </Text>
           </View>

@@ -765,6 +765,9 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'camera.flipToFront': 'Switch to the front camera',
   'camera.flipToBack': 'Switch to the back camera',
   'camera.hint': 'Tap for a photo · Hold to record · Swipe to zoom',
+  'camera.hintVideo': 'Tap to record, tap again to finish · Hold and swipe to zoom',
+  'camera.shutterVideoA11y': 'Tap to start recording and again to finish',
+  'camera.recording': 'Recording',
 
   'lesson.headerTitle': 'Course Lesson',
   'lesson.courseCompleted': 'Course completed!',
@@ -1171,6 +1174,66 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'common.changesSaved': 'Changes saved',
 
   'agenda.headerTitle': 'SCHEDULE',
+
+  'agenda.myAvailability': 'My availability',
+
+  'availability.title': 'My availability',
+
+  'availability.body': 'Mark the days and times when people can request a 1:1 session with you. It is a week that repeats. Whoever requests a session will see these times, hour by hour.',
+
+  'availability.day0': 'Monday',
+
+  'availability.day1': 'Tuesday',
+
+  'availability.day2': 'Wednesday',
+
+  'availability.day3': 'Thursday',
+
+  'availability.day4': 'Friday',
+
+  'availability.day5': 'Saturday',
+
+  'availability.day6': 'Sunday',
+
+  'availability.add': 'Add',
+
+  'availability.addTo': 'Add a time on {dia}',
+
+  'availability.addRange': 'Add this time',
+
+  'availability.from': 'From',
+
+  'availability.to': 'To',
+
+  'availability.none': 'No times',
+
+  'availability.remove': 'Remove the time {franja}',
+
+  'availability.save': 'Save availability',
+
+  'availability.saved': 'Availability saved',
+
+  'availability.saveFailed': 'Could not save. Try again.',
+
+  'availability.loadFailed': 'Could not load your availability',
+
+  'availability.needTimes': 'Choose a start and an end time.',
+
+  'availability.tooShort': 'The time range must last at least one hour.',
+
+  'availability.overlap': 'That time overlaps another one on the same day.',
+
+  'availability.dayFull': 'That day already has as many times as it can hold.',
+
+  'availability.note': 'Times are in the time zone of your phone. Sessions last one hour.',
+
+  'availability.unavailableTitle': 'Not available yet',
+
+  'availability.unavailableBody': 'Availability for sessions will be turned on soon.',
+
+  'booking.openings': 'Available times for {nombre}',
+
+  'booking.openingsHint': 'Pick one, or suggest another time below.',
   'agenda.statePending': 'Pending',
   'agenda.stateAccepted': 'Confirmed',
   'agenda.stateRejected': 'Declined',
@@ -1364,9 +1427,41 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'live.goHome': 'Go to Home',
   'live.returningHome': 'Returning to Home in {n} s',
   'live.stayInChat': 'Stay and read the chat',
+  'live.recordingDownload': 'Download the recording',
+  'live.recordingExpires': 'The link expires: download it soon.',
+  'live.recordingPending': 'If recording is turned on, it will show up here a few minutes after the live ends.',
+  'live.recordingCheckAgain': 'Check again',
+  'live.recordingOpenFailed': 'Could not open the recording link.',
   'live.chatEmptyOpen': 'Nobody has written yet. You can be the first.',
   'live.chatEmptyClosed': 'There are no messages in this room.',
   'live.holdToHide': 'Press and hold to hide this message',
+  'live.holdForActions': 'Press and hold to pin or hide this message',
+  'live.messageActions': 'Message actions',
+  'live.hideMessage': 'Hide message',
+  'live.pin': 'Pin message',
+  'live.unpin': 'Unpin',
+  'live.pinned': 'Pinned message',
+  'live.pinnedA11y': 'Pinned message from {nombre}: {texto}',
+  'live.pinHidden': "That message is hidden and can't be pinned.",
+  'live.bannerButton': 'On-screen text',
+  'live.bannerTitle': 'On-screen text',
+  'live.bannerBody': 'Everyone watching sees it, on top of the live. A single line, up to {n} characters.',
+  'live.bannerPlaceholder': 'Write your message',
+  'live.bannerStyle': 'How it appears',
+  'live.bannerStyleSlide': 'Slide',
+  'live.bannerStylePulse': 'Pulse',
+  'live.bannerStyleTicker': 'Ticker',
+  'live.bannerPreview': 'Preview',
+  'live.bannerShow': 'Show to everyone',
+  'live.bannerUpdate': 'Update the text',
+  'live.bannerRemove': 'Remove the text',
+  'live.bannerTooLong': '{n} characters over the limit.',
+  'live.bannerA11y': 'Message from {nombre}: {texto}',
+  'live.bannerEditHint': 'Tap to change or remove the text',
+  'live.spotlightClosed': 'You can only highlight something while the live is on air.',
+  'live.spotlightTooFast': "You've changed this too many times in a row. Wait a moment.",
+  'live.spotlightUnavailable': "Highlighting in a live isn't available yet.",
+  'live.spotlightFailed': "Couldn't save the change. Try again.",
   'live.messagePlaceholder': 'Write a message…',
   'live.messageLabel': 'Message for the chat',
   'live.chatOpensLater': 'The chat opens when the broadcast starts.',
@@ -1701,6 +1796,9 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'wizard.totalLength': 'Total length: {duracion}',
   'wizard.accessType': 'ACCESS TYPE',
   'wizard.priceIn': 'Price ({moneda})',
+  'catalog.currency': 'Currency',
+  'catalog.currencyPEN': 'Peruvian soles (S/)',
+  'catalog.currencyUSD': 'US dollars ($)',
   'wizard.markFreeSample':
     'Mark at least one lesson as a free sample so it can be tried before buying, and leave the rest locked: a purchase has to unlock something real.',
   'wizard.freeCourseNote':

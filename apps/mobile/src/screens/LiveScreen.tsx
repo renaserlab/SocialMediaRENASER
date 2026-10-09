@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { ScrimDeMedio } from '@/components/CapaDeContraste';
+import { rellenoDePeligro, ScrimDeMedio } from '@/components/CapaDeContraste';
 import { Pulsable } from '@/components/Pulsable';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Text } from '@/components/Text';
@@ -23,7 +23,11 @@ import {
   altoDelChatPara,
   type ChatDeDirectoRef,
 } from '@/components/live/ChatDeDirecto';
+import { DescargaDeGrabacion } from '@/components/live/DescargaDeGrabacion';
 import { EscenarioDeVideo } from '@/components/live/EscenarioDeVideo';
+import { HojaDeRotulo } from '@/components/live/HojaDeRotulo';
+import { MensajeFijado } from '@/components/live/MensajeFijado';
+import { RotuloDeDirecto } from '@/components/live/RotuloDeDirecto';
 import { FinDeDirecto } from '@/components/live/FinDeDirecto';
 import { HojaDeCalidad } from '@/components/live/HojaDeCalidad';
 import { HojaDeEfectos } from '@/components/live/HojaDeEfectos';
@@ -31,6 +35,7 @@ import { HojaDeInvitados } from '@/components/live/HojaDeInvitados';
 import { InvitacionAlEscenario } from '@/components/live/InvitacionAlEscenario';
 import { ReaccionesDeDirecto } from '@/components/live/ReaccionesDeDirecto';
 import { useAudienciaDeDirecto } from '@/hooks/useAudienciaDeDirecto';
+import { useDestacadoDeDirecto } from '@/hooks/useDestacadoDeDirecto';
 import { useEscenarioDeDirecto } from '@/hooks/useEscenarioDeDirecto';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { useSesionDeDirecto } from '@/hooks/useSesionDeDirecto';
@@ -373,10 +378,10 @@ function BotonDeTerminar({
       accessibilityRole="button"
       accessibilityLabel={etiqueta}
       accessibilityState={{ disabled: desactivado }}
-      style={[estilos.terminar, { backgroundColor: media.danger }]}
+      style={[estilos.terminar, { backgroundColor: rellenoDePeligro.fondo }]}
     >
-      <Feather name="square" size={13} color={media.text} />
-      <Text variant="secondary" weight="800" color={media.text}>
+      <Feather name="square" size={13} color={rellenoDePeligro.texto} />
+      <Text variant="secondary" weight="800" color={rellenoDePeligro.texto}>
         {texto}
       </Text>
     </Pulsable>
@@ -514,6 +519,7 @@ export function LiveScreen() {
   const [hojaDeEfectos, setHojaDeEfectos] = useState(false);
   const [hojaDeCalidad, setHojaDeCalidad] = useState(false);
   const [hojaDeInvitados, setHojaDeInvitados] = useState(false);
+  const [hojaDeRotulo, setHojaDeRotulo] = useState(false);
   /** La emision termino CON ESTA PERSONA DELANTE, no antes de que entrara. */
   const [terminoMirando, setTerminoMirando] = useState(false);
 
@@ -711,6 +717,38 @@ export function LiveScreen() {
     alQuitarme,
   });
 
+  /*
+    Lo destacado: el mensaje que quien emite ha fijado y el texto que ha puesto
+    sobre la imagen. Igual que el escenario, aqui no se decide nada: el hook
+    pregunta al servidor y manda los gestos.
+  */
+  const destacar = useDestacadoDeDirecto({
+    emisionId,
+    enDirecto: emision?.estado === 'live',
+    alFallar: setAviso,
+  });
+  const { fijado, rotulo } = destacar.destacado;
+  /** Quien puede fijar y poner rotulo. Lo dice el servidor, no la ficha. */
+  const puedeDestacar = destacar.disponible && destacar.destacado.puedeGestionar;
+  const fijarDesdeElChat = useMemo(
+    () => ({
+      disponible: puedeDestacar,
+      fijadoId: fijado?.id ?? null,
+      ocupado: destacar.ocupado,
+      fijar: destacar.fijar,
+      soltar: destacar.soltar,
+      cambioPorFuera: destacar.cambioPorFuera,
+    }),
+    [
+      puedeDestacar,
+      fijado?.id,
+      destacar.ocupado,
+      destacar.fijar,
+      destacar.soltar,
+      destacar.cambioPorFuera,
+    ],
+  );
+
   if (errorDeCarga) {
     return (
       <View style={estilos.fondo}>
@@ -822,6 +860,24 @@ export function LiveScreen() {
             </View>
           ) : null}
 
+          {/*
+            El texto de quien emite. Arriba, bajo la cabecera: es donde menos
+            estorba —ni tapa el chat ni la cara de quien habla en el centro— y
+            donde se mira al entrar. Quien gestiona lo toca para cambiarlo.
+          */}
+          {destacar.disponible && rotulo ? (
+            <RotuloDeDirecto
+              rotulo={rotulo}
+              reduceMotion={reduceMotion}
+              etiqueta={t('live.bannerA11y', {
+                nombre: emision.anfitrionNombre,
+                texto: rotulo.texto,
+              })}
+              alPulsar={puedeDestacar ? () => setHojaDeRotulo(true) : undefined}
+              pista={puedeDestacar ? t('live.bannerEditHint') : undefined}
+            />
+          ) : null}
+
           {/* Gestion de la emision: empezarla o terminarla. */}
           {puedeGestionar && (emision.estado === 'live' || emision.estado === 'scheduled') ? (
             <View style={estilos.filaDeGestion}>
@@ -869,6 +925,15 @@ export function LiveScreen() {
             ) : hayImagen ? null : (
               <CartelDeVideo emision={emision} estado={vista.estado} />
             )}
+
+            {/*
+              La grabacion, para quien emitio (prototipo). Solo pinta algo si el
+              servidor tiene la funcion; el enlace lo da el proveedor de video
+              unos minutos despues de terminar, y caduca.
+            */}
+            {terminada && puedeGestionar ? (
+              <DescargaDeGrabacion emisionId={emision.id} alFallar={setAviso} />
+            ) : null}
 
             {/*
               La salida del estado, cuando la hay. Un cartel que solo explica el
@@ -920,6 +985,15 @@ export function LiveScreen() {
           {/* Abajo: el chat a la izquierda y los controles de quien emite a la derecha. */}
           <View style={estilos.filaInferior} pointerEvents="box-none">
             <View style={estilos.ladoDelChat}>
+              {/* El mensaje fijado: encima del chat, para que no se lo lleve. */}
+              {destacar.disponible && fijado ? (
+                <MensajeFijado
+                  mensaje={fijado}
+                  puedeSoltar={puedeDestacar}
+                  ocupado={destacar.ocupado}
+                  alSoltar={() => void destacar.soltar()}
+                />
+              ) : null}
               <ChatDeDirecto
                 ref={chat}
                 emisionId={emision.id}
@@ -927,6 +1001,7 @@ export function LiveScreen() {
                 puedeModerar={puedeGestionar}
                 alto={altoDelChat}
                 alFallar={alFallarElChat}
+                destacar={fijarDesdeElChat}
               />
             </View>
             <View style={estilos.ladoDeAcciones}>
@@ -955,6 +1030,19 @@ export function LiveScreen() {
                   activo={false}
                   desactivado={false}
                   alPulsar={() => setHojaDeInvitados(true)}
+                />
+              ) : null}
+              {/*
+                El texto en pantalla de quien emite. Encendido cuando hay uno
+                puesto: asi se sabe sin mirar arriba.
+              */}
+              {enDirecto && puedeDestacar ? (
+                <BotonDeControl
+                  icono="type"
+                  etiqueta={t('live.bannerButton')}
+                  activo={Boolean(rotulo)}
+                  desactivado={false}
+                  alPulsar={() => setHojaDeRotulo(true)}
                 />
               ) : null}
               {/*
@@ -1032,6 +1120,11 @@ export function LiveScreen() {
         escena={escena}
         anfitrionId={emision.anfitrionId}
       />
+      <HojaDeRotulo
+        visible={hojaDeRotulo && puedeDestacar}
+        alCerrar={() => setHojaDeRotulo(false)}
+        destacar={destacar}
+      />
       <HojaDeCalidad
         visible={hojaDeCalidad && calidad.estado.opciones.length > 0}
         alCerrar={() => setHojaDeCalidad(false)}
@@ -1047,9 +1140,9 @@ function Insignia({ estado }: { estado: EstadoDeEmision }) {
   const { t } = useTranslation();
   if (estado === 'live') {
     return (
-      <View style={[estilos.insignia, { backgroundColor: media.danger }]}>
-        <View style={[estilos.punto, { backgroundColor: media.text }]} />
-        <Text variant="caption" weight="900" color={media.text}>
+      <View style={[estilos.insignia, { backgroundColor: rellenoDePeligro.fondo }]}>
+        <View style={[estilos.punto, { backgroundColor: rellenoDePeligro.texto }]} />
+        <Text variant="caption" weight="900" color={rellenoDePeligro.texto}>
           {t('live.badgeLive')}
         </Text>
       </View>

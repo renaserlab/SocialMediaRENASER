@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { Avatar } from '@/components/Avatar';
+import { rellenoDePeligro } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -194,12 +195,18 @@ function TarjetaDeEmision({ emision, alAbrir }: { emision: Emision; alAbrir: () 
             style={[
               estilos.rotulo,
               enDirecto
-                ? { backgroundColor: media.danger }
+                ? { backgroundColor: rellenoDePeligro.fondo }
                 : { borderColor: media.border, borderWidth: 1 },
             ]}
           >
-            {enDirecto ? <View style={[estilos.punto, { backgroundColor: media.text }]} /> : null}
-            <Text variant="caption" weight="900" color={enDirecto ? media.text : media.textMuted}>
+            {enDirecto ? (
+              <View style={[estilos.punto, { backgroundColor: rellenoDePeligro.texto }]} />
+            ) : null}
+            <Text
+              variant="caption"
+              weight="900"
+              color={enDirecto ? rellenoDePeligro.texto : media.textMuted}
+            >
               {rotulo}
             </Text>
           </View>

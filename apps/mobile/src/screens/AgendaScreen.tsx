@@ -169,6 +169,18 @@ export function AgendaScreen() {
         }}
       >
         <View style={styles.contenedor}>
+          {/* Cuándo se me puede pedir una sesión (prototipo, 09/10/2026). */}
+          <Pressable
+            onPress={() => router.push('/disponibilidad' as never)}
+            accessibilityRole="button"
+            style={[styles.disponibilidad, { borderColor: colors.border }]}
+          >
+            <Feather name="clock" size={16} color={colors.text} />
+            <Text variant="body" weight="700" style={styles.disponibilidadTexto}>
+              {t('agenda.myAvailability')}
+            </Text>
+            <Feather name="chevron-right" size={18} color={colors.textMuted} />
+          </Pressable>
           <SegmentedControl
             options={[
               solicitudes.length > 0
@@ -385,6 +397,17 @@ function Fila({ icono, texto }: { icono: keyof typeof Feather.glyphMap; texto: s
 }
 
 const styles = StyleSheet.create({
+  disponibilidad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  disponibilidadTexto: { flex: 1 },
   contenedor: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   pestanas: { marginBottom: spacing.lg },
   lista: { gap: spacing.md },

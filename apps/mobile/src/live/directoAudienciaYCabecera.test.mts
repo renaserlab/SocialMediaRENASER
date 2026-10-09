@@ -186,7 +186,9 @@ describe('el tema del directo va abajo, entre el chat y las reacciones', () => {
 describe('cortar la emisión se distingue de un vistazo', () => {
   it('es el único botón relleno de la sala, con icono y palabra', () => {
     const boton = PANTALLA.slice(PANTALLA.indexOf('function BotonDeTerminar'), PANTALLA.indexOf('function TemaDeDirecto'));
-    assert.match(boton, /backgroundColor: media\.danger/);
+    // El relleno es el rojo que aguanta letra blanca (`rellenoDePeligro`), no
+    // el rojo claro de la paleta oscura: ver `rellenoDePeligro.test.mts`.
+    assert.match(boton, /backgroundColor: rellenoDePeligro\.fondo/);
     assert.match(boton, /<Feather name="square"/);
     assert.match(boton, /accessibilityLabel=\{etiqueta\}/);
   });

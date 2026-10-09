@@ -768,6 +768,9 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'camera.flipToFront': 'Mudar para a câmera frontal',
   'camera.flipToBack': 'Mudar para a câmera traseira',
   'camera.hint': 'Toque para uma foto · Segure para gravar · Deslize para aproximar',
+  'camera.hintVideo': 'Toque para gravar e de novo para terminar · Segure e deslize para aproximar',
+  'camera.shutterVideoA11y': 'Toque para começar a gravar e de novo para terminar',
+  'camera.recording': 'Gravando',
 
   'lesson.headerTitle': 'Aula do Curso',
   'lesson.courseCompleted': 'Curso concluído!',
@@ -1175,6 +1178,66 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'common.changesSaved': 'Alterações salvas',
 
   'agenda.headerTitle': 'AGENDA',
+
+  'agenda.myAvailability': 'Minha disponibilidade',
+
+  'availability.title': 'Minha disponibilidade',
+
+  'availability.body': 'Marque em quais dias e horários podem pedir uma sessão 1:1 com você. É uma semana que se repete. Quem pedir uma sessão verá estes horários, de hora em hora.',
+
+  'availability.day0': 'Segunda-feira',
+
+  'availability.day1': 'Terça-feira',
+
+  'availability.day2': 'Quarta-feira',
+
+  'availability.day3': 'Quinta-feira',
+
+  'availability.day4': 'Sexta-feira',
+
+  'availability.day5': 'Sábado (dia)',
+
+  'availability.day6': 'Domingo (dia)',
+
+  'availability.add': 'Adicionar',
+
+  'availability.addTo': 'Adicionar um horário em {dia}',
+
+  'availability.addRange': 'Adicionar este horário',
+
+  'availability.from': 'Das',
+
+  'availability.to': 'Até as',
+
+  'availability.none': 'Sem horário',
+
+  'availability.remove': 'Remover o horário {franja}',
+
+  'availability.save': 'Salvar disponibilidade',
+
+  'availability.saved': 'Disponibilidade salva',
+
+  'availability.saveFailed': 'Não foi possível salvar. Tente de novo.',
+
+  'availability.loadFailed': 'Não foi possível carregar sua disponibilidade',
+
+  'availability.needTimes': 'Escolha a hora de início e a de fim.',
+
+  'availability.tooShort': 'O horário precisa durar pelo menos uma hora.',
+
+  'availability.overlap': 'Esse horário se sobrepõe a outro no mesmo dia.',
+
+  'availability.dayFull': 'Esse dia já tem todos os horários que cabem.',
+
+  'availability.note': 'Os horários são os do seu telefone. As sessões duram uma hora.',
+
+  'availability.unavailableTitle': 'Ainda não disponível',
+
+  'availability.unavailableBody': 'A disponibilidade para sessões será ativada em breve.',
+
+  'booking.openings': 'Horários disponíveis de {nombre}',
+
+  'booking.openingsHint': 'Escolha um, ou proponha outro momento abaixo.',
   'agenda.statePending': 'Pendente',
   'agenda.stateAccepted': 'Confirmada',
   'agenda.stateRejected': 'Recusada',
@@ -1369,9 +1432,41 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'live.goHome': 'Ir para o Início',
   'live.returningHome': 'Voltando ao Início em {n} s',
   'live.stayInChat': 'Ficar e ler o chat',
+  'live.recordingDownload': 'Baixar a gravação',
+  'live.recordingExpires': 'O link expira: baixe logo.',
+  'live.recordingPending': 'Se a gravação estiver ativada, ela aparecerá aqui alguns minutos depois de terminar.',
+  'live.recordingCheckAgain': 'Verificar de novo',
+  'live.recordingOpenFailed': 'Não foi possível abrir o link da gravação.',
   'live.chatEmptyOpen': 'Ninguém escreveu ainda. Você pode começar.',
   'live.chatEmptyClosed': 'Não há mensagens nesta sala.',
   'live.holdToHide': 'Mantenha pressionado para ocultar esta mensagem',
+  'live.holdForActions': 'Mantenha pressionado para fixar ou ocultar esta mensagem',
+  'live.messageActions': 'Ações da mensagem',
+  'live.hideMessage': 'Ocultar mensagem',
+  'live.pin': 'Fixar mensagem',
+  'live.unpin': 'Desafixar',
+  'live.pinned': 'Mensagem fixada',
+  'live.pinnedA11y': 'Mensagem fixada de {nombre}: {texto}',
+  'live.pinHidden': 'Essa mensagem está oculta e não pode ser fixada.',
+  'live.bannerButton': 'Texto na tela',
+  'live.bannerTitle': 'Texto na tela',
+  'live.bannerBody': 'Todos que assistem veem, por cima da live. Uma só linha, até {n} caracteres.',
+  'live.bannerPlaceholder': 'Escreva sua mensagem',
+  'live.bannerStyle': 'Como aparece',
+  'live.bannerStyleSlide': 'Deslizante',
+  'live.bannerStylePulse': 'Pulsar',
+  'live.bannerStyleTicker': 'Letreiro',
+  'live.bannerPreview': 'Prévia',
+  'live.bannerShow': 'Mostrar para todos',
+  'live.bannerUpdate': 'Atualizar o texto',
+  'live.bannerRemove': 'Remover o texto',
+  'live.bannerTooLong': 'Sobram {n} caracteres a mais.',
+  'live.bannerA11y': 'Mensagem de {nombre}: {texto}',
+  'live.bannerEditHint': 'Toque para alterar ou remover o texto',
+  'live.spotlightClosed': 'Só é possível destacar algo enquanto a live está no ar.',
+  'live.spotlightTooFast': 'Você alterou isso muitas vezes seguidas. Aguarde um momento.',
+  'live.spotlightUnavailable': 'Destacar em uma live ainda não está disponível.',
+  'live.spotlightFailed': 'Não foi possível salvar a alteração. Tente de novo.',
   'live.messagePlaceholder': 'Escreva uma mensagem…',
   'live.messageLabel': 'Mensagem para o chat',
   'live.chatOpensLater': 'O chat abre quando a transmissão começar.',
@@ -1705,6 +1800,9 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'wizard.totalLength': 'Duração total: {duracion}',
   'wizard.accessType': 'TIPO DE ACESSO',
   'wizard.priceIn': 'Preço ({moneda})',
+  'catalog.currency': 'Moeda',
+  'catalog.currencyPEN': 'Sóis (S/)',
+  'catalog.currencyUSD': 'Dólares americanos ($)',
   'wizard.markFreeSample':
     'Marque pelo menos uma aula como amostra gratuita para que dê para experimentar antes de comprar, e deixe o resto fechado: uma compra precisa desbloquear algo real.',
   'wizard.freeCourseNote':

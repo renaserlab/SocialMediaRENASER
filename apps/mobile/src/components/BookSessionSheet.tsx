@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -8,14 +8,17 @@ import { DateField } from '@/components/DateField';
 import { hoyANoche } from '@/components/DateField.types';
 import { InlineError } from '@/components/InlineError';
 import { Input } from '@/components/Input';
+import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { TimeField } from '@/components/TimeField';
 import { toHumanTime } from '@/components/TimeField.types';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
+import { aFechaYHora, agruparPorDia, type Hueco } from '@/lib/disponibilidad';
 import { toast } from '@/lib/toast';
+import { AvailabilityRepository } from '@/repositories/AvailabilityRepository';
 import { BookingRepository } from '@/repositories/BookingRepository';
 import { MessageRepository } from '@/repositories/MessageRepository';
-import { spacing } from '@/theme/tokens';
+import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -27,6 +30,10 @@ type Props = {
     fullName: string;
   };
 };
+
+/** Cuántos días con hueco se enseñan, y cuántos huecos de cada uno. */
+const DIAS_A_LA_VISTA = 4;
+const HUECOS_POR_DIA = 6;
 
 export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
   const { t } = useTranslation();
@@ -49,6 +56,27 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
     los dos antes de que el botón se apagara, y salían dos solicitudes.
   */
   const ocupado = useRef(false);
+
+  /*
+    LOS HORARIOS DE LA OTRA PERSONA (prototipo, 09/10/2026). Si ha dicho cuándo
+    está disponible, se ofrecen aquí para elegir con un toque; el día y la hora
+    de abajo se rellenan solos. Si no ha dicho nada —o el servidor aún no tiene
+    la función—, la lista viene vacía y la hoja es la de siempre.
+  */
+  const [huecos, setHuecos] = useState<Hueco[]>([]);
+  useEffect(() => {
+    if (!visible) return;
+    let vigente = true;
+    setHuecos([]);
+    void AvailabilityRepository.huecosDe(targetUser.id).then((lista) => {
+      if (vigente) setHuecos(lista);
+    });
+    return () => {
+      vigente = false;
+    };
+  }, [visible, targetUser.id]);
+  /** Los primeros días con hueco: es una hoja, no un calendario. */
+  const dias = useMemo(() => agruparPorDia(huecos).slice(0, DIAS_A_LA_VISTA), [huecos]);
 
   /** Lo que se enseña y se envía: «12/08/2026 a las 4:00 PM». */
   const propuesta = date && time ? `${date} a las ${toHumanTime(time)}` : '';
@@ -245,6 +273,58 @@ export function BookSessionSheet({ visible, onClose, targetUser }: Props) {
         {t('booking.subtitle', { nombre: targetUser.fullName })}
       </Text>
 
+      {dias.length > 0 ? (
+        <View style={styles.huecos}>
+          <Text variant="caption" weight="800" color={colors.textMuted}>
+            {t('booking.openings', { nombre: targetUser.fullName })}
+          </Text>
+          {dias.map((dia) => (
+            <View key={dia.fecha} style={styles.dia}>
+              <Text variant="caption" weight="700" color={colors.text}>
+                {dia.fecha}
+              </Text>
+              <View style={styles.horas}>
+                {dia.huecos.slice(0, HUECOS_POR_DIA).map((hueco) => {
+                  const { fecha, hora } = aFechaYHora(hueco.empiezaIso);
+                  const elegido = date === fecha && time === hora;
+                  return (
+                    <Pulsable
+                      key={hueco.empiezaIso}
+                      onPress={() => {
+                        setDate(fecha);
+                        setTime(hora);
+                        setError(null);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: elegido }}
+                      accessibilityLabel={`${fecha}, ${toHumanTime(hora)}`}
+                      style={[
+                        styles.hueco,
+                        {
+                          borderColor: elegido ? colors.text : colors.border,
+                          backgroundColor: elegido ? colors.text : 'transparent',
+                        },
+                      ]}
+                    >
+                      <Text
+                        variant="secondary"
+                        weight="700"
+                        color={elegido ? colors.background : colors.text}
+                      >
+                        {toHumanTime(hora)}
+                      </Text>
+                    </Pulsable>
+                  );
+                })}
+              </View>
+            </View>
+          ))}
+          <Text variant="caption" color={colors.textMuted}>
+            {t('booking.openingsHint')}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.when}>
         <View style={styles.half}>
           {/*
@@ -315,6 +395,16 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginBottom: spacing.md,
+  },
+  huecos: { gap: spacing.sm, marginBottom: spacing.md },
+  dia: { gap: spacing.xs },
+  horas: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  hueco: {
+    minHeight: 36,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
   },
   // Fecha y hora comparten fila: se leen como una sola respuesta.
   when: { flexDirection: 'row', gap: spacing.sm },

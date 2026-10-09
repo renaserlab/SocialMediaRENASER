@@ -97,15 +97,31 @@ APLICADAS = {
     # entonces tampoco se edita: se corrige hacia delante, con otra.
     "0097_sesiones_en_el_chat.sql": "6bff20e6bd058c0007fe6c669eaf4ce635481618",
     # TAMPOCO ES DE SERVICIOS (son los invitados en el directo). Edson la
-    # ejecutó a mano en Supabase el 07/10/2026 y así lo comunicó. Su propio
-    # bloque final se niega a terminar si la tabla queda sin RLS o con alguna
-    # política, así que haber corrido sin error ya dice esas dos cosas. LA
-    # COMPROBACIÓN EN SOLO LECTURA —columnas, claves, índices, que no esté en
-    # la publicación de tiempo real— ESTÁ PENDIENTE de que pegue su resultado:
-    # desde este equipo no se llega a la base. Se registra ya porque lo que
-    # importa de este registro es que el fichero deje de editarse desde el
-    # momento en que está aplicado; se corrige hacia delante, con otra.
+    # ejecutó a mano en Supabase el 07/10/2026 y así lo comunicó. COMPROBADA
+    # ESE MISMO DÍA, EN SOLO LECTURA Y SIN DIVERGENCIAS: once comprobaciones,
+    # las once en OK, vistas en la captura del resultado que pegó Edson —la
+    # tabla existe; sus siete columnas con su tipo, si admiten nulo y su valor
+    # por defecto; la clave primaria; las tres claves ajenas y lo que hace
+    # cada una al borrar; los cinco estados; los tres índices; RLS activada;
+    # ninguna política; fuera de la publicación de tiempo real; ningún
+    # disparador propio; cero filas—. La igualdad entre lo esperado y lo
+    # obtenido la calcula la propia base, no quien lee la captura. Desde que
+    # está aplicada no se edita: se corrige hacia delante, con otra.
     "0098_invitados_en_el_directo.sql": "edb58a1c64883b73b6bdf9902b0544ef84d5e41b",
+    # TAMPOCO SON DE SERVICIOS: lo destacado del directo, la disponibilidad
+    # para las sesiones 1:1 y la grabacion del directo. Edson ejecuto las tres
+    # a mano en Supabase el 09/10/2026 y asi lo comunico. Cada una se niega a
+    # terminar si su tabla queda sin RLS o con alguna politica. COMPROBADAS ESE
+    # MISMO DIA, EN SOLO LECTURA Y SIN DIVERGENCIAS: una consulta de 21
+    # comprobaciones —siete por tabla: columnas con su tipo, nulo y valor por
+    # defecto; claves ajenas y que hace cada una al borrar; restricciones;
+    # indices; RLS activada; ninguna politica; fuera de la publicacion de tiempo
+    # real—, las 21 en OK, vistas en las dos capturas que pego Edson. La
+    # igualdad la calcula la propia base. Desde que estan aplicadas no se
+    # editan: se corrige hacia delante, con otra.
+    "0099_destacado_del_directo.sql": "13c5890fbbe3be5533ccfa7f06bdd25f4a86a329",
+    "0100_disponibilidad_para_sesiones.sql": "d5269ccc65760f98aa69304281ffd651515284de",
+    "0101_grabacion_del_directo.sql": "5d8ab69d8192828601c3910492c7c305bafa485b",
 }
 
 

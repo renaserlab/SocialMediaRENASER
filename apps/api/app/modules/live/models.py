@@ -1,7 +1,8 @@
 """Modelos de las transmisiones en vivo.
 
 Mapean public.live_sessions / public.live_messages / public.live_reaction_totals
-de la migracion 0029, y public.live_guests de la 0098.
+de la migracion 0029, public.live_guests de la 0098, public.live_spotlights de
+la 0099 y public.live_recordings de la 0101.
 """
 
 from datetime import datetime
@@ -164,4 +165,73 @@ class LiveGuest(Base):
     )
     ended_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class LiveSpotlight(Base):
+    """Lo destacado de una emision: el mensaje fijado y el rotulo de quien emite.
+
+    UNA FILA POR EMISION, con lo vigente. Las reglas estan en `destacado.py`;
+    aqui solo esta la forma de la tabla (migracion 0099).
+
+    VA EN SU TABLA Y NO EN `live_sessions` A PROPOSITO: una columna nueva en
+    `LiveSession` haria que este codigo, desplegado antes que la migracion, no
+    pudiera ni leer una emision.
+    """
+
+    __tablename__ = "live_spotlights"
+
+    session_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("live_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    pinned_message_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("live_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    pinned_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    pinned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    banner_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    banner_style: Mapped[str] = mapped_column(
+        String(16), default="slide", server_default="slide"
+    )
+    banner_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    banner_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class LiveRecording(Base):
+    """La grabacion de una emision, tal como la aviso el proveedor (0101).
+
+    PROTOTIPO. Z no graba: graba el proveedor, si la grabacion esta encendida
+    en su panel. Aqui queda el enlace temporal que manda al terminar de
+    prepararla. Ese enlace CADUCA; `received_at` dice desde cuando cuenta.
+    """
+
+    __tablename__ = "live_recordings"
+
+    session_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("live_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    provider_recording_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    download_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

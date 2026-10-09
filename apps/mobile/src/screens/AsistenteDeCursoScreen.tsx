@@ -32,7 +32,7 @@ import {
   type ResumenDeModulo,
 } from '@/lib/asistenteDeCurso';
 import { confirm, notify } from '@/lib/confirm';
-import { aCentavos, aTextoEditable } from '@/lib/dinero';
+import { aCentavos, aTextoEditable, MONEDAS_DE_CURSO, monedaDeCurso } from '@/lib/dinero';
 import { toast } from '@/lib/toast';
 import { volverA } from '@/navigation/salirDelTramite';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
@@ -94,7 +94,7 @@ export function AsistenteDeCursoScreen() {
   const [paso, setPaso] = useState<PasoId>('basico');
   const [borrador, setBorrador] = useState<BorradorDeCurso>(VACIO);
   const [modulos, setModulos] = useState<ResumenDeModulo[]>([]);
-  const [currency, setCurrency] = useState('PEN');
+  const [currency, setCurrency] = useState<string>('PEN');
   const [reviewStatus, setReviewStatus] = useState<string>('draft');
   const [motivoDeRechazo, setMotivoDeRechazo] = useState<string | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined);
@@ -243,6 +243,8 @@ export function AsistenteDeCursoScreen() {
         targetAudience: borrador.targetAudience,
         prerequisites: borrador.prerequisites,
         priceMinor: precioEnCentavos ?? 0,
+        // Con el precio va su moneda. Un curso gratuito conserva la que tenía.
+        ...(borrador.dePago ? { currency: monedaDeCurso(currency) } : {}),
         ...(coverPath ? { coverPath } : {}),
       });
       if (coverPath) {
@@ -658,8 +660,16 @@ export function AsistenteDeCursoScreen() {
             />
             {borrador.dePago ? (
               <>
+                <Text variant="caption" weight="800" color={colors.textMuted} style={styles.etiqueta}>
+                  {t('catalog.currency')}
+                </Text>
+                <SegmentedControl
+                  options={MONEDAS_DE_CURSO.map((codigo) => t(`catalog.currency${codigo}`))}
+                  selectedIndex={MONEDAS_DE_CURSO.indexOf(monedaDeCurso(currency))}
+                  onChange={(i) => setCurrency(MONEDAS_DE_CURSO[i] ?? 'PEN')}
+                />
                 <Input
-                  label={t('wizard.priceIn', { moneda: currency })}
+                  label={t('wizard.priceIn', { moneda: monedaDeCurso(currency) })}
                   value={borrador.precio}
                   onChangeText={(precio) => cambiar({ precio })}
                   placeholder="49.90"

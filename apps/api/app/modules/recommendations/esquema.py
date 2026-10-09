@@ -146,6 +146,54 @@ async def hay_invitados_de_directo(db: AsyncSession) -> bool:
     return _cache["live_guests"]
 
 
+async def hay_destacado_de_directo(db: AsyncSession) -> bool:
+    """Si existe `live_spotlights` (migracion 0099).
+
+    SIN LA 0099 el directo funciona entero y como siempre; lo unico que no hay
+    es donde guardar el mensaje fijado y el rotulo de quien emite. Se degrada
+    lo nuevo, nunca lo que ya habia.
+    """
+    if "live_spotlights" not in _cache:
+        _cache["live_spotlights"] = await _hay_tabla(db, "live_spotlights")
+        if not _cache["live_spotlights"]:
+            logger.warning(
+                "La migracion 0099 no esta aplicada: en los directos no se "
+                "puede fijar un mensaje ni poner un rotulo."
+            )
+    return _cache["live_spotlights"]
+
+
+async def hay_grabaciones_de_directo(db: AsyncSession) -> bool:
+    """Si existe `live_recordings` (migracion 0101).
+
+    Sin ella el aviso de «grabacion lista» se ignora y nadie ve una descarga.
+    """
+    if "live_recordings" not in _cache:
+        _cache["live_recordings"] = await _hay_tabla(db, "live_recordings")
+        if not _cache["live_recordings"]:
+            logger.warning(
+                "La migracion 0101 no esta aplicada: no se guarda la grabacion "
+                "de los directos."
+            )
+    return _cache["live_recordings"]
+
+
+async def hay_disponibilidad(db: AsyncSession) -> bool:
+    """Si existe `availability_slots` (migracion 0100).
+
+    Sin ella nadie puede decir cuando esta disponible; pedir una sesion sigue
+    funcionando como siempre, proponiendo el momento a mano.
+    """
+    if "availability_slots" not in _cache:
+        _cache["availability_slots"] = await _hay_tabla(db, "availability_slots")
+        if not _cache["availability_slots"]:
+            logger.warning(
+                "La migracion 0100 no esta aplicada: no hay disponibilidad "
+                "para las sesiones 1:1."
+            )
+    return _cache["availability_slots"]
+
+
 async def hay_resenas_de_perfil(db: AsyncSession) -> bool:
     """Si existe `profile_reviews` (migracion 0030).
 
