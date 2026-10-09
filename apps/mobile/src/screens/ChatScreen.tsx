@@ -34,8 +34,16 @@ import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
 import { SesionEnElChat } from '@/components/SesionEnElChat';
 import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
+import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
 import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { useTranslation } from '@/i18n/useTranslation';
+import { nombreDelAutor } from '@/lib/gruposDeChat';
+import {
+  MENSAJES_POR_PAGINA_AL_BUSCAR,
+  PAGINAS_PARA_IR_A_UN_MENSAJE,
+  RESALTE_MS,
+  tomarSalto,
+} from '@/lib/saltoDeChat';
 import { afterSheetClose } from '@/lib/afterSheetClose';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
@@ -150,6 +158,18 @@ function diaDe(mensaje?: Message): string | null {
  */
 function mismaRafaga(actual: Message, anterior?: Message): boolean {
   if (!anterior || anterior.sender !== actual.sender) return false;
+  // EN UN GRUPO «suyo» puede ser de varias personas: dos mensajes ajenos
+  // seguidos solo van juntos si son de la misma. En un chat de dos el autor
+  // ajeno es siempre el mismo y esto no cambia nada. Los propios no se
+  // miran: la burbuja que se está enviando todavía no trae autor.
+  if (
+    actual.sender === 'them' &&
+    anterior.autorId &&
+    actual.autorId &&
+    anterior.autorId !== actual.autorId
+  ) {
+    return false;
+  }
   if (anterior.eliminado || actual.eliminado) return false;
   // La tarjeta de una sesión no es una burbuja: nada se pega a ella.
   if (anterior.sesion || actual.sesion) return false;
@@ -179,6 +199,25 @@ export function ChatScreen() {
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
+
+  /*
+    QUÉ ES ESTA CONVERSACIÓN: de dos personas o un grupo.
+
+    `undefined` mientras se pregunta y `null` si no se pudo saber, que se
+    trata como siempre: un chat de dos. En un grupo cambian tres cosas y
+    nada más: la cabecera enseña el nombre del grupo, cada mensaje ajeno
+    dice de quién es, y dos personas distintas no comparten ráfaga.
+  */
+  const { info: infoDeConversacion, refrescar: refrescarInfo } = useInfoDeConversacion(
+    params.id,
+    currentUserId,
+    supabaseEnabled && !!params.id,
+  );
+  const esGrupo = infoDeConversacion?.esGrupo === true;
+  /** El mensaje al que se llegó desde «Contenido», mientras dura el resalte. */
+  const [resaltado, setResaltado] = useState<string | null>(null);
+  /** El mensaje al que hay que ir, recogido de `saltoDeChat`. */
+  const [mensajeBuscado, setMensajeBuscado] = useState<string | null>(null);
 
   // Modo demo (sin Supabase): usa el store local.
   const conversations = useAppStore((state) => state.conversations);
@@ -674,8 +713,10 @@ export function ChatScreen() {
   });
   // Lo que la lista tiene que mirar, además de los mensajes, para repintar.
   const extraDeSesiones = useMemo(
-    () => ({ estadosDeSesion, sesionOcupada }),
-    [estadosDeSesion, sesionOcupada],
+    // Con `infoDeConversacion` y `resaltado`: la lista solo repinta sus
+    // celdas cuando cambia esto, y los dos cambian lo que pinta una burbuja.
+    () => ({ estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado }),
+    [estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado],
   );
 
   // -------------------------------------------------------------------------
@@ -790,6 +831,104 @@ export function ChatScreen() {
     else if (queHacer === 'bajar-sin-animar') bajarAlFinal(false);
     else if (queHacer === 'avisar') setHayNuevosAbajo(true);
   }, [idDeLoUltimo, loUltimoEsMio, bajarAlFinal]);
+
+  // -------------------------------------------------------------------------
+  // Ir a un mensaje concreto (desde «Contenido»)
+  // -------------------------------------------------------------------------
+
+  /*
+    El encargo llega por `saltoDeChat`, no por un parámetro: a esta pantalla
+    se VUELVE desde «Contenido», y al volver atrás no se pueden cambiar sus
+    parámetros. Se recoge al tener el foco, que cubre también el caso de
+    que hubiera que abrirla de nuevo. Al volver al chat por cualquier otro
+    camino se refresca además quién está en la conversación.
+  */
+  const yaTuvoElFoco = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      const pedido = tomarSalto(typeof params.id === 'string' ? params.id : null);
+      if (pedido) setMensajeBuscado(pedido);
+      // La primera vez ya pregunta el propio `useInfoDeConversacion`.
+      if (yaTuvoElFoco.current) refrescarInfo();
+      yaTuvoElFoco.current = true;
+    }, [params.id, refrescarInfo]),
+  );
+
+  const sigueMontado = useRef(true);
+  useEffect(
+    () => () => {
+      sigueMontado.current = false;
+    },
+    [],
+  );
+
+  /*
+    EL CHAT SOLO TIENE CARGADO LO ÚLTIMO. Si el mensaje está más arriba se
+    sube por el historial —el mismo camino que hace el dedo, y por eso la
+    conversación sigue siendo continua hasta hoy— hasta dar con él.
+
+    CON TOPE: diez páginas de cien. Un mensaje más antiguo que los últimos
+    mil no se abre desde aquí, y se dice; cargar el historial entero de un
+    grupo para enseñar un mensaje dejaría el teléfono a tirones.
+  */
+  const enBusca = useRef<string | null>(null);
+  useEffect(() => {
+    if (!supabaseEnabled || !params.id || !mensajeBuscado || cargandoMensajes) return;
+    if (enBusca.current === mensajeBuscado) return;
+    enBusca.current = mensajeBuscado;
+    const conversationId = params.id;
+    const buscado = mensajeBuscado;
+
+    const buscar = async (): Promise<boolean> => {
+      for (let pagina = 0; pagina <= PAGINAS_PARA_IR_A_UN_MENSAJE; pagina += 1) {
+        const indice = mensajesRef.current.findIndex((m) => m.id === buscado);
+        if (indice >= 0) {
+          // Deja de seguir el final: si no, la lista volvería abajo sola.
+          pegadoAlFinal.current = false;
+          setLejosDelFinal(true);
+          setResaltado(buscado);
+          const ir = () =>
+            void lista.current?.scrollToIndex({ index: indice, animated: false, viewPosition: 0.3 });
+          // Dos veces: la primera sale con alturas estimadas si las celdas de
+          // arriba aún no se han medido; la segunda cae en el sitio.
+          setTimeout(ir, 120);
+          setTimeout(ir, 500);
+          setTimeout(() => {
+            if (sigueMontado.current) setResaltado(null);
+          }, RESALTE_MS);
+          return true;
+        }
+        const before = instanteMasAntiguo(mensajesRef.current);
+        if (!before || pagina === PAGINAS_PARA_IR_A_UN_MENSAJE) return false;
+        const viejos = await MessageRepository.listMessages(conversationId, currentUserId, {
+          before,
+          limit: MENSAJES_POR_PAGINA_AL_BUSCAR,
+        });
+        if (!sigueMontado.current) return true;
+        const conocidos = new Set(mensajesRef.current.map((m) => m.id));
+        // Nada nuevo más arriba: se acabó el historial.
+        if (!viejos.some((m) => !conocidos.has(m.id))) {
+          setHayMasHistorial(false);
+          return false;
+        }
+        aplicar(fusionar(mensajesRef.current, viejos));
+      }
+      return false;
+    };
+
+    buscar()
+      .then((encontrado) => {
+        if (!encontrado && sigueMontado.current) {
+          notify(t('chat.jumpNotFoundTitle'), t('chat.jumpNotFoundBody'));
+        }
+      })
+      .catch(() => {
+        // Sin red no se llega al mensaje; el chat queda como estaba.
+      })
+      .finally(() => {
+        if (sigueMontado.current) setMensajeBuscado(null);
+      });
+  }, [supabaseEnabled, params.id, mensajeBuscado, cargandoMensajes, currentUserId, aplicar, t]);
 
   // -------------------------------------------------------------------------
   // Elegir archivos
@@ -1492,7 +1631,28 @@ export function ChatScreen() {
         nombreDeRespaldo={headerName}
         avatarDeRespaldo={demoConversation?.avatarUrl}
         idDeRespaldo={demoConversation?.otherId}
-        resolverEnElServidor={supabaseEnabled && !!params.id}
+        // «La otra persona» solo se busca cuando ya se sabe que NO es un grupo:
+        // en un grupo saldría el nombre de quien escribió primero.
+        resolverEnElServidor={
+          supabaseEnabled && !!params.id && infoDeConversacion !== undefined && !esGrupo
+        }
+        grupo={
+          esGrupo && infoDeConversacion
+            ? {
+                titulo: infoDeConversacion.titulo || headerName,
+                miembros: infoDeConversacion.miembros.length,
+              }
+            : undefined
+        }
+        alAbrirGrupo={
+          esGrupo && params.id
+            ? () =>
+                router.push({
+                  pathname: '/chat/grupo/[id]' as never,
+                  params: { id: params.id },
+                })
+            : undefined
+        }
         onBack={() => void salirDelChat()}
         // El contenido por vistas se pide al servidor: sin él (modo de
         // muestra) no hay nada que abrir, y el botón no se pinta.
@@ -1503,7 +1663,10 @@ export function ChatScreen() {
                   // `as never`: los tipos de rutas se generan al arrancar Expo
                   // y todavía no conocen esta, igual que `/disponibilidad`.
                   pathname: '/chat/contenido/[id]' as never,
-                  params: { id: params.id, name: headerName },
+                  params: {
+                    id: params.id,
+                    name: (esGrupo && infoDeConversacion?.titulo) || headerName,
+                  },
                 })
             : undefined
         }
@@ -1700,7 +1863,13 @@ export function ChatScreen() {
               */
               <Aparecer inmediato={item.estado !== 'enviando'} desde={12} clave={item.id}>
                 {cabecera}
-                <View style={mine ? styles.filaMia : styles.filaSuya}>
+                <View
+                  style={[
+                    mine ? styles.filaMia : styles.filaSuya,
+                    // El mensaje al que se llegó desde «Contenido», un momento.
+                    item.id === resaltado && { backgroundColor: colors.border },
+                  ]}
+                >
                   <View
                     style={[
                       styles.bubble,
@@ -1723,6 +1892,21 @@ export function ChatScreen() {
                       },
                     ]}
                   >
+                    {/*
+                      DE QUIÉN ES, solo en un grupo y solo en el primer
+                      mensaje de cada ráfaga ajena: repetir el nombre en
+                      cinco burbujas seguidas de la misma persona no dice
+                      nada.
+                    */}
+                    {esGrupo && !mine && !agrupado ? (
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.autorDeGrupo, { color: colors.textMuted }]}
+                      >
+                        {nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre) ||
+                          t('groups.someone')}
+                      </Text>
+                    ) : null}
                     {/*
                       A QUE HISTORIA RESPONDIA, encima de todo lo demás: es el
                       contexto que hace que se entienda lo que viene debajo.
@@ -2074,6 +2258,7 @@ export function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  autorDeGrupo: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
   // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
   messages: { padding: spacing.lg },
   // La lista y, encima, el botón de «ir a lo último».

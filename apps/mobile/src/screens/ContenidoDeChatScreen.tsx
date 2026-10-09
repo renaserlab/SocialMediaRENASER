@@ -28,6 +28,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { describeError } from '@/lib/describeError';
 import { notify } from '@/lib/confirm';
+import { pedirSalto } from '@/lib/saltoDeChat';
 import {
   MENSAJES_POR_PAGINA_DE_VISTA,
   SIN_VISTAS,
@@ -35,6 +36,7 @@ import {
   claveDeVista,
   crearTurnos,
   fundirPaginas,
+  huellaDeCriterios,
   pestanasDe,
   refrescarPrimeraPagina,
   sigueExistiendo,
@@ -47,7 +49,7 @@ import {
   MessageRepository,
   type MensajeDeVista,
 } from '@/repositories/MessageRepository';
-import { subscribeToConversation } from '@/services/realtime';
+import { subscribeToConversationChanges } from '@/services/realtime';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -142,6 +144,17 @@ export function ContenidoDeChatScreen() {
   const loQueSeMira = useRef('');
   loQueSeMira.current = `${claveDeVista(vista)}|${buscar}`;
 
+  /*
+    Lo que decide el resultado del filtro abierto. Cuando quien administra
+    lo edita y se vuelve aquí, cambia; y la lista que se estaba viendo ya
+    no vale, así que se pide entera otra vez (ver las dependencias de
+    `cargar`). En una categoría es siempre la cadena vacía.
+  */
+  const huellaDelFiltro =
+    vista.tipo === 'filtro'
+      ? huellaDeCriterios(vistas.filtros.find((f) => f.id === vista.id))
+      : '';
+
   const leerVistas = useCallback(() => {
     if (!conversationId) return;
     void MessageRepository.vistas(conversationId).then(setVistas);
@@ -195,7 +208,10 @@ export function ContenidoDeChatScreen() {
           if (turnos.vigente(turno)) setCargando(false);
         });
     },
-    [conversationId, vista, buscar, currentUserId, turnos, t],
+    // `huellaDelFiltro` no se lee dentro: está para que cambiar los
+    // criterios del filtro abierto vuelva a lanzar la carga entera.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conversationId, vista, buscar, currentUserId, turnos, t, huellaDelFiltro],
   );
 
   // Al entrar, y cada vez que cambia la vista o lo que se busca.
@@ -225,16 +241,17 @@ export function ContenidoDeChatScreen() {
     return () => clearTimeout(espera);
   }, [escrito]);
 
-  // MENSAJES NUEVOS. Se usa el mismo canal que el chat: cuando entra algo en la
-  // conversación, se vuelve a pedir la primera página y las cuentas. No se
-  // intenta adivinar aquí si el mensaje nuevo pertenece a la vista: eso lo
-  // sabe el servidor. Como mucho una recarga cada dos segundos.
+  // MENSAJES NUEVOS Y BORRADOS. Cuando algo cambia en la conversación —entra
+  // un mensaje, o alguien borra uno, que es marcar su fila— se vuelve a pedir
+  // la primera página y las cuentas. No se intenta adivinar aquí si el
+  // mensaje pertenece a la vista: eso lo sabe el servidor. Como mucho una
+  // recarga cada dos segundos.
   const recargar = useRef(cargar);
   recargar.current = cargar;
   useEffect(() => {
     if (!conversationId) return;
     let pendiente: ReturnType<typeof setTimeout> | null = null;
-    const desengancha = subscribeToConversation(conversationId, () => {
+    const desengancha = subscribeToConversationChanges(conversationId, () => {
       if (pendiente) return;
       pendiente = setTimeout(() => {
         pendiente = null;
@@ -275,6 +292,26 @@ export function ContenidoDeChatScreen() {
   const abierta = claveDeVista(vista);
   const filtroAbierto =
     vista.tipo === 'filtro' ? vistas.filtros.find((f) => f.id === vista.id) : undefined;
+
+  /*
+    VER EL MENSAJE EN SU SITIO. Se deja el encargo y se vuelve al chat que
+    está abierto debajo, que lo recoge al recuperar el foco y sube hasta el
+    mensaje. `dismissTo` cierra las pantallas de en medio (esta, y la del
+    grupo si se vino por ella); si no hubiera un chat debajo, lo abre.
+  */
+  const irAlMensaje = useCallback(
+    (mensaje: MensajeDeVista) => {
+      if (!conversationId) return;
+      pedirSalto(conversationId, mensaje.id);
+      router.dismissTo({
+        pathname: '/chat/[id]',
+        params: params.name
+          ? { id: conversationId, name: params.name }
+          : { id: conversationId },
+      });
+    },
+    [conversationId, params.name, router],
+  );
 
   const abrirFuera = useCallback(
     (adjunto: MessageAttachment) => {
@@ -363,6 +400,15 @@ export function ContenidoDeChatScreen() {
           <Text color={colors.textMuted} style={styles.detalle}>
             {fechaLegible(item.fechaIso)}
           </Text>
+          <Pressable
+            onPress={() => irAlMensaje(item)}
+            accessibilityRole="button"
+            accessibilityLabel={t('chatViews.goToMessage')}
+            hitSlop={10}
+            style={styles.irAlChat}
+          >
+            <Feather name="corner-up-right" size={16} color={colors.textMuted} />
+          </Pressable>
         </View>
         {item.texto.trim() ? (
           <TextoConEnlaces texto={item.texto} colorDelTexto={colors.text} style={styles.texto} />
@@ -384,6 +430,19 @@ export function ContenidoDeChatScreen() {
       <AppHeader
         title={params.name ? t('chatViews.titleOf', { nombre: params.name }) : t('chatViews.title')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        // Solo para quien administra el grupo. El permiso es del servidor;
+        // esto evita pintar un botón que respondería 403.
+        rightIcon={vistas.puedoAdministrar ? 'sliders' : undefined}
+        onRightPress={
+          vistas.puedoAdministrar
+            ? () =>
+                router.push({
+                  pathname: '/chat/filtros/[id]' as never,
+                  params: { id: conversationId },
+                })
+            : undefined
+        }
+        rightLabel={t('groupFilters.title')}
       />
 
       <View style={styles.buscador}>
@@ -512,6 +571,7 @@ const styles = StyleSheet.create({
   },
   cabeceraDeFila: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   autor: { flexShrink: 1, fontSize: 14 },
+  irAlChat: { marginLeft: 'auto', padding: spacing.xs },
   detalle: { fontSize: 12 },
   texto: { fontSize: 15, lineHeight: 21 },
   medios: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },

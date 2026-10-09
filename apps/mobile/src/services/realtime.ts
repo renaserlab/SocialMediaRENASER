@@ -44,3 +44,42 @@ export function subscribeToConversation(
     void client.removeChannel(channel);
   };
 }
+
+/**
+ * Avisa de CUALQUIER cambio en los mensajes de una conversación: uno nuevo, y
+ * también uno que se borra (borrar es marcar la fila, o sea un cambio).
+ *
+ * NO ENTREGA LA FILA, a propósito. Quien escucha —la pantalla de contenido por
+ * vistas— no puede decidir con la fila si el mensaje pertenece a lo que está
+ * mirando: eso lo sabe el servidor. Aquí solo se dice «algo cambió, vuelve a
+ * preguntar».
+ *
+ * El chat sigue con `subscribeToConversation`, que sí entrega la fila para
+ * pintar la burbuja al instante.
+ */
+export function subscribeToConversationChanges(
+  conversationId: string,
+  alCambiar: () => void,
+): () => void {
+  const client = supabase;
+  if (!client) return () => {};
+
+  channelSeq += 1;
+  const channel = client
+    .channel(`messages-changes:${conversationId}:${channelSeq}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId}`,
+      },
+      () => alCambiar(),
+    )
+    .subscribe();
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}

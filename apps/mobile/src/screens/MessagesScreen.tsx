@@ -627,7 +627,19 @@ export function MessagesScreen() {
         chat nuevo se abre desde el perfil de la persona, que es donde está el
         botón que sí funciona.
       */}
-      <AppHeader title={t('messages.title')} grande />
+      <AppHeader
+        title={t('messages.title')}
+        grande
+        // CREAR UN GRUPO. Solo con sesión y servidor: sin ellos no hay a
+        // quién añadir, y el botón no se pinta (nunca uno que no haga nada).
+        rightIcon={supabaseEnabled && signedIn ? 'users' : undefined}
+        onRightPress={
+          supabaseEnabled && signedIn
+            ? () => router.push('/chat/nuevo-grupo' as never)
+            : undefined
+        }
+        rightLabel={t('groups.new')}
+      />
       {supabaseEnabled && !signedIn ? (
         <SignedOutNotice
           icon="message-square"

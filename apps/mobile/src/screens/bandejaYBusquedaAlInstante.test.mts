@@ -155,7 +155,9 @@ describe('la pantalla de Mensajes usa eso, y solo como espera', () => {
   });
 
   it('el título es grande y a la izquierda, no un rótulo en mayúsculas', () => {
-    assert.match(PANTALLA, /<AppHeader title=\{t\('messages\.title'\)\} grande \/>/);
+    // Desde el 09/10 la cabecera lleva además el botón de crear un grupo, así
+    // que ya no cabe en una línea. Lo que se fija es lo mismo: título y `grande`.
+    assert.match(PANTALLA, /<AppHeader\s+title=\{t\('messages\.title'\)\}\s+grande/);
     const cabecera = sinComentarios(fuente('components/AppHeader.tsx'));
     assert.match(cabecera, /grande = false,/, 'las demás pantallas siguen como estaban');
     assert.match(cabecera, /if \(grande\) \{/);

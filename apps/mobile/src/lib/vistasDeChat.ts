@@ -285,3 +285,135 @@ export function crearTurnos(): { siguiente: () => number; vigente: (turno: numbe
     vigente: (turno) => turno === ultimo,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Escribir un filtro
+// ---------------------------------------------------------------------------
+
+/** Los mismos topes que `messaging/vistas.py`, que es quien manda. */
+export const MAX_NOMBRE_DE_FILTRO = 40;
+export const MAX_DESCRIPCION_DE_FILTRO = 200;
+export const MAX_PALABRAS_DE_FILTRO = 5;
+export const MIN_LETRAS_DE_PALABRA = 3;
+export const MAX_LETRAS_DE_PALABRA = 40;
+export const MAX_AUTORES_DE_FILTRO = 10;
+
+/** Lo que se está escribiendo en el formulario de un filtro. */
+export type BorradorDeFiltro = {
+  nombre: string;
+  descripcion: string;
+  icono: string;
+  criterios: CriteriosDeFiltro;
+  activo: boolean;
+};
+
+export const BORRADOR_VACIO: BorradorDeFiltro = {
+  nombre: '',
+  descripcion: '',
+  icono: 'filter',
+  criterios: { tipos: [], palabras: [], modo: 'any', autores: [] },
+  activo: true,
+};
+
+export function borradorDe(filtro: FiltroDeGrupo): BorradorDeFiltro {
+  return {
+    nombre: filtro.nombre,
+    descripcion: filtro.descripcion,
+    icono: filtro.icono,
+    criterios: {
+      tipos: [...filtro.criterios.tipos],
+      palabras: [...filtro.criterios.palabras],
+      modo: filtro.criterios.modo,
+      autores: [...filtro.criterios.autores],
+    },
+    activo: filtro.activo,
+  };
+}
+
+const sinEspaciosDeMas = (texto: string): string => texto.split(/\s+/).filter(Boolean).join(' ');
+
+/**
+ * Las palabras de un filtro, a partir de lo que se escribe en un campo.
+ *
+ * Se separan por comas o por saltos de línea, NO por espacios: «examen final»
+ * es una sola cosa que buscar. Sin repetidas, compare como compare las
+ * mayúsculas.
+ */
+export function palabrasDe(texto: string): string[] {
+  const vistas = new Set<string>();
+  const salida: string[] = [];
+  for (const trozo of texto.split(/[,\n]/)) {
+    const palabra = sinEspaciosDeMas(trozo);
+    const clave = palabra.toLocaleLowerCase();
+    if (!palabra || vistas.has(clave)) continue;
+    vistas.add(clave);
+    salida.push(palabra);
+  }
+  return salida;
+}
+
+export type JuicioDeFiltro =
+  | 'vale'
+  | 'sin_nombre'
+  | 'nombre_largo'
+  | 'descripcion_larga'
+  | 'sin_criterios'
+  | 'palabra_corta'
+  | 'palabra_larga'
+  | 'muchas_palabras'
+  | 'muchos_autores';
+
+/**
+ * Lo que el servidor rechazaría, dicho antes de enviar.
+ *
+ * No es la validación: la validación es la del servidor. Esto evita mandar lo
+ * que se sabe que va a volver con un 422.
+ */
+export function juzgarFiltro(borrador: BorradorDeFiltro): JuicioDeFiltro {
+  const nombre = sinEspaciosDeMas(borrador.nombre);
+  if (!nombre) return 'sin_nombre';
+  if (nombre.length > MAX_NOMBRE_DE_FILTRO) return 'nombre_largo';
+  if (sinEspaciosDeMas(borrador.descripcion).length > MAX_DESCRIPCION_DE_FILTRO) {
+    return 'descripcion_larga';
+  }
+  const { tipos, palabras, autores } = borrador.criterios;
+  if (tipos.length + palabras.length + autores.length === 0) return 'sin_criterios';
+  if (palabras.length > MAX_PALABRAS_DE_FILTRO) return 'muchas_palabras';
+  if (palabras.some((p) => p.length < MIN_LETRAS_DE_PALABRA)) return 'palabra_corta';
+  if (palabras.some((p) => p.length > MAX_LETRAS_DE_PALABRA)) return 'palabra_larga';
+  if (autores.length > MAX_AUTORES_DE_FILTRO) return 'muchos_autores';
+  return 'vale';
+}
+
+/** El cuerpo de la petición, con los nombres que espera el servidor. */
+export function cuerpoDeFiltro(borrador: BorradorDeFiltro): Record<string, unknown> {
+  return {
+    name: sinEspaciosDeMas(borrador.nombre),
+    description: sinEspaciosDeMas(borrador.descripcion),
+    icon: borrador.icono,
+    enabled: borrador.activo,
+    criteria: {
+      types: TIPOS_DE_CONTENIDO.filter((tipo) => borrador.criterios.tipos.includes(tipo)),
+      keywords: borrador.criterios.palabras,
+      keyword_mode: borrador.criterios.modo,
+      author_ids: borrador.criterios.autores,
+    },
+  };
+}
+
+/** Pone o quita un valor de una lista, sin tocar la original. */
+export function alternar<T>(lista: readonly T[], valor: T): T[] {
+  return lista.includes(valor) ? lista.filter((v) => v !== valor) : [...lista, valor];
+}
+
+/**
+ * Una huella de lo que decide el resultado de un filtro.
+ *
+ * Sirve para saber, al volver de editarlo, que la lista que se estaba viendo
+ * ya no vale: cambió qué mensajes le pertenecen.
+ */
+export function huellaDeCriterios(filtro: FiltroDeGrupo | undefined): string {
+  if (!filtro) return '';
+  const { tipos, palabras, modo, autores } = filtro.criterios;
+  return JSON.stringify([tipos, palabras, modo, autores]);
+}

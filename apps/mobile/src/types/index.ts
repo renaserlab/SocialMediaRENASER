@@ -202,6 +202,14 @@ export type Message = {
   id: string;
   text: string;
   sender: 'me' | 'them';
+  /**
+   * Quién lo escribió. En un chat de dos sobra —«suyo» solo puede ser de una
+   * persona—, pero en un GRUPO es lo que dice de quién es cada mensaje.
+   * Los mensajes que todavía no han llegado al servidor no lo tienen.
+   */
+  autorId?: string;
+  /** Su nombre tal como venía con el mensaje. Una fila de tiempo real no lo trae. */
+  autorNombre?: string;
   /** Hora ya formateada para pintarla. */
   createdAt: string;
   /**
@@ -301,6 +309,8 @@ export type MessageStoryContext = {
 export type Conversation = {
   id: string;
   name: string;
+  /** Es un grupo: su nombre es el título, y no hay «la otra persona». */
+  esGrupo?: boolean;
   subtitle: string;
   unread: number;
   messages: Message[];

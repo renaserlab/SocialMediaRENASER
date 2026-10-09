@@ -111,6 +111,15 @@ type Props = {
    * OPCIONAL: sin él la cabecera queda exactamente como estaba, sin botón.
    */
   alAbrirContenido?: () => void;
+  /**
+   * La conversación es un GRUPO: se enseña su nombre y cuántos son, en vez
+   * de «la otra persona», que en un grupo no existe.
+   *
+   * Sin él la cabecera es la de siempre.
+   */
+  grupo?: { titulo: string; miembros: number };
+  /** Abre la pantalla del grupo (miembros y ajustes). */
+  alAbrirGrupo?: () => void;
 };
 
 export function CabeceraDeChat({
@@ -122,6 +131,8 @@ export function CabeceraDeChat({
   resolverEnElServidor,
   onBack,
   alAbrirContenido,
+  grupo,
+  alAbrirGrupo,
 }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -165,6 +176,26 @@ export function CabeceraDeChat({
       onRightPress={alAbrirContenido}
       rightLabel={alAbrirContenido ? t('chatViews.open') : undefined}
       center={
+        grupo ? (
+          <Pressable
+            onPress={alAbrirGrupo}
+            disabled={!alAbrirGrupo}
+            accessibilityRole={alAbrirGrupo ? 'button' : undefined}
+            accessibilityLabel={t('groups.openGroup', { nombre: grupo.titulo })}
+            hitSlop={8}
+            style={styles.persona}
+          >
+            <Avatar size={30} image={null} name={grupo.titulo} />
+            <View style={styles.textosDeGrupo}>
+              <Text numberOfLines={1} weight="700" color={colors.text} style={styles.nombre}>
+                {grupo.titulo}
+              </Text>
+              <Text numberOfLines={1} color={colors.textMuted} style={styles.miembros}>
+                {t('groups.membersCount', { n: grupo.miembros })}
+              </Text>
+            </View>
+          </Pressable>
+        ) : (
         <Pressable
           onPress={() => irAlPerfil(router, idDelPerfil)}
           disabled={!idDelPerfil}
@@ -185,6 +216,7 @@ export function CabeceraDeChat({
             {nombre}
           </Text>
         </Pressable>
+        )
       }
     />
   );
@@ -201,4 +233,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   nombre: { fontSize: 15, flexShrink: 1 },
+  textosDeGrupo: { minWidth: 0, flexShrink: 1 },
+  miembros: { fontSize: 11 },
 });

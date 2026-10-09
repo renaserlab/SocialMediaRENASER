@@ -240,7 +240,10 @@ test('la pantalla no filtra por su cuenta: pregunta al servidor', () => {
 
 test('los mensajes nuevos recargan la vista, con freno', () => {
   const pantalla = leer('../screens/ContenidoDeChatScreen.tsx');
-  assert.match(pantalla, /subscribeToConversation\(conversationId, \(\) => \{\s*if \(pendiente\) return;/);
+  assert.match(
+    pantalla,
+    /subscribeToConversationChanges\(conversationId, \(\) => \{\s*if \(pendiente\) return;/,
+  );
   assert.match(pantalla, /ESPERA_ENTRE_RECARGAS_MS = 2000/);
 });
 
