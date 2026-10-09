@@ -28,12 +28,41 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.messaging.models import ConversationMember
+from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import UserBlock
 
 #: El tipo del aviso. Tiene su texto y su canal en `notifications/push.py`.
 TIPO = "message"
+
+#: El texto del aviso cuando el mensaje va a un GRUPO: «Ana envió un mensaje
+#: al grupo «Aula»». Es solo el TEXTO: en los datos del aviso el tipo sigue
+#: siendo `message`, porque lleva al mismo sitio —la conversación— y la
+#: aplicación decide el destino por ese campo (`rutaDelPush.ts`).
+TIPO_EN_GRUPO = "message_group"
+
+#: «Ana te añadió al grupo «Aula»».
+TIPO_AL_ANADIR = "group_added"
+
+
+async def grupo_de(db: AsyncSession, conversation_id: str) -> str | None:
+    """El nombre del grupo, o `None` si la conversación es de dos personas.
+
+    Un grupo sin título —no debería haberlos: crear uno lo exige— devuelve
+    la cadena vacía, que sigue siendo «es un grupo»; la plantilla pone
+    entonces «un grupo». Lo que no puede pasar es avisar «te envió un
+    mensaje» de algo que se mandó a veinte personas.
+    """
+    fila = (
+        await db.execute(
+            select(Conversation.kind, Conversation.title).where(
+                Conversation.id == conversation_id
+            )
+        )
+    ).one_or_none()
+    if fila is None or fila.kind != "group":
+        return None
+    return (fila.title or "").strip()
 
 
 async def destinatarios(

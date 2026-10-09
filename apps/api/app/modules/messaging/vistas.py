@@ -414,7 +414,7 @@ class PaginaDeVista(BaseModel):
 # --------------------------------------------------------------------------- #
 # Permisos
 # --------------------------------------------------------------------------- #
-async def _conversacion_de(
+async def conversacion_de(
     db: AsyncSession, conversation_id: str, uid: str
 ) -> tuple[str, str]:
     """`(kind, created_by)` de una conversacion A LA QUE SE PERTENECE.
@@ -460,7 +460,7 @@ async def _exigir_administrar(
     db: AsyncSession, conversation_id: str, uid: str
 ) -> None:
     """Pertenecer, que sea un grupo, que la 0102 este, y poder administrar."""
-    kind, creador = await _conversacion_de(db, conversation_id, uid)
+    kind, creador = await conversacion_de(db, conversation_id, uid)
     if kind != "group":
         raise ConflictError(
             "Los filtros personalizados son de los grupos.",
@@ -609,7 +609,7 @@ async def vistas_de_la_conversacion(
     `all` no lleva cuenta: contar la conversacion entera cada vez que se abre
     esta pantalla seria pagar por un numero que nadie mira.
     """
-    kind, creador = await _conversacion_de(db, conversation_id, current_user.id)
+    kind, creador = await conversacion_de(db, conversation_id, current_user.id)
     cuentas = await _cuentas(db, conversation_id)
 
     puede = administra(kind, creador, current_user.id)
@@ -658,7 +658,7 @@ async def mensajes_de_una_vista(
     que no lo administre. No se dice «existe pero no puedes»: eso seria
     confirmar que existe.
     """
-    kind, creador = await _conversacion_de(db, conversation_id, current_user.id)
+    kind, creador = await conversacion_de(db, conversation_id, current_user.id)
 
     if (category is None) == (filter_id is None):
         raise ValidationAppError(
@@ -817,7 +817,7 @@ async def listar_filtros(
     db: AsyncSession = Depends(get_db),
 ) -> list[FiltroLeido]:
     """Los filtros del grupo. Quien no administra solo ve los encendidos."""
-    kind, creador = await _conversacion_de(db, conversation_id, current_user.id)
+    kind, creador = await conversacion_de(db, conversation_id, current_user.id)
     if kind != "group" or not await esquema.hay_filtros_de_conversacion(db):
         return []
     return await _filtros(

@@ -122,6 +122,12 @@ APLICADAS = {
     "0099_destacado_del_directo.sql": "13c5890fbbe3be5533ccfa7f06bdd25f4a86a329",
     "0100_disponibilidad_para_sesiones.sql": "d5269ccc65760f98aa69304281ffd651515284de",
     "0101_grabacion_del_directo.sql": "5d8ab69d8192828601c3910492c7c305bafa485b",
+    # 0102 (filtros personalizados de un grupo). Edson la ejecuto a mano en
+    # Supabase el 09/10/2026 y asi lo comunico. La migracion se niega a
+    # terminar si la tabla queda sin RLS o con alguna politica. PENDIENTE la
+    # consulta de comprobacion en solo lectura. Desde que esta aplicada no se
+    # edita: se corrige hacia delante, con otra.
+    "0102_filtros_de_conversacion.sql": "82e1ea3c385d3ab5ca3071ed530c9d71dac78ea1",
 }
 
 
