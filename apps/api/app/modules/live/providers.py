@@ -104,6 +104,21 @@ class EventoDeProveedor:
     session_id: str
     external_session_id: str = ""
     ocurrido_en: str = ""
+    #: Solo en el aviso de «la grabacion esta lista»: donde quedo y el enlace
+    #: temporal para bajarla. `None` en todos los demas.
+    grabacion: "GrabacionAvisada | None" = None
+
+
+@dataclass(frozen=True)
+class GrabacionAvisada:
+    """Lo que el proveedor dice de una grabacion ya preparada."""
+
+    recording_id: str = ""
+    ruta: str = ""
+    #: Enlace temporal. Caduca; cuanto dura lo decide el proveedor.
+    url: str = ""
+    duracion_s: int | None = None
+    tamano_bytes: int | None = None
 
 
 class ProveedorDeDirecto(ABC):

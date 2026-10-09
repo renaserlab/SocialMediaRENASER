@@ -23,6 +23,7 @@ import {
   altoDelChatPara,
   type ChatDeDirectoRef,
 } from '@/components/live/ChatDeDirecto';
+import { DescargaDeGrabacion } from '@/components/live/DescargaDeGrabacion';
 import { EscenarioDeVideo } from '@/components/live/EscenarioDeVideo';
 import { HojaDeRotulo } from '@/components/live/HojaDeRotulo';
 import { MensajeFijado } from '@/components/live/MensajeFijado';
@@ -924,6 +925,15 @@ export function LiveScreen() {
             ) : hayImagen ? null : (
               <CartelDeVideo emision={emision} estado={vista.estado} />
             )}
+
+            {/*
+              La grabacion, para quien emitio (prototipo). Solo pinta algo si el
+              servidor tiene la funcion; el enlace lo da el proveedor de video
+              unos minutos despues de terminar, y caduca.
+            */}
+            {terminada && puedeGestionar ? (
+              <DescargaDeGrabacion emisionId={emision.id} alFallar={setAviso} />
+            ) : null}
 
             {/*
               La salida del estado, cuando la hay. Un cartel que solo explica el

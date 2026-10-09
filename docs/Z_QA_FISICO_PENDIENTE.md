@@ -3105,3 +3105,21 @@ Hacen falta dos cuentas: A pone su semana y B le pide una sesión.
 | Pedir una sesión a alguien SIN semana puesta: la hoja es la de siempre, sin horarios | | | |
 | A vacía su semana y guarda: a B ya no se le ofrece ningún horario | | | |
 | B con el teléfono en otra zona horaria: ve los horarios en SU hora | | | |
+
+## Descarga de la grabación del directo (09/10/2026) — prototipo
+
+**No se puede probar hasta que la empresa decida encender la grabación en el
+panel de 100ms** (tiene costo por minuto). Además hacen falta la migración
+0101 aplicada, el servidor desplegado y una compilación nueva. Sin ver en
+teléfono ni con una grabación de verdad.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Con la grabación APAGADA en 100ms: al terminar un directo, quien emitió ve «Si la grabación está activada, aparecerá aquí…» y nada más | | | |
+| Quien solo miraba no ve nada de la grabación | | | |
+| Con la grabación ENCENDIDA: unos minutos después de terminar, «Volver a comprobar» pasa a «Descargar la grabación» | | | |
+| Debajo del botón dice cuánto dura y cuánto pesa, y que el enlace caduca | | | |
+| Al tocarlo se abre el vídeo fuera de la aplicación y se puede guardar | | | |
+| El vídeo dura lo que duró el directo y se oye | | | |
+| Anotar cuánto tarda en estar lista y, días después, si el enlace sigue abriendo | | | |
+| Un directo sin grabación se termina y se ve exactamente como antes | | | |

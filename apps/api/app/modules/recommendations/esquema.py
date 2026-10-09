@@ -163,6 +163,21 @@ async def hay_destacado_de_directo(db: AsyncSession) -> bool:
     return _cache["live_spotlights"]
 
 
+async def hay_grabaciones_de_directo(db: AsyncSession) -> bool:
+    """Si existe `live_recordings` (migracion 0101).
+
+    Sin ella el aviso de «grabacion lista» se ignora y nadie ve una descarga.
+    """
+    if "live_recordings" not in _cache:
+        _cache["live_recordings"] = await _hay_tabla(db, "live_recordings")
+        if not _cache["live_recordings"]:
+            logger.warning(
+                "La migracion 0101 no esta aplicada: no se guarda la grabacion "
+                "de los directos."
+            )
+    return _cache["live_recordings"]
+
+
 async def hay_disponibilidad(db: AsyncSession) -> bool:
     """Si existe `availability_slots` (migracion 0100).
 

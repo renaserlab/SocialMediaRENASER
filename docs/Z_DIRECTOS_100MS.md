@@ -1024,3 +1024,61 @@ sirviendo solo para ocultarlo. Tras aplicarla hay que reiniciar la API.
 - Elegir color o posición del texto.
 - Fijar más de un mensaje, o un historial de lo fijado.
 - Programar un texto para una hora.
+
+## 20. La grabación del directo (09/10/2026) — prototipo
+
+Pedido: que quien emitió pueda descargar el vídeo de su directo durante un
+tiempo. **Hecho en el código como prototipo; la grabación está APAGADA en el
+panel de 100ms, así que hoy no hace nada.** Sin la migración aplicada, sin
+desplegar y sin probar con una grabación de verdad.
+
+### Quién graba
+
+**Z no graba.** Graba 100ms, y solo si la grabación está encendida en la
+plantilla (hoy está desactivada, a propósito: ver §16). Z no arranca ni para
+ninguna grabación: se limita a escuchar el aviso de que hay una lista.
+
+Encenderla es una decisión de la empresa: **tiene costo por minuto grabado** y
+por almacenamiento. Hay que hacerlo en el panel de 100ms; antes de guiar ese
+paso hace falta una captura de la sección de grabación de la plantilla.
+
+### Qué hace el código
+
+1. 100ms manda al webhook que ya existe un aviso `beam.recording.success` (o
+   `recording.success`) con `recording_presigned_url`, `recording_path`,
+   `duration` y `size`. Los nombres están comprobados en su documentación el
+   09/10/2026; **no se ha recibido ninguno de verdad**.
+2. El servidor guarda ese enlace en `live_recordings` (migración **0101**, sin
+   aplicar), en la emisión cuya sala es la del aviso. Solo si el enlace es
+   `https`, y solo si la sala es de una emisión nuestra.
+3. `GET /live/sessions/{id}/recording` se lo entrega **solo a quien gestiona
+   la emisión**. A quien solo miraba, 403.
+4. En la aplicación, quien emitió ve en la pantalla de fin «Descargar la
+   grabación», que abre el enlace fuera. Si todavía no ha llegado, lo dice y
+   deja volver a comprobar.
+
+### Lo que hay que saber
+
+- **El enlace caduca.** Es el temporal que da 100ms; cuánto dura lo decide
+  100ms y no está medido. El prototipo no pide uno nuevo: pasado ese tiempo,
+  la descarga deja de abrir.
+- **El vídeo no lleva comentarios ni reacciones.** Los dibuja la aplicación
+  encima de la imagen; no viajan en la transmisión.
+- **Con invitados**, lo que se graba es la composición que hace 100ms de la
+  sala, no la pantalla repartida de Z.
+- **El webhook solo comprueba un secreto compartido** (ver §«Cómo se comprueba
+  que el aviso es suyo»). Por eso el enlace se limita a `https` y a salas
+  nuestras, y solo lo ve quien emitió.
+- El vídeo queda en el almacenamiento de 100ms, no en el de Z.
+
+### Sin la migración 0101
+
+El aviso de grabación se ignora, la ruta dice que la función no está y la
+aplicación no pinta nada.
+
+### Lo que no se hizo
+
+- Pedir un enlace nuevo cuando caduca.
+- Guardar el vídeo en el almacenamiento de Z, o borrarlo pasado un plazo.
+- Enseñar la grabación a quienes miraron.
+- Los clips con IA, que necesitan esta grabación como punto de partida.

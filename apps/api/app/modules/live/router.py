@@ -51,6 +51,7 @@ from app.modules.live import (
 from app.modules.live.models import (
     LiveMessage,
     LiveReactionTotal,
+    LiveRecording,
     LiveSession,
     LiveSpotlight,
 )
@@ -65,6 +66,7 @@ from app.modules.live.schemas import (
     LiveGuestRead,
     LiveMessageCreate,
     LiveMessageRead,
+    LiveRecordingRead,
     LiveSessionCreate,
     LiveSessionRead,
     LiveSessionUpdate,
@@ -1151,6 +1153,96 @@ async def quitar_rotulo(
 
 
 # --------------------------------------------------------------------------- #
+# La grabacion (prototipo)
+# --------------------------------------------------------------------------- #
+#
+# Z NO GRABA. Graba el proveedor de video, y solo si la grabacion esta encendida
+# en su panel. Cuando termina de prepararla avisa (`grabacion_lista`, mas abajo)
+# con un enlace temporal, y aqui se le entrega a quien gestiona la emision.
+
+
+def _es_enlace_seguro(url: str) -> bool:
+    """Solo `https`. El enlace sale de un aviso, y la aplicacion lo va a abrir:
+    no se le pasa a nadie un `javascript:` ni un `http://` que llegaron ahi."""
+    return url.startswith("https://") and len(url) < 4000 and " " not in url
+
+
+@router.get("/sessions/{session_id}/recording", response_model=LiveRecordingRead)
+async def ver_grabacion(
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveRecordingRead:
+    """El enlace para bajar la grabacion. Solo para quien gestiona la emision."""
+    await _exigir_esquema(db)
+    sesion = await _sesion_visible(db, session_id, current_user.id)
+    if not await _puede_gestionar(db, current_user.id, sesion):
+        raise ForbiddenError("Solo quien emitió puede descargar la grabación.")
+    if not await esquema.hay_grabaciones_de_directo(db):
+        return LiveRecordingRead(available=False)
+
+    fila = await db.get(LiveRecording, sesion.id)
+    if fila is None or not fila.download_url:
+        return LiveRecordingRead(available=True)
+    return LiveRecordingRead(
+        available=True,
+        ready=True,
+        url=fila.download_url,
+        duration_seconds=fila.duration_seconds,
+        size_bytes=fila.size_bytes,
+        received_at=fila.received_at,
+    )
+
+
+async def _guardar_grabacion(db: AsyncSession, evento) -> None:
+    """Apunta la grabacion que avisa el proveedor, en la emision que es suya.
+
+    LA EMISION SE BUSCA POR LA SALA DEL PROVEEDOR, ademas de por el nombre: el
+    aviso de la grabacion compuesta no trae el nombre de la sala. Y solo se
+    acepta si esa sala es de una emision NUESTRA: un aviso no puede colgarle
+    una grabacion a una emision que no la tiene.
+    """
+    grabacion = evento.grabacion
+    if grabacion is None or not _es_enlace_seguro(grabacion.url):
+        logger.warning("[live] aviso de grabacion sin enlace utilizable")
+        return
+    if not await esquema.hay_grabaciones_de_directo(db):
+        return
+
+    sesion: LiveSession | None = None
+    try:
+        UUID(evento.session_id)
+        sesion = await db.get(LiveSession, evento.session_id)
+    except (ValueError, AttributeError, TypeError):
+        sesion = None
+    if sesion is None and evento.room_id:
+        sesion = await db.scalar(
+            select(LiveSession).where(LiveSession.provider_room_id == evento.room_id)
+        )
+    if sesion is None or sesion.provider != "100ms":
+        logger.warning("[live] aviso de grabacion de una emision desconocida")
+        return
+    # Las dos señas tienen que casar: la emision que dice el nombre y la sala
+    # que dice el aviso son la misma.
+    if evento.room_id and sesion.provider_room_id != evento.room_id:
+        logger.warning("[live] aviso de grabacion con una sala que no es la suya")
+        return
+
+    fila = await db.get(LiveRecording, sesion.id)
+    if fila is None:
+        fila = LiveRecording(session_id=sesion.id)
+        db.add(fila)
+    fila.provider_recording_id = grabacion.recording_id or None
+    fila.storage_path = grabacion.ruta or None
+    fila.download_url = grabacion.url
+    fila.duration_seconds = grabacion.duracion_s
+    fila.size_bytes = grabacion.tamano_bytes
+    fila.received_at = _ahora()
+    await db.commit()
+    logger.info("[live] grabacion lista para la emision %s", sesion.id)
+
+
+# --------------------------------------------------------------------------- #
 # El escenario: a quien se invita a salir con su camara
 # --------------------------------------------------------------------------- #
 #
@@ -1685,6 +1777,12 @@ async def _aplicar_evento_de_directo(db: AsyncSession, evento) -> None:
     afectan a cero filas y no cambian nada: la idempotencia esta en la sentencia,
     no en haber recordado que ya lo vimos.
     """
+    # La grabacion va por su camino: su aviso puede llegar sin el nombre de la
+    # sala, y no mueve el estado de ninguna emision.
+    if evento.significado == "grabacion_lista":
+        await _guardar_grabacion(db, evento)
+        return
+
     if not evento.session_id:
         logger.warning("[live] aviso %s sin emision atribuible", evento.tipo)
         return

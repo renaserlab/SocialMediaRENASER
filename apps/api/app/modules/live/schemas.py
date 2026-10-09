@@ -222,6 +222,24 @@ class LiveStageRead(BaseModel):
     me: str | None = None
 
 
+class LiveRecordingRead(BaseModel):
+    """La grabacion de una emision, para quien la gestiona (prototipo).
+
+    `available` es si el servidor tiene montada la funcion; `ready`, si el
+    proveedor ya aviso de que hay una grabacion que bajar. Con la grabacion
+    apagada en el panel del proveedor, `ready` no llega a ser cierto nunca.
+    """
+
+    available: bool
+    ready: bool = False
+    #: Enlace TEMPORAL del proveedor. Caduca: si ya no abre, no hay otro.
+    url: str | None = None
+    duration_seconds: int | None = None
+    size_bytes: int | None = None
+    #: Cuando llego el aviso. La caducidad del enlace cuenta desde entonces.
+    received_at: datetime | None = None
+
+
 class LiveSpotlightPin(BaseModel):
     """Que mensaje del chat se fija."""
 

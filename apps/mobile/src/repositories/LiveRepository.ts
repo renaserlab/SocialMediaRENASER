@@ -1,5 +1,6 @@
 import { leerDestacado, type Destacado, type EstiloDeRotulo } from '@/live/destacado';
 import { leerEscenario, type Escenario } from '@/live/escenario';
+import { leerGrabacion, type Grabacion } from '@/live/grabacion';
 import {
   clasificarFalloDeCredencial,
   type FalloDeCredencial,
@@ -461,6 +462,22 @@ export const LiveRepository = {
         method: 'POST',
       }),
     );
+  },
+
+  /**
+   * La grabacion del directo, para quien lo emitio (prototipo).
+   *
+   * NUNCA FALLA: un servidor sin la funcion (404), sin la tabla, sin red o un
+   * 403 se leen todos como «no hay nada que ofrecer», y no se pinta nada.
+   */
+  async grabacion(emisionId: string): Promise<Grabacion> {
+    try {
+      return leerGrabacion(
+        await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/recording`),
+      );
+    } catch {
+      return leerGrabacion(null);
+    }
   },
 
   /* ------------------------------------------------------- Lo destacado -- */
