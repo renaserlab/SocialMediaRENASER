@@ -1731,6 +1731,9 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'wizard.totalLength': 'Total length: {duracion}',
   'wizard.accessType': 'ACCESS TYPE',
   'wizard.priceIn': 'Price ({moneda})',
+  'catalog.currency': 'Currency',
+  'catalog.currencyPEN': 'Peruvian soles (S/)',
+  'catalog.currencyUSD': 'US dollars ($)',
   'wizard.markFreeSample':
     'Mark at least one lesson as a free sample so it can be tried before buying, and leave the rest locked: a purchase has to unlock something real.',
   'wizard.freeCourseNote':

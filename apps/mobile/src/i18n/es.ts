@@ -1825,6 +1825,9 @@ export const es = {
   'wizard.totalLength': 'Duración total: {duracion}',
   'wizard.accessType': 'TIPO DE ACCESO',
   'wizard.priceIn': 'Precio ({moneda})',
+  'catalog.currency': 'Moneda',
+  'catalog.currencyPEN': 'Soles (S/)',
+  'catalog.currencyUSD': 'Dólares ($)',
   'wizard.markFreeSample':
     'Marca al menos una lección como muestra gratuita para que se pueda probar antes de comprar, y deja el resto cerrado: una compra tiene que desbloquear algo real.',
   'wizard.freeCourseNote':

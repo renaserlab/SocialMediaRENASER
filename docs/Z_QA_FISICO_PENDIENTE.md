@@ -3058,3 +3058,18 @@ Hacen falta dos: uno emite (A) y uno mira (B).
 | B mantiene pulsado un mensaje: no pasa nada | | | |
 | A termina el directo: no queda ni texto ni mensaje fijado en la pantalla de fin | | | |
 | El texto no tapa el nombre de quien emite ni «EN VIVO», ni con invitados en pantalla | | | |
+
+## Precio del curso en soles o en dólares (09/10/2026) — prototipo
+
+Solo de la aplicación. El precio se guarda y se enseña en la moneda elegida,
+**sin convertir**: no hay tipo de cambio. Las compras siguen apagadas.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Crear curso › De pago: aparece «Moneda» con Soles (S/) y Dólares ($) | | | |
+| Con Dólares, el campo dice «Precio (USD)»; con Soles, «Precio (PEN)» | | | |
+| Un curso guardado en dólares se ve como `$ 25.00` en Cursos, en su ficha y en la vista previa | | | |
+| Uno en soles se sigue viendo como `S/ 25.00` | | | |
+| Editar un curso en dólares: la hoja y el asistente abren con Dólares marcado | | | |
+| Cambiarlo a soles y guardar: el precio pasa a verse en soles, con la misma cifra | | | |
+| Un curso gratuito no enseña el selector y sigue diciendo «Gratis» | | | |

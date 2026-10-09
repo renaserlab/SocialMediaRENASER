@@ -1735,6 +1735,9 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'wizard.totalLength': 'Duração total: {duracion}',
   'wizard.accessType': 'TIPO DE ACESSO',
   'wizard.priceIn': 'Preço ({moneda})',
+  'catalog.currency': 'Moeda',
+  'catalog.currencyPEN': 'Sóis (S/)',
+  'catalog.currencyUSD': 'Dólares americanos ($)',
   'wizard.markFreeSample':
     'Marque pelo menos uma aula como amostra gratuita para que dê para experimentar antes de comprar, e deixe o resto fechado: uma compra precisa desbloquear algo real.',
   'wizard.freeCourseNote':

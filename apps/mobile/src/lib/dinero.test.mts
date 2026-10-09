@@ -120,3 +120,26 @@ describe('el importe de una constancia', () => {
     assert.equal(importeConMoneda(4990, ''), '49.90');
   });
 });
+
+describe('la moneda de un curso (07/10/2026: soles o dólares)', () => {
+  it('se ofrecen soles y dólares, con soles primero', async () => {
+    const { MONEDAS_DE_CURSO } = await import('./dinero.ts');
+    assert.deepEqual([...MONEDAS_DE_CURSO], ['PEN', 'USD']);
+  });
+
+  it('un curso guardado conserva su moneda; una que no se ofrece cae en soles', async () => {
+    const { monedaDeCurso } = await import('./dinero.ts');
+    assert.equal(monedaDeCurso('USD'), 'USD');
+    assert.equal(monedaDeCurso('usd '), 'USD');
+    assert.equal(monedaDeCurso('PEN'), 'PEN');
+    for (const rara of ['MXN', 'EUR', '', null, undefined]) {
+      assert.equal(monedaDeCurso(rara), 'PEN', String(rara));
+    }
+  });
+
+  it('el precio se enseña en su moneda, sin convertir', () => {
+    assert.equal(etiquetaDePrecio(2500, 'USD'), '$ 25.00');
+    assert.equal(etiquetaDePrecio(2500, 'PEN'), 'S/ 25.00');
+    assert.equal(etiquetaDePrecio(0, 'USD'), 'Gratis');
+  });
+});

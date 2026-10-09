@@ -1211,6 +1211,7 @@ export function ProfileSection({
                           title: course.title,
                           description: course.description,
                           priceMinor: course.priceMinor,
+                          currency: course.currency,
                           topicIds: course.topicIds,
                         })
                     : undefined
