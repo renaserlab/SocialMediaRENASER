@@ -957,7 +957,8 @@ ver en teléfonos, sin la migración aplicada y sin desplegar.**
 
 ### Dónde se guarda
 
-Tabla `live_spotlights` (migración **0099**, sin aplicar): una fila por
+Tabla `live_spotlights` (migración **0099**, aplicada por Edson el 09/10/2026 y
+comprobada ese día en solo lectura, sin divergencias): una fila por
 emisión, con lo vigente —no un historial—. Va en su tabla y no en columnas de
 `live_sessions` a propósito: con columnas nuevas ahí, el código desplegado
 antes que la migración no podría ni leer una emisión.
@@ -1048,8 +1049,8 @@ paso hace falta una captura de la sección de grabación de la plantilla.
    `recording.success`) con `recording_presigned_url`, `recording_path`,
    `duration` y `size`. Los nombres están comprobados en su documentación el
    09/10/2026; **no se ha recibido ninguno de verdad**.
-2. El servidor guarda ese enlace en `live_recordings` (migración **0101**, sin
-   aplicar), en la emisión cuya sala es la del aviso. Solo si el enlace es
+2. El servidor guarda ese enlace en `live_recordings` (migración **0101**,
+   aplicada y comprobada sin divergencias el 09/10/2026), en la emisión cuya sala es la del aviso. Solo si el enlace es
    `https`, y solo si la sala es de una emisión nuestra.
 3. `GET /live/sessions/{id}/recording` se lo entrega **solo a quien gestiona
    la emisión**. A quien solo miraba, 403.
