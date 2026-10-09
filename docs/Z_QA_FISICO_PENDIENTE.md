@@ -3000,3 +3000,61 @@ es un fallo de la aplicación.
 | C (que solo mira) no ve en ningún momento el botón de invitar ni la lista de invitados | | | |
 | Una persona sin cuenta que mira: no ve nada de esto y el directo le funciona igual | | | |
 | Un directo sin invitados se ve y se oye exactamente como antes | | | |
+
+## Reel que graba y rojo que se lee (09/10/2026)
+
+Solo de la aplicación: basta una compilación nueva. La versión sigue siendo la
+1.2.1.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Crear › Reel: un TOQUE en el disparador empieza a grabar (no hace foto) | | | |
+| Otro toque termina y lleva a «describe tu reel», con el vídeo reproduciéndose | | | |
+| Mantener pulsado graba y al soltar termina | | | |
+| Manteniendo pulsado, deslizar el dedo hacia arriba acerca la imagen | | | |
+| La primera vez pide el micrófono; al concederlo empieza a grabar sin tener que tocar otra vez | | | |
+| La pista dice «Toca para grabar y otra vez para terminar · Mantén y desliza para acercar» | | | |
+| Mientras graba no se puede girar la cámara, y el anillo avanza | | | |
+| A los tres minutos se corta solo | | | |
+| Crear › Historia y Crear › Publicación: un toque sigue haciendo FOTO y mantener graba, como antes | | | |
+| En el directo, «EN VIVO» y «Terminar» se leen bien (letra blanca sobre rojo oscuro) | | | |
+| La tarjeta de un directo en Inicio y el aviso de «está en directo»: el rótulo rojo se lee igual | | | |
+
+## Mensaje fijado y texto en pantalla (09/10/2026)
+
+Hacen falta **la migración 0099 aplicada, el servidor desplegado y una
+compilación nueva**. En la copia web se vio la hoja del texto con su contador
+y su vista previa, el texto bajo la cabecera (también en cinta, moviéndose), el
+mensaje fijado sobre el chat, el menú al mantener pulsado un mensaje y que quien
+mira no tiene ningún control. **Con teléfonos falta ver que le llega a los
+demás al momento.**
+
+Hacen falta dos: uno emite (A) y uno mira (B).
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A, emitiendo: en la columna derecha hay un botón con una «T» | | | |
+| Al tocarlo se abre «Texto en pantalla», con el campo, el contador `0/80` y tres formas: Deslizar, Latido, Cinta | | | |
+| Al escribir aparece «Así se verá» con el texto tal como saldrá | | | |
+| Escribiendo con espacios de más o saltos de línea, la muestra los quita y el contador no los cuenta | | | |
+| Con más de 80 caracteres el contador se pone rojo, dice cuántos sobran y «Mostrar a todos» se apaga | | | |
+| «Mostrar a todos»: el texto aparece arriba, bajo el nombre, en A y en B, en uno o dos segundos | | | |
+| En B el texto entra deslizándose UNA vez; no vuelve a entrar solo cada poco | | | |
+| «Latido»: entra y late tres veces; después se queda quieto | | | |
+| «Cinta» con un texto largo: corre de lado y se lee entero. Con uno corto, no se mueve | | | |
+| A toca el texto: se abre la hoja con lo que hay puesto; «Actualizar el texto» lo cambia para todos | | | |
+| «Quitar el texto»: desaparece en A y en B | | | |
+| B toca el texto: no pasa nada. B no tiene el botón «T» | | | |
+| Con «reducir movimiento» activado en el teléfono de B: el texto aparece sin moverse | | | |
+| A mantiene pulsado un mensaje del chat: se abre «Acciones del mensaje» con «Fijar mensaje» y «Ocultar mensaje» | | | |
+| «Fijar mensaje»: aparece encima del chat, con chincheta y el nombre de quien lo escribió, en A y en B | | | |
+| Llegan mensajes nuevos: el fijado NO se va con la conversación | | | |
+| A fija otro mensaje: sustituye al anterior | | | |
+| A mantiene pulsado el mensaje fijado: ofrece «Dejar de fijar» | | | |
+| A toca la `X` del fijado: desaparece en A y en B | | | |
+| A oculta el mensaje que está fijado: deja de estar fijado para todos | | | |
+| B entra al directo DESPUÉS de que A fijara y pusiera el texto: ve las dos cosas | | | |
+| B pone la aplicación en segundo plano, A cambia el texto, B vuelve: ve el nuevo | | | |
+| B mantiene pulsado un mensaje: no pasa nada | | | |
+| A termina el directo: no queda ni texto ni mensaje fijado en la pantalla de fin | | | |
+| El texto no tapa el nombre de quien emite ni «EN VIVO», ni con invitados en pantalla | | | |

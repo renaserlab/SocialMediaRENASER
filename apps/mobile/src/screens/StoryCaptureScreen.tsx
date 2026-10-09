@@ -24,6 +24,7 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
 import { alturasDeCamara, ALTO_PISTA, ANILLO } from '@/lib/controlesDeCamara';
+import { alSoltarElDisparadorDeVideo, MANTENER_MS } from '@/lib/disparadorDeVideo';
 import { haptics } from '@/lib/haptics';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { palette, radius, spacing } from '@/theme/tokens';
@@ -41,9 +42,6 @@ const media = palette('dark');
   cortara a un tiempo y la subida rechazara a otro.
 */
 const MAX_STORY_MS = MAX_HISTORIA_MS;
-
-/** A partir de aqui la pulsacion se considera larga y empieza a grabar. */
-const MANTENER_MS = 350;
 
 /**
  * Lo que tarda el cambio de modo en llegar a la camara nativa.
@@ -93,6 +91,13 @@ type Props = {
    */
   duracionMaximaMs?: number;
   /**
+   * La camara solo graba (Reel): no hay foto que hacer.
+   *
+   * Un toque empieza y otro termina; mantener tambien graba. La regla esta en
+   * `lib/disparadorDeVideo`, que cuenta por que.
+   */
+  soloVideo?: boolean;
+  /**
    * Barra propia, abajo del todo, por debajo de los controles.
    *
    * La usa la pantalla de Crear para poner ahi los tipos de publicacion
@@ -115,6 +120,7 @@ export function StoryCaptureScreen({
   onClose,
   lastPhotoUri,
   duracionMaximaMs = MAX_STORY_MS,
+  soloVideo = false,
   pie,
 }: Props) {
   const { t } = useTranslation();
@@ -163,7 +169,9 @@ export function StoryCaptureScreen({
    * grabar en el mismo instante en que se pedia el cambio, cuando la camara
    * seguia en modo foto.
    */
-  const [mode, setMode] = useState<CameraMode>('picture');
+  const [mode, setMode] = useState<CameraMode>(soloVideo ? 'video' : 'picture');
+  /** El modo en reposo: al que se vuelve al terminar de grabar. */
+  const modoEnReposo: CameraMode = soloVideo ? 'video' : 'picture';
 
   /**
    * Distingue el toque de la pulsacion larga.
@@ -178,6 +186,9 @@ export function StoryCaptureScreen({
   const holdFired = useRef(false);
   /** La grabacion llego a empezar: al soltar hay que cortarla. */
   const didRecord = useRef(false);
+  /** Solo video: cuando se apoyo el dedo, y si entonces ya se estaba grabando. */
+  const apoyadoEn = useRef(0);
+  const yaGrababa = useRef(false);
 
   /**
    * Zoom de 0 a 1, como lo espera la camara.
@@ -253,7 +264,9 @@ export function StoryCaptureScreen({
   }, [busy, onCaptured]);
 
   const startRecording = useCallback(async () => {
-    if (!cameraRef.current || busy) return;
+    // `didRecord`: en solo video un segundo toque llega con la grabacion en
+    // marcha; pedir otra encima la corta con error.
+    if (!cameraRef.current || busy || didRecord.current) return;
     // El video lleva sonido: sin permiso de microfono se graba mudo y nadie
     // entiende por que. Se pide justo aqui, cuando ya tiene sentido.
     if (!micPermission?.granted) {
@@ -269,14 +282,20 @@ export function StoryCaptureScreen({
     // La camara pasa a modo video ANTES de grabar, y se espera a que el cambio
     // llegue a la vista nativa: `recordAsync` sobre una camara en modo foto
     // falla siempre. Sin esta espera, grabar no funcionaba nunca.
-    setMode('video');
-    await new Promise((resolve) => setTimeout(resolve, CAMBIO_DE_MODO_MS));
+    //
+    // Una camara que solo graba ya esta en modo video desde que se monta: no
+    // hay cambio que esperar, y soltar el dedo no cancela nada (alli un toque
+    // corto ES la peticion de grabar).
+    if (!soloVideo) {
+      setMode('video');
+      await new Promise((resolve) => setTimeout(resolve, CAMBIO_DE_MODO_MS));
 
-    // Se solto mientras cambiaba el modo: fue una pulsacion corta de mas, no
-    // una peticion de grabar.
-    if (!pressing.current) {
-      setMode('picture');
-      return;
+      // Se solto mientras cambiaba el modo: fue una pulsacion corta de mas, no
+      // una peticion de grabar.
+      if (!pressing.current) {
+        setMode('picture');
+        return;
+      }
     }
 
     didRecord.current = true;
@@ -332,14 +351,24 @@ export function StoryCaptureScreen({
       // El zoom no se hereda de una grabacion a la siguiente.
       zoomRef.current = 0;
       setZoom(0);
-      // Se vuelve a modo foto: es lo que se usa la mayor parte del tiempo.
-      setMode('picture');
+      // Se vuelve al modo en reposo: foto en la camara de historias, que es lo
+      // que se usa la mayor parte del tiempo; video en la que solo graba.
+      setMode(modoEnReposo);
       stopProgress();
     }
-  }, [busy, micPermission, requestMicPermission, onCaptured, progress, stopProgress]);
+  }, [busy, micPermission, requestMicPermission, onCaptured, progress, stopProgress, soloVideo, modoEnReposo, topeMs]);
 
   const onPressIn = () => {
     pressing.current = true;
+    if (soloVideo) {
+      // Sin temporizador: aqui no hay foto de la que distinguirse. Se graba
+      // desde el primer contacto, y al soltar se decide si fue un toque (sigue)
+      // o una pulsacion mantenida (termina).
+      apoyadoEn.current = Date.now();
+      yaGrababa.current = didRecord.current;
+      if (!didRecord.current) void startRecording();
+      return;
+    }
     holdFired.current = false;
     holdTimer.current = setTimeout(() => {
       holdFired.current = true;
@@ -349,6 +378,15 @@ export function StoryCaptureScreen({
 
   const onPressOut = () => {
     pressing.current = false;
+    if (soloVideo) {
+      const queHacer = alSoltarElDisparadorDeVideo({
+        grabando: didRecord.current,
+        yaGrababa: yaGrababa.current,
+        duroMs: Date.now() - apoyadoEn.current,
+      });
+      if (queHacer === 'parar') cameraRef.current?.stopRecording();
+      return;
+    }
     if (holdTimer.current) {
       clearTimeout(holdTimer.current);
       holdTimer.current = null;
@@ -493,7 +531,7 @@ export function StoryCaptureScreen({
         <View style={styles.recordingPill}>
           <View style={styles.recordingDot} />
           <Text variant="secondary" weight="700" color={media.text}>
-            Grabando
+            {t('camera.recording')}
           </Text>
         </View>
       ) : null}
@@ -553,7 +591,7 @@ export function StoryCaptureScreen({
         <View
           {...disparador.panHandlers}
           accessibilityRole="button"
-          accessibilityLabel={t('camera.shutterA11y')}
+          accessibilityLabel={t(soloVideo ? 'camera.shutterVideoA11y' : 'camera.shutterA11y')}
           style={styles.shutterHit}
         >
           <View style={styles.shutterRing}>
@@ -656,7 +694,7 @@ export function StoryCaptureScreen({
             numberOfLines={2}
             style={styles.hintText}
           >
-            {t('camera.hint')}
+            {t(soloVideo ? 'camera.hintVideo' : 'camera.hint')}
           </Text>
         </SuperficieSobreMedio>
       </View>

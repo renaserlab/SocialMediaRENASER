@@ -19,11 +19,13 @@ import { Feather } from '@expo/vector-icons';
 
 import { Avatar } from '@/components/Avatar';
 import { sobreMedio } from '@/components/CapaDeContraste';
+import { AccionesDeMensaje } from '@/components/live/AccionesDeMensaje';
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm } from '@/lib/confirm';
+import { accionesDeMensaje, type AccionDeMensaje } from '@/live/destacado';
 import {
   UMBRAL_DEL_FINAL,
   alDesplazar,
@@ -115,6 +117,23 @@ type Props = {
   alto: number;
   /** Traduce un fallo del directo a algo legible y lo enseña. */
   alFallar: (error: unknown, respaldo: string) => void;
+  /**
+   * Fijar mensajes. Sin esto —o con `disponible` a `false`: el servidor aun no
+   * lo admite— mantener pulsado solo sirve para ocultar, como siempre.
+   */
+  destacar?: FijarDesdeElChat;
+};
+
+/** Lo que el chat necesita para fijar y soltar. Lo pone `useDestacadoDeDirecto`. */
+export type FijarDesdeElChat = {
+  disponible: boolean;
+  /** El mensaje fijado ahora mismo, o `null`. */
+  fijadoId: string | null;
+  ocupado: boolean;
+  fijar: (mensajeId: string) => Promise<boolean>;
+  soltar: () => Promise<boolean>;
+  /** Se ha escondido el mensaje que estaba fijado. */
+  cambioPorFuera: () => void;
 };
 
 /* ------------------------------------------------------------------ Fila --- */
@@ -182,7 +201,7 @@ const claveDeMensaje = (mensaje: MensajeDeEmision) => mensaje.id;
 /* ------------------------------------------------------------------ Chat --- */
 
 export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDeDirecto(
-  { emisionId, abierto, puedeModerar, alto, alFallar },
+  { emisionId, abierto, puedeModerar, alto, alFallar, destacar },
   ref,
 ) {
   const { t } = useTranslation();
@@ -206,6 +225,15 @@ export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDe
   const listaRef = useRef<FlashListRef<MensajeDeEmision> | null>(null);
   const alFallarRef = useRef(alFallar);
   alFallarRef.current = alFallar;
+  /*
+    Lo de fijar entra por referencia: `alMantener` tiene que ser la MISMA
+    funcion durante toda la emision, o cada cambio de lo destacado volveria a
+    pintar todas las filas del chat.
+  */
+  const destacarRef = useRef(destacar);
+  destacarRef.current = destacar;
+  /** El mensaje sobre el que se esta eligiendo que hacer. */
+  const [elegido, setElegido] = useState<MensajeDeEmision | null>(null);
 
   const visibles = useMemo(() => mensajesVisibles(ventana), [ventana]);
 
@@ -310,6 +338,9 @@ export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDe
         // Tambien llegara por Realtime; se aplica ya para que quien modera vea
         // el efecto en el mismo momento en que lo pide.
         chat.current?.poner({ ...mensaje, oculto: true });
+        // Si era el fijado, el servidor ya lo ha soltado: se vuelve a preguntar
+        // y se avisa, o seguiria en lo alto de la pantalla de todo el mundo.
+        if (destacarRef.current?.fijadoId === mensaje.id) destacarRef.current.cambioPorFuera();
         // Y se avisa a los demas, que no lo van a recibir por la base.
         const emisor = avisos.current;
         if (emisor && !emisor.avisar()) {
@@ -322,6 +353,36 @@ export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDe
       }
     },
     [t],
+  );
+
+  /**
+   * Mantener pulsado un mensaje, para quien modera.
+   *
+   * Con una sola cosa que hacer —ocultar— se va directo a su confirmacion, que
+   * es lo que pasaba siempre. Con dos, primero se elige.
+   */
+  const alMantener = useCallback(
+    (mensaje: MensajeDeEmision) => {
+      const acciones = accionesDeMensaje({
+        puedeModerar: true,
+        puedeDestacar: destacarRef.current?.disponible ?? false,
+        mensajeId: mensaje.id,
+        fijadoId: destacarRef.current?.fijadoId ?? null,
+      });
+      if (acciones.length === 1 && acciones[0] === 'ocultar') void ocultar(mensaje);
+      else setElegido(mensaje);
+    },
+    [ocultar],
+  );
+
+  const alElegirAccion = useCallback(
+    (accion: AccionDeMensaje, mensaje: MensajeDeEmision) => {
+      setElegido(null);
+      if (accion === 'ocultar') void ocultar(mensaje);
+      else if (accion === 'fijar') void destacarRef.current?.fijar(mensaje.id);
+      else void destacarRef.current?.soltar();
+    },
+    [ocultar],
   );
 
   /* -------------------------------------------------- Seguir el final ----- */
@@ -369,12 +430,13 @@ export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDe
 
   /* ----------------------------------------------------------- Pintado ---- */
 
-  const pista = t('live.holdToHide');
+  const puedeFijar = puedeModerar && Boolean(destacar?.disponible);
+  const pista = t(puedeFijar ? 'live.holdForActions' : 'live.holdToHide');
   const pintarFila = useCallback<ListRenderItem<MensajeDeEmision>>(
     ({ item }) => (
-      <FilaDeChat mensaje={item} puedeModerar={puedeModerar} alMantener={ocultar} pista={pista} />
+      <FilaDeChat mensaje={item} puedeModerar={puedeModerar} alMantener={alMantener} pista={pista} />
     ),
-    [puedeModerar, ocultar, pista],
+    [puedeModerar, alMantener, pista],
   );
 
   const estado = estadoDelChat({
@@ -469,6 +531,25 @@ export const ChatDeDirecto = forwardRef<ChatDeDirectoRef, Props>(function ChatDe
             {etiquetaDeNuevos}
           </Text>
         </Pulsable>
+      ) : null}
+
+      {puedeModerar ? (
+        <AccionesDeMensaje
+          mensaje={elegido}
+          acciones={
+            elegido
+              ? accionesDeMensaje({
+                  puedeModerar,
+                  puedeDestacar: puedeFijar,
+                  mensajeId: elegido.id,
+                  fijadoId: destacar?.fijadoId ?? null,
+                })
+              : []
+          }
+          ocupado={destacar?.ocupado ?? false}
+          alElegir={alElegirAccion}
+          alCerrar={() => setElegido(null)}
+        />
       ) : null}
     </View>
   );

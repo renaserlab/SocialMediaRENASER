@@ -351,6 +351,7 @@ export function PasoDeCaptura({
       onClose={alCerrar}
       lastPhotoUri={ultimaFoto}
       duracionMaximaMs={duracionMaximaMs}
+      soloVideo={soloVideo}
       pie={pie}
     />
   );

@@ -11,6 +11,7 @@ import {
 import { mantenerSuscripcion } from '@/live/suscripcionViva';
 import { topicoDeAvisosDelChat, type FilaDeChat } from '@/live/ventanaDeChat';
 import { LiveRepository, type EstadoDeEmision } from '@/repositories/LiveRepository';
+import { avisoDeDestacado, topicoDeDestacado } from '@/live/destacado';
 import { avisoDeEscenario, topicoDeEscenario } from '@/live/escenario';
 import { supabase } from '@/services/supabase';
 
@@ -337,6 +338,46 @@ export function avisosDelEscenario(
   });
   return {
     avisar: (paraUsuarioId) => conexion.enviar(avisoDeEscenario(paraUsuarioId)),
+    cerrar: () => conexion.cerrar(),
+  };
+}
+
+export type AvisosDeDestacado = {
+  /** «Lo destacado ha cambiado: vuelve a preguntar». `false` = no salio. */
+  avisar: () => boolean;
+  cerrar: () => void;
+};
+
+/**
+ * El aviso de que quien emite ha fijado un mensaje o ha cambiado su rotulo.
+ *
+ * Es Broadcast y no la base, igual que el del escenario: la tabla de lo
+ * destacado no se puede leer desde el cliente, asi que no hay cambio que
+ * Realtime pueda entregar. Quien hace el gesto avisa, y quien recibe el aviso
+ * le PREGUNTA al servidor.
+ *
+ * EL AVISO NO LLEVA NADA (ver `avisoDeDestacado`): ni el texto ni el mensaje.
+ * Lo puede mandar cualquiera, asi que lo unico que consigue es una pregunta, y
+ * las preguntas van con medida (`crearRepaso`).
+ *
+ * `alVolverElCanal` se llama cada vez que el canal queda suscrito: quien lo usa
+ * distingue la primera vez de una vuelta tras una caida.
+ */
+export function avisosDeDestacado(
+  emisionId: string,
+  alAvisar: () => void,
+  alVolverElCanal: () => void,
+): AvisosDeDestacado {
+  if (!transporte || !emisionId) return { avisar: () => false, cerrar: () => {} };
+  const conexion = transporte.abrir(topicoDeDestacado(emisionId), {
+    // Lo que traiga el mensaje da igual: solo cuenta que ha llegado.
+    alRecibir: () => alAvisar(),
+    alCambiarEstado: (estado) => {
+      if (estado === 'suscrito') alVolverElCanal();
+    },
+  });
+  return {
+    avisar: () => conexion.enviar(avisoDeDestacado()),
     cerrar: () => conexion.cerrar(),
   };
 }

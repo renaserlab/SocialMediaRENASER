@@ -30,6 +30,22 @@ import { palette, radius, spacing } from '@/theme/tokens';
 /** La paleta con la que se pinta cualquier cosa que vaya encima de un medio. */
 export const sobreMedio = palette('dark');
 
+/**
+ * Un RELLENO rojo con letra encima: «EN VIVO», «Terminar».
+ *
+ * `danger` de la paleta oscura es un rojo CLARO, pensado para ser
+ * letra o icono sobre negro. Usado como fondo con letra blanca encima se queda
+ * en 2,3 a 1: «EN VIVO» y «Terminar» se leian mal, y son justo los dos rotulos
+ * que no pueden fallar en la sala. El rojo que si aguanta letra blanca es el de
+ * la paleta clara (6,5 a 1), y ya existe: no se inventa ningun color.
+ *
+ * Es opaco, asi que no depende de lo que haya detras —el video, una foto—.
+ */
+export const rellenoDePeligro = {
+  fondo: palette('light').danger,
+  texto: palette('light').onPrimary,
+} as const;
+
 /*
   Los degradados salen de los tokens: `overlay` es el mismo velo que usan los
   fondos de la aplicacion. Aqui no se escribe ningun color a mano.
