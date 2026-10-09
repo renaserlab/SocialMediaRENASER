@@ -108,6 +108,16 @@ APLICADAS = {
     # obtenido la calcula la propia base, no quien lee la captura. Desde que
     # está aplicada no se edita: se corrige hacia delante, con otra.
     "0098_invitados_en_el_directo.sql": "edb58a1c64883b73b6bdf9902b0544ef84d5e41b",
+    # TAMPOCO SON DE SERVICIOS: lo destacado del directo, la disponibilidad
+    # para las sesiones 1:1 y la grabacion del directo. Edson ejecuto las tres
+    # a mano en Supabase el 09/10/2026 y asi lo comunico. Cada una se niega a
+    # terminar si su tabla queda sin RLS o con alguna politica. LA COMPROBACION
+    # EN SOLO LECTURA de las tres ESTA PENDIENTE de que pegue su resultado:
+    # desde este equipo no se llega a la base. Se registran ya porque lo que
+    # importa es que los ficheros dejen de editarse desde que estan aplicados.
+    "0099_destacado_del_directo.sql": "13c5890fbbe3be5533ccfa7f06bdd25f4a86a329",
+    "0100_disponibilidad_para_sesiones.sql": "d5269ccc65760f98aa69304281ffd651515284de",
+    "0101_grabacion_del_directo.sql": "5d8ab69d8192828601c3910492c7c305bafa485b",
 }
 
 
