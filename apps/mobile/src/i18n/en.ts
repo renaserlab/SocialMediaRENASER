@@ -6724,7 +6724,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'groups.photoTitle': 'Group photo',
   'groups.photoAdd': 'Add a photo',
   'groups.photoChange': 'Change the photo',
-  'groups.photoRemove': 'Remove it',
+  'groups.photoRemove': 'Remove the photo',
   'groups.errorPhoto': 'That photo could not be used. Choose another one.',
   'groupJoin.title': 'Join a group',
   'groupJoin.explain': 'Asking to join does not add you to the group: whoever manages it gets your request and decides.',

@@ -3317,10 +3317,14 @@ la primera fila de «Archivos» es la que lo confirma o lo desmiente.
 
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
-| Quien administra puede poner una foto desde la ficha del grupo | | | |
+| En la ficha, la foto de arriba lleva una cámara pequeña para quien administra | | | |
+| Tocar la foto abre «Foto del grupo» con «Elegir de la galería» y «Tomar foto» | | | |
+| Elegir una de la galería la pone; tomarla con la cámara, también | | | |
+| Mientras se sube, la cámara pequeña gira y la foto no se puede volver a tocar | | | |
 | La foto sale en la bandeja, en la cabecera del chat y en la ficha, para todos los miembros | | | |
-| Se puede cambiar y quitar; al quitarla vuelve la inicial del nombre | | | |
-| Quien no administra no ve el botón de cambiarla | | | |
+| Con foto puesta aparece además «Quitar la foto»; al quitarla vuelven las iniciales del nombre | | | |
+| Quien no administra ve la foto sin la cámara, y al tocarla no pasa nada | | | |
+| Sin permiso para las fotos o la cámara, la ficha dice dónde activarlo | | | |
 
 ### Enlace del grupo y solicitudes
 

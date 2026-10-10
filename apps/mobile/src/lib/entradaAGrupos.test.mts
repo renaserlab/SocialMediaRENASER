@@ -371,10 +371,31 @@ test('las puertas del grupo solo se pintan para quien administra', () => {
   assert.match(puertas, /if \(!info\.puedoAdministrar \|\| !info\.hayExtras \|\| !ajustes\) return null;/);
   // Cambiar el enlace deja sin efecto el anterior: se confirma antes.
   assert.match(puertas, /await confirm\(\{\s*title: t\('groupJoin\.rotateTitle'\)/);
+});
+
+test('la foto del grupo se cambia tocándola, y solo quien administra', () => {
+  const foto = leer('../components/chat/FotoDelGrupo.tsx');
+  // Sin administrar, o con un servidor que no conoce la foto, es la foto y nada más.
+  assert.match(foto, /if \(!info\.puedoAdministrar \|\| !info\.hayExtras\) return foto;/);
+  // Se elige de la galería, se toma con la cámara o se quita.
+  assert.match(foto, /await pickImage\(\{ aspect: \[1, 1\] \}\)/);
+  assert.match(foto, /await takePhoto\(\{ aspect: \[1, 1\] \}\)/);
+  assert.match(foto, /await GroupRepository\.quitarFoto\(grupoId\)/);
+  // «Quitar» solo se ofrece si hay foto que quitar.
+  assert.match(foto, /\{info\.avatarPath \? \(\s*<ListRow\s*title=\{t\('groups\.photoRemove'\)\}/);
+  // La hoja se cierra DESPUÉS de elegir: cerrarla antes rompe el selector en iOS.
+  const elegir = foto.slice(foto.indexOf('const elegir = useCallback('), foto.indexOf('const quitar = useCallback('));
+  assert.ok(elegir.indexOf('await takePhoto(') < elegir.indexOf('setAbierta(false)'));
   // La foto se sube a la carpeta de quien administra, que es lo que exige el servidor.
-  assert.match(puertas, /uploadProfileImage\('avatar', elegida\)/);
+  assert.match(foto, /uploadProfileImage\('avatar', elegida\)/);
   const servidor = leer('../../../api/app/modules/messaging/entrada_a_grupos.py');
   assert.match(servidor, /prefijo = f"\{current_user\.id\}\/"/);
+  // Sin permiso para las fotos o la cámara se dice el motivo, no «no se pudo subir».
+  assert.match(foto, /if \(error instanceof PermisoDenegadoError\) return error\.message;/);
+  // Está en lo alto de la ficha, y en un solo sitio: las puertas ya no la llevan.
+  const ficha = leer('../screens/GrupoScreen.tsx');
+  assert.match(ficha, /<FotoDelGrupo info=\{info\} alCambiar=\{refrescar\} alFallar=\{setFallo\} \/>/);
+  assert.doesNotMatch(leer('../components/chat/PuertasDelGrupo.tsx'), /ponerFoto|quitarFoto|pickImage/);
 });
 
 test('el perfil no pinta la sección si no hay grupos que enseñar', () => {

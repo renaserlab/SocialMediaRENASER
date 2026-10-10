@@ -6811,7 +6811,7 @@ export const es = {
   'groups.photoTitle': 'Foto del grupo',
   'groups.photoAdd': 'Poner una foto',
   'groups.photoChange': 'Cambiar la foto',
-  'groups.photoRemove': 'Quitarla',
+  'groups.photoRemove': 'Quitar la foto',
   'groups.errorPhoto': 'No se pudo usar esa foto. Elige otra.',
   'groupJoin.title': 'Unirse a un grupo',
   'groupJoin.explain': 'Pedir unirte no te mete en el grupo: quien lo administra recibe tu solicitud y decide.',

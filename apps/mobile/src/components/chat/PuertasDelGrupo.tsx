@@ -19,12 +19,7 @@ import {
 import { toast } from '@/lib/toast';
 import { GroupRepository } from '@/repositories/GroupRepository';
 import { ApiError } from '@/services/api';
-import {
-  describeStorageError,
-  pickImage,
-  profileImageUrl,
-  uploadProfileImage,
-} from '@/services/storage';
+import { profileImageUrl } from '@/services/storage';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
@@ -35,8 +30,9 @@ type Props = {
 };
 
 /**
- * Lo que quien administra decide sobre CÓMO SE ENTRA a su grupo: la foto, si
- * se enseña en su perfil, el enlace, y las solicitudes que esperan respuesta.
+ * Lo que quien administra decide sobre CÓMO SE ENTRA a su grupo: si se enseña
+ * en su perfil, el enlace, y las solicitudes que esperan respuesta. La foto
+ * se cambia tocándola, en lo alto de la ficha (`FotoDelGrupo`).
  *
  * SOLO SE PINTA PARA QUIEN ADMINISTRA, y solo si el servidor conoce estas
  * funciones (`info.hayExtras`). Es comodidad: cada cambio se comprueba otra
@@ -81,36 +77,14 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
         alCambiar();
         return true;
       } catch (error) {
-        if (error instanceof ApiError) {
-          setFallo(t(claveDelFalloDeGrupo(error.code) as TranslationKey));
-        } else {
-          // Elegir o subir la foto: el mensaje ya viene escrito para leerse.
-          setFallo(describeStorageError(error));
-        }
+        const codigo = error instanceof ApiError ? error.code : null;
+        setFallo(t(claveDelFalloDeGrupo(codigo) as TranslationKey));
         return false;
       } finally {
         setOcupado(null);
       }
     },
     [ocupado, alCambiar, t],
-  );
-
-  const cambiarFoto = useCallback(
-    () =>
-      hacer('foto', async () => {
-        const elegida = await pickImage({ aspect: [1, 1] });
-        if (!elegida) return;
-        // La foto se sube a la carpeta de imágenes de quien administra: es
-        // donde el almacenamiento le deja escribir, y lo que exige el servidor.
-        const ruta = await uploadProfileImage('avatar', elegida);
-        await GroupRepository.ponerFoto(grupoId, ruta);
-      }),
-    [hacer, grupoId],
-  );
-
-  const quitarFoto = useCallback(
-    () => hacer('foto', () => GroupRepository.quitarFoto(grupoId)),
-    [hacer, grupoId],
   );
 
   const compartir = useCallback(() => {
@@ -200,31 +174,6 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
           ))}
         </View>
       ) : null}
-
-      {/* ---------- Foto ---------- */}
-      <View style={styles.seccion}>
-        <Text weight="700">{t('groups.photoTitle')}</Text>
-        <View style={styles.botones}>
-          <Button
-            label={t(info.avatarPath ? 'groups.photoChange' : 'groups.photoAdd')}
-            variant="secondary"
-            icon="image"
-            onPress={() => void cambiarFoto()}
-            loading={ocupado === 'foto'}
-            disabled={!!ocupado}
-            style={styles.boton}
-          />
-          {info.avatarPath ? (
-            <Button
-              label={t('groups.photoRemove')}
-              variant="secondary"
-              onPress={() => void quitarFoto()}
-              disabled={!!ocupado}
-              style={styles.boton}
-            />
-          ) : null}
-        </View>
-      </View>
 
       {/* ---------- Cómo se entra ---------- */}
       <View style={styles.seccion}>
