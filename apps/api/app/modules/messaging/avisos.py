@@ -44,6 +44,14 @@ TIPO_EN_GRUPO = "message_group"
 #: «Ana te añadió al grupo «Aula»».
 TIPO_AL_ANADIR = "group_added"
 
+#: «Ana quiere unirse a tu grupo «Aula»». Le llega a quien lo administra.
+TIPO_AL_PEDIR_ENTRAR = "group_join_request"
+
+#: A donde lleva ese aviso al tocarlo: a la ficha del grupo, que es donde se
+#: responde. Es un destino propio y no `message`, porque `message` abre el
+#: chat y ahi no hay nada que decidir.
+DESTINO_DE_SOLICITUD = "group_join"
+
 
 async def grupo_de(db: AsyncSession, conversation_id: str) -> str | None:
     """El nombre del grupo, o `None` si la conversación es de dos personas.

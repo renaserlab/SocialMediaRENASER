@@ -292,6 +292,26 @@ async def hay_filtros_de_conversacion(db: AsyncSession) -> bool:
     return _cache["conversation_filters"]
 
 
+async def hay_puertas_de_grupo(db: AsyncSession) -> bool:
+    """Si existen `group_settings` y `group_join_requests` (migracion 0104).
+
+    SIN LA 0104: los grupos funcionan igual, pero sin foto, sin enlace y sin
+    solicitudes. Solo se entra a uno cuando quien lo administra te añade.
+    Las dos tablas llegan en la misma migracion: se mira una.
+    """
+    if "group_settings" not in _cache:
+        conexion = await db.connection()
+        _cache["group_settings"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("group_settings")
+        )
+        if not _cache["group_settings"]:
+            logger.warning(
+                "La migracion 0104 no esta aplicada: los grupos no tienen foto, "
+                "enlace ni solicitudes para entrar."
+            )
+    return _cache["group_settings"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 

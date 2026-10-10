@@ -56,6 +56,9 @@ class ConversationRead(BaseModel):
     title: str | None = None
     # Para chats directos: el otro participante.
     other: AuthorSummary | None = None
+    #: La foto de un GRUPO (ruta del almacenamiento). En un chat directo va
+    #: a nulo: la foto es la de `other`. Nulo tambien sin la migracion 0104.
+    avatar_path: str | None = None
     last_message: str | None = None
     last_message_at: datetime | None = None
     unread_count: int = 0

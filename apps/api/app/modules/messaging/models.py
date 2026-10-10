@@ -14,11 +14,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -328,4 +330,88 @@ class ConversationFilter(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GroupSettings(Base):
+    """La foto de un grupo, su enlace y si se enseña en el perfil (migracion 0104).
+
+    UNA FILA POR GRUPO, y solo cuando hace falta: un grupo recien creado no
+    tiene fila, y eso significa «sin foto, sin enlace y sin aparecer en ningun
+    perfil». Quien comprueba que la tabla existe es
+    `esquema.hay_puertas_de_grupo`.
+
+    TABLA APARTE Y NINGUNA COLUMNA NUEVA EN `conversations`, por lo mismo que
+    `MessageAttachment`.
+
+    `avatar_path` es una RUTA del almacenamiento, no la imagen. `invite_code`
+    es el secreto del enlace: no sale nunca en una respuesta que no sea para
+    quien administra el grupo.
+    """
+
+    __tablename__ = "group_settings"
+
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    listed_on_profile: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    invite_code: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    invite_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GroupJoinRequest(Base):
+    """Alguien pide entrar a un grupo (migracion 0104).
+
+    UNA SOLA VIVA POR PERSONA Y GRUPO: lo impone el indice unico parcial de
+    abajo, que es el mismo de la migracion. Las resueltas se conservan.
+
+    `status`: pending | approved | rejected | cancelled.
+    `source`: profile (desde «Unete a mi grupo») | link (desde el enlace).
+    """
+
+    __tablename__ = "group_join_requests"
+    __table_args__ = (
+        Index(
+            "group_join_requests_pending_uidx",
+            "conversation_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    source: Mapped[str] = mapped_column(String(16), default="profile", server_default="profile")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
     )

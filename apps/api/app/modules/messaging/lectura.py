@@ -37,7 +37,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import esquema
+from app.modules.messaging import ajustes_de_grupo, esquema
 from app.modules.messaging.etiquetas import etiquetas_por_conversacion
 from app.modules.messaging.models import (
     ConversationMember,
@@ -323,6 +323,12 @@ async def leer_conversaciones(
     ]
     resumenes = await _resumen_de_los_sin_texto(db, sin_texto)
 
+    # La foto de los GRUPOS de la pagina, con un `IN` como todo lo demas. Si
+    # en la pagina no hay ningun grupo —lo normal— no se consulta nada.
+    fotos = await ajustes_de_grupo.avatares_de(
+        db, [fila.id for fila in filas if fila.kind == "group"]
+    )
+
     salida: list[ConversationRead] = []
     for fila in filas:
         ultimo = ultimos.get(fila.id)
@@ -343,6 +349,7 @@ async def leer_conversaciones(
                 # Solo los chats directos tienen «el otro»; en un grupo el
                 # nombre lo pone el titulo.
                 other=otros.get(fila.id) if fila.kind == "direct" else None,
+                avatar_path=fotos.get(fila.id),
                 last_message=resumen,
                 last_message_at=ultimo.created_at if ultimo is not None else None,
                 unread_count=pendientes.get(fila.id, 0),

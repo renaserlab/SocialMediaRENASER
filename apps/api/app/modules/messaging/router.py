@@ -32,6 +32,7 @@ from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import audio, avisos, esquema, historias, sesiones
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
+from app.modules.messaging.entrada_a_grupos import router as entrada_router
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.grupos import router as grupos_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
@@ -82,6 +83,10 @@ router.include_router(vistas_router)
 # `POST /groups` se declara antes que las rutas con `{conversation_id}` de
 # este fichero por la misma precaución que las etiquetas.
 router.include_router(grupos_router)
+
+# Como se entra a un grupo (`entrada_a_grupos.py`): su tarjeta, su enlace,
+# su foto y las solicitudes. Sus rutas fijas empiezan por `/groups/…`.
+router.include_router(entrada_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas

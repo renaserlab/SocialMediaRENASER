@@ -51,7 +51,8 @@ API = "/api/v1/conversations"
 BASE = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
-async def _levantar(sin_la_0102: bool = False):
+async def _levantar(sin_la_0102: bool = False, sin_tablas: tuple[str, ...] = ()):
+    """`sin_tablas` deja fuera las de otra migracion (la 0104, por ejemplo)."""
     esquema.olvidar()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
@@ -68,10 +69,9 @@ async def _levantar(sin_la_0102: bool = False):
         from app.modules.social_graph import models as _s  # noqa: F401
         from app.modules.stories import models as _st  # noqa: F401
 
-        if sin_la_0102:
-            tablas = [
-                t for t in Base.metadata.sorted_tables if t.name != "conversation_filters"
-            ]
+        fuera = set(sin_tablas) | ({"conversation_filters"} if sin_la_0102 else set())
+        if fuera:
+            tablas = [t for t in Base.metadata.sorted_tables if t.name not in fuera]
             await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tablas))
         else:
             await conn.run_sync(Base.metadata.create_all)

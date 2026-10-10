@@ -52,7 +52,8 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user
-from app.modules.messaging import avisos
+from app.modules.messaging import ajustes_de_grupo, avisos, esquema
+from app.modules.messaging.ajustes_de_grupo import AjustesLeidos
 from app.modules.messaging.lectura import leer_conversaciones
 from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.messaging.schemas import ConversationRead
@@ -155,12 +156,22 @@ class InfoDeConversacion(BaseModel):
     members_count: int = 0
     members: list[MiembroLeido] = Field(default_factory=list)
     max_members: int = MAX_MIEMBROS
+    #: La foto del grupo: una ruta del almacenamiento, como la de un perfil.
+    avatar_path: str | None = None
+    #: La foto, el enlace y las solicitudes existen en ESTE servidor (0104).
+    #: Con `false`, la aplicacion no enseña nada de eso.
+    extras_available: bool = False
+    #: Como esta configurada la entrada. SOLO para quien administra: lleva
+    #: el codigo del enlace, que es un secreto. A los demas, `None`.
+    settings: AjustesLeidos | None = None
+    #: Cuantas solicitudes esperan respuesta. Solo para quien administra.
+    pending_requests: int = 0
 
 
 # --------------------------------------------------------------------------- #
 # Reglas
 # --------------------------------------------------------------------------- #
-async def _exigir_que_se_puedan_anadir(
+async def exigir_que_se_puedan_anadir(
     db: AsyncSession, uid: str, ids: list[str]
 ) -> None:
     """Que todas existan y que no haya bloqueo con ninguna. Una sola respuesta.
@@ -189,7 +200,7 @@ async def _exigir_que_se_puedan_anadir(
         raise ValidationAppError(_NO_SE_PUEDE_ANADIR, code="group_member_not_allowed")
 
 
-async def _exigir_grupo_administrado(
+async def exigir_grupo_administrado(
     db: AsyncSession, conversation_id: str, uid: str
 ) -> None:
     """Pertenecer, que sea un grupo, y administrarlo. En ese orden."""
@@ -203,7 +214,7 @@ async def _exigir_grupo_administrado(
         )
 
 
-async def _nombre_de(db: AsyncSession, uid: str) -> str | None:
+async def nombre_de(db: AsyncSession, uid: str) -> str | None:
     fila = (
         await db.execute(
             select(Profile.full_name, Profile.username).where(Profile.id == uid)
@@ -214,7 +225,7 @@ async def _nombre_de(db: AsyncSession, uid: str) -> str | None:
     return (fila.full_name or "").strip() or fila.username or None
 
 
-async def _avisar_de_que_los_anadieron(
+async def avisar_de_que_los_anadieron(
     db: AsyncSession,
     background: BackgroundTasks,
     *,
@@ -229,7 +240,7 @@ async def _avisar_de_que_los_anadieron(
             background,
             user_ids=a_quienes,
             notification_type=avisos.TIPO_AL_ANADIR,
-            actor_name=await _nombre_de(db, quien),
+            actor_name=await nombre_de(db, quien),
             # `type: message` en los datos: tocar el aviso abre la conversacion,
             # que es a donde lleva ese tipo en la aplicacion.
             data={"type": avisos.TIPO, "conversationId": conversation_id},
@@ -285,7 +296,7 @@ async def crear_grupo(
             code="group_rate_limited",
         )
 
-    await _exigir_que_se_puedan_anadir(db, uid, otros)
+    await exigir_que_se_puedan_anadir(db, uid, otros)
 
     # La identidad sale del JWT. Nunca de la peticion.
     grupo = Conversation(kind="group", title=payload.title, created_by=uid)
@@ -296,7 +307,7 @@ async def crear_grupo(
         db.add(ConversationMember(conversation_id=grupo.id, user_id=persona))
     await db.commit()
 
-    await _avisar_de_que_los_anadieron(
+    await avisar_de_que_los_anadieron(
         db,
         background,
         conversation_id=grupo.id,
@@ -328,7 +339,7 @@ async def info_de_la_conversacion(
 
     Los miembros van TODOS en la respuesta: el tope del grupo es
     `MAX_MIEMBROS`, asi que la lista entera cabe y paginarla seria complicar
-    la pantalla para nada. Tres consultas, sean cuantos sean.
+    la pantalla para nada. Un numero fijo de consultas, sean cuantos sean.
     """
     kind, creador = await conversacion_de(db, conversation_id, current_user.id)
     titulo = await db.scalar(
@@ -356,13 +367,25 @@ async def info_de_la_conversacion(
     ]
     # Quien administra, el primero: es a quien se busca en esa lista.
     miembros.sort(key=lambda miembro: not miembro.is_admin)
+    puede = administra(kind, creador, current_user.id)
+    hay_extras = es_grupo and await esquema.hay_puertas_de_grupo(db)
+    ajustes = await ajustes_de_grupo.fila_de(db, conversation_id) if hay_extras else None
     return InfoDeConversacion(
         id=conversation_id,
         kind=kind,
         title=titulo,
-        can_manage=administra(kind, creador, current_user.id),
+        can_manage=puede,
         members_count=len(miembros),
         members=miembros,
+        avatar_path=ajustes.avatar_path if ajustes is not None else None,
+        extras_available=hay_extras,
+        # El codigo del enlace solo viaja hacia quien administra.
+        settings=ajustes_de_grupo.leer(ajustes) if (puede and hay_extras) else None,
+        pending_requests=(
+            await ajustes_de_grupo.pendientes_de(db, conversation_id)
+            if (puede and hay_extras)
+            else 0
+        ),
     )
 
 
@@ -376,7 +399,7 @@ async def renombrar_grupo(
     """Cambia el nombre. NO toca `updated_at`: renombrar no es actividad, y
     subir el grupo a lo alto de la bandeja de todos por un cambio de nombre
     seria avisar de algo que no ha pasado."""
-    await _exigir_grupo_administrado(db, conversation_id, current_user.id)
+    await exigir_grupo_administrado(db, conversation_id, current_user.id)
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id, Conversation.kind == "group")
@@ -398,7 +421,7 @@ async def anadir_miembros(
     Ven el historial entero: la conversacion es del grupo, no de cada uno.
     """
     uid = current_user.id
-    await _exigir_grupo_administrado(db, conversation_id, uid)
+    await exigir_grupo_administrado(db, conversation_id, uid)
 
     ya_dentro = set(
         (
@@ -414,7 +437,7 @@ async def anadir_miembros(
         raise ConflictError(
             f"Un grupo admite hasta {MAX_MIEMBROS} personas.", code="group_is_full"
         )
-    await _exigir_que_se_puedan_anadir(db, uid, nuevos)
+    await exigir_que_se_puedan_anadir(db, uid, nuevos)
 
     if nuevos:
         for persona in nuevos:
@@ -430,7 +453,7 @@ async def anadir_miembros(
             select(Conversation.title).where(Conversation.id == conversation_id)
         )
         if nuevos:
-            await _avisar_de_que_los_anadieron(
+            await avisar_de_que_los_anadieron(
                 db,
                 background,
                 conversation_id=conversation_id,

@@ -224,7 +224,7 @@ def test_la_ultima_migracion_es_la_que_dice_la_documentacion(aplicadas) -> None:
     # cambio ya traia la 0052: en verde aqui, porque el modulo entero se salta
     # sin PostgreSQL, y en rojo la primera vez que CI tuviera uno, que es
     # exactamente cuando se ejercitan por primera vez la 0051 y la 0052.
-    assert aplicadas[-1].startswith("0103_"), (
+    assert aplicadas[-1].startswith("0104_"), (
         f"la ultima migracion es {aplicadas[-1]}: actualiza los modelos, "
         "la documentacion y esta prueba en el mismo cambio"
     )
