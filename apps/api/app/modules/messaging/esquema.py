@@ -312,6 +312,26 @@ async def hay_puertas_de_grupo(db: AsyncSession) -> bool:
     return _cache["group_settings"]
 
 
+async def hay_reacciones_y_respuestas(db: AsyncSession) -> bool:
+    """Si existen `message_reactions` y `message_replies` (migracion 0106).
+
+    SIN LA 0106: el chat funciona igual, sin reacciones y sin citas. Un
+    mensaje que responde a otro se manda igual, como un mensaje normal.
+    Las dos tablas llegan en la misma migracion: se mira una.
+    """
+    if "message_reactions" not in _cache:
+        conexion = await db.connection()
+        _cache["message_reactions"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("message_reactions")
+        )
+        if not _cache["message_reactions"]:
+            logger.warning(
+                "La migracion 0106 no esta aplicada: no hay reacciones ni "
+                "respuestas a un mensaje concreto."
+            )
+    return _cache["message_reactions"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 

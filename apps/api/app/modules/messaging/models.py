@@ -415,3 +415,65 @@ class GroupJoinRequest(Base):
         ForeignKey("profiles.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+
+class MessageReaction(Base):
+    """La reaccion de una persona a un mensaje (migracion 0106).
+
+    UNA POR PERSONA Y MENSAJE: es la clave primaria. Reaccionar otra vez
+    cambia el emoji, no añade otra fila.
+
+    `conversation_id` va repetido —tambien lo sabe el mensaje— por lo mismo que
+    en `MessageAttachment`: acota las consultas a una conversacion sin pasar
+    por `messages`. Quien comprueba que la tabla existe es
+    `esquema.hay_reacciones_y_respuestas`.
+    """
+
+    __tablename__ = "message_reactions"
+
+    message_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    emoji: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MessageReply(Base):
+    """A que mensaje responde un mensaje (migracion 0106).
+
+    LA CLAVE PRIMARIA ES `message_id`: un mensaje responde a UNO o a ninguno.
+    `reply_to_id` es anulable por lo mismo que `MessageStoryContext.story_id`:
+    si el original llegara a quitarse de verdad, la respuesta sigue en pie sin
+    su cita.
+    """
+
+    __tablename__ = "message_replies"
+
+    message_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    reply_to_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

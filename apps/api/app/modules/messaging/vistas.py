@@ -70,7 +70,7 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import esquema, historias, sesiones
+from app.modules.messaging import esquema, historias, reacciones, sesiones
 from app.modules.messaging.lectura import adjuntos_por_mensaje
 from app.modules.messaging.models import (
     Conversation,
@@ -759,6 +759,8 @@ async def mensajes_de_una_vista(
     adjuntos = await adjuntos_por_mensaje(db, ids)
     de_historia = await historias.contextos_por_mensaje(db, ids)
     de_sesion = await sesiones.contextos_por_mensaje(db, ids, current_user.id)
+    reacciones_de = await reacciones.reacciones_por_mensaje(db, ids, current_user.id)
+    citas = await reacciones.respuestas_por_mensaje(db, ids)
 
     items = [
         MessageRead(
@@ -772,6 +774,8 @@ async def mensajes_de_una_vista(
             attachments=adjuntos.get(msg_id, []),
             story_context=de_historia.get(msg_id),
             booking_context=de_sesion.get(msg_id),
+            reactions=reacciones_de.get(msg_id, []),
+            reply_to=citas.get(msg_id),
         )
         for (
             msg_id,

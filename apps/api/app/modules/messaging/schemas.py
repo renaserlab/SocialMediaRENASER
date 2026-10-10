@@ -176,6 +176,12 @@ class MessageCreate(BaseModel):
     attachments: list[AttachmentCreate] = Field(
         default_factory=list, max_length=MAX_ADJUNTOS
     )
+    #: El mensaje de ESTA conversación al que se responde, si se responde a uno.
+    #:
+    #: Solo el identificador: de quién era y qué decía lo lee el servidor. Si
+    #: no es de esta conversación, o la 0106 no está, el mensaje se manda
+    #: igual, sin cita.
+    reply_to_id: str | None = None
     #: La historia que se está respondiendo, cuando el mensaje sale del visor.
     #:
     #: SOLO EL IDENTIFICADOR. De quién es la historia lo averigua el servidor
@@ -192,6 +198,32 @@ class MessageCreate(BaseModel):
         if not self.body.strip() and not self.attachments:
             raise ValueError("Escribe algo o adjunta un archivo.")
         return self
+
+
+class ReactionRead(BaseModel):
+    """Una reacción a un mensaje, agrupada: «❤ 3»."""
+
+    emoji: str
+    count: int = 1
+    #: Una de ellas es de quien pregunta.
+    mine: bool = False
+
+
+class ReplyRead(BaseModel):
+    """La cita de un mensaje que responde a otro.
+
+    `excerpt` va vacío y `deleted` a `true` cuando el original se borró: el
+    texto de un mensaje eliminado no viaja, tampoco dentro de una cita.
+    `kind` es el tipo de su primer adjunto, para poder decir «Foto» cuando
+    no tenía texto.
+    """
+
+    id: str
+    sender_id: str
+    sender_name: str = ""
+    excerpt: str = ""
+    kind: str | None = None
+    deleted: bool = False
 
 
 class MessageRead(BaseModel):
@@ -230,6 +262,12 @@ class MessageRead(BaseModel):
     #: `None` en la inmensa mayoría, y también mientras la 0097 espere: sin la
     #: tabla el mensaje sale como texto normal. Ver `BookingContextRead`.
     booking_context: "BookingContextRead | None" = None
+
+    #: Las reacciones, agrupadas. Vacía en la inmensa mayoría, y también
+    #: mientras la 0106 espere aprobación o si el mensaje está borrado.
+    reactions: list[ReactionRead] = Field(default_factory=list)
+    #: A qué mensaje responde, si responde a alguno.
+    reply_to: ReplyRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
