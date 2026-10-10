@@ -141,11 +141,21 @@ APLICADAS = {
     # 0104 (como se entra a un grupo: foto, enlace y solicitudes), 0105 (el
     # almacen del chat admite `text/html`) y 0106 (reacciones y respuestas a
     # un mensaje). Edson ejecuto las tres a mano en Supabase el 10/10/2026 y
-    # asi lo comunico: las tres respondieron «Success. No rows returned», que
-    # es lo que responde una migracion que termina bien. PENDIENTE la
-    # consulta de comprobacion en solo lectura (30 filas): todavia no hay
-    # resultado que anotar. Desde que estan aplicadas no se editan: se
-    # corrige hacia delante, con otra.
+    # asi lo comunico. COMPROBADAS ESE MISMO DIA, EN SOLO LECTURA Y SIN
+    # DIVERGENCIAS: una consulta de 30 comprobaciones, las 30 en OK, vistas en
+    # las tres capturas que pego Edson. Quince de la 0104 —de `group_settings`
+    # y de `group_join_requests`: columnas con su tipo y nulo; valores por
+    # defecto; claves ajenas y que hace cada una al borrar; restricciones;
+    # indices; el codigo del enlace no se repite; una sola solicitud pendiente
+    # por persona y grupo; RLS activada; ninguna politica; fuera de la
+    # publicacion de tiempo real—, cuatro de la 0105 —`message-media` admite
+    # `text/html`, conserva lo que ya admitia, admite 14 tipos y ni uno mas, y
+    # sigue siendo privado— y once de la 0106 —de `message_reactions` y de
+    # `message_replies`: columnas con su tipo y nulo; una reaccion por persona
+    # y mensaje; claves ajenas y que hace cada una al borrar; restricciones;
+    # indices; RLS activada; ninguna politica; fuera de la publicacion de
+    # tiempo real—. La igualdad la calcula la propia base. Desde que estan
+    # aplicadas no se editan: se corrige hacia delante, con otra.
     "0104_puertas_de_grupo.sql": "3b140187d65afbfc90a27803c997b858f0723d99",
     "0105_html_en_el_chat.sql": "6376934516c38f796894e9249ba7b0d22e9747df",
     "0106_reacciones_y_respuestas.sql": "d65aa960989ff04e55b1b2dd590129aad4e3ee61",
