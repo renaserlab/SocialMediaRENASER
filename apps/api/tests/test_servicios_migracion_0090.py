@@ -138,6 +138,17 @@ APLICADAS = {
     # aplicadas no se editan: se corrige hacia delante, con otra.
     "0102_filtros_de_conversacion.sql": "82e1ea3c385d3ab5ca3071ed530c9d71dac78ea1",
     "0103_miembros_solo_por_la_api.sql": "ea57ad6565e3146ee81c9aa5d72ffbe08e0b5b7d",
+    # 0104 (como se entra a un grupo: foto, enlace y solicitudes), 0105 (el
+    # almacen del chat admite `text/html`) y 0106 (reacciones y respuestas a
+    # un mensaje). Edson ejecuto las tres a mano en Supabase el 10/10/2026 y
+    # asi lo comunico: las tres respondieron «Success. No rows returned», que
+    # es lo que responde una migracion que termina bien. PENDIENTE la
+    # consulta de comprobacion en solo lectura (30 filas): todavia no hay
+    # resultado que anotar. Desde que estan aplicadas no se editan: se
+    # corrige hacia delante, con otra.
+    "0104_puertas_de_grupo.sql": "3b140187d65afbfc90a27803c997b858f0723d99",
+    "0105_html_en_el_chat.sql": "6376934516c38f796894e9249ba7b0d22e9747df",
+    "0106_reacciones_y_respuestas.sql": "d65aa960989ff04e55b1b2dd590129aad4e3ee61",
 }
 
 
