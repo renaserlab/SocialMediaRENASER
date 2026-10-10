@@ -18,7 +18,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Avatar } from '@/components/Avatar';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { Chip } from '@/components/Chip';
-import { ImageViewer } from '@/components/ImageViewer';
+import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
@@ -29,6 +29,7 @@ import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { describeError } from '@/lib/describeError';
 import { notify } from '@/lib/confirm';
 import { pedirSalto } from '@/lib/saltoDeChat';
+import { enlaceDeDescarga, esHtml } from '@/lib/tiposDeArchivo';
 import {
   MENSAJES_POR_PAGINA_DE_VISTA,
   SIN_VISTAS,
@@ -316,7 +317,11 @@ export function ContenidoDeChatScreen() {
   const abrirFuera = useCallback(
     (adjunto: MessageAttachment) => {
       if (!adjunto.url) return;
-      Linking.openURL(adjunto.url).catch(() => {
+      // Un HTML se DESCARGA, no se abre como página: ver `enlaceDeDescarga`.
+      const destino = esHtml(adjunto.mimeType, adjunto.fileName)
+        ? enlaceDeDescarga(adjunto.url, adjunto.fileName)
+        : adjunto.url;
+      Linking.openURL(destino).catch(() => {
         notify(t('common.couldNotOpen'), t('common.tryAgainSoon'));
       });
     },
@@ -365,9 +370,8 @@ export function ContenidoDeChatScreen() {
       <Pressable
         key={adjunto.id}
         onPress={() => {
-          // Un vídeo no va al visor de imágenes: se abre fuera, como en el chat.
-          if (adjunto.kind === 'video') abrirFuera(adjunto);
-          else if (adjunto.url) setFotoAmpliada(adjunto);
+          // Fotos y vídeos se ven DENTRO, en el mismo visor que en el chat.
+          if (adjunto.url) setFotoAmpliada(adjunto);
         }}
         accessibilityRole="button"
         accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
@@ -418,6 +422,23 @@ export function ContenidoDeChatScreen() {
       </View>
     );
   };
+
+  // De quién es lo que se está viendo ampliado: lo dice el mensaje del que cuelga.
+  const mensajeDelVisor = fotoAmpliada
+    ? mensajes.find((m) => m.adjuntos.some((a) => a.id === fotoAmpliada.id))
+    : undefined;
+  const accionesDelVisor: AccionDeVisor[] = mensajeDelVisor
+    ? [
+        {
+          icono: 'corner-up-right',
+          etiqueta: t('chatViews.goToMessage'),
+          alPulsar: () => {
+            setFotoAmpliada(null);
+            irAlMensaje(mensajeDelVisor);
+          },
+        },
+      ]
+    : [];
 
   const vacio = buscar
     ? { titulo: t('chatViews.emptySearchTitle'), cuerpo: t('chatViews.emptySearchBody', { texto: buscar }) }
@@ -540,13 +561,19 @@ export function ContenidoDeChatScreen() {
         />
       )}
 
-      {fotoAmpliada?.url ? (
-        <ImageViewer
-          uri={fotoAmpliada.url}
-          caption={fotoAmpliada.fileName ?? undefined}
-          onClose={() => setFotoAmpliada(null)}
-        />
-      ) : null}
+      <VisorDeAdjunto
+        adjunto={fotoAmpliada?.url ? fotoAmpliada : null}
+        autor={
+          !mensajeDelVisor
+            ? ''
+            : mensajeDelVisor.mio
+              ? t('chatViews.you')
+              : mensajeDelVisor.autor.nombre
+        }
+        fecha={mensajeDelVisor ? fechaLegible(mensajeDelVisor.fechaIso) : undefined}
+        acciones={accionesDelVisor}
+        onClose={() => setFotoAmpliada(null)}
+      />
     </AppScreen>
   );
 }

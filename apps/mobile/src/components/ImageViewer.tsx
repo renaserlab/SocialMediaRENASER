@@ -33,6 +33,16 @@ type Props = {
   onClose: () => void;
   /** Texto opcional bajo la imagen (el pie del testimonio, por ejemplo). */
   caption?: string | null;
+  /**
+   * Una barra propia arriba, EN LUGAR del botón de cerrar.
+   *
+   * OPCIONAL: sin ella el visor es exactamente el de siempre. La usa el chat,
+   * que necesita decir de quién es la foto y ofrecer qué hacer con ella. Quien
+   * la pasa se encarga de que incluya cómo cerrar.
+   */
+  cabecera?: React.ReactNode;
+  /** Algo propio abajo del todo, EN LUGAR de la ayuda de la pinza. */
+  pie?: React.ReactNode;
 };
 
 /**
@@ -47,7 +57,7 @@ type Props = {
  *
  * Se cierra con la X, tocando fuera o arrastrando hacia abajo.
  */
-export function ImageViewer({ uri, onClose, caption }: Props) {
+export function ImageViewer({ uri, onClose, caption, cabecera, pie }: Props) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const escala = useSharedValue(1);
@@ -176,15 +186,19 @@ export function ImageViewer({ uri, onClose, caption }: Props) {
           </View>
         </GestureDetector>
 
-        <Pressable
-          onPress={cerrar}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel={t('media.closeImage')}
-          style={styles.cerrar}
-        >
-          <Feather name="x" size={24} color={media.text} />
-        </Pressable>
+        {cabecera ? (
+          <View style={styles.cabecera}>{cabecera}</View>
+        ) : (
+          <Pressable
+            onPress={cerrar}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={t('media.closeImage')}
+            style={styles.cerrar}
+          >
+            <Feather name="x" size={24} color={media.text} />
+          </Pressable>
+        )}
 
         {/*
           Medidos desde encima de los botones de Android: el `Modal` tambien se
@@ -199,13 +213,19 @@ export function ImageViewer({ uri, onClose, caption }: Props) {
           </View>
         ) : null}
 
-        <Text
-          variant="secondary"
-          color={media.textMuted}
-          style={[styles.ayuda, { bottom: 32 + insets.bottom }]}
-        >
-          {t('media.pinchToZoom')}
-        </Text>
+        {pie ? (
+          <View style={[styles.pieDelVisor, { paddingBottom: insets.bottom + spacing.sm }]}>
+            {pie}
+          </View>
+        ) : (
+          <Text
+            variant="secondary"
+            color={media.textMuted}
+            style={[styles.ayuda, { bottom: 32 + insets.bottom }]}
+          >
+            {t('media.pinchToZoom')}
+          </Text>
+        )}
       </GestureHandlerRootView>
     </Modal>
   );
@@ -214,6 +234,8 @@ export function ImageViewer({ uri, onClose, caption }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: media.background },
   lienzo: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  cabecera: { position: 'absolute', top: 0, left: 0, right: 0 },
+  pieDelVisor: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.md },
   imagen: { width: '100%', height: '100%' },
   cerrar: {
     position: 'absolute',

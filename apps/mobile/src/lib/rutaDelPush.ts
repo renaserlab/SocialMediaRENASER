@@ -78,6 +78,12 @@ export function rutaDelPush(datos: unknown, opciones: Opciones = {}): string | n
     const directo = uuid(d.liveId);
     return directo ? `/live/${directo}` : RUTA_DE_LA_BANDEJA;
   }
+  // «X quiere unirse a tu grupo»: a la ficha del grupo, donde se responde.
+  // No al chat: ahí no hay nada que decidir.
+  if (tipo === 'group_join') {
+    const grupo = uuid(d.conversationId);
+    return grupo ? `/chat/grupo/${grupo}` : '/messages';
+  }
   if (tipo === 'message') {
     const conversacion = uuid(d.conversationId);
     // Sin conversación válida, a la lista de mensajes: ahí está sea cual sea.

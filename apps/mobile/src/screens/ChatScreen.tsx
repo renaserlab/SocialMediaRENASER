@@ -27,7 +27,9 @@ import { Pulsable } from '@/components/Pulsable';
 import { CabeceraDeChat } from '@/components/CabeceraDeChat';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
-import { ImageViewer } from '@/components/ImageViewer';
+import { Avatar } from '@/components/Avatar';
+import { HojaDeStickers } from '@/components/chat/HojaDeStickers';
+import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
 import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
@@ -37,7 +39,11 @@ import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
 import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { useTranslation } from '@/i18n/useTranslation';
-import { nombreDelAutor } from '@/lib/gruposDeChat';
+import { colorDeAutor, miembroDe, nombreDelAutor } from '@/lib/gruposDeChat';
+import { esSticker } from '@/lib/stickers';
+import { enlaceDeDescarga, esHtml } from '@/lib/tiposDeArchivo';
+import { guardarEnLaGaleria } from '@/services/guardarAdjunto';
+import { profileImageUrl } from '@/services/storage';
 import {
   MENSAJES_POR_PAGINA_AL_BUSCAR,
   PAGINAS_PARA_IR_A_UN_MENSAJE,
@@ -192,7 +198,7 @@ const SONDEO_SIN_TIEMPO_REAL_MS = 4_000;
 const REPASO_DE_LA_BAJADA_MS = 400;
 
 export function ChatScreen() {
-  const { colors } = useAppTheme();
+  const { colors, mode } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -252,6 +258,7 @@ export function ChatScreen() {
   const [intentoDeCarga, setIntentoDeCarga] = useState(0);
   const [elegidos, setElegidos] = useState<AdjuntoElegido[]>([]);
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [stickersAbiertos, setStickersAbiertos] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<MessageAttachment | null>(null);
   // Historial: si queda algo más arriba y si se está trayendo ahora mismo.
@@ -1479,10 +1486,29 @@ export function ChatScreen() {
    */
   const abrirFuera = (adjunto: MessageAttachment) => {
     if (!adjunto.url || !estaEnElServidor(adjunto)) return;
-    Linking.openURL(adjunto.url).catch(() => {
+    // Un HTML se DESCARGA, no se abre como página: ver `enlaceDeDescarga`.
+    const destino = esHtml(adjunto.mimeType, adjunto.fileName)
+      ? enlaceDeDescarga(adjunto.url, adjunto.fileName)
+      : adjunto.url;
+    Linking.openURL(destino).catch(() => {
       notify(t('common.couldNotOpen'), t('common.tryAgainSoon'));
     });
   };
+
+  /** Guarda en la galería del teléfono la foto o el vídeo que se está viendo. */
+  const guardarAdjunto = useCallback(
+    async (adjunto: MessageAttachment) => {
+      if (!adjunto.url || (adjunto.kind !== 'image' && adjunto.kind !== 'video')) return;
+      const resultado = await guardarEnLaGaleria(adjunto.url, adjunto.fileName, adjunto.kind);
+      if (resultado === 'guardado') notify(t('chat.savedTitle'), t('chat.savedBody'));
+      else if (resultado === 'sin_permiso') {
+        notify(t('chat.saveDeniedTitle'), t('chat.saveDeniedBody'));
+      } else if (resultado === 'fallo') {
+        notify(t('chat.saveFailedTitle'), t('common.tryAgainSoon'));
+      }
+    },
+    [t],
+  );
 
   const pintarAdjunto = (adjunto: MessageAttachment, mio: boolean) => {
     const colorTexto = mio ? colors.onPrimary : colors.text;
@@ -1560,8 +1586,11 @@ export function ChatScreen() {
             para ampliar». La aplicación no tiene un visor de vídeo a pantalla
             completa, así que se abre fuera, como los documentos.
           */
-          if (adjunto.kind === 'video') abrirFuera(adjunto);
-          else if (adjunto.url) setFotoAmpliada(adjunto);
+          // EL VÍDEO SE REPRODUCE DENTRO (10/10/2026), en el mismo visor que
+          // las fotos. Antes se abría fuera, en el navegador. Mientras se
+          // está subiendo todavía no tiene dirección que reproducir.
+          if (adjunto.kind === 'video' && !estaEnElServidor(adjunto)) return;
+          if (adjunto.url) setFotoAmpliada(adjunto);
         }}
         accessibilityRole="button"
         accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
@@ -1616,6 +1645,48 @@ export function ChatScreen() {
     if (abajo) setHayNuevosAbajo(false);
   };
 
+  /*
+    DE QUIÉN ES LO QUE SE ESTÁ VIENDO AMPLIADO, y cuándo se mandó. Lo dice el
+    mensaje del que cuelga el adjunto. Antes el visor enseñaba la foto y nada
+    más: en un grupo no se sabía de quién era.
+  */
+  const mensajeDelVisor = fotoAmpliada
+    ? messages.find((m) => m.attachments?.some((a) => a.id === fotoAmpliada.id))
+    : undefined;
+  const autorDelVisor = !mensajeDelVisor
+    ? headerName
+    : mensajeDelVisor.sender === 'me'
+      ? t('chatViews.you')
+      : nombreDelAutor(infoDeConversacion, mensajeDelVisor.autorId, mensajeDelVisor.autorNombre) ||
+        headerName;
+  const fechaDelVisor = mensajeDelVisor?.createdAtIso
+    ? new Date(mensajeDelVisor.createdAtIso).toLocaleString(undefined, {
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : undefined;
+  const accionesDelVisor: AccionDeVisor[] = [];
+  if (fotoAmpliada && estaEnElServidor(fotoAmpliada)) {
+    accionesDelVisor.push({
+      icono: 'download',
+      etiqueta: t('chat.saveMedia'),
+      alPulsar: () => void guardarAdjunto(fotoAmpliada),
+    });
+  }
+  if (mensajeDelVisor && mensajeDelVisor.sender === 'me' && !mensajeDelVisor.estado) {
+    accionesDelVisor.push({
+      icono: 'trash-2',
+      etiqueta: t('common.delete'),
+      peligro: true,
+      alPulsar: () => {
+        setFotoAmpliada(null);
+        void eliminarMensaje(mensajeDelVisor);
+      },
+    });
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/*
@@ -1641,6 +1712,10 @@ export function ChatScreen() {
             ? {
                 titulo: infoDeConversacion.titulo || headerName,
                 miembros: infoDeConversacion.miembros.length,
+                avatarUrl: profileImageUrl(infoDeConversacion.avatarPath) ?? undefined,
+                // A quien administra, la cabecera le dice que hay alguien
+                // esperando: tocarla lleva a la ficha, donde se responde.
+                pendientes: infoDeConversacion.pendientes,
               }
             : undefined
         }
@@ -1770,6 +1845,17 @@ export function ChatScreen() {
               ninguna zona con la que abrir el menú de acciones.
             */
             const mostrarHora = !agrupado || !item.text || !!item.estado;
+            /*
+              STICKER: un mensaje que es solo uno, dos o tres emoji, sin
+              adjuntos. Se pinta grande y sin burbuja. Vale igual para el que
+              se elige en el panel que para el que se escribe con el teclado.
+            */
+            const comoSticker =
+              !item.eliminado &&
+              !item.attachments?.length &&
+              !item.storyContext &&
+              !item.sesion &&
+              esSticker(item.text);
 
             const cabecera = cambioDeDia ? (
               <View style={styles.dia}>
@@ -1866,10 +1952,32 @@ export function ChatScreen() {
                 <View
                   style={[
                     mine ? styles.filaMia : styles.filaSuya,
+                    esGrupo && !mine && styles.filaDeGrupo,
                     // El mensaje al que se llegó desde «Contenido», un momento.
                     item.id === resaltado && { backgroundColor: colors.border },
                   ]}
                 >
+                  {/*
+                    EN UN GRUPO, LA FOTO DE QUIEN ESCRIBE (10/10/2026). Va al
+                    lado del primer mensaje de cada ráfaga; en los siguientes
+                    queda su hueco, para que las burbujas no bailen. Visto en
+                    teléfono: con solo el nombre en gris no se distinguía
+                    quién mandaba cada cosa.
+                  */}
+                  {esGrupo && !mine ? (
+                    agrupado ? (
+                      <View style={styles.huecoDeAvatar} />
+                    ) : (
+                      <Avatar
+                        size={28}
+                        image={
+                          profileImageUrl(miembroDe(infoDeConversacion, item.autorId)?.avatarPath) ??
+                          null
+                        }
+                        name={nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre)}
+                      />
+                    )
+                  ) : null}
                   <View
                     style={[
                       styles.bubble,
@@ -1882,12 +1990,18 @@ export function ChatScreen() {
                         // La ajena se despega del fondo con un gris suave en
                         // vez de un borde: en claro, blanco sobre blanco con
                         // una línea parecía una casilla de formulario.
-                        backgroundColor: mine ? colors.primary : colors.surfaceAlt,
-                        borderColor: fallido
-                          ? colors.danger
+                        backgroundColor: comoSticker
+                          ? 'transparent'
                           : mine
                             ? colors.primary
-                            : colors.border,
+                            : colors.surfaceAlt,
+                        borderColor: fallido
+                          ? colors.danger
+                          : comoSticker
+                            ? 'transparent'
+                            : mine
+                              ? colors.primary
+                              : colors.border,
                         opacity: item.estado === 'enviando' ? 0.75 : 1,
                       },
                     ]}
@@ -1901,7 +2015,11 @@ export function ChatScreen() {
                     {esGrupo && !mine && !agrupado ? (
                       <Text
                         numberOfLines={1}
-                        style={[styles.autorDeGrupo, { color: colors.textMuted }]}
+                        style={[
+                          styles.autorDeGrupo,
+                          // Cada persona, su color: se la reconoce antes de leerla.
+                          { color: colorDeAutor(item.autorId, mode === 'dark') },
+                        ]}
                       >
                         {nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre) ||
                           t('groups.someone')}
@@ -1960,7 +2078,9 @@ export function ChatScreen() {
                         reunión pegado aquí se abre con un toque. Sin
                         enlaces se pinta exactamente lo de antes.
                       */}
-                      {item.text ? (
+                      {item.text && comoSticker ? (
+                        <Text style={styles.sticker}>{item.text}</Text>
+                      ) : item.text ? (
                         <TextoConEnlaces
                           texto={item.text}
                           colorDelTexto={mine ? colors.onPrimary : colors.text}
@@ -1997,7 +2117,8 @@ export function ChatScreen() {
                         <View style={[styles.pieDeBurbuja, mine && styles.pieDeBurbujaMia]}>
                           <Text
                             style={{
-                              color: mine ? colors.onPrimary : colors.textMuted,
+                              // Sin burbuja detrás, la hora va sobre el fondo del chat.
+                              color: mine && !comoSticker ? colors.onPrimary : colors.textMuted,
                               fontSize: 11,
                               opacity: 0.8,
                             }}
@@ -2018,7 +2139,7 @@ export function ChatScreen() {
                                     : 'check'
                               }
                               size={11}
-                              color={colors.onPrimary}
+                              color={comoSticker ? colors.textMuted : colors.onPrimary}
                               style={styles.iconoDeEstado}
                             />
                           ) : null}
@@ -2165,6 +2286,18 @@ export function ChatScreen() {
             </Pulsable>
           )}
 
+          {grabadora.ocupada || !supabaseEnabled ? null : (
+            <Pulsable
+              accessibilityLabel={t('stickers.open')}
+              accessibilityRole="button"
+              onPress={() => setStickersAbiertos(true)}
+              escala={ESCALA_AL_PULSAR.icono}
+              style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+            >
+              <Feather name="smile" size={22} color={colors.text} />
+            </Pulsable>
+          )}
+
           {grabadora.ocupada ? null : (
             <Input
               value={text}
@@ -2246,19 +2379,30 @@ export function ChatScreen() {
         />
       </BottomSheet>
 
-      {fotoAmpliada?.url ? (
-        <ImageViewer
-          uri={fotoAmpliada.url}
-          caption={fotoAmpliada.fileName ?? undefined}
-          onClose={() => setFotoAmpliada(null)}
-        />
-      ) : null}
+      <HojaDeStickers
+        visible={stickersAbiertos}
+        onClose={() => setStickersAbiertos(false)}
+        alElegir={(sticker) => {
+          setStickersAbiertos(false);
+          void mandar({ texto: sticker, archivos: [] });
+        }}
+      />
+      <VisorDeAdjunto
+        adjunto={fotoAmpliada?.url ? fotoAmpliada : null}
+        autor={autorDelVisor}
+        fecha={fechaDelVisor}
+        acciones={accionesDelVisor}
+        onClose={() => setFotoAmpliada(null)}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  autorDeGrupo: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
+  autorDeGrupo: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  filaDeGrupo: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  huecoDeAvatar: { width: 28 },
+  sticker: { fontSize: 44, lineHeight: 56 },
   // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
   messages: { padding: spacing.lg },
   // La lista y, encima, el botón de «ir a lo último».

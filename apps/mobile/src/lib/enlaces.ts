@@ -55,6 +55,8 @@ export const RESPALDOS_ES = {
   'share.postBy': 'Mira esta publicación de {nombre} en Z',
   'share.live': 'Mira este directo en Z',
   'share.liveBy': 'Mira el directo de {nombre} en Z',
+  'share.group': 'Únete a mi grupo en Z',
+  'share.groupNamed': 'Únete al grupo «{nombre}» en Z',
 } as const;
 
 const enEspanol: TraductorDeEnlaces = (clave, params) => {
@@ -191,12 +193,39 @@ ${url}` : texto, url };
 }
 
 /**
+ * Enlace de invitacion a un grupo: `/grupo/{codigo}`.
+ *
+ * Lleva a la TARJETA del grupo, desde la que se pide entrar. No mete a nadie:
+ * quien administra el grupo decide. El codigo es el secreto del enlace, y
+ * cambiarlo en la ficha del grupo deja este enlace sin efecto.
+ */
+export function enlaceDeGrupo(codigo: string | null | undefined): string | null {
+  const base = baseDeLaWeb();
+  if (!base || !codigo) return null;
+  return `${base}/grupo/${encodeURIComponent(codigo)}`;
+}
+
+/** Texto + enlace de un grupo, listo para `Share.share`. */
+export function compartirGrupo(opciones: {
+  codigo: string | null | undefined;
+  grupo?: string | null;
+  traducir?: TraductorDeEnlaces;
+}): MensajeCompartido {
+  const traducir = opciones.traducir ?? enEspanol;
+  const nombre = opciones.grupo?.trim();
+  const texto = nombre ? traducir('share.groupNamed', { nombre }) : traducir('share.group');
+  const url = enlaceDeGrupo(opciones.codigo);
+  return { message: url ? `${texto}\n${url}` : texto, url };
+}
+
+/**
  * La ruta de la aplicacion a la que lleva un enlace de la propia web de Z, o
  * `null` si el enlace es de fuera.
  *
  * Para que un enlace de Z pegado en un chat se abra DENTRO de la aplicacion y
  * no saque a la persona al navegador a ver lo mismo. Solo se reconoce lo que
- * la aplicacion sabe abrir por ruta: un directo y una publicacion.
+ * la aplicacion sabe abrir por ruta: un directo, una publicacion y el enlace
+ * de un grupo.
  */
 export function rutaInternaDe(url: string | null | undefined): string | null {
   const base = baseDeLaWeb();
@@ -204,7 +233,7 @@ export function rutaInternaDe(url: string | null | undefined): string | null {
   const limpio = url.trim();
   if (!limpio.startsWith(`${base}/`)) return null;
   const camino = limpio.slice(base.length).split(/[?#]/)[0] ?? '';
-  const partes = /^\/(live|post)\/([A-Za-z0-9_-]+)\/?$/.exec(camino);
+  const partes = /^\/(live|post|grupo)\/([A-Za-z0-9_-]+)\/?$/.exec(camino);
   if (!partes) return null;
   return `/${partes[1]}/${partes[2]}`;
 }

@@ -555,9 +555,19 @@ describe('reintentar un envío fallido', () => {
 // ---------------------------------------------------------------------------
 describe('abrir un vídeo o un documento', () => {
   it('un vídeo no va al visor de imágenes', () => {
+    // Desde el 10/10 el vídeo se reproduce DENTRO de la aplicación (antes se
+    // abría fuera). Lo que no cambia es el motivo de esta prueba: a
+    // `ImageViewer` nunca le llega un vídeo, porque con uno enseña una pantalla
+    // negra. `VisorDeAdjunto` lo reproduce él y solo le pasa las imágenes.
     assert.match(
       CHAT,
-      /if \(adjunto\.kind === 'video'\) abrirFuera\(adjunto\);\s*else if \(adjunto\.url\) setFotoAmpliada\(adjunto\);/,
+      /if \(adjunto\.kind === 'video' && !estaEnElServidor\(adjunto\)\) return;\s*if \(adjunto\.url\) setFotoAmpliada\(adjunto\);/,
+    );
+    const visor = fuente('components/chat/VisorDeAdjunto.tsx');
+    assert.match(visor, /if \(adjunto\?\.kind === 'video' && adjunto\.url\) \{/);
+    assert.match(
+      visor,
+      /uri=\{adjunto\?\.kind === 'image' \? adjunto\.url \?\? null : null\}/,
       '`ImageViewer` pinta una imagen: con un vídeo enseña una pantalla negra.',
     );
   });
@@ -578,7 +588,8 @@ describe('abrir un vídeo o un documento', () => {
     assert.match(abrir, /if \(!adjunto\.url \|\| !estaEnElServidor\(adjunto\)\) return;/);
     assert.match(
       abrir,
-      /Linking\.openURL\(adjunto\.url\)\.catch\(\(\) => \{\s*notify\(/,
+      // `destino` es la dirección del adjunto, o la de descarga si es un HTML.
+      /Linking\.openURL\(destino\)\.catch\(\(\) => \{\s*notify\(/,
       'Si el teléfono no sabe abrirlo hay que decirlo, no callar.',
     );
   });

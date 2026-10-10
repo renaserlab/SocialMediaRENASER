@@ -117,7 +117,14 @@ type Props = {
    *
    * Sin él la cabecera es la de siempre.
    */
-  grupo?: { titulo: string; miembros: number };
+  grupo?: {
+    titulo: string;
+    miembros: number;
+    /** La foto del grupo, ya como dirección. Sin ella, sus iniciales. */
+    avatarUrl?: string;
+    /** Solicitudes para entrar que esperan a quien administra. */
+    pendientes?: number;
+  };
   /** Abre la pantalla del grupo (miembros y ajustes). */
   alAbrirGrupo?: () => void;
 };
@@ -185,13 +192,15 @@ export function CabeceraDeChat({
             hitSlop={8}
             style={styles.persona}
           >
-            <Avatar size={30} image={null} name={grupo.titulo} />
+            <Avatar size={30} image={grupo.avatarUrl ?? null} name={grupo.titulo} />
             <View style={styles.textosDeGrupo}>
               <Text numberOfLines={1} weight="700" color={colors.text} style={styles.nombre}>
                 {grupo.titulo}
               </Text>
               <Text numberOfLines={1} color={colors.textMuted} style={styles.miembros}>
-                {t('groups.membersCount', { n: grupo.miembros })}
+                {grupo.pendientes
+                  ? t('groupJoin.pendingBadge', { n: grupo.pendientes })
+                  : t('groups.membersCount', { n: grupo.miembros })}
               </Text>
             </View>
           </Pressable>

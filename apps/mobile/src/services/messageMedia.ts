@@ -25,6 +25,7 @@
  * ruta. Es lo que permite mandar un vídeo grande por trozos reanudables sin que
  * el servidor tenga que sostener la conexión mientras tanto.
  */
+import { tipoDeContenidoDe } from '@/lib/tiposDeArchivo';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -203,7 +204,10 @@ function extensionDe(adjunto: AdjuntoElegido): string {
 }
 
 function tipoDeContenido(adjunto: AdjuntoElegido, ext: string): string {
-  if (adjunto.mimeType) return adjunto.mimeType;
+  // El teléfono no siempre dice el tipo, o dice uno genérico: un audio o un
+  // HTML llegaban como «archivo desconocido» y el almacén los rechazaba.
+  const deducido = tipoDeContenidoDe(adjunto.mimeType, adjunto.name ?? `archivo.${ext}`);
+  if (deducido !== 'application/octet-stream') return deducido;
   if (adjunto.kind === 'image') return `image/${ext === 'jpg' ? 'jpeg' : ext}`;
   if (adjunto.kind === 'video') return `video/${ext}`;
   // El bucket `message-media` admite `audio/*` desde la 0033, así que esto pasa
@@ -279,7 +283,8 @@ export async function subirAdjunto(
   return {
     storage_path: ruta,
     kind: adjunto.kind,
-    mime_type: adjunto.mimeType,
+    // El tipo con el que de verdad se subió, no el que dijo el teléfono.
+    mime_type: contentType,
     file_name: adjunto.name,
     // El tamaño REAL del archivo leído, no el que informó el selector: no
     // siempre coinciden, y el que cuenta es el que se ha subido.

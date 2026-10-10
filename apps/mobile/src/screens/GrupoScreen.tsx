@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
+import { PuertasDelGrupo } from '@/components/chat/PuertasDelGrupo';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
@@ -181,7 +182,11 @@ export function GrupoScreen() {
       <AppHeader title={t('groups.infoTitle')} onBack={volver} />
       <View style={styles.cuerpo}>
         <View style={styles.cabecera}>
-          <Avatar size={72} image={null} name={info.titulo} />
+          <Avatar
+            size={72}
+            image={profileImageUrl(info.avatarPath) ?? null}
+            name={info.titulo}
+          />
           <Text weight="800" style={styles.titulo} numberOfLines={2}>
             {info.titulo}
           </Text>
@@ -242,6 +247,13 @@ export function GrupoScreen() {
             />
           ) : null}
         </View>
+
+        {/*
+          CÓMO SE ENTRA AL GRUPO: las solicitudes que esperan, la foto, si se
+          enseña en el perfil y el enlace. Solo para quien administra, y solo
+          si el servidor conoce estas funciones; si no, no pinta nada.
+        */}
+        <PuertasDelGrupo info={info} alCambiar={refrescar} />
 
         <View style={styles.seccion}>
           <Text weight="700">{t('groups.members')}</Text>

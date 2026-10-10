@@ -32,6 +32,8 @@ export type ConversationDto = {
    * no está desplegada.
    */
   labels?: { id: string; nombre: string }[];
+  /** La foto de un GRUPO. En un chat de dos viene a nulo: la foto es la de `other`. */
+  avatar_path?: string | null;
 };
 
 export type AttachmentDto = {
@@ -154,7 +156,8 @@ export function toConversation(dto: ConversationDto): Conversation {
     // El backend ya manda al otro participante con su foto; antes se descartaba
     // y la lista pintaba imagenes de muestra segun la posicion de la fila, de
     // modo que quien tenia foto salia con la de otra persona.
-    avatarUrl: profileImageUrl(dto.other?.avatar_path) ?? undefined,
+    // En un grupo no hay «el otro»: la foto es la del grupo, si tiene.
+    avatarUrl: profileImageUrl(dto.other?.avatar_path ?? dto.avatar_path) ?? undefined,
     otherId: dto.other?.id,
     // `?? []` y no `dto.labels`: la fila pinta `labels.length` sin comprobar
     // nada, y una API vieja que no mande el campo no puede reventar la bandeja.
