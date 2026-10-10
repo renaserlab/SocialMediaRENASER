@@ -83,3 +83,41 @@ export function subscribeToConversationChanges(
     void client.removeChannel(channel);
   };
 }
+
+/**
+ * «Alguien ha reaccionado en esta conversación: vuelve a preguntar».
+ *
+ * Una reacción no es un mensaje nuevo: cambia uno que ya está en pantalla, y
+ * el canal de mensajes no se entera. Quien reacciona manda este aviso por
+ * difusión y los demás preguntan a la API por las reacciones de lo que ven.
+ *
+ * EL AVISO NO LLEVA NADA: ni quién, ni a qué mensaje, ni con qué. Un canal de
+ * difusión lo puede escuchar —y escribir— cualquiera con la aplicación, así
+ * que no puede transportar nada que importe. Lo peor que consigue quien mande
+ * avisos falsos es que los demás pregunten una vez de más, y lo que les
+ * contesta la API es lo que de verdad pueden ver.
+ */
+export function avisosDeReacciones(
+  conversationId: string,
+  alAvisar: () => void,
+): { avisar: () => void; cerrar: () => void } {
+  const client = supabase;
+  if (!client || !conversationId) return { avisar: () => {}, cerrar: () => {} };
+
+  // SIN contador en el nombre: todos los teléfonos de la conversación tienen
+  // que estar en el MISMO canal para oírse. `self: false` evita oírse a uno
+  // mismo, que ya pintó su propia reacción.
+  const channel = client
+    .channel(`chat-reacciones:${conversationId}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'reaccion' }, () => alAvisar())
+    .subscribe();
+
+  return {
+    avisar: () => {
+      void channel.send({ type: 'broadcast', event: 'reaccion', payload: {} });
+    },
+    cerrar: () => {
+      void client.removeChannel(channel);
+    },
+  };
+}

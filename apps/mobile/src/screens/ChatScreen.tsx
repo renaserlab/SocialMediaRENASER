@@ -38,9 +38,19 @@ import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
 import { useResponderSesion } from '@/hooks/useResponderSesion';
+import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { colorDeAutor, miembroDe, nombreDelAutor } from '@/lib/gruposDeChat';
-import { esSticker } from '@/lib/stickers';
+import {
+  MAX_CONSULTA_DE_REACCIONES,
+  alReaccionar,
+  aplicarReacciones,
+  miReaccion,
+  textoDeCita,
+  type CitaDeMensaje,
+  type ReaccionDeMensaje,
+} from '@/lib/reaccionesDeChat';
+import { REACCIONES_RAPIDAS, esSticker } from '@/lib/stickers';
 import { enlaceDeDescarga, esHtml } from '@/lib/tiposDeArchivo';
 import { guardarEnLaGaleria } from '@/services/guardarAdjunto';
 import { profileImageUrl } from '@/services/storage';
@@ -99,7 +109,7 @@ import {
   type AdjuntoSubido,
 } from '@/services/messageMedia';
 import { PermisoDenegadoError } from '@/services/storage';
-import { subscribeToConversation } from '@/services/realtime';
+import { avisosDeReacciones, subscribeToConversation } from '@/services/realtime';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -107,7 +117,13 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import type { Message, MessageAttachment } from '@/types';
 
 /** Un envío que se puede repetir tal cual si falla. */
-type EnvioPendiente = { texto: string; archivos: AdjuntoElegido[] };
+type EnvioPendiente = {
+  texto: string;
+  archivos: AdjuntoElegido[];
+  /** El mensaje al que se responde, y su cita para pintarla ya en la burbuja. */
+  respondeA?: string;
+  cita?: CitaDeMensaje;
+};
 
 /**
  * La lápida de un mensaje borrado: sin relleno, con el borde a la vista y en
@@ -259,6 +275,10 @@ export function ChatScreen() {
   const [elegidos, setElegidos] = useState<AdjuntoElegido[]>([]);
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [stickersAbiertos, setStickersAbiertos] = useState(false);
+  /** El mensaje al que se está respondiendo, mientras se escribe la respuesta. */
+  const [respondiendoA, setRespondiendoA] = useState<Message | null>(null);
+  /** El mensaje al que se va a reaccionar desde el panel de «más». */
+  const [reaccionandoA, setReaccionandoA] = useState<Message | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [fotoAmpliada, setFotoAmpliada] = useState<MessageAttachment | null>(null);
   // Historial: si queda algo más arriba y si se está trayendo ahora mismo.
@@ -292,6 +312,7 @@ export function ChatScreen() {
   const [funciones, setFunciones] = useState<FuncionesDelChat>({
     notasDeVoz: false,
     respuestasAHistorias: false,
+    reacciones: false,
   });
 
   /*
@@ -1028,6 +1049,8 @@ export function ChatScreen() {
           envio.texto,
           currentUserId,
           subidos,
+          null,
+          envio.respondeA ?? null,
         );
         aplicar(reconciliarEnvio(mensajesRef.current, idTemporal, guardado));
         ultimoEnvioDe.current.delete(idTemporal);
@@ -1102,6 +1125,8 @@ export function ChatScreen() {
             sender: 'me' as const,
             createdAt: '',
             estado: 'enviando' as const,
+            // La cita se ve desde el primer instante, no al confirmar.
+            respuestaA: envio.cita,
             progreso: envio.archivos.length ? 0 : undefined,
             // Vista previa local mientras sube: la ruta local vale como `url`,
             // así la burbuja enseña la foto —o deja oír la nota— desde el primer
@@ -1128,6 +1153,19 @@ export function ChatScreen() {
     [enviando, aplicar, enviar],
   );
 
+  /** La cita de un mensaje que se va a responder, armada con lo que ya se sabe de él. */
+  const citaDe = (mensaje: Message): CitaDeMensaje => ({
+    id: mensaje.id,
+    autorId: mensaje.autorId ?? (mensaje.sender === 'me' ? currentUserId ?? '' : ''),
+    autor:
+      mensaje.sender === 'me'
+        ? t('chatViews.you')
+        : nombreDelAutor(infoDeConversacion, mensaje.autorId, mensaje.autorNombre) || headerName,
+    extracto: mensaje.text.replace(/\s+/g, ' ').trim().slice(0, 140),
+    tipo: mensaje.attachments?.[0]?.kind ?? null,
+    eliminado: false,
+  });
+
   const submit = async () => {
     const body = text.trim();
     if (!body && elegidos.length === 0) return;
@@ -1139,9 +1177,15 @@ export function ChatScreen() {
       return;
     }
 
-    const envio: EnvioPendiente = { texto: body, archivos: elegidos };
+    const envio: EnvioPendiente = {
+      texto: body,
+      archivos: elegidos,
+      respondeA: respondiendoA?.id,
+      cita: respondiendoA ? citaDe(respondiendoA) : undefined,
+    };
     setText('');
     setElegidos([]);
+    setRespondiendoA(null);
     await mandar(envio);
   };
 
@@ -1450,10 +1494,16 @@ export function ChatScreen() {
    * hacer. Un menú que se abre para enseñar que no hay opciones es peor que no
    * abrirse.
    */
-  const abrirAcciones = useCallback((mensaje: Message) => {
-    if (mensaje.sender !== 'me' || mensaje.estado || mensaje.eliminado) return;
-    setAccionesDe(mensaje);
-  }, []);
+  const abrirAcciones = useCallback(
+    (mensaje: Message) => {
+      if (mensaje.estado || mensaje.eliminado) return;
+      // Sobre lo propio siempre hay algo (borrar). Sobre lo ajeno solo hay
+      // reaccionar y responder: sin ellas la hoja se abriría vacía.
+      if (mensaje.sender !== 'me' && !funciones.reacciones) return;
+      setAccionesDe(mensaje);
+    },
+    [funciones.reacciones],
+  );
 
   /**
    * Borrar DESDE la hoja. El `afterSheetClose` no es opcional.
@@ -1484,6 +1534,89 @@ export function ChatScreen() {
    * pantallas de evidencias y documentos. Si el sistema no sabe abrirlo, se
    * dice: un toque que no hace nada se lee como un botón roto.
    */
+  // -------------------------------------------------------------------------
+  // Reaccionar
+  // -------------------------------------------------------------------------
+
+  const avisosDeReaccion = useRef<{ avisar: () => void; cerrar: () => void } | null>(null);
+
+  /** Pregunta por las reacciones de lo que hay cargado: los últimos cien mensajes. */
+  const refrescarReacciones = useCallback(() => {
+    if (!supabaseEnabled || !params.id) return;
+    const ids = mensajesRef.current
+      .filter((m) => !m.estado && !m.eliminado)
+      .slice(-MAX_CONSULTA_DE_REACCIONES)
+      .map((m) => m.id);
+    if (ids.length === 0) return;
+    MessageRepository.reaccionesDe(params.id, ids)
+      .then((porMensaje) => {
+        const siguiente = aplicarReacciones(mensajesRef.current, ids, porMensaje);
+        // La misma lista significa «nada cambió»: no se repinta el chat.
+        if (siguiente !== mensajesRef.current) aplicar(siguiente);
+      })
+      .catch(() => {
+        // Sin respuesta se queda lo que había; el siguiente aviso lo repite.
+      });
+  }, [supabaseEnabled, params.id, aplicar]);
+
+  /*
+    UNA REACCIÓN CAMBIA UN MENSAJE QUE YA ESTÁ EN PANTALLA, y el canal de
+    mensajes no avisa de eso. Quien reacciona manda un aviso sin contenido y
+    los demás preguntan a la API. Como mucho una consulta cada segundo largo.
+    Solo si el servidor conoce las reacciones: sin eso no hay nada que oír.
+  */
+  useEffect(() => {
+    if (!supabaseEnabled || !params.id || !funciones.reacciones) return;
+    let pendiente: ReturnType<typeof setTimeout> | null = null;
+    const canal = avisosDeReacciones(params.id, () => {
+      if (pendiente) return;
+      pendiente = setTimeout(() => {
+        pendiente = null;
+        refrescarReacciones();
+      }, 1200);
+    });
+    avisosDeReaccion.current = canal;
+    return () => {
+      if (pendiente) clearTimeout(pendiente);
+      avisosDeReaccion.current = null;
+      canal.cerrar();
+    };
+  }, [supabaseEnabled, params.id, funciones.reacciones, refrescarReacciones]);
+
+  /**
+   * Pone la reacción (o la quita, con `null`).
+   *
+   * Se pinta EN EL ACTO y después se corrige con lo que diga el servidor, que
+   * es quien sabe cuántos han reaccionado. Si falla, se vuelve a como estaba
+   * y se dice: una reacción que se queda puesta sin haberse guardado miente.
+   */
+  const reaccionar = useCallback(
+    async (mensaje: Message, emoji: string | null) => {
+      if (!params.id || mensaje.estado || mensaje.eliminado) return;
+      const conversationId = params.id;
+      const antes = mensaje.reacciones ?? [];
+      const poner = (reacciones: ReaccionDeMensaje[]) =>
+        aplicar(
+          mensajesRef.current.map((m) => (m.id === mensaje.id ? { ...m, reacciones } : m)),
+        );
+      poner(alReaccionar(antes, emoji));
+      try {
+        poner(await MessageRepository.reaccionar(conversationId, mensaje.id, emoji));
+        avisosDeReaccion.current?.avisar();
+      } catch {
+        poner(antes);
+        notify(t('chat.reactFailedTitle'), t('common.tryAgainSoon'));
+      }
+    },
+    [params.id, aplicar, t],
+  );
+
+  /** El texto de una cita: su extracto, o qué era si no tenía texto. */
+  const textoDeLaCita = (cita: CitaDeMensaje): string => {
+    const lo = textoDeCita(cita);
+    return 'texto' in lo ? lo.texto : t(lo.clave as TranslationKey);
+  };
+
   const abrirFuera = (adjunto: MessageAttachment) => {
     if (!adjunto.url || !estaEnElServidor(adjunto)) return;
     // Un HTML se DESCARGA, no se abre como página: ver `enlaceDeDescarga`.
@@ -1850,6 +1983,12 @@ export function ChatScreen() {
               adjuntos. Se pinta grande y sin burbuja. Vale igual para el que
               se elige en el panel que para el que se escribe con el teclado.
             */
+            /*
+              MANTENER PULSADO abre las acciones. Sobre lo propio siempre
+              (borrar); sobre lo ajeno solo si se puede reaccionar o
+              responder: sin eso la hoja saldría vacía.
+            */
+            const conAcciones = !item.estado && (mine || funciones.reacciones);
             const comoSticker =
               !item.eliminado &&
               !item.attachments?.length &&
@@ -2026,6 +2165,43 @@ export function ChatScreen() {
                       </Text>
                     ) : null}
                     {/*
+                      A QUÉ MENSAJE RESPONDE (10/10/2026). Tocarla lleva al
+                      original, con el mismo camino que «ver en el chat».
+                      Hermana de lo demás, nunca envolviéndolo.
+                    */}
+                    {item.respuestaA ? (
+                      <Pressable
+                        onPress={() => setMensajeBuscado(item.respuestaA?.id ?? null)}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('chat.replyGoTo')}
+                        style={[
+                          styles.cita,
+                          { borderLeftColor: colorDeAutor(item.respuestaA.autorId, mode === 'dark') },
+                        ]}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.citaAutor,
+                            { color: mine && !comoSticker ? colors.onPrimary : colors.text },
+                          ]}
+                        >
+                          {item.respuestaA.autorId === currentUserId
+                            ? t('chatViews.you')
+                            : item.respuestaA.autor || t('groups.someone')}
+                        </Text>
+                        <Text
+                          numberOfLines={2}
+                          style={[
+                            styles.citaTexto,
+                            { color: mine && !comoSticker ? colors.onPrimary : colors.textMuted },
+                          ]}
+                        >
+                          {textoDeLaCita(item.respuestaA)}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {/*
                       A QUE HISTORIA RESPONDIA, encima de todo lo demás: es el
                       contexto que hace que se entienda lo que viene debajo.
 
@@ -2065,12 +2241,12 @@ export function ChatScreen() {
                     */}
                     <Pressable
                       onLongPress={
-                        mine && !item.estado ? () => abrirAcciones(item) : undefined
+                        conAcciones ? () => abrirAcciones(item) : undefined
                       }
                       delayLongPress={400}
-                      accessibilityRole={mine && !item.estado ? 'button' : undefined}
+                      accessibilityRole={conAcciones ? 'button' : undefined}
                       accessibilityLabel={
-                        mine && !item.estado ? t('chat.holdForActions') : undefined
+                        conAcciones ? t('chat.holdForActions') : undefined
                       }
                     >
                       {/*
@@ -2146,6 +2322,41 @@ export function ChatScreen() {
                         </View>
                       ) : null}
                     </Pressable>
+                    {/*
+                      LAS REACCIONES. Tocar una pone la propia o la quita.
+                      Fuera del `Pressable` de arriba: un botón dentro de
+                      otro genera HTML inválido en la web.
+                    */}
+                    {item.reacciones?.length ? (
+                      <View style={styles.reacciones}>
+                        {item.reacciones.map((reaccion) => (
+                          <Pressable
+                            key={reaccion.emoji}
+                            onPress={() =>
+                              void reaccionar(item, reaccion.mia ? null : reaccion.emoji)
+                            }
+                            accessibilityRole="button"
+                            accessibilityLabel={t('chat.reactionOf', {
+                              emoji: reaccion.emoji,
+                              n: reaccion.cuantos,
+                            })}
+                            style={[
+                              styles.reaccion,
+                              {
+                                backgroundColor: colors.background,
+                                borderColor: reaccion.mia ? colors.text : colors.border,
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.reaccionTexto, { color: colors.text }]}>
+                              {reaccion.cuantos > 1
+                                ? `${reaccion.emoji} ${reaccion.cuantos}`
+                                : reaccion.emoji}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : null}
                   </View>
 
                   {fallido ? (
@@ -2247,6 +2458,39 @@ export function ChatScreen() {
               </View>
             ))}
           </ScrollView>
+        ) : null}
+
+        {/*
+          A QUÉ SE ESTÁ RESPONDIENDO, mientras se escribe. Con su X: quien se
+          arrepiente manda un mensaje normal.
+        */}
+        {respondiendoA ? (
+          <View
+            style={[
+              styles.respondiendo,
+              { borderTopColor: colors.border, backgroundColor: colors.surfaceAlt },
+            ]}
+          >
+            <View style={styles.respondiendoTexto}>
+              <Text numberOfLines={1} style={[styles.citaAutor, { color: colors.text }]}>
+                {respondiendoA.sender === 'me'
+                  ? t('chat.replyingToYou')
+                  : t('chat.replyingTo', { nombre: citaDe(respondiendoA).autor })}
+              </Text>
+              <Text numberOfLines={1} style={[styles.citaTexto, { color: colors.textMuted }]}>
+                {textoDeLaCita(citaDe(respondiendoA))}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setRespondiendoA(null)}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.replyCancel')}
+              hitSlop={10}
+              style={styles.respondiendoQuitar}
+            >
+              <Feather name="x" size={18} color={colors.text} />
+            </Pressable>
+          </View>
         ) : null}
 
         <View
@@ -2371,20 +2615,87 @@ export function ChatScreen() {
 
       {/* El menú de acciones de una burbuja. */}
       <BottomSheet visible={!!accionesDe} onClose={() => setAccionesDe(null)}>
-        <ListRow
-          title={t('common.delete')}
-          leftIcon="trash-2"
-          destructive
-          onPress={() => void eliminarDesdeElMenu()}
-        />
+        {funciones.reacciones ? (
+          <>
+            <View style={styles.reaccionesRapidas}>
+              {REACCIONES_RAPIDAS.map((emoji) => {
+                const puesta = miReaccion(accionesDe?.reacciones) === emoji;
+                return (
+                  <Pressable
+                    key={emoji}
+                    onPress={() => {
+                      const mensaje = accionesDe;
+                      setAccionesDe(null);
+                      if (mensaje) void reaccionar(mensaje, puesta ? null : emoji);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('chat.reactWith', { emoji })}
+                    style={[
+                      styles.reaccionRapida,
+                      puesta && { backgroundColor: colors.surfaceAlt },
+                    ]}
+                  >
+                    <Text style={styles.reaccionRapidaTexto}>{emoji}</Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={() => {
+                  const mensaje = accionesDe;
+                  setAccionesDe(null);
+                  // Otra hoja no se abre encima de una que se está cerrando.
+                  void afterSheetClose().then(() => setReaccionandoA(mensaje));
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.reactMore')}
+                style={styles.reaccionRapida}
+              >
+                <Feather name="plus" size={22} color={colors.text} />
+              </Pressable>
+            </View>
+            <ListRow
+              title={t('chat.reply')}
+              leftIcon="corner-up-left"
+              onPress={() => {
+                setRespondiendoA(accionesDe);
+                setAccionesDe(null);
+              }}
+            />
+          </>
+        ) : null}
+        {accionesDe?.sender === 'me' ? (
+          <ListRow
+            title={t('common.delete')}
+            leftIcon="trash-2"
+            destructive
+            onPress={() => void eliminarDesdeElMenu()}
+          />
+        ) : null}
       </BottomSheet>
+
+      <HojaDeStickers
+        visible={!!reaccionandoA}
+        titulo={t('chat.reactTitle')}
+        onClose={() => setReaccionandoA(null)}
+        alElegir={(emoji) => {
+          const mensaje = reaccionandoA;
+          setReaccionandoA(null);
+          if (mensaje) void reaccionar(mensaje, emoji);
+        }}
+      />
 
       <HojaDeStickers
         visible={stickersAbiertos}
         onClose={() => setStickersAbiertos(false)}
         alElegir={(sticker) => {
           setStickersAbiertos(false);
-          void mandar({ texto: sticker, archivos: [] });
+          void mandar({
+            texto: sticker,
+            archivos: [],
+            respondeA: respondiendoA?.id,
+            cita: respondiendoA ? citaDe(respondiendoA) : undefined,
+          });
+          setRespondiendoA(null);
         }}
       />
       <VisorDeAdjunto
@@ -2392,6 +2703,38 @@ export function ChatScreen() {
         autor={autorDelVisor}
         fecha={fechaDelVisor}
         acciones={accionesDelVisor}
+        pie={
+          funciones.reacciones && mensajeDelVisor && !mensajeDelVisor.estado ? (
+            <View style={styles.pieDelVisor}>
+              <Pressable
+                onPress={() => {
+                  setRespondiendoA(mensajeDelVisor);
+                  setFotoAmpliada(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.reply')}
+                style={styles.responderEnElVisor}
+              >
+                <Feather name="corner-up-left" size={18} color="#FFFFFF" />
+                <Text style={styles.responderEnElVisorTexto}>{t('chat.reply')}</Text>
+              </Pressable>
+              {REACCIONES_RAPIDAS.slice(0, 3).map((emoji) => {
+                const puesta = miReaccion(mensajeDelVisor.reacciones) === emoji;
+                return (
+                  <Pressable
+                    key={emoji}
+                    onPress={() => void reaccionar(mensajeDelVisor, puesta ? null : emoji)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('chat.reactWith', { emoji })}
+                    style={[styles.reaccionEnElVisor, puesta && styles.reaccionEnElVisorPuesta]}
+                  >
+                    <Text style={styles.reaccionRapidaTexto}>{emoji}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : undefined
+        }
         onClose={() => setFotoAmpliada(null)}
       />
     </View>
@@ -2403,6 +2746,63 @@ const styles = StyleSheet.create({
   filaDeGrupo: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   huecoDeAvatar: { width: 28 },
   sticker: { fontSize: 44, lineHeight: 56 },
+  cita: {
+    borderLeftWidth: 3,
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginBottom: 6,
+    backgroundColor: 'rgba(127,127,127,0.22)',
+  },
+  citaAutor: { fontSize: 12, fontWeight: '700' },
+  citaTexto: { fontSize: 13, lineHeight: 18 },
+  reacciones: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  reaccion: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2 },
+  reaccionTexto: { fontSize: 13 },
+  reaccionesRapidas: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  reaccionRapida: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reaccionRapidaTexto: { fontSize: 26, lineHeight: 32 },
+  respondiendo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  respondiendoTexto: { flex: 1, minWidth: 0 },
+  respondiendoQuitar: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  pieDelVisor: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  responderEnElVisor: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 44,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  responderEnElVisorTexto: { color: '#FFFFFF', fontSize: 15 },
+  reaccionEnElVisor: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reaccionEnElVisorPuesta: { backgroundColor: 'rgba(255,255,255,0.22)' },
   // FlashList solo admite padding en contentContainerStyle (nada de gap/flexGrow).
   messages: { padding: spacing.lg },
   // La lista y, encima, el botón de «ir a lo último».

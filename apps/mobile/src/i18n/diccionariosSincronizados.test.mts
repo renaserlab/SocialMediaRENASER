@@ -73,6 +73,8 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Reaccionar y responder: «Audio» se escribe igual en inglés.
+    'chat.replyAudio',
     // Servicios, Incremento 4: formato puro («{n} min», «{desde} → {hasta}»),
     // «SA» (sábado / Saturday) y la raya de un día desconocido.
     'servicios.agenda.minutos',
@@ -141,6 +143,11 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Reaccionar y responder: «Responder», «Foto» y «Vídeo» se escriben
+    // igual en portugués.
+    'chat.reply',
+    'chat.replyPhoto',
+    'chat.replyVideo',
     // Contenido del chat: «Vídeos» se escribe igual en portugués.
     'chatViews.videos',
     // Servicios, Incremento 6: «Casos», «Caso», «Caso retirado», «Reserva

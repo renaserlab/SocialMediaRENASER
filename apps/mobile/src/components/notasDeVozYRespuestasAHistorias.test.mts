@@ -190,7 +190,9 @@ describe('sin la migración 0044 no se ofrece grabar', () => {
       'Hay que exigir un `true` explícito, no dar por buena la ausencia del campo.',
     );
     assert.ok(
-      /catch \{\s*\n\s*return \{ notasDeVoz: false, respuestasAHistorias: false \};/.test(funciones),
+      /catch \{\s*\n\s*return \{ notasDeVoz: false, respuestasAHistorias: false, reacciones: false \};/.test(
+        funciones,
+      ),
       'Un fallo de red tiene que responder que NO hay notas de voz.',
     );
   });

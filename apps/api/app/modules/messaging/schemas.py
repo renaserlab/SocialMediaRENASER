@@ -318,3 +318,5 @@ class MessagingAvailability(BaseModel):
     #: Es también lo que decide si la bandeja ofrece el filtro
     #: «Respuestas a historias».
     story_replies: bool = False
+    #: Se puede reaccionar a un mensaje y responder a uno concreto (0106).
+    reactions: bool = False

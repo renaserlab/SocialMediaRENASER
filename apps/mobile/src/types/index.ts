@@ -1,3 +1,5 @@
+import type { CitaDeMensaje, ReaccionDeMensaje } from '@/lib/reaccionesDeChat';
+
 export type ThemeMode = 'light' | 'dark';
 
 export type UserProfile = {
@@ -210,6 +212,10 @@ export type Message = {
   autorId?: string;
   /** Su nombre tal como venía con el mensaje. Una fila de tiempo real no lo trae. */
   autorNombre?: string;
+  /** Las reacciones, agrupadas. Sin ninguna, no viene. */
+  reacciones?: ReaccionDeMensaje[];
+  /** El mensaje al que responde, si responde a alguno. */
+  respuestaA?: CitaDeMensaje;
   /** Hora ya formateada para pintarla. */
   createdAt: string;
   /**

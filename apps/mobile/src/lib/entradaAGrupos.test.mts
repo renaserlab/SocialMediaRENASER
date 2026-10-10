@@ -169,7 +169,7 @@ test('los stickers no usan expresiones que el teléfono puede no entender', () =
   assert.match(chat, /esSticker\(item\.text\)/);
   // Con adjuntos nunca es un sticker.
   assert.match(chat, /!item\.attachments\?\.length &&[\s\S]{0,120}esSticker\(item\.text\)/);
-  assert.match(chat, /void mandar\(\{ texto: sticker, archivos: \[\] \}\)/);
+  assert.match(chat, /void mandar\(\{\s+texto: sticker,\s+archivos: \[\],/);
 });
 
 // --------------------------------------------------------------------------

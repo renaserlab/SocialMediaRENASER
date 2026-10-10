@@ -3222,3 +3222,130 @@ ficha, crear un grupo, crear un filtro y Contenido. Nada visto en teléfono.
 | Con un mensaje antiguo (hay que subir bastante), también llega | | | |
 | Tras llegar, el botón de «ir a lo último» devuelve al final | | | |
 | Con Contenido abierto, borrar un mensaje desde otro teléfono lo quita de la lista en unos segundos | | | |
+
+## Chat de grupo como en WhatsApp: entrar, foto, stickers, visor, reacciones y respuestas (10/10/2026)
+
+Hace falta el servidor desplegado, una compilación nueva y **dos teléfonos con
+cuentas distintas** (tres, para ver bien quién escribe y quién reacciona). Tres
+migraciones tienen que estar aplicadas antes de probar, y sin cada una pasa
+esto:
+
+- sin la **0104**, la foto del grupo, el enlace y las solicitudes no aparecen
+  (la ficha del grupo se ve como el 09/10);
+- sin la **0105**, mandar un archivo HTML falla al subirlo;
+- sin la **0106**, no aparecen ni «Responder» ni las reacciones.
+
+Nada de esta sección se ha visto en teléfono ni en la copia web. La causa del
+fallo al mandar un audio está razonada leyendo el código, no reproducida:
+la primera fila de «Archivos» es la que lo confirma o lo desmiente.
+
+### Quién escribe en el grupo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En un grupo, cada mensaje ajeno lleva la foto de quien lo escribe a su izquierda y su nombre encima | | | |
+| Cada persona tiene su color de nombre, siempre el mismo, y se lee en claro y en oscuro | | | |
+| Varios mensajes seguidos de la misma persona llevan el nombre y la foto una sola vez | | | |
+| Una foto o un vídeo sin texto también dicen de quién son | | | |
+| En un chat de dos no aparece nada de esto | | | |
+
+### Ver una foto o un vídeo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Al ampliar una foto se lee arriba de quién es y cuándo se mandó | | | |
+| Un vídeo se reproduce DENTRO de la aplicación, con sus controles, sin abrir el navegador | | | |
+| Al cerrar el vídeo se vuelve al mismo punto del chat y deja de sonar | | | |
+| «Guardar en el teléfono» pide permiso la primera vez y la foto o el vídeo aparecen en la galería | | | |
+| Desde la foto ampliada, «Responder» cierra el visor y deja la respuesta preparada | | | |
+| Desde la foto ampliada, tocar una de las tres reacciones la pone; tocarla otra vez la quita | | | |
+| En una foto propia sigue estando «Eliminar» | | | |
+
+### Archivos
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Elegir un audio del teléfono (mp3, m4a, ogg, opus) y mandarlo a un grupo: sube y llega | | | |
+| Una nota de voz grabada con el micrófono sigue funcionando en un grupo | | | |
+| Un archivo .html se puede elegir, sube y llega como archivo | | | |
+| Al tocar un .html recibido se DESCARGA; no se abre como una página | | | |
+| PDF, Word y Excel siguen subiendo como antes | | | |
+
+### Stickers
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| El botón de la carita junto al cuadro de texto abre el panel, con sus pestañas | | | |
+| Tocar uno lo manda en el acto, grande y sin burbuja | | | |
+| Escribir uno, dos o tres emoji con el teclado sale igual de grande | | | |
+| Cuatro emoji, o emoji con texto, salen como un mensaje normal | | | |
+| El panel no tapa el cuadro de texto ni se queda abierto tras elegir | | | |
+
+### Reaccionar
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Mantener pulsado un mensaje AJENO abre un menú con seis reacciones, un «+» y «Responder» | | | |
+| Mantener pulsado uno PROPIO enseña lo mismo y además «Eliminar» | | | |
+| En el menú de un mensaje ajeno no aparece «Eliminar» | | | |
+| Tocar una reacción la pinta al momento debajo del mensaje | | | |
+| El «+» abre el panel completo y lo que se elige queda como reacción | | | |
+| Reaccionar con otra cambia la anterior: nunca quedan dos de la misma persona | | | |
+| Tocar la propia debajo del mensaje la quita | | | |
+| Si reaccionan dos personas con lo mismo, sale el número («❤ 2») | | | |
+| La reacción de otra persona aparece en este teléfono en un par de segundos, sin salir del chat | | | |
+| Sin conexión, la reacción se deshace y sale un aviso | | | |
+| Un mensaje eliminado no admite reacciones ni enseña las que tenía | | | |
+| Sobre un mensaje que aún se está enviando, mantener pulsado no hace nada | | | |
+
+### Responder a un mensaje
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| «Responder» deja una franja sobre el cuadro de texto con a quién y a qué se responde | | | |
+| La X de la franja la quita y el mensaje sale normal | | | |
+| El mensaje enviado lleva la cita encima, con el nombre y el texto del original | | | |
+| Si el original era una foto, un vídeo, un audio o un archivo sin texto, la cita lo dice | | | |
+| Tocar la cita sube hasta el mensaje original y lo resalta | | | |
+| Responder a un mensaje propio dice «Respondiendo a tu mensaje», y la cita, «Tú» | | | |
+| Se puede responder con una foto, con un sticker y con solo texto | | | |
+| Si el original se elimina después, la cita dice «Mensaje eliminado», sin su texto | | | |
+| La franja no tapa el cuadro de texto con el teclado abierto | | | |
+| Todo lo anterior funciona igual en un chat de dos | | | |
+
+### Foto del grupo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra puede poner una foto desde la ficha del grupo | | | |
+| La foto sale en la bandeja, en la cabecera del chat y en la ficha, para todos los miembros | | | |
+| Se puede cambiar y quitar; al quitarla vuelve la inicial del nombre | | | |
+| Quien no administra no ve el botón de cambiarla | | | |
+
+### Enlace del grupo y solicitudes
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra enciende «Enlace del grupo» en la ficha y con «Compartir el enlace» puede mandarlo por otra aplicación | | | |
+| Los demás miembros no ven el enlace | | | |
+| Abrir el enlace en otro teléfono con la aplicación instalada enseña la tarjeta del grupo y «Pedir unirme» | | | |
+| Pedir unirse NO mete en el grupo: queda «Solicitud enviada» | | | |
+| A quien administra le llega el aviso «X quiere unirse a tu grupo «Y»» | | | |
+| Tocar ese aviso abre la ficha del grupo, con la solicitud a la vista | | | |
+| Aceptar mete a la persona: le aparece el grupo y recibe su aviso | | | |
+| Rechazar no le avisa, y no puede volver a pedirlo hasta el día siguiente | | | |
+| Quien lo pidió puede retirar su solicitud («Retirar mi solicitud») | | | |
+| «Cambiar el enlace» deja sin efecto el anterior: abrirlo ya no enseña el grupo | | | |
+| Con el grupo lleno (100), la tarjeta dice que está lleno y no deja pedirlo | | | |
+| Con un bloqueo entre quien administra y quien abre el enlace, el enlace se ve como si ya no sirviera | | | |
+
+### «Únete a mi grupo» en el perfil
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra puede encender «Mostrar en mi perfil» en la ficha del grupo | | | |
+| Al visitar su perfil aparece la sección con ese grupo, su foto, cuántos son y «Pedir unirme» | | | |
+| Un grupo que no se marcó no aparece en el perfil | | | |
+| Quien ya es miembro ve «Abrir el grupo» en vez de «Pedir unirme» | | | |
+| En el perfil propio se ven los grupos marcados, sin botón de pedir | | | |
+| Apagarlo lo quita del perfil sin tocar el grupo | | | |

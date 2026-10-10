@@ -1,3 +1,4 @@
+import { leerCita, leerReacciones } from '@/lib/reaccionesDeChat';
 import { profileImageUrl } from '@/services/storage';
 import type {
   Conversation,
@@ -85,6 +86,9 @@ export type MessageDto = {
    * blanco por una función que todavía no está desplegada.
    */
   deleted_at?: string | null;
+  /** Las reacciones y la cita, tal como las manda el servidor (0106). */
+  reactions?: unknown;
+  reply_to?: unknown;
   /**
    * A qué historia respondía, si respondía a alguna.
    *
@@ -233,6 +237,8 @@ export function toMessage(dto: MessageDto, currentUserId?: string | null): Messa
     // enseña a qué respondía. Aquí no hay nada que esconder.
     storyContext: dto.story_context ? toStoryContext(dto.story_context) : undefined,
     sesion: dto.booking_context ? toSesionDelMensaje(dto.booking_context) : undefined,
+    reacciones: leerReacciones(dto.reactions),
+    respuestaA: leerCita(dto.reply_to),
   };
 }
 

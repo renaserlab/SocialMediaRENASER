@@ -471,6 +471,7 @@ async def messaging_availability(
     return MessagingAvailability(
         voice_notes=disponible,
         story_replies=await esquema.hay_respuestas_a_historias(db),
+        reactions=await esquema.hay_reacciones_y_respuestas(db),
     )
 
 

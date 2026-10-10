@@ -22,6 +22,11 @@ import {
   parametrosDeBandeja,
   type ConsultaDeBandeja,
 } from '@/lib/bandeja';
+import {
+  leerConsultaDeReacciones,
+  leerReacciones,
+  type ReaccionDeMensaje,
+} from '@/lib/reaccionesDeChat';
 import type { Conversation, Message, MessageAttachment } from '@/types';
 
 /**
@@ -149,6 +154,8 @@ export type FuncionesDelChat = {
   notasDeVoz: boolean;
   /** Se guarda la referencia a la historia respondida. */
   respuestasAHistorias: boolean;
+  /** Se puede reaccionar a un mensaje y responder a uno concreto (0106). */
+  reacciones: boolean;
 };
 
 export const MessageRepository = {
@@ -170,13 +177,15 @@ export const MessageRepository = {
       const dto = await apiRequest<{
         voice_notes?: boolean;
         story_replies?: boolean;
+        reactions?: boolean;
       }>(`${API_V1}/conversations/availability`);
       return {
         notasDeVoz: dto.voice_notes === true,
         respuestasAHistorias: dto.story_replies === true,
+        reacciones: dto.reactions === true,
       };
     } catch {
-      return { notasDeVoz: false, respuestasAHistorias: false };
+      return { notasDeVoz: false, respuestasAHistorias: false, reacciones: false };
     }
   },
 
@@ -387,14 +396,19 @@ export const MessageRepository = {
     currentUserId?: string | null,
     attachments: AdjuntoSubido[] = [],
     storyId?: string | null,
+    /** El mensaje de esta conversación al que se responde, si se responde a uno. */
+    replyToId?: string | null,
   ): Promise<Message> {
     const dto = await apiRequest<MessageDto>(
       `${API_V1}/conversations/${conversationId}/messages`,
       {
         method: 'POST',
-        body: JSON.stringify(
-          storyId ? { body, attachments, story_id: storyId } : { body, attachments },
-        ),
+        body: JSON.stringify({
+          body,
+          attachments,
+          ...(storyId ? { story_id: storyId } : {}),
+          ...(replyToId ? { reply_to_id: replyToId } : {}),
+        }),
       },
     );
     const [mensaje] = await completar([toMessage(dto, currentUserId)]);
@@ -420,6 +434,41 @@ export const MessageRepository = {
     await apiRequest<void>(
       `${API_V1}/conversations/${conversationId}/messages/${messageId}`,
       { method: 'DELETE' },
+    );
+  },
+
+  /**
+   * Pone la reacción de quien llama (o la quita, con `null`). Devuelve cómo
+   * quedan las reacciones del mensaje según el servidor, que es quien sabe.
+   */
+  async reaccionar(
+    conversationId: string,
+    messageId: string,
+    emoji: string | null,
+  ): Promise<ReaccionDeMensaje[]> {
+    return leerReacciones(
+      await apiRequest<unknown>(
+        `${API_V1}/conversations/${conversationId}/messages/${messageId}/reaction`,
+        emoji ? { method: 'PUT', body: JSON.stringify({ emoji }) } : { method: 'DELETE' },
+      ),
+    );
+  },
+
+  /**
+   * Las reacciones de unos mensajes concretos, en UNA petición.
+   *
+   * Una reacción cambia un mensaje antiguo, y el chat solo pide los nuevos:
+   * cuando alguien reacciona, se pregunta aquí por los que hay a la vista.
+   */
+  async reaccionesDe(
+    conversationId: string,
+    messageIds: string[],
+  ): Promise<Record<string, ReaccionDeMensaje[]>> {
+    return leerConsultaDeReacciones(
+      await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/reactions/lookup`, {
+        method: 'POST',
+        body: JSON.stringify({ message_ids: messageIds }),
+      }),
     );
   },
 

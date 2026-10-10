@@ -346,6 +346,21 @@ async def test_sin_la_0106_el_chat_sigue_y_el_mensaje_se_manda_sin_cita(sin_migr
 
 
 @pytest.mark.asyncio
+async def test_la_aplicacion_pregunta_antes_de_ofrecer_reaccionar(entorno):
+    """Nunca un botón muerto: «Responder» y las reacciones solo se pintan si existen."""
+    http, _, _ = entorno
+    assert (await http.get(f"{API}/availability")).json()["reactions"] is True
+
+
+@pytest.mark.asyncio
+async def test_sin_la_0106_la_aplicacion_no_ofrece_reaccionar(sin_migracion):
+    http, _, _ = sin_migracion
+    disponibilidad = await http.get(f"{API}/availability")
+    assert disponibilidad.status_code == 200
+    assert disponibilidad.json()["reactions"] is False
+
+
+@pytest.mark.asyncio
 async def test_un_chat_de_dos_tambien_tiene_reacciones_y_citas(entorno):
     http, sesiones, identidad = entorno
     original = await _mensaje(sesiones, de=BRUNO, texto="¿Vienes?", en=DIRECTO)
