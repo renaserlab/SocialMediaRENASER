@@ -3659,3 +3659,35 @@ bibliotecas instaladas, no probándolo.
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
 | Tras cerrar sesión y entrar con otra cuenta, el muro carga sus imágenes con normalidad | | | |
+
+---
+
+## Responder deslizando (12/10/2026)
+
+Hace falta una **compilación nueva**. No hay migración ni cambio en el
+servidor. El gesto solo existe donde el menú ya ofrece «Responder».
+
+Visto en la copia web local, simulando el dedo: la burbuja se mueve hacia los
+dos lados, aparece la flecha, soltar pasado el punto deja el mensaje citado y
+soltar antes no hace nada. **Sin ver:** nada en teléfono. Lo que más importa
+mirar es que el gesto no estorbe a subir y bajar por el chat.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Deslizar un mensaje AJENO hacia la derecha: la burbuja sigue al dedo y a su izquierda aparece una flecha de responder | | | |
+| Al soltar, el mensaje queda citado sobre el cuadro de escribir, igual que con «Responder» del menú | | | |
+| Lo mismo deslizando hacia la IZQUIERDA: la flecha sale a la derecha | | | |
+| Con un mensaje PROPIO funciona igual, hacia los dos lados | | | |
+| Al llegar al punto en que soltar ya responde, el teléfono da un toque corto, uno solo | | | |
+| Soltar antes de ese punto: la burbuja vuelve a su sitio y no se cita nada | | | |
+| Al soltar, la burbuja vuelve suave a su sitio, sin rebote y sin quedarse corrida | | | |
+| Subir y bajar por el chat con el dedo encima de los mensajes NO mueve ninguna burbuja de lado | | | |
+| Desplazar la lista se siente igual de fluido que antes | | | |
+| Tocar una foto la sigue abriendo; mantener presionado sigue abriendo el menú | | | |
+| Una foto sin marco, un archivo y una nota de voz también se responden deslizando | | | |
+| Un mensaje que se está enviando, uno que no se envió y uno eliminado no se deslizan | | | |
+| Escribir y enviar: el mensaje sale con la cita encima, y tocar la cita lleva al original | | | |
+| La X de la cita, sobre el cuadro de escribir, la quita | | | |
+| En un chat de dos personas funciona igual que en un grupo | | | |
+| En iPhone: deslizar desde el borde izquierdo de la pantalla sigue volviendo atrás | | | |
+| Con «reducir movimiento» activado en el teléfono, responde igual y la burbuja vuelve de golpe | | | |
