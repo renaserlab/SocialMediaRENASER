@@ -105,6 +105,15 @@ export function alRecibirUnPush(): void {
 }
 
 /**
+ * Se silenció un chat, o se le devolvieron los avisos. La lista de
+ * conversaciones conocidas se vuelve a leer YA: sin esto, el primer mensaje
+ * tras silenciar todavía daría su aviso, con lo que se sabía de antes.
+ */
+export function alCambiarElSilencioDeUnChat(): void {
+  ponerseAlDia?.();
+}
+
+/**
  * Entrega a la lectura de la bandeja el push de una SESIÓN (se pidió, se
  * aceptó, se canceló…). Devuelve `false` si nadie escucha: entonces quien
  * llama enseña el aviso por su cuenta.
@@ -333,8 +342,9 @@ export function useAvisosEnVivo(): void {
     const alDiaConLaLista = (lista: readonly Conversation[] | null, entrando: boolean) => {
       if (!vivo || !lista) return;
       recordar(lista);
+      // Lo silenciado no se anuncia al entrar: sigue contando en la bandeja.
       const { pendientes: sinLeer, total } = conversacionesPendientes(
-        lista,
+        lista.filter((conversacion) => !conversacion.silenciada),
         seEstaViendoLaConversacion,
       );
       const decir = entrando && hayPendientesQueDecir(total, mensajesDichos);
@@ -380,6 +390,10 @@ export function useAvisosEnVivo(): void {
       remitente: string | null,
       fresca: boolean,
     ) => {
+      // UN CHAT SILENCIADO NO AVISA, tampoco con la aplicación abierta. El
+      // mensaje llega y cuenta como no leído, pero no interrumpe: es lo que
+      // ya hace el servidor con el push.
+      if (conversacion.silenciada) return;
       avisar({
         tipo: 'notificacion',
         titulo: conversacion.name,

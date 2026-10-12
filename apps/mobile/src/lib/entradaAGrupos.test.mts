@@ -91,8 +91,8 @@ test('un HTML se descarga: la dirección lleva `download` y no se duplica', () =
   assert.equal(descarga, `${firmada}&download=Mi%20p%C3%A1gina.html`);
   assert.equal(enlaceDeDescarga(descarga, 'otra.html'), descarga);
   assert.equal(enlaceDeDescarga('https://x.example/a.html', null), 'https://x.example/a.html?download=archivo');
-  // En el chat y en Contenido, un HTML se abre SIEMPRE por ese camino.
-  for (const pantalla of ['../screens/ChatScreen.tsx', '../screens/ContenidoDeChatScreen.tsx']) {
+  // En el chat y en el contenido compartido, un HTML se abre SIEMPRE por ese camino.
+  for (const pantalla of ['../screens/ChatScreen.tsx', '../components/chat/PestanasDeContenido.tsx']) {
     assert.match(
       leer(pantalla),
       /esHtml\(adjunto\.mimeType, adjunto\.fileName\)\s*\? enlaceDeDescarga\(adjunto\.url, adjunto\.fileName\)/,
@@ -208,8 +208,10 @@ test('el vídeo se reproduce dentro de la aplicación, no fuera', () => {
   const chat = leer('../screens/ChatScreen.tsx');
   assert.doesNotMatch(chat, /if \(adjunto\.kind === 'video'\) abrirFuera\(adjunto\);/);
   assert.match(chat, /if \(adjunto\.kind === 'video' && !estaEnElServidor\(adjunto\)\) return;/);
-  const contenido = leer('../screens/ContenidoDeChatScreen.tsx');
-  assert.doesNotMatch(contenido, /if \(adjunto\.kind === 'video'\) abrirFuera\(adjunto\);/);
+  // En el contenido compartido, un vídeo se abre en el mismo visor que una foto.
+  const contenido = leer('../components/chat/PestanasDeContenido.tsx');
+  assert.doesNotMatch(contenido, /kind === 'video'\) abrir(Fuera|Archivo)\(/);
+  assert.match(contenido, /if \(adjunto\.url\) setAmpliado\(tesela\);/);
   const visor = leer('../components/chat/VisorDeAdjunto.tsx');
   assert.match(visor, /useVideoPlayer\(uri,/);
   assert.match(visor, /nativeControls/);
@@ -217,12 +219,15 @@ test('el vídeo se reproduce dentro de la aplicación, no fuera', () => {
 });
 
 test('al ampliar una foto o un vídeo se dice de quién es y cuándo', () => {
-  for (const pantalla of ['../screens/ChatScreen.tsx', '../screens/ContenidoDeChatScreen.tsx']) {
-    const codigo = leer(pantalla);
-    assert.match(codigo, /<VisorDeAdjunto\s+adjunto=\{fotoAmpliada\?\.url \? fotoAmpliada : null\}/, pantalla);
-    assert.match(codigo, /const mensajeDelVisor = fotoAmpliada/, pantalla);
-  }
   const chat = leer('../screens/ChatScreen.tsx');
+  assert.match(chat, /<VisorDeAdjunto\s+adjunto=\{fotoAmpliada\?\.url \? fotoAmpliada : null\}/);
+  assert.match(chat, /const mensajeDelVisor = fotoAmpliada/);
+  // En el contenido compartido la tesela ya lleva su mensaje: de ahí salen los dos.
+  const contenido = leer('../components/chat/PestanasDeContenido.tsx');
+  assert.match(
+    contenido,
+    /<VisorDeAdjunto\s+adjunto=\{ampliado\?\.adjunto\.url \? ampliado\.adjunto : null\}\s+autor=\{ampliado \? quien\(ampliado\.mensaje\) : ''\}\s+fecha=\{ampliado \? fechaLegible\(ampliado\.mensaje\.fechaIso\) : undefined\}/,
+  );
   assert.match(chat, /etiqueta: t\('chat\.saveMedia'\)/);
   // Borrar desde el visor solo se ofrece sobre lo propio; el permiso es del servidor.
   assert.match(chat, /mensajeDelVisor\.sender === 'me' && !mensajeDelVisor\.estado/);

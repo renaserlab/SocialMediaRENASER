@@ -28,6 +28,7 @@ import { CabeceraDeChat } from '@/components/CabeceraDeChat';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { Avatar } from '@/components/Avatar';
+import { HojaDeFondoDeChat } from '@/components/chat/HojaDeFondoDeChat';
 import { HojaDeStickers } from '@/components/chat/HojaDeStickers';
 import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
 import { ListRow } from '@/components/ListRow';
@@ -60,10 +61,12 @@ import {
   RESALTE_MS,
   tomarSalto,
 } from '@/lib/saltoDeChat';
+import { alCambiarElSilencioDeUnChat } from '@/hooks/useAvisosEnVivo';
 import { afterSheetClose } from '@/lib/afterSheetClose';
+import { colorDeFondo, veloSobreLaFoto } from '@/lib/fondoDeChat';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
-import { retirarAvisosDe } from '@/lib/toast';
+import { retirarAvisosDe, toast } from '@/lib/toast';
 import {
   alSaberDeUnMensaje,
   marcarConversacionLeida,
@@ -93,12 +96,15 @@ import {
 import { formatTime, toMessageFromRow } from '@/mappers/messageMapper';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { BookingRepository, type Sesion } from '@/repositories/BookingRepository';
+import { GroupRepository } from '@/repositories/GroupRepository';
 import {
   MessageRepository,
   MENSAJES_POR_PAGINA,
+  SIN_FUNCIONES,
   type FuncionesDelChat,
 } from '@/repositories/MessageRepository';
 import { ApiError } from '@/services/api';
+import { useFondoDeChatStore } from '@/store/useFondoDeChatStore';
 import {
   elegirArchivo,
   elegirFotosOVideos,
@@ -309,11 +315,26 @@ export function ChatScreen() {
     dejar que alguien hable treinta segundos para después perderlo todo con un
     503. Un fallo de red también responde `false`, por lo mismo.
   */
-  const [funciones, setFunciones] = useState<FuncionesDelChat>({
-    notasDeVoz: false,
-    respuestasAHistorias: false,
-    reacciones: false,
-  });
+  const [funciones, setFunciones] = useState<FuncionesDelChat>(SIN_FUNCIONES);
+
+  /*
+    EL MENÚ DEL CHAT (los tres puntos) y lo que se abre desde él.
+
+    `silencioPuesto` es lo que se acaba de pulsar, que manda sobre lo último
+    leído hasta que el servidor lo confirme: la campana no puede tardar una
+    vuelta de red en cambiar.
+  */
+  const [opcionesAbiertas, setOpcionesAbiertas] = useState(false);
+  const [fondoAbierto, setFondoAbierto] = useState(false);
+  const [silencioPuesto, setSilencioPuesto] = useState<boolean | null>(null);
+  const [haciendoOpcion, setHaciendoOpcion] = useState(false);
+
+  // El fondo que esta persona eligió en este teléfono. Se lee una vez.
+  const fondoDelChat = useFondoDeChatStore((estado) => estado.fondo);
+  const leerFondoDelChat = useFondoDeChatStore((estado) => estado.leer);
+  useEffect(() => {
+    void leerFondoDelChat();
+  }, [leerFondoDelChat]);
 
   /*
     Lo último que se intentó enviar DESDE CADA BURBUJA, para poder repetirlo.
@@ -1356,6 +1377,116 @@ export function ChatScreen() {
    * descarta POR SU CAMINO —`cancelar` cierra el micrófono, `eliminar` suelta
    * la previa, y los dos borran el fichero— y solo entonces se navega.
    */
+  const estaSilenciada = silencioPuesto ?? infoDeConversacion?.silenciada ?? false;
+  useEffect(() => {
+    setSilencioPuesto(null);
+  }, [infoDeConversacion?.silenciada]);
+
+  /** Cierra el menú y espera: nada se abre encima de una hoja que se va. */
+  const trasElMenu = async () => {
+    setOpcionesAbiertas(false);
+    await afterSheetClose();
+  };
+
+  const nombreDelChat = (esGrupo && infoDeConversacion?.titulo) || headerName;
+
+  const abrirContenido = async () => {
+    if (!params.id) return;
+    await trasElMenu();
+    // En un grupo, lo compartido está en su ficha, junto a los miembros.
+    router.push(
+      esGrupo
+        ? { pathname: '/chat/grupo/[id]' as never, params: { id: params.id } }
+        : { pathname: '/chat/contenido/[id]' as never, params: { id: params.id, name: nombreDelChat } },
+    );
+  };
+
+  const abrirBusqueda = async () => {
+    if (!params.id) return;
+    await trasElMenu();
+    router.push({
+      pathname: '/chat/buscar/[id]' as never,
+      params: { id: params.id, name: nombreDelChat },
+    });
+  };
+
+  const abrirFondo = async () => {
+    await trasElMenu();
+    setFondoAbierto(true);
+  };
+
+  const alternarSilencio = async () => {
+    if (!params.id || haciendoOpcion) return;
+    const quiere = !estaSilenciada;
+    await trasElMenu();
+    setHaciendoOpcion(true);
+    setSilencioPuesto(quiere);
+    try {
+      await MessageRepository.silenciar(params.id, quiere);
+      toast(t(quiere ? 'chatMenu.muted' : 'chatMenu.unmuted'), quiere ? 'bell-off' : 'bell');
+      refrescarInfo();
+      alCambiarElSilencioDeUnChat();
+    } catch {
+      setSilencioPuesto(null);
+      notify(t('chatMenu.failedTitle'), t('common.tryAgainSoon'));
+    } finally {
+      setHaciendoOpcion(false);
+    }
+  };
+
+  /**
+   * Vaciar el chat PARA QUIEN LO PIDE. Se pregunta antes, porque no tiene
+   * vuelta atrás para esa persona, y se dice lo que no hace: no le borra
+   * nada a nadie más.
+   */
+  const vaciarElChat = async () => {
+    if (!params.id || haciendoOpcion) return;
+    await trasElMenu();
+    const seguro = await confirm({
+      title: t('chatMenu.clearTitle'),
+      message: t(esGrupo ? 'chatMenu.clearBodyGroup' : 'chatMenu.clearBody'),
+      confirmLabel: t('chatMenu.clear'),
+      destructive: true,
+    });
+    if (!seguro) return;
+    setHaciendoOpcion(true);
+    try {
+      await MessageRepository.vaciar(params.id);
+      // Lo que había en pantalla ya no se le enseña; se vuelve a pedir el
+      // historial, que ahora empieza donde lo vació.
+      setRespondiendoA(null);
+      setRemoteMessages([]);
+      setIntentoDeCarga((n) => n + 1);
+      toast(t('chatMenu.cleared'), 'check');
+    } catch {
+      notify(t('chatMenu.failedTitle'), t('common.tryAgainSoon'));
+    } finally {
+      setHaciendoOpcion(false);
+    }
+  };
+
+  const salirDelGrupo = async () => {
+    if (!params.id || !currentUserId || haciendoOpcion) return;
+    await trasElMenu();
+    const seguro = await confirm({
+      title: t('groups.leaveTitle'),
+      message: t('groups.leaveBody'),
+      confirmLabel: t('groups.leave'),
+      destructive: true,
+    });
+    if (!seguro) return;
+    setHaciendoOpcion(true);
+    try {
+      await GroupRepository.quitar(params.id, currentUserId);
+      // Ya no se pertenece: a este chat no se puede volver.
+      router.replace('/messages' as never);
+    } catch {
+      notify(t('chatMenu.failedTitle'), t('common.tryAgainSoon'));
+    } finally {
+      setHaciendoOpcion(false);
+    }
+  };
+
   const salirDelChat = async () => {
     if (notaEnJuego) {
       const ok = await confirm({
@@ -1862,22 +1993,10 @@ export function ChatScreen() {
             : undefined
         }
         onBack={() => void salirDelChat()}
-        // El contenido por vistas se pide al servidor: sin él (modo de
-        // muestra) no hay nada que abrir, y el botón no se pinta.
-        alAbrirContenido={
-          supabaseEnabled && params.id
-            ? () =>
-                router.push({
-                  // `as never`: los tipos de rutas se generan al arrancar Expo
-                  // y todavía no conocen esta, igual que `/disponibilidad`.
-                  pathname: '/chat/contenido/[id]' as never,
-                  params: {
-                    id: params.id,
-                    name: (esGrupo && infoDeConversacion?.titulo) || headerName,
-                  },
-                })
-            : undefined
-        }
+        // Lo del menú se le pide al servidor: sin él (modo de muestra) no
+        // hay nada que abrir, y los tres puntos no se pintan.
+        alAbrirMenu={supabaseEnabled && params.id ? () => setOpcionesAbiertas(true) : undefined}
+        silenciada={estaSilenciada}
       />
       {/*
         La franja roja solo cuando YA hay algo pintado (una burbuja propia, un
@@ -1891,7 +2010,33 @@ export function ChatScreen() {
         </Text>
       ) : null}
       <SinTecladoDelante>
-        <View style={styles.zonaDeMensajes} onLayout={alMedirLaLista}>
+        <View
+          style={[
+            styles.zonaDeMensajes,
+            { backgroundColor: colorDeFondo(fondoDelChat, mode === 'dark', colors.background) },
+          ]}
+          onLayout={alMedirLaLista}
+        >
+        {/*
+          EL FONDO QUE ELIGIÓ ESTA PERSONA. Una foto va detrás de la lista y
+          bajo un velo: puede ser cualquier cosa, y lo que no puede es dejar
+          sin leer la hora de un mensaje. No recibe toques.
+        */}
+        {fondoDelChat.tipo === 'foto' ? (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <Image
+              source={{ uri: fondoDelChat.uri }}
+              resizeMode="cover"
+              style={StyleSheet.absoluteFill}
+            />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: veloSobreLaFoto(mode === 'dark') },
+              ]}
+            />
+          </View>
+        ) : null}
         <FlashList
           ref={lista}
           data={elementos}
@@ -2594,6 +2739,54 @@ export function ChatScreen() {
           )}
         </View>
       </SinTecladoDelante>
+
+      {/*
+        EL MENÚ DEL CHAT. Cada fila hace algo: «Silenciar» y «Vaciar chat»
+        solo salen si el servidor las tiene, y «Salir del grupo», solo en un
+        grupo que no se administra (quien lo lleva no puede dejarlo solo).
+      */}
+      <BottomSheet visible={opcionesAbiertas} onClose={() => setOpcionesAbiertas(false)}>
+        <ListRow
+          title={t(esGrupo ? 'chatMenu.groupInfo' : 'chatMenu.content')}
+          leftIcon={esGrupo ? 'users' : 'grid'}
+          onPress={() => void abrirContenido()}
+        />
+        <ListRow
+          title={t('chatMenu.search')}
+          leftIcon="search"
+          onPress={() => void abrirBusqueda()}
+        />
+        {funciones.preferencias ? (
+          <ListRow
+            title={t(estaSilenciada ? 'chatMenu.unmute' : 'chatMenu.mute')}
+            leftIcon={estaSilenciada ? 'bell' : 'bell-off'}
+            onPress={() => void alternarSilencio()}
+          />
+        ) : null}
+        <ListRow
+          title={t('chatBackground.title')}
+          leftIcon="image"
+          onPress={() => void abrirFondo()}
+        />
+        {funciones.preferencias ? (
+          <ListRow
+            title={t('chatMenu.clear')}
+            leftIcon="trash-2"
+            destructive
+            onPress={() => void vaciarElChat()}
+          />
+        ) : null}
+        {esGrupo && infoDeConversacion && !infoDeConversacion.puedoAdministrar ? (
+          <ListRow
+            title={t('groups.leave')}
+            leftIcon="log-out"
+            destructive
+            onPress={() => void salirDelGrupo()}
+          />
+        ) : null}
+      </BottomSheet>
+
+      <HojaDeFondoDeChat visible={fondoAbierto} onClose={() => setFondoAbierto(false)} />
 
       <BottomSheet visible={menuAbierto} onClose={() => setMenuAbierto(false)}>
         <ListRow

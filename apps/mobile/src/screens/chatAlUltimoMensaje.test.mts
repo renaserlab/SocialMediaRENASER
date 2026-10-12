@@ -94,7 +94,11 @@ describe('la conversación sigue el último mensaje', () => {
     assert.match(CHAT, /<FlashList\s+ref=\{lista\}/);
     assert.match(CHAT, /onScroll=\{alDesplazar\}/);
     assert.match(CHAT, /onContentSizeChange=\{alCrecerElContenido\}/);
-    assert.match(CHAT, /<View style=\{styles\.zonaDeMensajes\} onLayout=\{alMedirLaLista\}>/);
+    // La zona de los mensajes lleva además el fondo que eligió la persona.
+    assert.match(
+      CHAT,
+      /<View\s+style=\{\[\s*styles\.zonaDeMensajes,[\s\S]{0,200}?\]\}\s*onLayout=\{alMedirLaLista\}\s*>/,
+    );
     // El botón solo existe cuando se ha subido, y va a lo último.
     assert.match(CHAT, /\{lejosDelFinal \? \(\s*<Pulsable\s+onPress=\{\(\) => bajarAlFinal\(true\)\}/);
     assert.match(CHAT, /accessibilityLabel=\{t\('chat\.goToLatest'\)\}/);

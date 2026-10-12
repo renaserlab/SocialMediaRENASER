@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { Feather } from '@expo/vector-icons';
 
 import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
 import { Pulsable } from '@/components/Pulsable';
@@ -121,16 +122,27 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
       />
 
       <View style={styles.centro}>
-        <Text
-          numberOfLines={1}
-          style={styles.nombre}
-          color={colors.text}
-          // Lo no leído en negrita, como en cualquier bandeja: el globo del
-          // número es pequeño y se pierde al ojear la lista de arriba abajo.
-          weight={sinLeer ? '800' : '600'}
-        >
-          {conversacion.name}
-        </Text>
+        <View style={styles.lineaDeNombre}>
+          <Text
+            numberOfLines={1}
+            style={styles.nombre}
+            color={colors.text}
+            // Lo no leído en negrita, como en cualquier bandeja: el globo del
+            // número es pequeño y se pierde al ojear la lista de arriba abajo.
+            weight={sinLeer ? '800' : '600'}
+          >
+            {conversacion.name}
+          </Text>
+          {/* Silenciado: no avisa porque así se pidió, no porque falle. */}
+          {conversacion.silenciada ? (
+            <Feather
+              name="bell-off"
+              size={13}
+              color={colors.textMuted}
+              accessibilityLabel={t('chatMenu.mutedBadge')}
+            />
+          ) : null}
+        </View>
 
         {/*
           El último mensaje y, pegada a él, la hora. El resumen es el que se
@@ -197,7 +209,8 @@ const styles = StyleSheet.create({
   // `minWidth: 0` para que un nombre o un resumen largos se recorten en vez de
   // empujar el globo fuera de la pantalla.
   centro: { flex: 1, minWidth: 0, gap: 2 },
-  nombre: { fontSize: 15, lineHeight: 20 },
+  lineaDeNombre: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  nombre: { fontSize: 15, lineHeight: 20, flexShrink: 1 },
   lineaDeResumen: { flexDirection: 'row', alignItems: 'center' },
   // `flexShrink` en el resumen y no en la hora: se recorta el mensaje.
   resumen: { fontSize: 14, lineHeight: 19, flexShrink: 1 },

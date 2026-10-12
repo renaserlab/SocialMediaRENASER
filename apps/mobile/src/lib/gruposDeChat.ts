@@ -49,6 +49,8 @@ export type InfoDeConversacion = {
   ajustes: AjustesDeGrupo | null;
   /** Solicitudes que esperan respuesta. Cero para quien no administra. */
   pendientes: number;
+  /** Quien mira la tiene silenciada: no recibe sus avisos. Es suyo. */
+  silenciada: boolean;
 };
 
 const esObjeto = (v: unknown): v is Record<string, unknown> =>
@@ -119,6 +121,7 @@ export function leerInfo(bruto: unknown): InfoDeConversacion | null {
       typeof bruto.max_members === 'number' && bruto.max_members > 0
         ? bruto.max_members
         : MAX_MIEMBROS_DE_GRUPO,
+    silenciada: bruto.muted === true,
   };
 }
 

@@ -23,6 +23,7 @@ export type ConversationDto = {
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  muted?: boolean;
   updated_at: string;
   /**
    * Las etiquetas del CRM de QUIEN PREGUNTA (migración 0045).
@@ -155,6 +156,7 @@ export function toConversation(dto: ConversationDto): Conversation {
     esGrupo: dto.kind === 'group',
     subtitle: dto.last_message ?? 'Sin mensajes aún',
     unread: dto.unread_count,
+    silenciada: dto.muted === true,
     messages: [],
     time: formatTime(dto.last_message_at),
     // El backend ya manda al otro participante con su foto; antes se descartaba

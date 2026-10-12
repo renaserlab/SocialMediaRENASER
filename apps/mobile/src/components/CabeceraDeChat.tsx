@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { Avatar } from '@/components/Avatar';
@@ -106,11 +107,15 @@ type Props = {
   resolverEnElServidor: boolean;
   onBack: () => void;
   /**
-   * Abre el contenido del chat por vistas (fotos, archivos, enlaces…).
+   * Abre el menú del chat (los tres puntos): contenido, buscar, silenciar,
+   * fondo, vaciar y, en un grupo, salir.
    *
-   * OPCIONAL: sin él la cabecera queda exactamente como estaba, sin botón.
+   * OPCIONAL: sin él la cabecera queda sin botón. Es lo que pasa en el modo
+   * de muestra, donde no hay servidor al que pedirle nada de eso.
    */
-  alAbrirContenido?: () => void;
+  alAbrirMenu?: () => void;
+  /** Quien mira tiene silenciado este chat: se dice junto al nombre. */
+  silenciada?: boolean;
   /**
    * La conversación es un GRUPO: se enseña su nombre y cuántos son, en vez
    * de «la otra persona», que en un grupo no existe.
@@ -137,7 +142,8 @@ export function CabeceraDeChat({
   idDeRespaldo,
   resolverEnElServidor,
   onBack,
-  alAbrirContenido,
+  alAbrirMenu,
+  silenciada = false,
   grupo,
   alAbrirGrupo,
 }: Props) {
@@ -175,13 +181,23 @@ export function CabeceraDeChat({
   const idDelPerfil = participante?.id ?? idDeRespaldo;
   const nombre = participante?.nombre || nombreDeRespaldo;
   const avatar = participante?.avatarUrl ?? avatarDeRespaldo;
+  // Una campana tachada junto al nombre: el chat no avisa porque se silenció,
+  // no porque se haya roto nada.
+  const campana = silenciada ? (
+    <Feather
+      name="bell-off"
+      size={13}
+      color={colors.textMuted}
+      accessibilityLabel={t('chatMenu.mutedBadge')}
+    />
+  ) : null;
 
   return (
     <AppHeader
       onBack={onBack}
-      rightIcon={alAbrirContenido ? 'grid' : undefined}
-      onRightPress={alAbrirContenido}
-      rightLabel={alAbrirContenido ? t('chatViews.open') : undefined}
+      rightIcon={alAbrirMenu ? 'more-vertical' : undefined}
+      onRightPress={alAbrirMenu}
+      rightLabel={alAbrirMenu ? t('chatMenu.open') : undefined}
       center={
         grupo ? (
           <Pressable
@@ -194,9 +210,12 @@ export function CabeceraDeChat({
           >
             <Avatar size={30} image={grupo.avatarUrl ?? null} name={grupo.titulo} />
             <View style={styles.textosDeGrupo}>
-              <Text numberOfLines={1} weight="700" color={colors.text} style={styles.nombre}>
-                {grupo.titulo}
-              </Text>
+              <View style={styles.conCampana}>
+                <Text numberOfLines={1} weight="700" color={colors.text} style={styles.nombre}>
+                  {grupo.titulo}
+                </Text>
+                {campana}
+              </View>
               <Text numberOfLines={1} color={colors.textMuted} style={styles.miembros}>
                 {grupo.pendientes
                   ? t('groupJoin.pendingBadge', { n: grupo.pendientes })
@@ -224,6 +243,7 @@ export function CabeceraDeChat({
           >
             {nombre}
           </Text>
+          {campana}
         </Pressable>
         )
       }
@@ -243,5 +263,6 @@ const styles = StyleSheet.create({
   },
   nombre: { fontSize: 15, flexShrink: 1 },
   textosDeGrupo: { minWidth: 0, flexShrink: 1 },
+  conCampana: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
   miembros: { fontSize: 11 },
 });

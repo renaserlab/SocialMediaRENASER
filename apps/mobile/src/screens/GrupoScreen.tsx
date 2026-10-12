@@ -6,30 +6,29 @@ import { Feather } from '@expo/vector-icons';
 import { AppHeader } from '@/components/AppHeader';
 import { AppScreen } from '@/components/AppScreen';
 import { FotoDelGrupo } from '@/components/chat/FotoDelGrupo';
-import { PuertasDelGrupo } from '@/components/chat/PuertasDelGrupo';
+import { PestanasDeContenido } from '@/components/chat/PestanasDeContenido';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { InlineError } from '@/components/InlineError';
-import { Input } from '@/components/Input';
 import { ListRow } from '@/components/ListRow';
 import { SelectorDePersonas } from '@/components/SelectorDePersonas';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
+import { alCambiarElSilencioDeUnChat } from '@/hooks/useAvisosEnVivo';
+import { useFuncionesDelChat } from '@/hooks/useFuncionesDelChat';
 import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm } from '@/lib/confirm';
 import {
   MAX_PERSONAS_POR_TANDA,
-  MAX_TITULO_DE_GRUPO,
   claveDelFalloDeGrupo,
-  juzgarTitulo,
-  limpiarTitulo,
   type MiembroDeGrupo,
 } from '@/lib/gruposDeChat';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
 import { GroupRepository } from '@/repositories/GroupRepository';
+import { MessageRepository } from '@/repositories/MessageRepository';
 import { ApiError } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
@@ -39,12 +38,18 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import type { PersonaEtiquetada } from '@/types';
 
 /**
- * Un grupo por dentro: su nombre, quién está y lo que se puede hacer con él.
+ * Un grupo por dentro, como la ficha de cualquier mensajería: su foto y su
+ * nombre, tres acciones a mano —escribir, silenciar, salir— y, debajo, sus
+ * pestañas: «Miembros» y lo que se ha compartido («Media», «Enlaces»,
+ * «Archivos», «Audios» y los filtros del grupo).
  *
  * LO QUE SE ENSEÑA DEPENDE DE QUIÉN MIRA, PERO EL PERMISO ES DEL SERVIDOR.
- * Quien administra ve cambiar el nombre, añadir y sacar gente, y los filtros;
- * los demás ven la lista y «Salir del grupo». Esconder un botón es comodidad:
- * cada cambio se vuelve a comprobar al llegar a la API.
+ * Quien administra ve además el lápiz —nombre, enlace, filtros—, añadir y
+ * sacar gente; los demás, «Salir». Esconder un botón es comodidad: cada
+ * cambio se vuelve a comprobar al llegar a la API.
+ *
+ * NUNCA UN BOTÓN MUERTO. «Silenciar» solo se ofrece si el servidor sabe
+ * silenciar, y cada pestaña de contenido, solo si tiene algo dentro.
  */
 export function GrupoScreen() {
   const { colors } = useAppTheme();
@@ -55,24 +60,22 @@ export function GrupoScreen() {
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id ?? null);
 
-  const { info, refrescar } = useInfoDeConversacion(
-    conversationId,
-    currentUserId,
-    supabaseEnabled && !!conversationId,
-  );
+  const activo = supabaseEnabled && !!conversationId;
+  const { info, refrescar } = useInfoDeConversacion(conversationId, currentUserId, activo);
+  const funciones = useFuncionesDelChat(activo);
 
-  const [titulo, setTitulo] = useState('');
   const [nuevas, setNuevas] = useState<PersonaEtiquetada[]>([]);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
-
-  // El nombre del formulario sigue al del grupo mientras no se esté editando.
-  const tituloDelGrupo = info?.titulo ?? '';
+  // Lo que se acaba de pulsar manda sobre lo último leído hasta que el
+  // servidor lo confirme: el botón no puede tardar una vuelta de red en cambiar.
+  const [silenciada, setSilenciada] = useState<boolean | null>(null);
+  const estaSilenciada = silenciada ?? info?.silenciada ?? false;
   useEffect(() => {
-    setTitulo(tituloDelGrupo);
-  }, [tituloDelGrupo]);
+    setSilenciada(null);
+  }, [info?.silenciada]);
 
-  // Al volver de añadir filtros o de otra pantalla, la lista está al día.
+  // Al volver de editar el grupo o de sus filtros, la ficha está al día.
   const yaTuvoElFoco = React.useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -100,15 +103,6 @@ export function GrupoScreen() {
     },
     [ocupado, t],
   );
-
-  const guardarTitulo = useCallback(async () => {
-    const limpio = limpiarTitulo(titulo);
-    if (juzgarTitulo(titulo) !== 'vale' || limpio === tituloDelGrupo) return;
-    if (await hacer('titulo', () => GroupRepository.renombrar(conversationId, limpio))) {
-      toast(t('groups.renamed'));
-      refrescar();
-    }
-  }, [titulo, tituloDelGrupo, hacer, conversationId, t, refrescar]);
 
   const anadir = useCallback(async () => {
     if (nuevas.length === 0) return;
@@ -151,6 +145,18 @@ export function GrupoScreen() {
     }
   }, [currentUserId, hacer, conversationId, router, t]);
 
+  const alternarSilencio = useCallback(async () => {
+    const quiere = !estaSilenciada;
+    setSilenciada(quiere);
+    if (await hacer('silencio', () => MessageRepository.silenciar(conversationId, quiere))) {
+      toast(t(quiere ? 'chatMenu.muted' : 'chatMenu.unmuted'));
+      refrescar();
+      alCambiarElSilencioDeUnChat();
+    } else {
+      setSilenciada(null);
+    }
+  }, [estaSilenciada, hacer, conversationId, t, refrescar]);
+
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
   if (info === undefined) {
@@ -174,197 +180,248 @@ export function GrupoScreen() {
     );
   }
 
-  const cambioDeTitulo =
-    juzgarTitulo(titulo) === 'vale' && limpiarTitulo(titulo) !== tituloDelGrupo;
   const cabenMas = info.miembros.length < info.maximoDeMiembros;
+  const abrirAjustes = () =>
+    router.push({ pathname: '/chat/ajustes-de-grupo/[id]' as never, params: { id: conversationId } });
+  // Al chat que está debajo; si se llegó aquí sin él (por un aviso), se abre.
+  const irAlChat = () =>
+    router.dismissTo({ pathname: '/chat/[id]', params: { id: conversationId, name: info.titulo } });
 
-  return (
-    <AppScreen>
-      <AppHeader title={t('groups.infoTitle')} onBack={volver} />
-      <View style={styles.cuerpo}>
-        <View style={styles.cabecera}>
-          {/* Para quien administra, la foto es también el botón de cambiarla. */}
-          <FotoDelGrupo info={info} alCambiar={refrescar} alFallar={setFallo} />
-          <Text weight="800" style={styles.titulo} numberOfLines={2}>
-            {info.titulo}
-          </Text>
-          <Text color={colors.textMuted}>
-            {t('groups.membersCount', { n: info.miembros.length })}
-          </Text>
-        </View>
+  const acciones: {
+    clave: string;
+    icono: keyof typeof Feather.glyphMap;
+    etiqueta: string;
+    alPulsar: () => void;
+    peligro?: boolean;
+  }[] = [
+    { clave: 'mensaje', icono: 'message-circle', etiqueta: t('groups.actionMessage'), alPulsar: irAlChat },
+    ...(funciones.preferencias
+      ? [
+          {
+            clave: 'silencio',
+            icono: (estaSilenciada ? 'bell' : 'bell-off') as keyof typeof Feather.glyphMap,
+            etiqueta: t(estaSilenciada ? 'chatMenu.unmute' : 'chatMenu.mute'),
+            alPulsar: () => void alternarSilencio(),
+          },
+        ]
+      : []),
+    // Quien administra no puede salir —el grupo quedaría sin nadie que lo
+    // lleve—: en su sitio tiene «Editar».
+    info.puedoAdministrar
+      ? { clave: 'editar', icono: 'edit-2', etiqueta: t('groups.actionEdit'), alPulsar: abrirAjustes }
+      : {
+          clave: 'salir',
+          icono: 'log-out',
+          etiqueta: t('groups.actionLeave'),
+          alPulsar: () => void salir(),
+          peligro: true,
+        },
+  ];
 
-        {fallo ? <InlineError message={fallo} /> : null}
+  const cabecera = (
+    <View style={styles.cabecera}>
+      {/* Para quien administra, la foto es también el botón de cambiarla. */}
+      <FotoDelGrupo info={info} alCambiar={refrescar} alFallar={setFallo} />
+      <Text weight="800" style={styles.titulo} numberOfLines={2}>
+        {info.titulo}
+      </Text>
+      <Text color={colors.textMuted}>{t('groups.membersCount', { n: info.miembros.length })}</Text>
 
-        {info.puedoAdministrar ? (
-          <View style={styles.seccion}>
-            <Input
-              label={t('groups.titleLabel')}
-              value={titulo}
-              onChangeText={setTitulo}
-              maxLength={MAX_TITULO_DE_GRUPO}
-              returnKeyType="done"
-              onSubmitEditing={() => void guardarTitulo()}
+      <View style={styles.acciones}>
+        {acciones.map((accion) => (
+          <Pressable
+            key={accion.clave}
+            onPress={accion.alPulsar}
+            disabled={!!ocupado}
+            accessibilityRole="button"
+            accessibilityLabel={accion.etiqueta}
+            style={[styles.accion, { backgroundColor: colors.surfaceAlt }]}
+          >
+            <Feather
+              name={accion.icono}
+              size={20}
+              color={accion.peligro ? colors.danger : colors.text}
             />
-            {cambioDeTitulo ? (
-              <Button
-                label={t('groups.saveTitle')}
-                variant="secondary"
-                onPress={() => void guardarTitulo()}
-                loading={ocupado === 'titulo'}
-                disabled={!!ocupado}
-              />
-            ) : null}
-          </View>
-        ) : null}
+            <Text
+              weight="600"
+              numberOfLines={1}
+              color={accion.peligro ? colors.danger : colors.text}
+              style={styles.accionTexto}
+            >
+              {accion.etiqueta}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
+      {fallo ? <InlineError message={fallo} /> : null}
+
+      {/* A quien administra se le dice que hay alguien esperando: se responde
+          en «Editar», donde están el enlace y las solicitudes. */}
+      {info.puedoAdministrar && info.pendientes > 0 ? (
         <View style={[styles.tarjeta, { borderColor: colors.border }]}>
           <ListRow
-            title={t('groups.content')}
-            subtitle={t('groups.contentHint')}
-            leftIcon="grid"
+            title={t('groupJoin.requestsTitle', { n: info.pendientes })}
+            subtitle={t('groupJoin.requestsHint')}
+            leftIcon="user-plus"
             rightIcon="chevron-right"
-            onPress={() =>
-              router.push({
-                pathname: '/chat/contenido/[id]' as never,
-                params: { id: conversationId, name: info.titulo },
-              })
-            }
+            onPress={abrirAjustes}
           />
-          {info.puedoAdministrar ? (
-            <ListRow
-              title={t('groupFilters.title')}
-              subtitle={t('groupFilters.hint')}
-              leftIcon="sliders"
-              rightIcon="chevron-right"
-              onPress={() =>
-                router.push({
-                  pathname: '/chat/filtros/[id]' as never,
-                  params: { id: conversationId },
-                })
-              }
-            />
-          ) : null}
         </View>
+      ) : null}
+    </View>
+  );
 
-        {/*
-          CÓMO SE ENTRA AL GRUPO: las solicitudes que esperan, si se enseña
-          en el perfil y el enlace. Solo para quien administra, y solo
-          si el servidor conoce estas funciones; si no, no pinta nada.
-        */}
-        <PuertasDelGrupo info={info} alCambiar={refrescar} />
-
+  const miembros = (
+    <View style={styles.miembros}>
+      {info.puedoAdministrar ? (
         <View style={styles.seccion}>
-          <Text weight="700">{t('groups.members')}</Text>
-          {info.miembros.map((miembro) => {
-            const soyYo = miembro.id === currentUserId;
-            return (
-              <View key={miembro.id} style={styles.miembro}>
-                <Pressable
-                  onPress={() => irAlPerfil(router, miembro.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('chat.openProfile', { nombre: miembro.nombre })}
-                  style={styles.persona}
-                >
-                  <Avatar
-                    size={40}
-                    image={profileImageUrl(miembro.avatarPath) ?? null}
-                    name={miembro.nombre}
-                  />
-                  <View style={styles.textos}>
-                    <Text numberOfLines={1} weight="600">
-                      {soyYo ? t('groups.youNamed', { nombre: miembro.nombre }) : miembro.nombre}
-                    </Text>
-                    {miembro.administra ? (
-                      <Text color={colors.textMuted} style={styles.detalle}>
-                        {t('groups.admin')}
-                      </Text>
-                    ) : miembro.usuario ? (
-                      <Text color={colors.textMuted} style={styles.detalle} numberOfLines={1}>
-                        @{miembro.usuario}
-                      </Text>
-                    ) : null}
-                  </View>
-                </Pressable>
-                {info.puedoAdministrar && !miembro.administra ? (
-                  <Pressable
-                    onPress={() => void sacar(miembro)}
-                    disabled={!!ocupado}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('groups.removeTitle', { nombre: miembro.nombre })}
-                    hitSlop={8}
-                    style={styles.sacar}
-                  >
-                    <Feather name="user-minus" size={18} color={colors.danger} />
-                  </Pressable>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-
-        {info.puedoAdministrar ? (
-          <View style={styles.seccion}>
-            {cabenMas ? (
-              <>
-                <SelectorDePersonas
-                  seleccionadas={nuevas}
-                  alCambiar={setNuevas}
-                  maximo={Math.min(
-                    MAX_PERSONAS_POR_TANDA,
-                    info.maximoDeMiembros - info.miembros.length,
-                  )}
-                  titulo={t('groups.addPeople')}
-                  ayuda={t('groups.peopleHint')}
+          {cabenMas ? (
+            <>
+              <SelectorDePersonas
+                seleccionadas={nuevas}
+                alCambiar={setNuevas}
+                maximo={Math.min(
+                  MAX_PERSONAS_POR_TANDA,
+                  info.maximoDeMiembros - info.miembros.length,
+                )}
+                titulo={t('groups.addPeople')}
+                ayuda={t('groups.peopleHint')}
+              />
+              {nuevas.length > 0 ? (
+                <Button
+                  label={t('groups.addSelected', { n: nuevas.length })}
+                  icon="user-plus"
+                  onPress={() => void anadir()}
+                  loading={ocupado === 'anadir'}
+                  disabled={!!ocupado}
                 />
-                {nuevas.length > 0 ? (
-                  <Button
-                    label={t('groups.addSelected', { n: nuevas.length })}
-                    icon="user-plus"
-                    onPress={() => void anadir()}
-                    loading={ocupado === 'anadir'}
-                    disabled={!!ocupado}
-                  />
-                ) : null}
-              </>
-            ) : (
-              <>
-                <Text weight="700">{t('groups.addPeople')}</Text>
-                <Text color={colors.textMuted} style={styles.detalle}>
-                  {t('groups.errorFull')}
-                </Text>
-              </>
-            )}
-          </View>
-        ) : (
-          <Button
-            label={t('groups.leave')}
-            variant="secondary"
-            icon="log-out"
-            onPress={() => void salir()}
-            loading={ocupado === 'salir'}
-            disabled={!!ocupado}
-          />
-        )}
+              ) : null}
+            </>
+          ) : (
+            <>
+              <Text weight="700">{t('groups.addPeople')}</Text>
+              <Text color={colors.textMuted} style={styles.detalle}>
+                {t('groups.errorFull')}
+              </Text>
+            </>
+          )}
+        </View>
+      ) : null}
 
-        {info.puedoAdministrar ? (
-          <Text color={colors.textMuted} style={styles.detalle}>
-            {t('groups.adminCannotLeave')}
-          </Text>
-        ) : null}
+      <View style={styles.seccion}>
+        {info.miembros.map((miembro) => {
+          const soyYo = miembro.id === currentUserId;
+          return (
+            <View key={miembro.id} style={styles.miembro}>
+              <Pressable
+                onPress={() => irAlPerfil(router, miembro.id)}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.openProfile', { nombre: miembro.nombre })}
+                style={styles.persona}
+              >
+                <Avatar
+                  size={44}
+                  image={profileImageUrl(miembro.avatarPath) ?? null}
+                  name={miembro.nombre}
+                />
+                <View style={styles.textos}>
+                  <Text numberOfLines={1} weight="600">
+                    {soyYo ? t('groups.youNamed', { nombre: miembro.nombre }) : miembro.nombre}
+                  </Text>
+                  {miembro.usuario ? (
+                    <Text color={colors.textMuted} style={styles.detalle} numberOfLines={1}>
+                      @{miembro.usuario}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+              {miembro.administra ? (
+                <View style={[styles.insignia, { backgroundColor: colors.surfaceAlt }]}>
+                  <Text weight="600" color={colors.textMuted} style={styles.insigniaTexto}>
+                    {t('groups.adminBadge')}
+                  </Text>
+                </View>
+              ) : info.puedoAdministrar ? (
+                <Pressable
+                  onPress={() => void sacar(miembro)}
+                  disabled={!!ocupado}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('groups.removeTitle', { nombre: miembro.nombre })}
+                  hitSlop={8}
+                  style={styles.sacar}
+                >
+                  <Feather name="user-minus" size={18} color={colors.danger} />
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        })}
       </View>
+    </View>
+  );
+
+  return (
+    <AppScreen scroll={false}>
+      <AppHeader
+        title={t('groups.infoTitle')}
+        onBack={volver}
+        // Solo para quien administra. El permiso es del servidor; esto evita
+        // pintar un botón que respondería 403.
+        rightIcon={info.puedoAdministrar ? 'edit-2' : undefined}
+        onRightPress={info.puedoAdministrar ? abrirAjustes : undefined}
+        rightLabel={t('groups.actionEdit')}
+      />
+      <PestanasDeContenido
+        conversationId={conversationId}
+        nombreDelChat={info.titulo}
+        cabecera={cabecera}
+        primera={{ clave: 'miembros', etiqueta: t('groups.members'), contenido: miembros }}
+        alRefrescar={refrescar}
+      />
     </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  cuerpo: { padding: spacing.md, gap: spacing.lg },
-  cabecera: { alignItems: 'center', gap: spacing.xs },
-  titulo: { fontSize: 20, textAlign: 'center' },
-  seccion: { gap: spacing.sm },
-  tarjeta: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, overflow: 'hidden' },
+  cabecera: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+  },
+  titulo: { fontSize: 22, textAlign: 'center', marginTop: spacing.xs },
+  acciones: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  accion: {
+    flex: 1,
+    minHeight: 64,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.xs,
+  },
+  accionTexto: { fontSize: 13 },
+  tarjeta: {
+    alignSelf: 'stretch',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    marginTop: spacing.xs,
+  },
+  miembros: { paddingHorizontal: spacing.md, paddingTop: spacing.xs, gap: spacing.lg },
+  seccion: { gap: spacing.md },
   miembro: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   persona: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minWidth: 0 },
   textos: { flex: 1, minWidth: 0 },
   detalle: { fontSize: 13 },
+  insignia: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill },
+  insigniaTexto: { fontSize: 12 },
   sacar: { padding: spacing.xs },
 });

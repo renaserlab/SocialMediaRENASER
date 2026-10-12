@@ -156,6 +156,16 @@ export type FuncionesDelChat = {
   respuestasAHistorias: boolean;
   /** Se puede reaccionar a un mensaje y responder a uno concreto (0106). */
   reacciones: boolean;
+  /** Se puede silenciar una conversación y vaciarla para uno mismo (0107). */
+  preferencias: boolean;
+};
+
+/** Lo que se da por hecho mientras el servidor no contesta: nada. */
+export const SIN_FUNCIONES: FuncionesDelChat = {
+  notasDeVoz: false,
+  respuestasAHistorias: false,
+  reacciones: false,
+  preferencias: false,
 };
 
 export const MessageRepository = {
@@ -178,15 +188,38 @@ export const MessageRepository = {
         voice_notes?: boolean;
         story_replies?: boolean;
         reactions?: boolean;
+        preferences?: boolean;
       }>(`${API_V1}/conversations/availability`);
       return {
         notasDeVoz: dto.voice_notes === true,
         respuestasAHistorias: dto.story_replies === true,
         reacciones: dto.reactions === true,
+        preferencias: dto.preferences === true,
       };
     } catch {
-      return { notasDeVoz: false, respuestasAHistorias: false, reacciones: false };
+      return SIN_FUNCIONES;
     }
+  },
+
+  /**
+   * Silencia una conversación, o le devuelve los avisos. SOLO PARA QUIEN LO
+   * PIDE: a los demás miembros no les cambia nada. Los mensajes siguen
+   * llegando y contando como no leídos; lo que no llega es el aviso.
+   */
+  async silenciar(conversationId: string, silenciada: boolean): Promise<void> {
+    await apiRequest<void>(`${API_V1}/conversations/${conversationId}/mute`, {
+      method: silenciada ? 'PUT' : 'DELETE',
+    });
+  },
+
+  /**
+   * Vacía el chat PARA QUIEN LO PIDE. No borra ningún mensaje: los demás los
+   * siguen viendo, y lo que llegue después se ve con normalidad.
+   */
+  async vaciar(conversationId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/conversations/${conversationId}/clear`, {
+      method: 'POST',
+    });
   },
 
   /**

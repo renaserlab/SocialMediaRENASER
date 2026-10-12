@@ -244,7 +244,8 @@ test('sin la migración, la aplicación no ofrece reaccionar ni responder', () =
   const repositorio = leer('../repositories/MessageRepository.ts');
   // Solo un `true` del servidor las enciende; si no se sabe, apagadas.
   assert.match(repositorio, /reacciones: dto\.reactions === true/);
-  assert.match(repositorio, /respuestasAHistorias: false, reacciones: false/);
+  assert.match(repositorio, /catch \{\s*return SIN_FUNCIONES;/);
+  assert.match(repositorio, /SIN_FUNCIONES: FuncionesDelChat = \{[^}]*reacciones: false,/);
   const pantalla = leer('../screens/ChatScreen.tsx');
   // El menú de un mensaje ajeno solo existe para reaccionar o responder.
   assert.match(pantalla, /const conAcciones = !item\.estado && \(mine \|\| funciones\.reacciones\)/);

@@ -319,6 +319,8 @@ export type Conversation = {
   esGrupo?: boolean;
   subtitle: string;
   unread: number;
+  /** Quien mira la tiene silenciada: llegan los mensajes, no los avisos. */
+  silenciada?: boolean;
   messages: Message[];
   /** Hora del último mensaje (para la lista de conversaciones). */
   time?: string;

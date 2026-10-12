@@ -3353,3 +3353,149 @@ la primera fila de «Archivos» es la que lo confirma o lo desmiente.
 | Quien ya es miembro ve «Abrir el grupo» en vez de «Pedir unirme» | | | |
 | En el perfil propio se ven los grupos marcados, sin botón de pedir | | | |
 | Apagarlo lo quita del perfil sin tocar el grupo | | | |
+
+## Ficha del grupo como en Telegram, menú del chat y fondo (11/10/2026)
+
+Hace falta el servidor desplegado, una compilación nueva y **dos teléfonos con
+cuentas distintas**: una que administre un grupo y otra que solo sea miembro.
+La migración **0107** tiene que estar aplicada; sin ella no aparecen
+«Silenciar» ni «Vaciar chat», y todo lo demás de esta sección funciona igual.
+
+Esta sección **sustituye** a «Contenido del chat por vistas (09/10/2026)» y a
+«Ficha del grupo (tocando su nombre en el chat)»: esas dos pantallas se han
+rehecho. Las listas de «Filtros del grupo» y de «Foto del grupo» siguen
+valiendo, con dos cambios de sitio: a los filtros y al enlace se llega ahora
+por el lápiz de la ficha («Editar grupo»).
+
+Visto en la copia web local con datos inventados: la ficha con sus pestañas,
+«Media» con su filtro, «Enlaces», «Archivos», «Audios», un filtro del grupo,
+«Silenciar», «Editar grupo», el menú del chat, «Buscar», el fondo por colores y
+«Vaciar chat». Sin ver: nada en teléfono, la foto como fondo (en la copia web
+no se ofrece), la ficha de quien no administra y el aviso que deja de llegar al
+silenciar.
+
+### La ficha del grupo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Tocar el nombre del grupo en el chat abre su ficha: foto, nombre y cuántos miembros | | | |
+| Debajo hay tres botones. Quien administra ve «Mensaje», «Silenciar» y «Editar»; los demás, «Mensaje», «Silenciar» y «Salir» | | | |
+| «Mensaje» vuelve al chat del grupo, sin abrir otro encima | | | |
+| «Salir» pregunta antes; al aceptar se sale y se vuelve a la bandeja | | | |
+| Las pestañas son «Miembros» y, a continuación, solo las que tienen algo: «Media», «Enlaces», «Archivos», «Audios» | | | |
+| En un grupo donde nadie ha mandado un audio no hay pestaña «Audios» | | | |
+| Si hay muchas pestañas, la barra se desliza de lado sin cambiar de sección de la aplicación | | | |
+| Tirar hacia abajo refresca la ficha | | | |
+
+### Pestaña «Miembros»
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Sale la lista de miembros, con quien administra el primero y la etiqueta «Administrador» | | | |
+| Tocar a alguien abre su perfil | | | |
+| Quien administra ve arriba «Añadir personas» y, junto a cada miembro, el botón de sacarlo | | | |
+| Quien no administra no ve ninguna de las dos cosas | | | |
+
+### Pestaña «Media»
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Las fotos y los vídeos salen juntos en una cuadrícula de tres por fila, de lo más reciente a lo más antiguo | | | |
+| Un mensaje con cinco fotos son cinco casillas | | | |
+| Un vídeo se distingue: fondo oscuro, el triángulo de reproducir y su duración | | | |
+| Si hay fotos y vídeos, encima salen «Todo», «Fotos» y «Vídeos», y cada uno deja solo lo suyo | | | |
+| Si solo hay fotos (o solo vídeos), esos tres botones no aparecen | | | |
+| Tocar una casilla abre la foto o el vídeo dentro de la aplicación, con quién lo mandó y cuándo | | | |
+| Desde ahí, «Ver en el chat» vuelve a la conversación y sube hasta ese mensaje | | | |
+| Al llegar al final de la cuadrícula se cargan más, sin repetir ninguna | | | |
+| Una foto nueva mandada desde otro teléfono aparece sola en unos segundos | | | |
+
+### Pestañas «Enlaces», «Archivos» y «Audios»
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| «Enlaces»: cada mensaje con un enlace es una fila con el nombre del sitio (por ejemplo «Shein»), el texto del mensaje y la dirección | | | |
+| Tocar la fila o la dirección abre el enlace; un enlace de Z se abre dentro de la aplicación | | | |
+| Un mensaje con dos enlaces enseña los dos | | | |
+| «Archivos»: cada archivo es una fila con su nombre, su peso, quién lo mandó y cuándo; tocarla lo abre o lo descarga | | | |
+| «Audios»: cada nota de voz se puede reproducir ahí mismo, y dice de quién es | | | |
+| Al cambiar de pestaña, el audio que sonaba se para | | | |
+| En las tres, la flecha de la derecha lleva al mensaje en el chat | | | |
+| Los mensajes de solo texto no salen en ninguna pestaña | | | |
+
+### Editar grupo (el lápiz, solo quien administra)
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| El lápiz de arriba a la derecha y el botón «Editar» abren «Editar grupo» | | | |
+| Quien no administra no ve ni el lápiz ni «Editar» | | | |
+| Ahí están el nombre del grupo, «Cómo se entra al grupo» (perfil y enlace) y «Filtros del grupo» | | | |
+| Cambiar el nombre y volver: la ficha y el chat enseñan el nuevo | | | |
+| Con una solicitud pendiente, la ficha enseña «Solicitudes» y tocarla lleva a «Editar grupo», donde se responde | | | |
+
+### El contenido de un chat de dos
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En el menú del chat, «Fotos, archivos y enlaces» abre las mismas pestañas, sin «Miembros» | | | |
+| Si no se ha compartido nada, lo dice, sin pestañas vacías | | | |
+
+### El menú del chat (los tres puntos)
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Arriba a la derecha del chat hay tres puntos; tocarlos abre el menú | | | |
+| En un grupo: «Ver el grupo», «Buscar», «Silenciar», «Fondo del chat», «Vaciar chat» y, si no se administra, «Salir del grupo» | | | |
+| Quien administra el grupo no ve «Salir del grupo» | | | |
+| En un chat de dos: «Fotos, archivos y enlaces», «Buscar», «Silenciar», «Fondo del chat» y «Vaciar chat» | | | |
+| Ninguna fila se queda sin hacer nada al tocarla | | | |
+
+### Silenciar
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| «Silenciar» (en el menú o en la ficha) deja una campana tachada junto al nombre del chat y en su fila de la bandeja | | | |
+| Con la aplicación CERRADA, un mensaje nuevo de ese chat no hace sonar el teléfono | | | |
+| Con la aplicación abierta en otra pantalla, tampoco sale el aviso de arriba | | | |
+| El mensaje sí llega: la bandeja lo enseña y cuenta como no leído | | | |
+| A los demás miembros del grupo les siguen llegando sus avisos | | | |
+| Silenciar un grupo no silencia los demás chats | | | |
+| «Activar avisos» lo devuelve todo a como estaba | | | |
+
+### Buscar en el chat
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| «Buscar» abre una pantalla con el cuadro ya listo para escribir | | | |
+| Escribir una palabra de un mensaje antiguo lo encuentra, aunque no estuviera cargado en pantalla | | | |
+| También encuentra un archivo por su nombre | | | |
+| Tocar un resultado vuelve al chat y sube hasta ese mensaje | | | |
+| Lo que no existe dice «Sin resultados», con lo buscado | | | |
+
+### Vaciar chat
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| «Vaciar chat» pregunta antes y avisa de que los demás seguirán viendo los mensajes | | | |
+| Al aceptar, el chat queda vacío en ESTE teléfono | | | |
+| En el teléfono de la otra persona (o de otro miembro) no ha cambiado nada | | | |
+| Las pestañas de la ficha («Media», «Enlaces»…) tampoco enseñan lo vaciado | | | |
+| La fila de la bandeja ya no enseña el último mensaje, ni cuenta no leídos | | | |
+| Un mensaje que llega después se ve con normalidad | | | |
+| Cerrar la aplicación y volver a entrar: lo vaciado sigue sin aparecer | | | |
+| «Buscar» no encuentra lo vaciado | | | |
+
+### Fondo del chat
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| «Fondo del chat» enseña «Por defecto», ocho colores y «Elegir una foto» | | | |
+| Tocar un color lo pone al momento detrás de los mensajes; la cabecera y el cuadro de texto no cambian | | | |
+| El fondo vale para todos los chats, no solo para el que se tenía abierto | | | |
+| Cerrar la aplicación y volver: el fondo elegido sigue puesto | | | |
+| Con cada color se leen bien la hora de un sticker, el nombre de quien escribe y las reacciones, en claro y en oscuro | | | |
+| Cambiar el tema del teléfono a oscuro deja el mismo color en su tono oscuro | | | |
+| «Elegir una foto» la pone de fondo, con un velo encima, y los mensajes se siguen leyendo | | | |
+| La foto sigue ahí al día siguiente, aunque se borre de la galería | | | |
+| «Por defecto» devuelve el fondo de siempre | | | |
+| En otro teléfono con la misma cuenta el fondo NO cambia: es de cada teléfono | | | |
