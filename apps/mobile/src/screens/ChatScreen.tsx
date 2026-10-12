@@ -3,12 +3,12 @@ import {
   ActivityIndicator,
   AppState,
   Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -29,7 +29,9 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { Avatar } from '@/components/Avatar';
 import { HojaDeFondoDeChat } from '@/components/chat/HojaDeFondoDeChat';
+import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
 import { HojaDeStickers } from '@/components/chat/HojaDeStickers';
+import { MedioDeChat } from '@/components/chat/MedioDeChat';
 import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
 import { ListRow } from '@/components/ListRow';
 import { Input } from '@/components/Input';
@@ -52,7 +54,7 @@ import {
   type ReaccionDeMensaje,
 } from '@/lib/reaccionesDeChat';
 import { REACCIONES_RAPIDAS, esSticker } from '@/lib/stickers';
-import { enlaceDeDescarga, esHtml } from '@/lib/tiposDeArchivo';
+import { medioQueEs, soloLlevaMedios, vaSinMarco } from '@/lib/mediosDeChat';
 import { guardarEnLaGaleria } from '@/services/guardarAdjunto';
 import { profileImageUrl } from '@/services/storage';
 import {
@@ -151,20 +153,20 @@ const ESTILO_ELIMINADO = {
  */
 const MINUTOS_DE_RAFAGA = 5;
 
-function pesoLegible(bytes?: number | null): string {
-  if (!bytes) return '';
-  const mb = bytes / 1024 / 1024;
-  if (mb >= 1) return `${mb.toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
+/** El relleno de una burbuja. Lo necesita también la foto que la llena. */
+const RELLENO_V = spacing.sm + 2;
+const RELLENO_H = spacing.md + 2;
+/** Lo que queda de burbuja alrededor de una foto que va con texto. */
+const MARCO_FINO = 3;
+/** Lo que mide de ancho una foto o un video en el chat. */
+const ANCHO_DE_MEDIO = 250;
 
 /**
  * Si el adjunto ya tiene un enlace del SERVIDOR, y no la ruta local con la que
  * se pinta la burbuja mientras sube.
  *
- * Es lo que decide si se puede abrir fuera de la aplicación: una ruta del
- * teléfono no se puede entregar a otra aplicación —en Android lanza—, y un
- * enlace firmado sí.
+ * Es lo que decide si ya se puede abrir, guardar o descargar: mientras sube
+ * solo existe en este teléfono.
  */
 function estaEnElServidor(adjunto: MessageAttachment): boolean {
   return !!adjunto.url && adjunto.url.startsWith('http');
@@ -1657,14 +1659,6 @@ export function ChatScreen() {
   // Pintar
   // -------------------------------------------------------------------------
 
-  /**
-   * Abre un adjunto con lo que el teléfono tenga para él: un documento en su
-   * lector, un vídeo en su reproductor.
-   *
-   * Es el mismo `Linking.openURL` sobre un enlace firmado que ya usan las
-   * pantallas de evidencias y documentos. Si el sistema no sabe abrirlo, se
-   * dice: un toque que no hace nada se lee como un botón roto.
-   */
   // -------------------------------------------------------------------------
   // Reaccionar
   // -------------------------------------------------------------------------
@@ -1748,17 +1742,6 @@ export function ChatScreen() {
     return 'texto' in lo ? lo.texto : t(lo.clave as TranslationKey);
   };
 
-  const abrirFuera = (adjunto: MessageAttachment) => {
-    if (!adjunto.url || !estaEnElServidor(adjunto)) return;
-    // Un HTML se DESCARGA, no se abre como página: ver `enlaceDeDescarga`.
-    const destino = esHtml(adjunto.mimeType, adjunto.fileName)
-      ? enlaceDeDescarga(adjunto.url, adjunto.fileName)
-      : adjunto.url;
-    Linking.openURL(destino).catch(() => {
-      notify(t('common.couldNotOpen'), t('common.tryAgainSoon'));
-    });
-  };
-
   /** Guarda en la galería del teléfono la foto o el vídeo que se está viendo. */
   const guardarAdjunto = useCallback(
     async (adjunto: MessageAttachment) => {
@@ -1774,8 +1757,46 @@ export function ChatScreen() {
     [t],
   );
 
-  const pintarAdjunto = (adjunto: MessageAttachment, mio: boolean) => {
-    const colorTexto = mio ? colors.onPrimary : colors.text;
+  /**
+   * Cómo va una foto o un video dentro de su mensaje.
+   *
+   * `sin_marco`: van solos, sin burbuja. `al_ras`: dentro de una burbuja con
+   * texto, con un marco fino. `normal`: mezclados con archivos o notas de
+   * voz, como una pieza más.
+   */
+  type ContextoDeAdjunto = {
+    mensaje: Message;
+    /** Si mantenerlo presionado abre el menú del mensaje. */
+    conAcciones: boolean;
+    forma: 'normal' | 'al_ras' | 'sin_marco';
+    /** Lo que se pinta encima de la imagen: de quién es, la hora. */
+    encima?: React.ReactNode;
+  };
+
+  /*
+    LO QUE MIDE DE ANCHO UNA FOTO O UN ARCHIVO. Una burbuja ocupa como máximo
+    el 80 % de la pantalla: en un teléfono angosto, los 250 puntos de siempre
+    no caben dentro y se salían por el borde. Se recorta a lo que haya.
+  */
+  const { width: anchoDePantalla } = useWindowDimensions();
+  const anchoDeMedio = Math.min(
+    ANCHO_DE_MEDIO,
+    Math.floor(anchoDePantalla * 0.8) - 2 * RELLENO_H - 2,
+  );
+
+  const pintarAdjunto = (
+    adjunto: MessageAttachment,
+    mio: boolean,
+    contexto: ContextoDeAdjunto,
+  ) => {
+    /*
+      MANTENER PRESIONADO SOBRE EL ADJUNTO ABRE EL MENÚ DEL MENSAJE. Antes
+      solo respondía la franja de la hora, debajo. Una foto sin marco ya no
+      tiene franja: sin esto no habría dónde borrar, reaccionar ni responder.
+    */
+    const alMantener = contexto.conAcciones
+      ? () => abrirAcciones(contexto.mensaje)
+      : undefined;
 
     /*
       LA NOTA DE VOZ NO MONTA REPRODUCTOR AQUI. Recibe si es la que está sonando
@@ -1797,41 +1818,27 @@ export function ChatScreen() {
 
     if (adjunto.kind === 'document') {
       /*
-        UN DOCUMENTO SE ABRE. Antes era una ficha con el nombre y el peso que no
-        respondía a nada: se podía mandar un PDF pero no leerlo. Se abre fuera,
-        con lo que el teléfono tenga para ese tipo de archivo — igual que las
-        evidencias y los documentos de las demás pantallas.
+        UN ARCHIVO SE DESCARGA, DENTRO DE LA APLICACIÓN (12/10/2026). Antes
+        tocarlo abría su dirección en el navegador: la persona acababa fuera
+        de Z, en una pestaña de Chrome. Ahora lleva su botón de descargar y
+        se guarda en el teléfono. Ver `ArchivoDeChat`.
 
-        Solo cuando ya hay enlace del servidor: mientras sube, lo que hay es una
-        ruta local que no se puede entregar a otra aplicación, y un botón que no
-        hace nada es peor que una ficha quieta.
+        Si en realidad es una foto o un video mandado como archivo, tocarlo
+        lo abre en el visor, como cualquier otra foto del chat. Solo cuando
+        ya está en el servidor: mientras sube no hay nada que abrir.
       */
-      const sePuedeAbrir = estaEnElServidor(adjunto);
+      const medio = estaEnElServidor(adjunto)
+        ? medioQueEs(adjunto.mimeType, adjunto.fileName)
+        : null;
       return (
-        <Pressable
+        <ArchivoDeChat
           key={adjunto.id}
-          onPress={() => abrirFuera(adjunto)}
-          disabled={!sePuedeAbrir}
-          accessibilityRole={sePuedeAbrir ? 'button' : undefined}
-          accessibilityLabel={
-            sePuedeAbrir
-              ? t('chat.openFile', { nombre: adjunto.fileName ?? '' }).trim()
-              : undefined
-          }
-          style={[styles.documento, { borderColor: colors.border }]}
-        >
-          <Feather name="file-text" size={20} color={colorTexto} />
-          <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={{ color: colorTexto, fontSize: 13, fontWeight: '600' }}>
-              {adjunto.fileName ?? 'Archivo'}
-            </Text>
-            {adjunto.bytes ? (
-              <Text style={{ color: colorTexto, fontSize: 10, opacity: 0.7 }}>
-                {pesoLegible(adjunto.bytes)}
-              </Text>
-            ) : null}
-          </View>
-        </Pressable>
+          adjunto={adjunto}
+          mio={mio}
+          alVer={medio ? () => setFotoAmpliada({ ...adjunto, kind: medio }) : undefined}
+          alMantener={alMantener}
+          style={{ width: anchoDeMedio }}
+        />
       );
     }
 
@@ -1856,20 +1863,29 @@ export function ChatScreen() {
           if (adjunto.kind === 'video' && !estaEnElServidor(adjunto)) return;
           if (adjunto.url) setFotoAmpliada(adjunto);
         }}
+        onLongPress={alMantener}
+        delayLongPress={400}
         accessibilityRole="button"
         accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
-        style={[styles.medio, { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) }]}
+        accessibilityHint={alMantener ? t('chat.holdForActions') : undefined}
+        style={[
+          styles.medio,
+          contexto.forma === 'sin_marco' && styles.medioSinMarco,
+          contexto.forma === 'al_ras' && styles.medioAlRas,
+          contexto.forma === 'al_ras' ? { minWidth: anchoDeMedio } : { width: anchoDeMedio },
+          { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) },
+        ]}
       >
-        {adjunto.url ? (
-          <Image source={{ uri: adjunto.url }} style={styles.medioImagen} />
-        ) : (
-          <View style={[styles.medioImagen, { backgroundColor: colors.border }]} />
-        )}
-        {adjunto.kind === 'video' ? (
-          <View style={styles.play}>
-            <Feather name="play" size={22} color="#FFF" />
-          </View>
-        ) : null}
+        {/*
+          LA PIEZA QUE SABE DE DÓNDE SACAR LA IMAGEN SIN ESPERAR: lo que ya
+          está en el teléfono, lo guardado en el disco, o la portada de un
+          video. Antes iba aquí un `Image` con la dirección firmada, que
+          volvía a bajar la foto en cada apertura y, con un video, pintaba
+          un cuadro negro. Ver `MedioDeChat`.
+        */}
+        <MedioDeChat adjunto={adjunto} style={StyleSheet.absoluteFill}>
+          {contexto.encima}
+        </MedioDeChat>
       </Pressable>
     );
   };
@@ -2140,6 +2156,31 @@ export function ChatScreen() {
               !item.storyContext &&
               !item.sesion &&
               esSticker(item.text);
+            /*
+              SIN MARCO (12/10/2026, pedido con captura): una foto o un
+              video que van solos se pintan sin burbuja. La propia era
+              negra y le hacía a la foto un marco grueso que la afeaba.
+              La hora va encima de la imagen, como en cualquier chat.
+
+              AL RAS: con texto, con una cita o respondiendo a una
+              historia la burbuja se queda —eso necesita un fondo sobre
+              el que leerse— y la foto la llena con un marco fino.
+            */
+            const sinMarco = vaSinMarco({
+              texto: item.text,
+              eliminado: item.eliminado,
+              conCita: !!item.respuestaA,
+              conHistoria: !!item.storyContext,
+              adjuntos: item.attachments,
+            });
+            const alRas =
+              !sinMarco && !item.eliminado && soloLlevaMedios(item.attachments);
+            /** Sin burbuja detrás: un sticker, o una foto sola. */
+            const sinFondo = comoSticker || sinMarco;
+            /** El nombre de quien escribe, en un grupo, en el primero de su ráfaga. */
+            const conAutor = esGrupo && !mine && !agrupado;
+            /** Si los adjuntos son lo primero que hay dentro de la burbuja. */
+            const adjuntosArriba = !conAutor && !item.respuestaA && !item.storyContext;
 
             const cabecera = cambioDeDia ? (
               <View style={styles.dia}>
@@ -2270,18 +2311,19 @@ export function ChatScreen() {
                       // la esquina que apunta al lado: se leen como un bloque.
                       agrupado && (mine ? styles.mineSeguida : styles.theirsSeguida),
                       agrupado && styles.pegada,
+                      sinMarco && styles.bubbleSinMarco,
                       {
                         // La ajena se despega del fondo con un gris suave en
                         // vez de un borde: en claro, blanco sobre blanco con
                         // una línea parecía una casilla de formulario.
-                        backgroundColor: comoSticker
+                        backgroundColor: sinFondo
                           ? 'transparent'
                           : mine
                             ? colors.primary
                             : colors.surfaceAlt,
                         borderColor: fallido
                           ? colors.danger
-                          : comoSticker
+                          : sinFondo
                             ? 'transparent'
                             : mine
                               ? colors.primary
@@ -2296,7 +2338,7 @@ export function ChatScreen() {
                       cinco burbujas seguidas de la misma persona no dice
                       nada.
                     */}
-                    {esGrupo && !mine && !agrupado ? (
+                    {conAutor && !sinMarco ? (
                       <Text
                         numberOfLines={1}
                         style={[
@@ -2360,8 +2402,67 @@ export function ChatScreen() {
                     ) : null}
 
                     {item.attachments?.length ? (
-                      <View style={styles.adjuntos}>
-                        {item.attachments.map((adjunto) => pintarAdjunto(adjunto, mine))}
+                      <View
+                        style={[
+                          styles.adjuntos,
+                          sinMarco && styles.adjuntosSinMarco,
+                          alRas && styles.adjuntosAlRas,
+                          alRas && adjuntosArriba && styles.adjuntosArriba,
+                        ]}
+                      >
+                        {item.attachments.map((adjunto, indice, todos) =>
+                          pintarAdjunto(adjunto, mine, {
+                            mensaje: item,
+                            conAcciones,
+                            forma: sinMarco ? 'sin_marco' : alRas ? 'al_ras' : 'normal',
+                            /*
+                              SIN BURBUJA, LO QUE IBA DENTRO DE ELLA VA ENCIMA
+                              DE LA IMAGEN, sobre un fondo oscuro para que se
+                              lea con cualquier foto: de quién es, arriba de
+                              la primera; la hora y el estado, abajo de la
+                              última.
+                            */
+                            encima: sinMarco ? (
+                              <>
+                                {indice === 0 && conAutor ? (
+                                  <View style={[styles.sobreMedio, styles.autorSobreMedio]}>
+                                    <Text numberOfLines={1} style={styles.textoSobreMedio}>
+                                      {nombreDelAutor(
+                                        infoDeConversacion,
+                                        item.autorId,
+                                        item.autorNombre,
+                                      ) || t('groups.someone')}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {indice === todos.length - 1 && mostrarHora ? (
+                                  <View style={[styles.sobreMedio, styles.horaSobreMedio]}>
+                                    <Text style={styles.textoSobreMedio}>
+                                      {item.estado === 'enviando'
+                                        ? t('chat.sending')
+                                        : fallido
+                                          ? t('chat.notSent')
+                                          : item.createdAt}
+                                    </Text>
+                                    {mine ? (
+                                      <Feather
+                                        name={
+                                          item.estado === 'enviando'
+                                            ? 'clock'
+                                            : fallido
+                                              ? 'alert-circle'
+                                              : 'check'
+                                        }
+                                        size={11}
+                                        color="#FFF"
+                                      />
+                                    ) : null}
+                                  </View>
+                                ) : null}
+                              </>
+                            ) : null,
+                          }),
+                        )}
                       </View>
                     ) : null}
 
@@ -2389,9 +2490,11 @@ export function ChatScreen() {
                         conAcciones ? () => abrirAcciones(item) : undefined
                       }
                       delayLongPress={400}
-                      accessibilityRole={conAcciones ? 'button' : undefined}
+                      // Una foto sin marco no tiene nada aquí debajo: el
+                      // menú se abre manteniendo presionada la propia foto.
+                      accessibilityRole={conAcciones && !sinMarco ? 'button' : undefined}
                       accessibilityLabel={
-                        conAcciones ? t('chat.holdForActions') : undefined
+                        conAcciones && !sinMarco ? t('chat.holdForActions') : undefined
                       }
                     >
                       {/*
@@ -2415,7 +2518,9 @@ export function ChatScreen() {
                             style={[
                               styles.barraAvance,
                               {
-                                backgroundColor: mine ? colors.onPrimary : colors.primary,
+                                // Sin burbuja, la barra va sobre el fondo del chat.
+                                backgroundColor:
+                                  mine && !sinMarco ? colors.onPrimary : colors.primary,
                                 width: `${Math.round(item.progreso * 100)}%`,
                               },
                             ]}
@@ -2423,7 +2528,7 @@ export function ChatScreen() {
                         </View>
                       ) : null}
 
-                      {mostrarHora ? (
+                      {mostrarHora && !sinMarco ? (
                         /*
                           LA HORA Y EL ESTADO, legibles. Eran 9 puntos al 70 %:
                           sobre la burbuja negra no se leía. Y el estado del
@@ -2583,13 +2688,20 @@ export function ChatScreen() {
                     </Text>
                   </View>
                 ) : (
-                  <Image source={{ uri: archivo.uri }} style={styles.previaImagen} />
+                  // La misma pieza que la burbuja: de un video enseña un
+                  // fotograma en vez de un cuadro negro.
+                  <MedioDeChat
+                    compacto
+                    style={styles.previaImagen}
+                    adjunto={{
+                      id: archivo.uri,
+                      storagePath: '',
+                      kind: archivo.kind,
+                      url: archivo.uri,
+                      durationS: archivo.durationS,
+                    }}
+                  />
                 )}
-                {archivo.kind === 'video' ? (
-                  <View style={styles.previaPlay}>
-                    <Feather name="play" size={14} color="#FFF" />
-                  </View>
-                ) : null}
                 <Pressable
                   onPress={() => quitarElegido(indice)}
                   accessibilityRole="button"
@@ -3039,8 +3151,8 @@ const styles = StyleSheet.create({
   bubble: {
     maxWidth: '80%',
     borderRadius: 20,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md + 2,
+    paddingVertical: RELLENO_V,
+    paddingHorizontal: RELLENO_H,
     borderWidth: 1,
     marginBottom: spacing.md,
   },
@@ -3054,33 +3166,34 @@ const styles = StyleSheet.create({
   mineSeguida: { borderTopRightRadius: 6 },
   theirsSeguida: { borderTopLeftRadius: 6 },
   pegada: { marginBottom: 3 },
+  // Una foto o un video solos: ni relleno ni borde que les hagan marco.
+  bubbleSinMarco: { paddingVertical: 0, paddingHorizontal: 0, borderWidth: 0 },
   adjuntos: { gap: spacing.sm, marginBottom: spacing.sm },
-  medio: {
-    width: 220,
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  medioImagen: { width: '100%', height: '100%' },
-  play: {
+  adjuntosSinMarco: { gap: 4, marginBottom: 0 },
+  // Dentro de una burbuja con texto la foto llega hasta casi el borde: se
+  // come el relleno de la burbuja menos un marco fino (`MARCO_FINO`).
+  adjuntosAlRas: { marginHorizontal: -(RELLENO_H - MARCO_FINO) },
+  adjuntosArriba: { marginTop: -(RELLENO_V - MARCO_FINO) },
+  // El ancho lo pone la pantalla: ver `anchoDeMedio`.
+  medio: { borderRadius: radius.md, overflow: 'hidden' },
+  medioSinMarco: { borderRadius: 18 },
+  // Se estira a lo que mida la burbuja —que puede ensancharla el texto—, y
+  // nunca menos que una foto suelta.
+  medioAlRas: { alignSelf: 'stretch', borderRadius: 16 },
+  // Lo que va encima de una foto sin marco: sobre oscuro, se lee con todas.
+  sobreMedio: {
     position: 'absolute',
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  documento: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    padding: spacing.sm,
-    width: 220,
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
+  horaSobreMedio: { right: 8, bottom: 8 },
+  autorSobreMedio: { left: 8, top: 8, maxWidth: '80%' },
+  textoSobreMedio: { color: '#FFF', fontSize: 11, lineHeight: 14, fontWeight: '600' },
   barra: { height: 3, borderRadius: 2, marginTop: spacing.sm, overflow: 'hidden' },
   barraAvance: { height: 3, borderRadius: 2 },
   accionesFallo: {
@@ -3103,15 +3216,6 @@ const styles = StyleSheet.create({
   },
   previaImagen: { width: '100%', height: '100%' },
   previaDocumento: { alignItems: 'center', justifyContent: 'center', gap: 4, padding: 4 },
-  previaPlay: {
-    position: 'absolute',
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   previaQuitar: {
     position: 'absolute',
     top: 2,

@@ -91,13 +91,19 @@ test('un HTML se descarga: la dirección lleva `download` y no se duplica', () =
   assert.equal(descarga, `${firmada}&download=Mi%20p%C3%A1gina.html`);
   assert.equal(enlaceDeDescarga(descarga, 'otra.html'), descarga);
   assert.equal(enlaceDeDescarga('https://x.example/a.html', null), 'https://x.example/a.html?download=archivo');
-  // En el chat y en el contenido compartido, un HTML se abre SIEMPRE por ese camino.
+  /*
+    Desde el 12/10 ningún archivo del chat se abre: se descarga. En la web,
+    SIEMPRE por la dirección de descarga —un HTML también—, que es lo que
+    impide que una página mandada por el chat se ejecute con la dirección
+    del almacén de Z delante. Y ninguna de las dos pantallas abre por su
+    cuenta la dirección de un adjunto.
+  */
+  assert.match(
+    leer('../services/descargarArchivo.ts'),
+    /if \(Platform\.OS === 'web'\) \{\s*await Linking\.openURL\(enlaceDeDescarga\(url, pedido\.nombre\)\);/,
+  );
   for (const pantalla of ['../screens/ChatScreen.tsx', '../components/chat/PestanasDeContenido.tsx']) {
-    assert.match(
-      leer(pantalla),
-      /esHtml\(adjunto\.mimeType, adjunto\.fileName\)\s*\? enlaceDeDescarga\(adjunto\.url, adjunto\.fileName\)/,
-      pantalla,
-    );
+    assert.doesNotMatch(leer(pantalla), /Linking\.openURL\((destino|adjunto\.url)/, pantalla);
   }
 });
 
