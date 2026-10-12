@@ -30,6 +30,7 @@ import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { Avatar } from '@/components/Avatar';
 import { HojaDeFondoDeChat } from '@/components/chat/HojaDeFondoDeChat';
 import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
+import { DeslizarParaResponder } from '@/components/chat/DeslizarParaResponder';
 import { HojaDeStickers } from '@/components/chat/HojaDeStickers';
 import { MedioDeChat } from '@/components/chat/MedioDeChat';
 import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
@@ -54,6 +55,7 @@ import {
   type ReaccionDeMensaje,
 } from '@/lib/reaccionesDeChat';
 import { REACCIONES_RAPIDAS, esSticker } from '@/lib/stickers';
+import { sePuedeResponder } from '@/lib/deslizarParaResponder';
 import { medioQueEs, soloLlevaMedios, vaSinMarco } from '@/lib/mediosDeChat';
 import { guardarEnLaGaleria } from '@/services/guardarAdjunto';
 import { profileImageUrl } from '@/services/storage';
@@ -2274,7 +2276,20 @@ export function ChatScreen() {
               */
               <Aparecer inmediato={item.estado !== 'enviando'} desde={12} clave={item.id}>
                 {cabecera}
-                <View
+                {/*
+                  DESLIZAR PARA RESPONDER (12/10/2026). Tirar del mensaje
+                  hacia cualquiera de los dos lados lo deja citado en la
+                  barra de escribir: lo mismo que «Responder» en el menú,
+                  sin el menú. Solo donde el menú lo ofrecería: ver
+                  `sePuedeResponder`.
+                */}
+                <DeslizarParaResponder
+                  clave={item.id}
+                  activo={sePuedeResponder(
+                    { estado: item.estado, eliminado: item.eliminado },
+                    funciones.reacciones,
+                  )}
+                  alResponder={() => setRespondiendoA(item)}
                   style={[
                     mine ? styles.filaMia : styles.filaSuya,
                     esGrupo && !mine && styles.filaDeGrupo,
@@ -2635,7 +2650,7 @@ export function ChatScreen() {
                       </Pressable>
                     </View>
                   ) : null}
-                </View>
+                </DeslizarParaResponder>
               </Aparecer>
             );
           }}
