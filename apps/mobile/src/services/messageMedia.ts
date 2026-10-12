@@ -167,6 +167,32 @@ export async function elegirFotosOVideos(
   return (resultado.assets ?? []).map(desdeAsset);
 }
 
+/**
+ * Una foto de la galería, recortada antes de mandarla.
+ *
+ * EL RECORTE LO HACE EL EDITOR DEL TELÉFONO (`allowsEditing`), el mismo de la
+ * foto de perfil y la del grupo: Z no trae uno propio. De ahí salen sus dos
+ * límites, que no se pueden levantar desde aquí:
+ *
+ *   · es UNA foto por vez. El editor del sistema no recorta varias, y por
+ *     eso esto va aparte de «Fotos y videos», que sí deja elegir varias;
+ *   · en Android el marco es libre; en iOS el recorte es siempre cuadrado.
+ *
+ * Lo que sale es una foto como cualquier otra: se achica y se sube igual.
+ */
+export async function elegirFotoRecortada(): Promise<AdjuntoElegido | null> {
+  const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permiso.granted) throw new PermisoDenegadoError(AVISO_FOTOS);
+
+  const resultado = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsEditing: true,
+  });
+  if (resultado.canceled) return null;
+  const asset = resultado.assets?.[0];
+  return asset ? desdeAsset(asset) : null;
+}
+
 /** Una foto recién hecha con la cámara. */
 export async function hacerFoto(): Promise<AdjuntoElegido | null> {
   const permiso = await ImagePicker.requestCameraPermissionsAsync();

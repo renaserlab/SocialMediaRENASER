@@ -111,6 +111,7 @@ import { ApiError } from '@/services/api';
 import { useFondoDeChatStore } from '@/store/useFondoDeChatStore';
 import {
   elegirArchivo,
+  elegirFotoRecortada,
   elegirFotosOVideos,
   hacerFoto,
   MAX_ADJUNTOS,
@@ -2925,6 +2926,14 @@ export function ChatScreen() {
           title={t('chat.photosAndVideos')}
           leftIcon="image"
           onPress={() => void elegirCon(() => elegirFotosOVideos(MAX_ADJUNTOS - elegidos.length))}
+        />
+        {/* Aparte de la fila de arriba: el recortador del teléfono trabaja
+            con una sola foto, y aquella deja elegir varias. */}
+        <ListRow
+          title={t('chat.cropPhoto')}
+          subtitle={t('chat.cropPhotoHint')}
+          leftIcon="crop"
+          onPress={() => void elegirCon(elegirFotoRecortada)}
         />
         <ListRow
           title={t('chat.camera')}

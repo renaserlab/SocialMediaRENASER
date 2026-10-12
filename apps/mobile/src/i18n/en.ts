@@ -455,6 +455,8 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'chat.linkFailed': "Couldn't open the link.",
   'chat.attach': 'Attach',
   'chat.photosAndVideos': 'Photos and videos',
+  'chat.cropPhoto': 'Crop a photo',
+  'chat.cropPhotoHint': 'Pick one photo and crop it before sending.',
   'chat.camera': 'Camera',
   'chat.file': 'File',
   'chat.viewPhoto': 'View photo',

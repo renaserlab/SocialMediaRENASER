@@ -485,6 +485,8 @@ export const es = {
   'chat.linkFailed': 'No se pudo abrir el enlace.',
   'chat.attach': 'Adjuntar',
   'chat.photosAndVideos': 'Fotos y videos',
+  'chat.cropPhoto': 'Recortar una foto',
+  'chat.cropPhotoHint': 'Eliges una foto y la recortas antes de enviarla.',
   'chat.camera': 'Cámara',
   'chat.file': 'Archivo',
   'chat.viewPhoto': 'Ver foto',
