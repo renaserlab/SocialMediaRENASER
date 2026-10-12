@@ -314,9 +314,10 @@ async def test_reacciones_y_citas_no_hacen_una_consulta_por_mensaje(entorno):
     assert sum(1 for m in cuerpo if m["reply_to"]) == 30
     assert sum(1 for m in cuerpo if m["reactions"]) == 30
     selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
-    # Las siete de siempre más el tipo de adjunto de los citados: ocho, con
+    # Las ocho de siempre (la octava, desde la 0107: desde cuándo quiere ver el
+    # chat quien pregunta) más el tipo de adjunto de los citados: nueve, con
     # treinta citas igual que con una.
-    assert len(selects) <= 8, f"{len(selects)} consultas para 31 mensajes con cita y reacción"
+    assert len(selects) <= 9, f"{len(selects)} consultas para 31 mensajes con cita y reacción"
 
 
 # --------------------------------------------------------------------------- #

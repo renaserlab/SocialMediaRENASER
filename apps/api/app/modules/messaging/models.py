@@ -477,3 +477,41 @@ class MessageReply(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ConversationPreference(Base):
+    """Lo que una persona decide PARA SI sobre una conversacion (migracion 0107).
+
+    UNA FILA POR PERSONA Y CONVERSACION, y solo cuando ha decidido algo: quien
+    no tiene fila no la tiene silenciada ni vaciada.
+
+    `muted`: no quiere avisos de esa conversacion. `cleared_at`: la vacio en ese
+    instante y lo anterior deja de enseñarsele A ELLA; los mensajes siguen en
+    `messages` para los demas.
+
+    Va en una tabla aparte y no en `conversation_members` por lo mismo que las
+    reacciones: una columna nueva rompe el codigo ya desplegado que pide la
+    tabla entera. Quien comprueba que existe es
+    `esquema.hay_preferencias_de_conversacion`.
+    """
+
+    __tablename__ = "conversation_preferences"
+
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    muted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    cleared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

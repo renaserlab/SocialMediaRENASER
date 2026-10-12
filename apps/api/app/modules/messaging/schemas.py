@@ -62,6 +62,9 @@ class ConversationRead(BaseModel):
     last_message: str | None = None
     last_message_at: datetime | None = None
     unread_count: int = 0
+    #: Quien pregunta la tiene silenciada: no recibe sus avisos. Es SUYO: a
+    #: los demás miembros no les dice nada. `false` sin la migración 0107.
+    muted: bool = False
     updated_at: datetime
 
     #: Las etiquetas del CRM que QUIEN PREGUNTA le ha puesto a esta conversación.
@@ -320,3 +323,5 @@ class MessagingAvailability(BaseModel):
     story_replies: bool = False
     #: Se puede reaccionar a un mensaje y responder a uno concreto (0106).
     reactions: bool = False
+    #: Se puede silenciar una conversación y vaciarla para uno mismo (0107).
+    preferences: bool = False

@@ -405,14 +405,15 @@ async def test_el_historial_no_hace_una_consulta_por_mensaje(entorno):
         quitar()
 
     assert len(respuesta.json()) == 40
-    # SIETE, Y SIEMPRE SIETE: pertenencia, mensajes con sus autores, adjuntos,
-    # contexto de historia, la sesion 1:1 de la que hable cada mensaje (0097)
-    # y —desde la 0106— las reacciones y las citas de la pagina. Lo que se
-    # vigila es que el numero NO dependa de cuantos mensajes hay: cada cosa
-    # nueva que cuelga de un mensaje es una consulta para la pagina entera,
-    # nunca una por burbuja. (Si la pagina trae alguna cita son ocho: el
-    # tipo de adjunto de los mensajes citados, tambien de una vez.)
-    assert len(_selects(consultas)) <= 7, (
+    # OCHO, Y SIEMPRE OCHO: pertenencia, desde cuando quiere ver el chat quien
+    # pregunta (0107: lo que vacio no se le enseña), mensajes con sus autores,
+    # adjuntos, contexto de historia, la sesion 1:1 de la que hable cada
+    # mensaje (0097) y —desde la 0106— las reacciones y las citas de la
+    # pagina. Lo que se vigila es que el numero NO dependa de cuantos mensajes
+    # hay: cada cosa nueva es una consulta para la pagina entera, nunca una
+    # por burbuja. (Si la pagina trae alguna cita son nueve: el tipo de
+    # adjunto de los mensajes citados, tambien de una vez.)
+    assert len(_selects(consultas)) <= 8, (
         f"{len(_selects(consultas))} consultas para 40 mensajes"
     )
 

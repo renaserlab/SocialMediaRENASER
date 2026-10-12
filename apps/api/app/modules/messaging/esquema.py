@@ -53,6 +53,7 @@ muerto y quitarlo es una linea por sitio.
 from __future__ import annotations
 
 import logging
+import time
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,15 +63,50 @@ logger = logging.getLogger("renaser.messaging")
 #: Lo averiguado, por proceso. Ausente = todavia no se ha mirado.
 _cache: dict[str, bool] = {}
 
+#: Cuanto vale un «no», en segundos. UN «SI» VALE SIEMPRE: una tabla no
+#: desaparece. UN «NO» CADUCA, porque las migraciones se aplican a mano y
+#: pueden llegar DESPUES de que la API haya arrancado. Sin esto, una API que
+#: miro antes de tiempo se quedaba con el «no» hasta que alguien la
+#: reiniciaba, y la funcion recien migrada no aparecia en la aplicacion sin
+#: que nada dijera por que. Cuesta una consulta al catalogo por minuto y por
+#: funcion, y solo mientras la migracion falta.
+SEGUNDOS_DE_UN_NO = 60.0
+
+#: Hasta que instante (reloj monotono) vale cada «no». Uno sin fecha —lo que
+#: deja una prueba que escribe en `_cache` a mano— vale siempre.
+_no_hasta: dict[str, float] = {}
+
+#: De cuales se ha avisado ya en el registro: el aviso sale una vez, no cada
+#: minuto.
+_avisados: set[str] = set()
+
+
+def _sabido(clave: str) -> bool:
+    """Si lo averiguado sobre `clave` sigue valiendo."""
+    if clave not in _cache:
+        return False
+    if _cache[clave]:
+        return True
+    return time.monotonic() < _no_hasta.get(clave, float("inf"))
+
+
+def _caduca(clave: str) -> bool:
+    """Pone fecha al «no» recien averiguado. `True` la primera vez: toca avisar."""
+    _no_hasta[clave] = time.monotonic() + SEGUNDOS_DE_UN_NO
+    if clave in _avisados:
+        return False
+    _avisados.add(clave)
+    return True
+
 
 async def hay_adjuntos_de_chat(db: AsyncSession) -> bool:
     """Si existe `message_attachments` (migracion 0033)."""
-    if "message_attachments" not in _cache:
+    if not _sabido("message_attachments"):
         conexion = await db.connection()
         _cache["message_attachments"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("message_attachments")
         )
-        if not _cache["message_attachments"]:
+        if not _cache["message_attachments"] and _caduca("message_attachments"):
             logger.warning(
                 "La migracion 0033 no esta aplicada: los mensajes solo pueden "
                 "llevar texto y el boton de adjuntar responde 503."
@@ -88,12 +124,12 @@ async def hay_pares_directos(db: AsyncSession) -> bool:
     la garantia de verdad —la que no depende de que nadie se equivoque— llega
     con la migracion.
     """
-    if "direct_conversation_pairs" not in _cache:
+    if not _sabido("direct_conversation_pairs"):
         conexion = await db.connection()
         _cache["direct_conversation_pairs"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("direct_conversation_pairs")
         )
-        if not _cache["direct_conversation_pairs"]:
+        if not _cache["direct_conversation_pairs"] and _caduca("direct_conversation_pairs"):
             logger.warning(
                 "La migracion 0039 no esta aplicada: abrir un chat directo dos "
                 "veces a la vez todavia puede crear dos conversaciones."
@@ -120,12 +156,12 @@ async def hay_etiquetas_de_conversacion(db: AsyncSession) -> bool:
     encima de las conversaciones, asi que la lista, el chat y los adjuntos
     siguen funcionando igual que hoy.
     """
-    if "conversation_labels" not in _cache:
+    if not _sabido("conversation_labels"):
         conexion = await db.connection()
         _cache["conversation_labels"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("conversation_labels")
         )
-        if not _cache["conversation_labels"]:
+        if not _cache["conversation_labels"] and _caduca("conversation_labels"):
             logger.warning(
                 "La migracion 0045 no esta aplicada: la bandeja funciona igual, "
                 "pero no se pueden crear ni usar etiquetas de conversacion."
@@ -149,12 +185,12 @@ async def hay_respuestas_a_historias(db: AsyncSession) -> bool:
     hay nada que filtrar, y un filtro que siempre devuelve vacio es un boton
     muerto.
     """
-    if "message_story_context" not in _cache:
+    if not _sabido("message_story_context"):
         conexion = await db.connection()
         _cache["message_story_context"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("message_story_context")
         )
-        if not _cache["message_story_context"]:
+        if not _cache["message_story_context"] and _caduca("message_story_context"):
             logger.warning(
                 "La migracion 0044 no esta aplicada: responder una historia "
                 "manda el mensaje pero sin su referencia a la historia."
@@ -224,7 +260,7 @@ async def hay_busqueda_en_mensajes(db: AsyncSession) -> bool:
     que esto funciona igual en los dos. Si por lo que sea no pudiera mirarlos, se
     responde que no: quedarse con la busqueda de siempre es el lado seguro.
     """
-    if "indice_busqueda_mensajes" not in _cache:
+    if not _sabido("indice_busqueda_mensajes"):
 
         def _mirar(sync) -> bool:  # noqa: ANN001
             try:
@@ -241,7 +277,7 @@ async def hay_busqueda_en_mensajes(db: AsyncSession) -> bool:
 
         conexion = await db.connection()
         _cache["indice_busqueda_mensajes"] = await conexion.run_sync(_mirar)
-        if not _cache["indice_busqueda_mensajes"]:
+        if not _cache["indice_busqueda_mensajes"] and _caduca("indice_busqueda_mensajes"):
             logger.info(
                 "La migracion 0046 no esta aplicada: la busqueda de la bandeja "
                 "encuentra por nombre y por usuario, no por el texto de los "
@@ -258,12 +294,12 @@ async def hay_sesiones_en_el_chat(db: AsyncSession) -> bool:
     porque no hay donde guardar de que sesion habla cada mensaje. La agenda y
     los avisos funcionan igual. Se degrada el adorno, nunca la sesion.
     """
-    if "message_booking_context" not in _cache:
+    if not _sabido("message_booking_context"):
         conexion = await db.connection()
         _cache["message_booking_context"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("message_booking_context")
         )
-        if not _cache["message_booking_context"]:
+        if not _cache["message_booking_context"] and _caduca("message_booking_context"):
             logger.warning(
                 "La migracion 0097 no esta aplicada: las sesiones salen en el "
                 "chat como texto, sin tarjeta ni botones."
@@ -279,12 +315,12 @@ async def hay_filtros_de_conversacion(db: AsyncSession) -> bool:
     `message_attachments`. Lo que no hay son filtros personalizados: listarlos
     devuelve vacio y crearlos responde 503.
     """
-    if "conversation_filters" not in _cache:
+    if not _sabido("conversation_filters"):
         conexion = await db.connection()
         _cache["conversation_filters"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("conversation_filters")
         )
-        if not _cache["conversation_filters"]:
+        if not _cache["conversation_filters"] and _caduca("conversation_filters"):
             logger.warning(
                 "La migracion 0102 no esta aplicada: los grupos no tienen "
                 "filtros personalizados; las categorias automaticas si."
@@ -299,12 +335,12 @@ async def hay_puertas_de_grupo(db: AsyncSession) -> bool:
     solicitudes. Solo se entra a uno cuando quien lo administra te añade.
     Las dos tablas llegan en la misma migracion: se mira una.
     """
-    if "group_settings" not in _cache:
+    if not _sabido("group_settings"):
         conexion = await db.connection()
         _cache["group_settings"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("group_settings")
         )
-        if not _cache["group_settings"]:
+        if not _cache["group_settings"] and _caduca("group_settings"):
             logger.warning(
                 "La migracion 0104 no esta aplicada: los grupos no tienen foto, "
                 "enlace ni solicitudes para entrar."
@@ -319,17 +355,37 @@ async def hay_reacciones_y_respuestas(db: AsyncSession) -> bool:
     mensaje que responde a otro se manda igual, como un mensaje normal.
     Las dos tablas llegan en la misma migracion: se mira una.
     """
-    if "message_reactions" not in _cache:
+    if not _sabido("message_reactions"):
         conexion = await db.connection()
         _cache["message_reactions"] = await conexion.run_sync(
             lambda sync: inspect(sync).has_table("message_reactions")
         )
-        if not _cache["message_reactions"]:
+        if not _cache["message_reactions"] and _caduca("message_reactions"):
             logger.warning(
                 "La migracion 0106 no esta aplicada: no hay reacciones ni "
                 "respuestas a un mensaje concreto."
             )
     return _cache["message_reactions"]
+
+
+async def hay_preferencias_de_conversacion(db: AsyncSession) -> bool:
+    """Si existe `conversation_preferences` (migracion 0107).
+
+    SIN LA 0107: el chat funciona igual. Lo que no hay es silenciar una
+    conversacion ni vaciarla para uno mismo: las dos rutas responden 503 y la
+    aplicacion no las ofrece (`GET /conversations/availability`).
+    """
+    if not _sabido("conversation_preferences"):
+        conexion = await db.connection()
+        _cache["conversation_preferences"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("conversation_preferences")
+        )
+        if not _cache["conversation_preferences"] and _caduca("conversation_preferences"):
+            logger.warning(
+                "La migracion 0107 no esta aplicada: no se puede silenciar ni "
+                "vaciar una conversacion."
+            )
+    return _cache["conversation_preferences"]
 
 
 def olvidar() -> None:
@@ -340,3 +396,5 @@ def olvidar() -> None:
     heredaria el «si» de la anterior y pasaria comprobando otra cosa.
     """
     _cache.clear()
+    _no_hasta.clear()
+    _avisados.clear()

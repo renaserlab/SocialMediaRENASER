@@ -393,6 +393,7 @@ async def test_la_aplicacion_puede_preguntar_si_hay_notas_de_voz(entorno):
         "voice_notes": True,
         "story_replies": True,
         "reactions": True,
+        "preferences": True,
     }
 
 

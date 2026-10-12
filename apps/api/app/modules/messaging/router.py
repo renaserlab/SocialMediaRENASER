@@ -30,11 +30,20 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import audio, avisos, esquema, historias, reacciones, sesiones
+from app.modules.messaging import (
+    audio,
+    avisos,
+    esquema,
+    historias,
+    preferencias,
+    reacciones,
+    sesiones,
+)
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.entrada_a_grupos import router as entrada_router
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.grupos import router as grupos_router
+from app.modules.messaging.preferencias import router as preferencias_router
 from app.modules.messaging.reacciones import router as reacciones_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
@@ -91,6 +100,9 @@ router.include_router(entrada_router)
 
 # Reaccionar a un mensaje y consultar reacciones (`reacciones.py`).
 router.include_router(reacciones_router)
+
+# Silenciar una conversación y vaciarla para uno mismo (`preferencias.py`).
+router.include_router(preferencias_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
@@ -472,6 +484,7 @@ async def messaging_availability(
         voice_notes=disponible,
         story_replies=await esquema.hay_respuestas_a_historias(db),
         reactions=await esquema.hay_reacciones_y_respuestas(db),
+        preferences=await esquema.hay_preferencias_de_conversacion(db),
     )
 
 
@@ -807,6 +820,11 @@ async def list_messages(
         consulta = consulta.where(Message.created_at < before)
     if after is not None:
         consulta = consulta.where(Message.created_at > after)
+    # LO QUE ESTA PERSONA VACIO NO SE LE ENSEÑA. Es suyo: a los demas
+    # miembros el historial les sale entero. Ver `preferencias.py`.
+    vaciado = await preferencias.vaciado_desde(db, conversation_id, current_user.id)
+    if vaciado is not None:
+        consulta = consulta.where(Message.created_at > vaciado)
 
     rows = (
         await db.execute(

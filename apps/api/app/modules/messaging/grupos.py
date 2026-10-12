@@ -52,7 +52,7 @@ from app.core.exceptions import (
     ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user
-from app.modules.messaging import ajustes_de_grupo, avisos, esquema
+from app.modules.messaging import ajustes_de_grupo, avisos, esquema, preferencias
 from app.modules.messaging.ajustes_de_grupo import AjustesLeidos
 from app.modules.messaging.lectura import leer_conversaciones
 from app.modules.messaging.models import Conversation, ConversationMember
@@ -166,6 +166,8 @@ class InfoDeConversacion(BaseModel):
     settings: AjustesLeidos | None = None
     #: Cuantas solicitudes esperan respuesta. Solo para quien administra.
     pending_requests: int = 0
+    #: Quien pregunta la tiene silenciada. Es suyo: no dice nada de los demas.
+    muted: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -386,6 +388,9 @@ async def info_de_la_conversacion(
             if (puede and hay_extras)
             else 0
         ),
+        muted=(
+            await preferencias.de_la_conversacion(db, conversation_id, current_user.id)
+        ).muted,
     )
 
 

@@ -37,7 +37,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import ajustes_de_grupo, esquema
+from app.modules.messaging import ajustes_de_grupo, esquema, preferencias
 from app.modules.messaging.etiquetas import etiquetas_por_conversacion
 from app.modules.messaging.models import (
     ConversationMember,
@@ -329,9 +329,22 @@ async def leer_conversaciones(
         db, [fila.id for fila in filas if fila.kind == "group"]
     )
 
+    # Lo que quien pregunta decidio PARA SI: cuales tiene silenciadas y desde
+    # cuando quiere ver cada una. Una consulta con un `IN`, como lo demas.
+    propias = await preferencias.de_la_pagina(db, uid, ids)
+
     salida: list[ConversationRead] = []
     for fila in filas:
+        propia = propias.get(str(fila.id), preferencias.SIN_PREFERENCIA)
         ultimo = ultimos.get(fila.id)
+        # Si vacio el chat y no ha llegado nada despues, para ELLA no hay
+        # ultimo mensaje: la fila no puede seguir enseñando lo que vacio.
+        if (
+            ultimo is not None
+            and propia.cleared_at is not None
+            and ultimo.created_at <= propia.cleared_at
+        ):
+            ultimo = None
         if ultimo is None:
             resumen = None
         elif (ultimo.body or "").strip():
@@ -353,6 +366,7 @@ async def leer_conversaciones(
                 last_message=resumen,
                 last_message_at=ultimo.created_at if ultimo is not None else None,
                 unread_count=pendientes.get(fila.id, 0),
+                muted=propia.muted,
                 updated_at=fila.updated_at,
                 labels=etiquetas.get(fila.id, []),
             )

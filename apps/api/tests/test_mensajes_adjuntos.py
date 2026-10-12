@@ -394,9 +394,11 @@ async def test_el_historial_con_adjuntos_no_hace_una_consulta_por_mensaje(entorn
     assert len(cuerpo) == 30
     assert all(len(m["attachments"]) == 1 for m in cuerpo)
     selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
-    # Siete desde la 0106 (reacciones y citas de la pagina, una consulta cada
-    # una). Sigue sin depender de cuantos mensajes hay, que es lo que se vigila.
-    assert len(selects) <= 7, f"{len(selects)} consultas para 30 mensajes con adjunto"
+    # Ocho: siete desde la 0106 (reacciones y citas de la pagina, una consulta
+    # cada una) y una mas desde la 0107 (desde cuando quiere ver el chat quien
+    # pregunta). Sigue sin depender de cuantos mensajes hay, que es lo que se
+    # vigila.
+    assert len(selects) <= 8, f"{len(selects)} consultas para 30 mensajes con adjunto"
 
 
 @pytest.mark.asyncio

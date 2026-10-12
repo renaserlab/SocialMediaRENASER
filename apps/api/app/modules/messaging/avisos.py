@@ -28,6 +28,7 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.messaging import preferencias
 from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import UserBlock
@@ -78,8 +79,10 @@ async def destinatarios(
 ) -> list[str]:
     """Los miembros de la conversación a los que hay que avisar.
 
-    Todos menos quien escribe —nadie se avisa a sí mismo— y menos aquellos con
-    los que haya un bloqueo, en cualquiera de los dos sentidos.
+    Todos menos quien escribe —nadie se avisa a sí mismo—, menos aquellos con
+    los que haya un bloqueo, en cualquiera de los dos sentidos, y menos quien
+    tenga la conversación SILENCIADA: el mensaje le llega igual y le cuenta
+    como no leído; lo que no le llega es el aviso.
     """
     miembros = list(
         await db.scalars(
@@ -108,7 +111,9 @@ async def destinatarios(
         (bloqueado if bloqueador == remitente_id else bloqueador)
         for bloqueador, bloqueado in bloqueos
     }
-    return [miembro for miembro in miembros if miembro not in fuera]
+    avisables = [miembro for miembro in miembros if miembro not in fuera]
+    en_silencio = await preferencias.quienes_silencian(db, conversation_id, avisables)
+    return [miembro for miembro in avisables if miembro not in en_silencio]
 
 
 def nombre_para_el_aviso(perfil: Profile | None) -> str | None:
