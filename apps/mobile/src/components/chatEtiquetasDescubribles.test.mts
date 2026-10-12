@@ -27,6 +27,7 @@ function fuente(rel: string): string {
 }
 
 const CHIPS = fuente('components/ChipsDeEtiquetas.tsx');
+const BANDEJA = fuente('screens/MessagesScreen.tsx');
 const REPOSITORIO = fuente('repositories/EtiquetasRepository.ts');
 
 describe('encontrar las etiquetas', () => {
@@ -45,6 +46,44 @@ describe('encontrar las etiquetas', () => {
       'La fila tiene que decir a la vista que son privadas: quien no lo sabe, ' +
         'o no las usa por no etiquetar a alguien delante de él, o las usa ' +
         'creyendo que se comparten.',
+    );
+  });
+
+  it('la explicación ocupa todo el ancho, no el hueco que le deja «Filtros»', () => {
+    /*
+      Lo reportado el 12/10/2026 con captura: el texto salía en tres líneas
+      estrechas, con media pantalla vacía a su derecha, porque vivía dentro
+      de la columna de las etiquetas y esa columna comparte renglón con el
+      botón «Filtros».
+    */
+    const fila = CHIPS.slice(
+      CHIPS.indexOf('export function ChipsDeEtiquetas('),
+      CHIPS.indexOf('export function ExplicacionDeEtiquetas('),
+    );
+    assert.ok(fila.length > 0, 'Falta `ExplicacionDeEtiquetas`, o va antes que la fila.');
+    // Como TEXTO que se pinta; como pista para el lector de pantalla sí sigue.
+    assert.ok(
+      !/>\s*\{t\('label\.explain'\)\}\s*</.test(fila),
+      'La fila ha vuelto a pintar la explicación por dentro: se estrechará otra vez.',
+    );
+
+    const renglon = BANDEJA.indexOf('<View style={styles.filaDeFiltros}>');
+    const filtros = BANDEJA.indexOf('<FiltrosDeBandeja', renglon);
+    const explicacion = BANDEJA.indexOf('<ExplicacionDeEtiquetas', renglon);
+    assert.ok(renglon > 0 && filtros > renglon, 'No se encuentra el renglón de etiquetas y filtros.');
+    assert.ok(
+      explicacion > filtros,
+      'La explicación tiene que ir DESPUÉS del renglón, no dentro de él.',
+    );
+    // Entre «Filtros» y la explicación se cierran la columna y el renglón.
+    const cierres = BANDEJA.slice(filtros, explicacion).match(/<\/View>/g) ?? [];
+    assert.equal(cierres.length, 2, 'La explicación sigue dentro del renglón de «Filtros».');
+    // Y se le pasa lo mismo que a la fila: no se explica una fila que no se ve.
+    assert.ok(
+      /<ExplicacionDeEtiquetas\s+etiquetas=\{etiquetas\.etiquetas\}\s+disponible=\{etiquetas\.disponible\}\s+alGestionar=\{abrirGestorDeLaLista\}\s*\/>/.test(
+        BANDEJA,
+      ),
+      'La explicación tiene que recibir las mismas tres cosas que la fila.',
     );
   });
 
