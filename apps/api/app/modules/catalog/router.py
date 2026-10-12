@@ -932,7 +932,7 @@ async def _requisitos_que_faltan(
     )
     hay_lecciones = False
     if not modulos:
-        faltan.append("Añade al menos un módulo.")
+        faltan.append("Agrega al menos un módulo.")
     else:
         # `in_(modulos)` con la lista NO vacia: `in_(lista or [""])` cuela en
         # SQLite y PostgreSQL rechaza la cadena vacia contra una columna uuid.
@@ -943,7 +943,7 @@ async def _requisitos_que_faltan(
         )
         hay_lecciones = bool(lecciones)
         if not hay_lecciones:
-            faltan.append("Añade al menos una lección dentro de un módulo.")
+            faltan.append("Agrega al menos una lección dentro de un módulo.")
 
     faltan.extend(await _requisitos_de_cobro(db, course, hay_lecciones=hay_lecciones))
     return faltan

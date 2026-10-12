@@ -594,7 +594,7 @@ async def crear_hold(
         # recarga perezosa fuera del greenlet: `MissingGreenlet`, y la persona
         # recibe un 500 en vez del 409 que explica el tope. Es la misma trampa
         # que ya se esquiva veinte líneas más abajo con `aviso`.
-        aviso = f"Como mucho {ajustes.max_per_order} entradas por operación."
+        aviso = f"Como máximo {ajustes.max_per_order} entradas por operación."
         await db.rollback()
         raise LimiteSuperado(aviso)
 

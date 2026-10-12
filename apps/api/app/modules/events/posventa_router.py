@@ -670,7 +670,7 @@ async def rechazar(
     ensure_uuid(case_id, "Expediente no encontrado.")
     if not (payload.reason or "").strip():
         raise ValidationAppError(
-            "Un rechazo necesita un motivo que se le pueda enseñar a la persona.",
+            "Un rechazo necesita un motivo que se le pueda mostrar a la persona.",
             code="event_case_reject_needs_reason",
         )
     movimiento = await posventa.transicionar(

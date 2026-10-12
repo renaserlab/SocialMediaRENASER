@@ -197,7 +197,7 @@ class ProveedorDeDirecto(ABC):
         El valor por defecto es el más discreto: un proveedor que no traduzca
         sus errores no puede filtrarlos por descuido.
         """
-        return "live_provider_error", "No se pudo preparar el vídeo."
+        return "live_provider_error", "No se pudo preparar el video."
 
 
 class ProveedorNoConfigurado(ProveedorDeDirecto):

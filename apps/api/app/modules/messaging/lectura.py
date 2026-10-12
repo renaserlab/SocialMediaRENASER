@@ -54,7 +54,7 @@ from app.modules.profiles.models import Profile
 #: sabe como se ve.
 _RESUMEN_SIN_TEXTO = {
     "image": "Foto",
-    "video": "Vídeo",
+    "video": "Video",
     "document": "Archivo",
 }
 

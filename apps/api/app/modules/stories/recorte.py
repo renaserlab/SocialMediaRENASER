@@ -153,10 +153,10 @@ def revisar_tramo(inicio_ms: int, fin_ms: int, duracion_real_ms: int) -> Tramo:
     rechazar el tramo «hasta el final», que es justo el que mas se elige.
     """
     if inicio_ms < 0:
-        raise ValidationAppError("El tramo no puede empezar antes del vídeo.")
+        raise ValidationAppError("El tramo no puede empezar antes del video.")
     if inicio_ms >= duracion_real_ms:
         raise ValidationAppError(
-            "El tramo empieza después de que el vídeo termine."
+            "El tramo empieza después de que el video termine."
         )
     fin = min(fin_ms, duracion_real_ms)
     duracion = fin - inicio_ms
@@ -216,8 +216,8 @@ async def _turno_acotado() -> AsyncIterator[None]:
         await asyncio.wait_for(semaforo.acquire(), timeout=ESPERA_DE_TURNO_S)
     except asyncio.TimeoutError:
         raise ServiceUnavailableError(
-            "El servidor está ocupado preparando otros vídeos. "
-            "No hemos publicado nada: inténtalo en un momento."
+            "El servidor está ocupado preparando otros videos. "
+            "No publicamos nada: inténtalo en un momento."
         ) from None
     try:
         yield
@@ -280,8 +280,8 @@ async def recortar(storage_path: str, tramo: Tramo, propietario: str) -> str:
     ffmpeg = mp._ffmpeg()
     if not mp.processing_configured() or not ffmpeg:
         raise ServiceUnavailableError(
-            "Este servidor no puede recortar vídeos ahora mismo. "
-            "No hemos publicado nada."
+            "Este servidor no puede recortar videos ahora mismo. "
+            "No publicamos nada."
         )
 
     try:
@@ -299,7 +299,7 @@ async def recortar(storage_path: str, tramo: Tramo, propietario: str) -> str:
         # ya se pago una vez en este repositorio.
         logger.exception("Fallo recortando %s", storage_path)
         raise ServiceUnavailableError(
-            "No pudimos recortar el vídeo. No hemos publicado nada: "
+            "No pudimos recortar el video. No publicamos nada: "
             "vuelve a intentarlo."
         ) from fallo
 
@@ -329,7 +329,7 @@ async def _recortar_de_verdad(
                     salio = False
                 if not salio:
                     raise ServiceUnavailableError(
-                        "No pudimos recortar el vídeo. No hemos publicado nada: "
+                        "No pudimos recortar el video. No publicamos nada: "
                         "vuelve a intentarlo."
                     )
 
@@ -345,7 +345,7 @@ async def _recortar_de_verdad(
                         duro_s,
                     )
                     raise ServiceUnavailableError(
-                        "El recorte no salió como debía. No hemos publicado nada."
+                        "El recorte no salió como debía. No publicamos nada."
                     )
 
                 # Bajo el prefijo del dueño, como los derivados de
@@ -383,8 +383,8 @@ async def preparar_video(
         # que este servidor no puede hacer.
         if tramo_pedido is not None:
             raise ServiceUnavailableError(
-                "Este servidor no puede recortar vídeos ahora mismo. "
-                "No hemos publicado nada."
+                "Este servidor no puede recortar videos ahora mismo. "
+                "No publicamos nada."
             )
         return storage_path, duracion_declarada_ms
 
@@ -394,7 +394,7 @@ async def preparar_video(
             # `duration_ms`; el archivo dura lo que dura, y si pasa del tope sin
             # elegir tramo, no hay historia.
             raise ValidationAppError(
-                f"Este vídeo dura {real_ms / 1000:.1f} s y las historias admiten "
+                f"Este video dura {real_ms / 1000:.1f} s y las historias admiten "
                 f"hasta {MAX_DURATION_MS // 1000}. Elige el tramo que quieres "
                 "publicar."
             )

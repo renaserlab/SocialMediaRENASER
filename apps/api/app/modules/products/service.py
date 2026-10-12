@@ -560,7 +560,7 @@ async def transicionar(
         if not (motivo or "").strip():
             raise ValidationAppError(
                 "Suspender un producto necesita un motivo que se le pueda "
-                "enseñar a quien lo vende.",
+                "mostrar a quien lo vende.",
                 code="product_suspension_needs_reason",
             )
         valores["suspended_at"] = momento
