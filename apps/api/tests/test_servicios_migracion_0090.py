@@ -159,6 +159,12 @@ APLICADAS = {
     "0104_puertas_de_grupo.sql": "3b140187d65afbfc90a27803c997b858f0723d99",
     "0105_html_en_el_chat.sql": "6376934516c38f796894e9249ba7b0d22e9747df",
     "0106_reacciones_y_respuestas.sql": "d65aa960989ff04e55b1b2dd590129aad4e3ee61",
+    # 0107 (lo que cada persona decide para si sobre una conversacion:
+    # silenciarla y vaciarla). Edson la ejecuto a mano en Supabase el
+    # 11/10/2026 y asi lo comunico. PENDIENTE la consulta de comprobacion en
+    # solo lectura (8 filas): todavia no hay resultado que anotar. Desde que
+    # esta aplicada no se edita: se corrige hacia delante, con otra.
+    "0107_preferencias_de_conversacion.sql": "746746dfc37da46a76e5ae792b3b5bce77dcb082",
 }
 
 
