@@ -6,6 +6,7 @@ import {
   toConversation,
   toMessage,
 } from '@/mappers/messageMapper';
+import { rutaDePortada } from '@/lib/mediosDeChat';
 import { firmarAdjuntos, type AdjuntoSubido } from '@/services/messageMedia';
 import { profileImageUrl, signMediaUrls } from '@/services/storage';
 import {
@@ -58,10 +59,13 @@ export const MENSAJES_POR_PAGINA = 30;
  *
  * Si la firma falla, el mensaje se devuelve igual: se lee el texto y el adjunto
  * enseña su hueco. Quedarse sin foto no puede dejar sin chat.
+ *
+ * LA PORTADA DE CADA VIDEO VA EN LA MISMA LLAMADA: es lo que se pinta en la
+ * burbuja, y pedirla aparte sería una segunda petición por cada página.
  */
 async function conUrlsFirmadas(mensajes: Message[]): Promise<Message[]> {
   const rutas = mensajes.flatMap((mensaje) =>
-    (mensaje.attachments ?? []).map((adjunto) => adjunto.storagePath),
+    (mensaje.attachments ?? []).flatMap(rutasDeUnAdjunto),
   );
   if (rutas.length === 0) return mensajes;
 
@@ -70,13 +74,29 @@ async function conUrlsFirmadas(mensajes: Message[]): Promise<Message[]> {
     mensaje.attachments?.length
       ? {
           ...mensaje,
-          attachments: mensaje.attachments.map((adjunto) => ({
-            ...adjunto,
-            url: firmas[adjunto.storagePath],
-          })),
+          attachments: mensaje.attachments.map((adjunto) => conFirmas(adjunto, firmas)),
         }
       : mensaje,
   );
+}
+
+/** Lo que hay que firmar para pintar un adjunto: él y, si es un video, su portada. */
+function rutasDeUnAdjunto(adjunto: { storagePath: string; kind: string }): string[] {
+  return adjunto.kind === 'video'
+    ? [adjunto.storagePath, rutaDePortada(adjunto.storagePath)]
+    : [adjunto.storagePath];
+}
+
+function conFirmas<T extends { storagePath: string; kind: string }>(
+  adjunto: T,
+  firmas: Record<string, string>,
+): T & { url?: string; posterUrl?: string } {
+  return {
+    ...adjunto,
+    url: firmas[adjunto.storagePath],
+    posterUrl:
+      adjunto.kind === 'video' ? firmas[rutaDePortada(adjunto.storagePath)] : undefined,
+  };
 }
 
 /**
@@ -272,7 +292,11 @@ export const MessageRepository = {
     );
     const filas = Array.isArray(dto?.items) ? dto.items : [];
     // Todas las firmas de la página en UNA llamada, igual que en el chat.
-    const rutas = filas.flatMap((fila) => (fila.attachments ?? []).map((a) => a.storage_path));
+    const rutas = filas.flatMap((fila) =>
+      (fila.attachments ?? []).flatMap((a) =>
+        rutasDeUnAdjunto({ storagePath: a.storage_path, kind: a.kind }),
+      ),
+    );
     let firmas: Record<string, string> = {};
     try {
       firmas = await firmarAdjuntos(rutas);
@@ -290,10 +314,7 @@ export const MessageRepository = {
           nombre: fila.sender?.full_name ?? '',
           avatarUrl: profileImageUrl(fila.sender?.avatar_path) ?? undefined,
         },
-        adjuntos: (fila.attachments ?? []).map((a) => ({
-          ...toAttachment(a),
-          url: firmas[a.storage_path],
-        })),
+        adjuntos: (fila.attachments ?? []).map((a) => conFirmas(toAttachment(a), firmas)),
       })),
       siguiente: leerCursor(dto),
     };

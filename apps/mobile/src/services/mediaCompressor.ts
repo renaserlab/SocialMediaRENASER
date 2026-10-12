@@ -38,9 +38,10 @@ type CompressorModule = {
     ) => Promise<string>;
   };
   getVideoMetaData: (filePath: string) => Promise<VideoMeta>;
+  clearCache?: (cacheDir?: string) => Promise<string>;
   createVideoThumbnail: (
     fileUrl: string,
-    options?: { quality?: number },
+    options?: { quality?: number; cacheName?: string },
   ) => Promise<ThumbnailResult>;
 };
 
@@ -131,16 +132,38 @@ export async function readVideoMetadata(uri: string): Promise<MediaMetadata | nu
  * instante en el muro y en los shorts mientras el video prepara. `null` donde
  * el modulo nativo no esta; esos videos quedan sin poster hasta que el
  * pipeline del backend lo genere.
+ *
+ * `nombreEnCache` es para quien va a pedir la misma portada mas de una vez (el
+ * chat): en Android el compresor la guarda con ese nombre en su carpeta
+ * temporal y, si ya existe, la devuelve sin volver a abrir el video. `uri`
+ * puede ser un archivo del telefono o una direccion `https`.
  */
 export async function createVideoPoster(
   uri: string,
+  nombreEnCache?: string,
 ): Promise<{ uri: string; width?: number; height?: number } | null> {
   if (!native || typeof native.createVideoThumbnail !== 'function') return null;
   try {
-    const thumb = await native.createVideoThumbnail(uri, { quality: 0.8 });
+    const thumb = await native.createVideoThumbnail(
+      uri,
+      nombreEnCache ? { quality: 0.8, cacheName: nombreEnCache } : { quality: 0.8 },
+    );
     if (!thumb?.path) return null;
     return { uri: thumb.path, width: thumb.width || undefined, height: thumb.height || undefined };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Borra las portadas de video que el compresor guarda en su carpeta temporal.
+ * Para el cierre de sesion: son fotogramas de videos privados de un chat.
+ */
+export async function clearVideoPosters(): Promise<void> {
+  if (!native || typeof native.clearCache !== 'function') return;
+  try {
+    await native.clearCache();
+  } catch {
+    // Es una carpeta temporal: el sistema la limpia igual cuando quiere.
   }
 }
