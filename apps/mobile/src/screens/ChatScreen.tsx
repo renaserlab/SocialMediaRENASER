@@ -67,7 +67,7 @@ import {
 } from '@/lib/saltoDeChat';
 import { alCambiarElSilencioDeUnChat } from '@/hooks/useAvisosEnVivo';
 import { afterSheetClose } from '@/lib/afterSheetClose';
-import { colorDeFondo, veloSobreLaFoto } from '@/lib/fondoDeChat';
+import { colorDeFondo, fondoDe, veloSobreLaFoto } from '@/lib/fondoDeChat';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { retirarAvisosDe, toast } from '@/lib/toast';
@@ -333,8 +333,9 @@ export function ChatScreen() {
   const [silencioPuesto, setSilencioPuesto] = useState<boolean | null>(null);
   const [haciendoOpcion, setHaciendoOpcion] = useState(false);
 
-  // El fondo que esta persona eligió en este teléfono. Se lee una vez.
-  const fondoDelChat = useFondoDeChatStore((estado) => estado.fondo);
+  // El fondo que esta persona eligió PARA ESTE CHAT en este teléfono. Cada
+  // conversación tiene el suyo; lo guardado se lee una vez.
+  const fondoDelChat = useFondoDeChatStore((estado) => fondoDe(estado.fondos, params.id ?? ''));
   const leerFondoDelChat = useFondoDeChatStore((estado) => estado.leer);
   useEffect(() => {
     void leerFondoDelChat();
@@ -2913,7 +2914,11 @@ export function ChatScreen() {
         ) : null}
       </BottomSheet>
 
-      <HojaDeFondoDeChat visible={fondoAbierto} onClose={() => setFondoAbierto(false)} />
+      <HojaDeFondoDeChat
+        conversacionId={params.id ?? ''}
+        visible={fondoAbierto}
+        onClose={() => setFondoAbierto(false)}
+      />
 
       <BottomSheet visible={menuAbierto} onClose={() => setMenuAbierto(false)}>
         <ListRow

@@ -6642,7 +6642,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'chatSearch.startBody': 'Por uma palavra de uma mensagem ou pelo nome de um arquivo.',
   'chatSearch.emptyBody': 'Não há nenhuma mensagem com «{texto}» neste chat.',
   'chatBackground.title': 'Fundo do chat',
-  'chatBackground.hint': 'Vale para todos os seus chats e só neste telefone. Ninguém mais vê.',
+  'chatBackground.hint': 'Muda só este chat e só neste telefone. Ninguém mais vê.',
   'chatBackground.default': 'Padrão',
   'chatBackground.photo': 'Escolher uma foto',
   'chatBackground.changePhoto': 'Trocar a foto do fundo',

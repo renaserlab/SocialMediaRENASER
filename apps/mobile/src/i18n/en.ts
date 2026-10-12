@@ -6637,7 +6637,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'chatSearch.startBody': 'By a word from a message or by a file name.',
   'chatSearch.emptyBody': 'No message with “{texto}” in this chat.',
   'chatBackground.title': 'Chat background',
-  'chatBackground.hint': 'Applies to all your chats, on this phone only. No one else sees it.',
+  'chatBackground.hint': 'Changes this chat only, on this phone only. No one else sees it.',
   'chatBackground.default': 'Default',
   'chatBackground.photo': 'Choose a photo',
   'chatBackground.changePhoto': 'Change the background photo',

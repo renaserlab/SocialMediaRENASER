@@ -6724,7 +6724,7 @@ export const es = {
   'chatSearch.startBody': 'Por una palabra de un mensaje o por el nombre de un archivo.',
   'chatSearch.emptyBody': 'No hay ningún mensaje con «{texto}» en este chat.',
   'chatBackground.title': 'Fondo del chat',
-  'chatBackground.hint': 'Se aplica a todos tus chats y solo en este teléfono. Nadie más lo ve.',
+  'chatBackground.hint': 'Cambia solo este chat y solo en este teléfono. Nadie más lo ve.',
   'chatBackground.default': 'Por defecto',
   'chatBackground.photo': 'Elegir una foto',
   'chatBackground.changePhoto': 'Cambiar la foto del fondo',
