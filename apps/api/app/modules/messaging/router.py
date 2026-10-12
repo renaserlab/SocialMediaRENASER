@@ -43,6 +43,7 @@ from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.entrada_a_grupos import router as entrada_router
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.grupos import router as grupos_router
+from app.modules.messaging.lecturas import router as lecturas_router
 from app.modules.messaging.preferencias import router as preferencias_router
 from app.modules.messaging.reacciones import router as reacciones_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
@@ -103,6 +104,9 @@ router.include_router(reacciones_router)
 
 # Silenciar una conversación y vaciarla para uno mismo (`preferencias.py`).
 router.include_router(preferencias_router)
+
+# Quién ha leído cada mensaje: la confirmación de lectura (`lecturas.py`).
+router.include_router(lecturas_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
@@ -485,6 +489,10 @@ async def messaging_availability(
         story_replies=await esquema.hay_respuestas_a_historias(db),
         reactions=await esquema.hay_reacciones_y_respuestas(db),
         preferences=await esquema.hay_preferencias_de_conversacion(db),
+        # No depende de ninguna migración: sale de `last_read_at`, que existe
+        # desde la 0001. Se anuncia igual para que una aplicación nueva contra
+        # un servidor anterior a esto no pinte marcas que nadie le va a dar.
+        read_receipts=True,
     )
 
 
