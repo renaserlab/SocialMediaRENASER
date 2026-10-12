@@ -1,6 +1,16 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import { ConversationDto, toConversation } from '@/mappers/messageMapper';
-import { leerInfo, type InfoDeConversacion } from '@/lib/gruposDeChat';
+import {
+  leerAjustes,
+  leerInfo,
+  leerSolicitudes,
+  leerTarjeta,
+  leerTarjetas,
+  type AjustesDeGrupo,
+  type InfoDeConversacion,
+  type SolicitudDeGrupo,
+  type TarjetaDeGrupo,
+} from '@/lib/gruposDeChat';
 import { cuerpoDeFiltro, type BorradorDeFiltro } from '@/lib/vistasDeChat';
 import type { Conversation } from '@/types';
 
@@ -95,5 +105,111 @@ export const GroupRepository = {
       `${API_V1}/conversations/${conversationId}/filters/${filtroId}`,
       { method: 'DELETE' },
     );
+  },
+
+  // -------------------------------------------------------------------------
+  // Entrar a un grupo: foto, enlace, tarjetas y solicitudes
+  // -------------------------------------------------------------------------
+
+  /**
+   * «Únete a mi grupo»: los grupos que una persona enseña en su perfil.
+   *
+   * NUNCA LANZA: sin respuesta, la sección del perfil no se pinta. Un perfil
+   * no puede dejar de verse porque falle esta lista.
+   */
+  async tarjetasDe(personaId: string): Promise<TarjetaDeGrupo[]> {
+    try {
+      return leerTarjetas(
+        await apiRequest<unknown>(`${API_V1}/conversations/groups/of/${personaId}`),
+      );
+    } catch {
+      return [];
+    }
+  },
+
+  /** La tarjeta del grupo de un enlace. Lanza si el enlace no vale (404). */
+  async tarjetaDelEnlace(codigo: string): Promise<TarjetaDeGrupo | null> {
+    return leerTarjeta(
+      await apiRequest<unknown>(
+        `${API_V1}/conversations/groups/invite/${encodeURIComponent(codigo)}`,
+      ),
+    );
+  },
+
+  /**
+   * Pide entrar. NO mete en el grupo: deja la solicitud a quien lo administra.
+   * `codigo` es el del enlace, cuando se llegó por él.
+   */
+  async pedirEntrar(conversationId: string, codigo?: string | null): Promise<void> {
+    await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/join-requests`, {
+      method: 'POST',
+      body: JSON.stringify(codigo ? { code: codigo } : {}),
+    });
+  },
+
+  async retirarSolicitud(conversationId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/conversations/${conversationId}/join-requests/mine`, {
+      method: 'DELETE',
+    });
+  },
+
+  /** Quién espera respuesta. Solo para quien administra el grupo. */
+  async solicitudes(conversationId: string): Promise<SolicitudDeGrupo[]> {
+    return leerSolicitudes(
+      await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/join-requests`),
+    );
+  },
+
+  async responderSolicitud(
+    conversationId: string,
+    solicitudId: string,
+    aceptar: boolean,
+  ): Promise<void> {
+    await apiRequest<void>(
+      `${API_V1}/conversations/${conversationId}/join-requests/${solicitudId}/${
+        aceptar ? 'approve' : 'reject'
+      }`,
+      { method: 'POST' },
+    );
+  },
+
+  /** Enseñar el grupo en el perfil y activar su enlace. Devuelve cómo queda. */
+  async cambiarAjustes(
+    conversationId: string,
+    cambios: { enMiPerfil?: boolean; enlaceActivo?: boolean },
+  ): Promise<AjustesDeGrupo> {
+    const cuerpo: Record<string, boolean> = {};
+    if (cambios.enMiPerfil !== undefined) cuerpo.listed_on_profile = cambios.enMiPerfil;
+    if (cambios.enlaceActivo !== undefined) cuerpo.invite_enabled = cambios.enlaceActivo;
+    return leerAjustes(
+      await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/group/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify(cuerpo),
+      }),
+    );
+  },
+
+  /** Cambia el enlace: el anterior deja de valer en el acto. */
+  async cambiarEnlace(conversationId: string): Promise<AjustesDeGrupo> {
+    return leerAjustes(
+      await apiRequest<unknown>(
+        `${API_V1}/conversations/${conversationId}/group/invite/rotate`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  /** Pone la foto. Los bytes ya están subidos: aquí va la ruta. */
+  async ponerFoto(conversationId: string, ruta: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/conversations/${conversationId}/group/photo`, {
+      method: 'PUT',
+      body: JSON.stringify({ avatar_path: ruta }),
+    });
+  },
+
+  async quitarFoto(conversationId: string): Promise<void> {
+    await apiRequest<void>(`${API_V1}/conversations/${conversationId}/group/photo`, {
+      method: 'DELETE',
+    });
   },
 };

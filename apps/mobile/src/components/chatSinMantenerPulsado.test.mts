@@ -321,12 +321,13 @@ describe('la cabecera del chat', () => {
       !/rightIcon="video"/.test(CHAT_CODIGO),
       'Ha vuelto la cámara de videollamada a la cabecera del chat.',
     );
-    // Desde el 09/10 la cabecera SÍ tiene una acción derecha: abrir el
-    // contenido del chat por vistas. Lo que no puede volver es el botón que no
-    // hace nada: el icono solo se pinta si hay a dónde ir, y va con su acción.
+    // La cabecera SÍ tiene una acción derecha: desde el 11/10, los tres puntos
+    // del menú del chat (antes abría el contenido). Lo que no puede volver es
+    // el botón que no hace nada: el icono solo se pinta si hay menú que
+    // abrir, y va con su acción.
     assert.match(
       sinComentarios(CABECERA),
-      /rightIcon=\{alAbrirContenido \? 'grid' : undefined\}\s*onRightPress=\{alAbrirContenido\}/,
+      /rightIcon=\{alAbrirMenu \? 'more-vertical' : undefined\}\s*onRightPress=\{alAbrirMenu\}/,
     );
     assert.ok(
       (sinComentarios(CABECERA).match(/rightIcon/g) ?? []).length === 1,

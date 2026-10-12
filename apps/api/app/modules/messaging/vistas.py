@@ -56,7 +56,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import and_, false, func, or_, select, update
+from sqlalchemy import and_, case, false, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -70,7 +70,7 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import esquema, historias, sesiones
+from app.modules.messaging import esquema, historias, preferencias, reacciones, sesiones
 from app.modules.messaging.lectura import adjuntos_por_mensaje
 from app.modules.messaging.models import (
     Conversation,
@@ -99,7 +99,12 @@ TIPOS = ("text", *TIPOS_DE_ADJUNTO, "link")
 #: Las categorias automaticas, en el orden en que se ofrecen. `all` es la
 #: conversacion entera y existe para poder BUSCAR en ella desde la misma
 #: pantalla; el chat sigue siendo el sitio donde se lee.
-CATEGORIAS = ("all", "image", "video", "document", "audio", "link")
+CATEGORIAS = ("all", "media", "image", "video", "document", "audio", "link")
+
+#: «Media» son las fotos y los videos JUNTOS, en una sola cuadricula: es como
+#: se miran en cualquier mensajeria. `image` y `video` siguen existiendo para
+#: quedarse solo con unas o con otros dentro de ella.
+_TIPOS_DE_CATEGORIA = {"media": ["image", "video"]}
 
 #: Con que empieza lo que la aplicacion pinta como enlace (`enlacesEnTexto.ts`).
 #: La aplicacion reconoce ademas dominios escritos a pelo («renaser.pe»); aqui
@@ -285,8 +290,10 @@ def _condiciones(criterios: Criterios, *, con_adjuntos: bool) -> list[ColumnElem
 
 
 def _criterios_de_categoria(categoria: str) -> Criterios | None:
-    """Una categoria ES unos criterios con un solo tipo. `all` no filtra."""
-    return None if categoria == "all" else Criterios(types=[categoria])
+    """Una categoria ES unos criterios de tipo. `all` no filtra."""
+    if categoria == "all":
+        return None
+    return Criterios(types=_TIPOS_DE_CATEGORIA.get(categoria, [categoria]))
 
 
 # --------------------------------------------------------------------------- #
@@ -553,31 +560,47 @@ async def _filtros(
     return [leido for fila in filas if (leido := _leer_filtro(fila)) is not None]
 
 
-async def _cuentas(db: AsyncSession, conversation_id: str) -> dict[str, int]:
+def _mensajes_con(*tipos: str):
+    """Cuantos MENSAJES distintos llevan algun adjunto de esos tipos."""
+    return func.count(
+        func.distinct(
+            case((MessageAttachment.kind.in_(tipos), MessageAttachment.message_id))
+        )
+    )
+
+
+async def _cuentas(
+    db: AsyncSession, conversation_id: str, desde: datetime | None = None
+) -> dict[str, int]:
     """Cuantos mensajes vivos hay de cada categoria. DOS consultas, siempre.
 
-    Una agrupa los adjuntos por tipo —contando MENSAJES, no archivos: diez
-    fotos en un mensaje son un mensaje— y la otra cuenta los que llevan un
-    enlace. Las dos van acotadas a la conversacion por su indice.
+    Una cuenta los adjuntos por tipo —contando MENSAJES, no archivos: diez
+    fotos en un mensaje son un mensaje, y uno con foto y video cuenta una vez
+    en «media»— y la otra cuenta los que llevan un enlace. Las dos van
+    acotadas a la conversacion por su indice.
+
+    `desde` es el instante en que quien pregunta vacio el chat: lo anterior
+    no se le cuenta.
     """
     cuentas = dict.fromkeys(CATEGORIAS, 0)
+    vivos = [Message.deleted_at.is_(None)]
+    if desde is not None:
+        vivos.append(Message.created_at > desde)
 
     if await esquema.hay_adjuntos_de_chat(db):
-        filas = await db.execute(
-            select(
-                MessageAttachment.kind,
-                func.count(func.distinct(MessageAttachment.message_id)),
+        fila = (
+            await db.execute(
+                select(
+                    *(_mensajes_con(tipo) for tipo in TIPOS_DE_ADJUNTO),
+                    _mensajes_con(*_TIPOS_DE_CATEGORIA["media"]),
+                )
+                .select_from(MessageAttachment)
+                .join(Message, Message.id == MessageAttachment.message_id)
+                .where(MessageAttachment.conversation_id == conversation_id, *vivos)
             )
-            .join(Message, Message.id == MessageAttachment.message_id)
-            .where(
-                MessageAttachment.conversation_id == conversation_id,
-                Message.deleted_at.is_(None),
-            )
-            .group_by(MessageAttachment.kind)
-        )
-        for tipo, cuantos in filas:
-            if tipo in cuentas:
-                cuentas[tipo] = int(cuantos)
+        ).one()
+        for tipo, cuantos in zip((*TIPOS_DE_ADJUNTO, "media"), fila, strict=True):
+            cuentas[tipo] = int(cuantos or 0)
 
     cuentas["link"] = int(
         await db.scalar(
@@ -585,7 +608,7 @@ async def _cuentas(db: AsyncSession, conversation_id: str) -> dict[str, int]:
             .select_from(Message)
             .where(
                 Message.conversation_id == conversation_id,
-                Message.deleted_at.is_(None),
+                *vivos,
                 or_(*(Message.body.ilike(m) for m in _MARCAS_DE_ENLACE)),
             )
         )
@@ -610,7 +633,9 @@ async def vistas_de_la_conversacion(
     esta pantalla seria pagar por un numero que nadie mira.
     """
     kind, creador = await conversacion_de(db, conversation_id, current_user.id)
-    cuentas = await _cuentas(db, conversation_id)
+    # Lo que quien pregunta vacio no se le cuenta ni se le enseña.
+    vaciado = await preferencias.vaciado_desde(db, conversation_id, current_user.id)
+    cuentas = await _cuentas(db, conversation_id, vaciado)
 
     puede = administra(kind, creador, current_user.id)
     hay_filtros = kind == "group" and await esquema.hay_filtros_de_conversacion(db)
@@ -699,6 +724,12 @@ async def mensajes_de_una_vista(
     if criterios is not None:
         condiciones.extend(_condiciones(criterios, con_adjuntos=con_adjuntos))
 
+    # Lo que quien pregunta vacio no sale en ninguna vista. Es suyo: a los
+    # demas miembros les sigue saliendo. Ver `preferencias.py`.
+    vaciado = await preferencias.vaciado_desde(db, conversation_id, current_user.id)
+    if vaciado is not None:
+        condiciones.append(Message.created_at > vaciado)
+
     texto = (q or "").strip()
     if texto:
         patron = _patron(texto)
@@ -759,6 +790,8 @@ async def mensajes_de_una_vista(
     adjuntos = await adjuntos_por_mensaje(db, ids)
     de_historia = await historias.contextos_por_mensaje(db, ids)
     de_sesion = await sesiones.contextos_por_mensaje(db, ids, current_user.id)
+    reacciones_de = await reacciones.reacciones_por_mensaje(db, ids, current_user.id)
+    citas = await reacciones.respuestas_por_mensaje(db, ids)
 
     items = [
         MessageRead(
@@ -772,6 +805,8 @@ async def mensajes_de_una_vista(
             attachments=adjuntos.get(msg_id, []),
             story_context=de_historia.get(msg_id),
             booking_context=de_sesion.get(msg_id),
+            reactions=reacciones_de.get(msg_id, []),
+            reply_to=citas.get(msg_id),
         )
         for (
             msg_id,

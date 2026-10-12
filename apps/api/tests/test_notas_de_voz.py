@@ -379,7 +379,7 @@ async def test_una_nota_de_voz_se_puede_borrar_como_cualquier_mensaje(entorno):
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_la_aplicacion_puede_preguntar_si_hay_notas_de_voz(entorno):
-    """Con la 0044 puesta, las dos funciones se ofrecen.
+    """Con la 0044 puesta, sus dos funciones se ofrecen.
 
     Sin este endpoint, la unica forma de saberlo seria grabar, subir y recibir
     un 503: alguien hablaria treinta segundos y lo perderia todo.
@@ -387,7 +387,14 @@ async def test_la_aplicacion_puede_preguntar_si_hay_notas_de_voz(entorno):
     http, _, _ = entorno
     respuesta = await http.get(f"{API}/availability")
     assert respuesta.status_code == 200
-    assert respuesta.json() == {"voice_notes": True, "story_replies": True}
+    # La respuesta entera, para que una funcion nueva no se cuele sin prueba:
+    # `reactions` llego con la 0106, que en esta base tambien esta puesta.
+    assert respuesta.json() == {
+        "voice_notes": True,
+        "story_replies": True,
+        "reactions": True,
+        "preferences": True,
+    }
 
 
 @pytest.mark.asyncio

@@ -73,6 +73,10 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Reaccionar y responder: «Audio» se escribe igual en inglés.
+    'chat.replyAudio',
+    // El contenido de un chat: «Media» es la misma palabra en inglés.
+    'chatViews.media',
     // Servicios, Incremento 4: formato puro («{n} min», «{desde} → {hasta}»),
     // «SA» (sábado / Saturday) y la raya de un día desconocido.
     'servicios.agenda.minutos',
@@ -141,6 +145,26 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Reaccionar y responder: «Responder», «Foto» y «Vídeo» se escriben
+    // igual en portugués.
+    'chat.reply',
+    'chat.replyPhoto',
+    'chat.replyVideo',
+    // El menú del chat y la ficha del grupo: palabras que coinciden en
+    // portugués («Buscar», «Silenciar», «Silenciado», «Editar»,
+    // «Administrador») y un formato puro («Buscar · {nombre}»).
+    'chatMenu.search',
+    'chatMenu.mute',
+    'chatMenu.mutedBadge',
+    'chatSearch.titleOf',
+    'groups.actionEdit',
+    'groups.adminBadge',
+    'groups.editTitle',
+    // Los colores del fondo del chat que se llaman igual en portugués.
+    'chatBackground.color.menta',
+    'chatBackground.color.lavanda',
+    'chatBackground.color.rosa',
+    'chatBackground.color.oliva',
     // Contenido del chat: «Vídeos» se escribe igual en portugués.
     'chatViews.videos',
     // Servicios, Incremento 6: «Casos», «Caso», «Caso retirado», «Reserva

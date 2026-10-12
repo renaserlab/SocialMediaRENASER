@@ -13,10 +13,12 @@ import {
   fundirPaginas,
   leerCursor,
   leerVistas,
+  opcionesDeMedia,
   parametrosDeVista,
-  pestanasDe,
   refrescarPrimeraPagina,
+  seccionesDeContenido,
   sigueExistiendo,
+  vistaDeSeccion,
 } from './vistasDeChat.ts';
 
 /*
@@ -61,18 +63,16 @@ const RESPUESTA = {
   max_filters: 20,
 };
 
-test('lo que no es una respuesta deja solo «Todo»', () => {
+test('lo que no es una respuesta no ofrece ninguna sección', () => {
   for (const bruto of [null, undefined, 'x', 7, [], {}]) {
     const vistas = leerVistas(bruto);
     assert.deepEqual(vistas.filtros, [], JSON.stringify(bruto));
     assert.equal(vistas.hayFiltros, false);
     assert.equal(vistas.puedoAdministrar, false);
-    assert.deepEqual(
-      pestanasDe(vistas).map((p) => claveDeVista(p.vista)),
-      ['c:all'],
-    );
+    assert.equal(vistas.conMedia, false);
+    assert.deepEqual(seccionesDeContenido(vistas), []);
   }
-  assert.deepEqual(pestanasDe(SIN_VISTAS).map((p) => claveDeVista(p.vista)), ['c:all']);
+  assert.deepEqual(seccionesDeContenido(SIN_VISTAS), []);
 });
 
 test('se leen las cuentas, los filtros y el permiso', () => {
@@ -96,19 +96,68 @@ test('se leen las cuentas, los filtros y el permiso', () => {
   assert.equal(vistas.filtros[1]?.activo, false);
 });
 
-test('las pestañas: Todo, las categorías con algo, y los filtros', () => {
-  const pestanas = pestanasDe(leerVistas(RESPUESTA));
+/* La misma respuesta, de un servidor que ya sabe juntar fotos y vídeos. */
+const conMedia = (cuentas: Record<string, number>) =>
+  leerVistas({
+    ...RESPUESTA,
+    categories: Object.entries(cuentas).map(([key, count]) => ({ key, count })),
+  });
+
+test('las secciones: solo las que tienen algo, en su orden, y los filtros', () => {
+  // «Media» antes que «Enlaces», como en cualquier mensajería. Sin «Todo»:
+  // el texto suelto no es contenido compartido. Y sin «Audios», que está a cero.
   assert.deepEqual(
-    pestanas.map((p) => claveDeVista(p.vista)),
-    ['c:all', 'c:image', 'c:document', 'c:link', 'f:f1', 'f:f2'],
+    seccionesDeContenido(leerVistas(RESPUESTA)).map((s) => s.clave),
+    ['media', 'link', 'document', 'f:f1', 'f:f2'],
   );
+  const todo = conMedia({ media: 3, image: 2, video: 2, document: 1, audio: 1, link: 1 });
+  assert.deepEqual(
+    seccionesDeContenido(todo).map((s) => s.clave),
+    ['media', 'link', 'document', 'audio', 'f:f1', 'f:f2'],
+  );
+  // Un chat en el que solo se ha hablado no enseña ninguna.
+  const nada = conMedia({ media: 0, image: 0, video: 0, document: 0, audio: 0, link: 0 });
+  assert.deepEqual(seccionesDeContenido({ ...nada, filtros: [] }), []);
 });
 
-test('la categoría abierta no desaparece aunque se quede a cero', () => {
+test('la sección abierta no desaparece aunque se quede a cero', () => {
   const vistas = leerVistas(RESPUESTA);
-  const abierta = { tipo: 'categoria', clave: 'video' } as const;
-  assert.ok(pestanasDe(vistas, abierta).some((p) => claveDeVista(p.vista) === 'c:video'));
-  assert.ok(!pestanasDe(vistas).some((p) => claveDeVista(p.vista) === 'c:video'));
+  assert.ok(seccionesDeContenido(vistas, 'audio').some((s) => s.clave === 'audio'));
+  assert.ok(!seccionesDeContenido(vistas).some((s) => s.clave === 'audio'));
+});
+
+test('«Media» junta fotos y vídeos, y un servidor antiguo no lo impide', () => {
+  // El servidor nuevo dice cuántos mensajes hay: uno con foto Y vídeo cuenta una vez.
+  const nuevo = conMedia({ media: 3, image: 2, video: 2 });
+  assert.equal(nuevo.conMedia, true);
+  const media = seccionesDeContenido(nuevo)[0];
+  assert.equal(media?.clave, 'media');
+  assert.equal(claveDeVista(vistaDeSeccion(media!, nuevo)), 'c:media');
+  assert.equal(claveDeVista(vistaDeSeccion(media!, nuevo, 'video')), 'c:video');
+  assert.deepEqual(opcionesDeMedia(nuevo), ['todo', 'image', 'video']);
+
+  // El antiguo no nombra `media`: hay sección igual, y se pide lo que sepa servir.
+  const viejo = leerVistas(RESPUESTA);
+  assert.equal(viejo.conMedia, false);
+  const suMedia = seccionesDeContenido(viejo)[0];
+  assert.equal(claveDeVista(vistaDeSeccion(suMedia!, viejo)), 'c:image');
+  const soloVideos = conMedia({ image: 0, video: 5 });
+  assert.equal(claveDeVista(vistaDeSeccion(seccionesDeContenido(soloVideos)[0]!, soloVideos)), 'c:video');
+});
+
+test('dentro de «Media» solo se ofrece elegir cuando hay de las dos cosas', () => {
+  assert.deepEqual(opcionesDeMedia(leerVistas(RESPUESTA)), [], 'solo hay fotos');
+  assert.deepEqual(opcionesDeMedia(conMedia({ media: 4, image: 4, video: 0 })), []);
+  // Con un servidor antiguo no hay «Todo» que pedir: se elige entre las dos.
+  assert.deepEqual(opcionesDeMedia(conMedia({ image: 4, video: 1 })), ['image', 'video']);
+});
+
+test('una sección de filtro pide su filtro', () => {
+  const vistas = leerVistas(RESPUESTA);
+  const deFiltro = seccionesDeContenido(vistas).find((s) => s.tipo === 'filtro');
+  assert.equal(claveDeVista(vistaDeSeccion(deFiltro!, vistas)), 'f:f1');
+  const enlaces = seccionesDeContenido(vistas).find((s) => s.clave === 'link');
+  assert.equal(claveDeVista(vistaDeSeccion(enlaces!, vistas)), 'c:link');
 });
 
 test('sin permiso para filtros, no hay filtros ni se puede administrar', () => {
@@ -228,10 +277,14 @@ test('la aplicación y el servidor hablan de las mismas categorías y tipos', ()
 });
 
 test('la pantalla no filtra por su cuenta: pregunta al servidor', () => {
-  const pantalla = leer('../screens/ContenidoDeChatScreen.tsx');
-  // Ni un `.filter` sobre los mensajes para decidir qué entra en la vista: los
-  // dos que hay separan los adjuntos de UN mensaje para pintarlos.
-  assert.doesNotMatch(pantalla, /mensajes\.filter\(/);
+  // Ni un `.filter` sobre los mensajes para decidir qué entra en una sección:
+  // lo que manda el servidor se enseña entero, también el enlace que el
+  // teléfono no sepa reconocer.
+  const pestanas = leer('../components/chat/PestanasDeContenido.tsx');
+  assert.doesNotMatch(pestanas, /mensajes\s*\.filter\(/);
+  assert.doesNotMatch(pestanas, /\.filter\(\(fila\)/);
+  const pantalla = leer('../hooks/useMensajesDeVista.ts');
+  assert.doesNotMatch(pantalla, /\.filter\(/);
   assert.match(pantalla, /MessageRepository\.mensajesDeVista\(conversationId, vista,/);
   // Cada petición lleva su turno y se cancela la anterior.
   assert.match(pantalla, /enCurso\.current\?\.abort\(\);/);
@@ -239,7 +292,7 @@ test('la pantalla no filtra por su cuenta: pregunta al servidor', () => {
 });
 
 test('los mensajes nuevos recargan la vista, con freno', () => {
-  const pantalla = leer('../screens/ContenidoDeChatScreen.tsx');
+  const pantalla = leer('../hooks/useMensajesDeVista.ts');
   assert.match(
     pantalla,
     /subscribeToConversationChanges\(conversationId, \(\) => \{\s*if \(pendiente\) return;/,
@@ -247,12 +300,15 @@ test('los mensajes nuevos recargan la vista, con freno', () => {
   assert.match(pantalla, /ESPERA_ENTRE_RECARGAS_MS = 2000/);
 });
 
-test('el botón de contenido solo sale cuando hay servidor al que preguntar', () => {
+test('el menú del chat solo sale cuando hay servidor al que preguntar', () => {
   const chat = leer('../screens/ChatScreen.tsx');
-  assert.match(chat, /alAbrirContenido=\{\s*supabaseEnabled && params\.id\s*\?/);
+  assert.match(
+    chat,
+    /alAbrirMenu=\{supabaseEnabled && params\.id \? \(\) => setOpcionesAbiertas\(true\) : undefined\}/,
+  );
   const cabecera = leer('../components/CabeceraDeChat.tsx');
-  assert.match(cabecera, /rightIcon=\{alAbrirContenido \? 'grid' : undefined\}/);
-  assert.match(cabecera, /alAbrirContenido\?: \(\) => void;/);
+  assert.match(cabecera, /rightIcon=\{alAbrirMenu \? 'more-vertical' : undefined\}/);
+  assert.match(cabecera, /alAbrirMenu\?: \(\) => void;/);
 });
 
 test('pedir las vistas nunca falla hacia la pantalla', () => {

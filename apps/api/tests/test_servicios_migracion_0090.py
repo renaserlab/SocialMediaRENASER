@@ -138,6 +138,38 @@ APLICADAS = {
     # aplicadas no se editan: se corrige hacia delante, con otra.
     "0102_filtros_de_conversacion.sql": "82e1ea3c385d3ab5ca3071ed530c9d71dac78ea1",
     "0103_miembros_solo_por_la_api.sql": "ea57ad6565e3146ee81c9aa5d72ffbe08e0b5b7d",
+    # 0104 (como se entra a un grupo: foto, enlace y solicitudes), 0105 (el
+    # almacen del chat admite `text/html`) y 0106 (reacciones y respuestas a
+    # un mensaje). Edson ejecuto las tres a mano en Supabase el 10/10/2026 y
+    # asi lo comunico. COMPROBADAS ESE MISMO DIA, EN SOLO LECTURA Y SIN
+    # DIVERGENCIAS: una consulta de 30 comprobaciones, las 30 en OK, vistas en
+    # las tres capturas que pego Edson. Quince de la 0104 —de `group_settings`
+    # y de `group_join_requests`: columnas con su tipo y nulo; valores por
+    # defecto; claves ajenas y que hace cada una al borrar; restricciones;
+    # indices; el codigo del enlace no se repite; una sola solicitud pendiente
+    # por persona y grupo; RLS activada; ninguna politica; fuera de la
+    # publicacion de tiempo real—, cuatro de la 0105 —`message-media` admite
+    # `text/html`, conserva lo que ya admitia, admite 14 tipos y ni uno mas, y
+    # sigue siendo privado— y once de la 0106 —de `message_reactions` y de
+    # `message_replies`: columnas con su tipo y nulo; una reaccion por persona
+    # y mensaje; claves ajenas y que hace cada una al borrar; restricciones;
+    # indices; RLS activada; ninguna politica; fuera de la publicacion de
+    # tiempo real—. La igualdad la calcula la propia base. Desde que estan
+    # aplicadas no se editan: se corrige hacia delante, con otra.
+    "0104_puertas_de_grupo.sql": "3b140187d65afbfc90a27803c997b858f0723d99",
+    "0105_html_en_el_chat.sql": "6376934516c38f796894e9249ba7b0d22e9747df",
+    "0106_reacciones_y_respuestas.sql": "d65aa960989ff04e55b1b2dd590129aad4e3ee61",
+    # 0107 (lo que cada persona decide para si sobre una conversacion:
+    # silenciarla y vaciarla). Edson la ejecuto a mano en Supabase el
+    # 11/10/2026 y asi lo comunico. COMPROBADA ESE MISMO DIA, EN SOLO LECTURA
+    # Y SIN DIVERGENCIAS: una consulta de 8 comprobaciones sobre
+    # `conversation_preferences`, las 8 en OK, vistas en las dos capturas que
+    # pego Edson —columnas con su tipo y nulo; valores por defecto; claves
+    # ajenas y que hace cada una al borrar; una fila por persona y
+    # conversacion; indices; RLS activada; ninguna politica; fuera de la
+    # publicacion de tiempo real—. La igualdad la calcula la propia base.
+    # Desde que esta aplicada no se edita: se corrige hacia delante, con otra.
+    "0107_preferencias_de_conversacion.sql": "746746dfc37da46a76e5ae792b3b5bce77dcb082",
 }
 
 

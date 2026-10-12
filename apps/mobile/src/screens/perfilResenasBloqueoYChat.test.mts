@@ -460,31 +460,44 @@ describe('eliminar un mensaje', () => {
   it('solo se ofrece sobre los mensajes propios', () => {
     /*
       LA PULSACION LARGA YA NO BORRA DIRECTAMENTE: abre el menu de acciones, y
-      es desde ahi desde donde se borra. La garantia que vigila esta prueba no
-      ha cambiado —nadie puede borrar lo ajeno— pero ahora se sostiene en DOS
-      sitios, y se comprueban los dos:
+      es desde ahi desde donde se borra.
 
-        1. El gesto no se ofrece siquiera sobre una burbuja ajena o pendiente.
-        2. Y si se llegara igual, `abrirAcciones` vuelve a comprobarlo antes de
-           abrir nada.
+      DESDE EL 10/10/2026 EL MENU TAMBIEN SE ABRE SOBRE LO AJENO, porque desde
+      el se reacciona y se responde. La garantia que vigila esta prueba no ha
+      cambiado —nadie puede borrar lo ajeno— y se sostiene en estos sitios:
 
-      El servidor lo comprueba una tercera vez (`message_not_yours`): esto solo
-      evita ofrecer lo que no se puede hacer.
+        1. El gesto no se ofrece sobre una burbuja pendiente, y sobre una ajena
+           solo si el servidor conoce las reacciones (si no, no habria nada
+           que ofrecer).
+        2. `abrirAcciones` vuelve a comprobarlo antes de abrir nada.
+        3. Dentro del menu, «Eliminar» solo se pinta si el mensaje es propio.
+        4. Y el borrado en si conserva su propia guarda.
+
+      El servidor lo comprueba otra vez (`message_not_yours`): esto solo evita
+      ofrecer lo que no se puede hacer.
     */
     assert.ok(
-      /onLongPress=\{\s*\n?\s*mine && !item\.estado \? \(\) => abrirAcciones\(item\) : undefined\s*\n?\s*\}/.test(
-        CHAT,
-      ),
-      'El gesto de pulsacion larga tiene que seguir cerrado a lo ajeno y a lo ' +
-        'que todavia se esta enviando.',
+      /const conAcciones = !item\.estado && \(mine \|\| funciones\.reacciones\);/.test(CHAT) &&
+        /onLongPress=\{\s*\n?\s*conAcciones \? \(\) => abrirAcciones\(item\) : undefined\s*\n?\s*\}/.test(
+          CHAT,
+        ),
+      'El gesto de pulsacion larga tiene que seguir cerrado a lo que todavia se ' +
+        'esta enviando, y a lo ajeno cuando no hay nada que ofrecer sobre ello.',
+    );
+    const abrir = CHAT.slice(
+      CHAT.indexOf('const abrirAcciones = useCallback('),
+      CHAT.indexOf('const eliminarDesdeElMenu'),
     );
     assert.ok(
-      /const abrirAcciones = useCallback\(\(mensaje: Message\) => \{\s*\n\s*if \(mensaje\.sender !== 'me' \|\| mensaje\.estado \|\| mensaje\.eliminado\) return;/.test(
-        CHAT,
-      ),
+      /if \(mensaje\.estado \|\| mensaje\.eliminado\) return;/.test(abrir) &&
+        /if \(mensaje\.sender !== 'me' && !funciones\.reacciones\) return;/.test(abrir),
       'El menu de acciones tiene que volver a comprobar de quien es el mensaje: ' +
         'una guarda que solo vive en el JSX se pierde en cuanto alguien llama a ' +
         'la funcion desde otro sitio.',
+    );
+    assert.ok(
+      /\{accionesDe\?\.sender === 'me' \? \(\s*<ListRow\s+title=\{t\('common\.delete'\)\}/.test(CHAT),
+      '«Eliminar» solo puede aparecer en el menu de un mensaje propio.',
     );
     assert.ok(
       /if \(!params\.id \|\| mensaje\.sender !== 'me' \|\| mensaje\.estado \|\| mensaje\.eliminado\) \{/.test(

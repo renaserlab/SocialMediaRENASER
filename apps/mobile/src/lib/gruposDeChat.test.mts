@@ -191,13 +191,20 @@ test('cada rechazo del servidor tiene su texto, y el desconocido uno genérico',
 
 test('los botones de administrar dependen de lo que dice el servidor', () => {
   const grupo = leer('../screens/GrupoScreen.tsx');
-  // Sacar a alguien, renombrar y añadir: solo con `puedoAdministrar`.
-  assert.match(grupo, /\{info\.puedoAdministrar && !miembro\.administra \? \(/);
-  assert.match(grupo, /\{info\.puedoAdministrar \? \(\s*<View style=\{styles\.seccion\}>\s*<Input/);
+  // Sacar a alguien y añadir: solo con `puedoAdministrar`. Quien administra
+  // lleva su insignia y no se puede sacar a sí mismo.
+  assert.match(grupo, /\{miembro\.administra \? \([\s\S]{0,400}?\) : info\.puedoAdministrar \? \(\s*<Pressable\s*onPress=\{\(\) => void sacar\(miembro\)\}/);
+  assert.match(grupo, /\{info\.puedoAdministrar \? \(\s*<View style=\{styles\.seccion\}>\s*\{cabenMas \? \(/);
+  // El lápiz, también: lo demás de administrar vive en su propia pantalla.
+  assert.match(grupo, /rightIcon=\{info\.puedoAdministrar \? 'edit-2' : undefined\}/);
   // Y salir, solo quien NO administra: el servidor se lo negaría.
-  assert.match(grupo, /\) : \(\s*<Button\s*label=\{t\('groups\.leave'\)\}/);
+  assert.match(grupo, /info\.puedoAdministrar\s*\? \{ clave: 'editar',[^}]*\}\s*: \{\s*clave: 'salir',/);
   // Sacar y salir piden confirmación.
   assert.equal((grupo.match(/await confirm\(\{/g) ?? []).length, 2);
+  // Renombrar, el enlace y los filtros: la pantalla de editar no se le abre a nadie más.
+  const ajustes = leer('../screens/AjustesDeGrupoScreen.tsx');
+  assert.match(ajustes, /if \(!info\.puedoAdministrar\) \{\s*return \(/);
+  assert.ok(ajustes.indexOf('if (!info.puedoAdministrar)') < ajustes.indexOf('<Input'));
 });
 
 test('crear un grupo no se puede lanzar dos veces', () => {
@@ -352,13 +359,14 @@ test('el chat sube por el historial hasta el mensaje, con tope, y avisa si no ll
   assert.match(chat, /\(\{ estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado \}\)/);
 });
 
-test('desde Contenido se vuelve al chat abierto, no se apila otro', () => {
-  const pantalla = leer('../screens/ContenidoDeChatScreen.tsx');
-  assert.match(pantalla, /pedirSalto\(conversationId, mensaje\.id\);\s*router\.dismissTo\(/);
+test('desde Contenido y desde Buscar se vuelve al chat abierto, no se apila otro', () => {
+  for (const ruta of ['../components/chat/PestanasDeContenido.tsx', '../screens/BuscarEnChatScreen.tsx']) {
+    assert.match(leer(ruta), /pedirSalto\(conversationId, mensaje\.id\);\s*router\.dismissTo\(/, ruta);
+  }
 });
 
 test('Contenido se entera de los borrados, no solo de los mensajes nuevos', () => {
-  const pantalla = leer('../screens/ContenidoDeChatScreen.tsx');
+  const pantalla = leer('../hooks/useMensajesDeVista.ts');
   assert.match(pantalla, /subscribeToConversationChanges\(conversationId, \(\) => \{\s*if \(pendiente\) return;/);
   const tiempoReal = leer('../services/realtime.ts');
   const funcion = tiempoReal.slice(tiempoReal.indexOf('export function subscribeToConversationChanges'));
@@ -369,6 +377,13 @@ test('Contenido se entera de los borrados, no solo de los mensajes nuevos', () =
 });
 
 test('cambiar los criterios del filtro abierto recarga su lista', () => {
-  const pantalla = leer('../screens/ContenidoDeChatScreen.tsx');
-  assert.match(pantalla, /\[conversationId, vista, buscar, currentUserId, turnos, t, huellaDelFiltro\]/);
+  // La huella de los criterios es una dependencia de la carga…
+  const carga = leer('../hooks/useMensajesDeVista.ts');
+  assert.match(carga, /\[conversationId, clave, buscar, currentUserId, turnos, t, huella\]/);
+  // …y quien pinta las pestañas se la pasa cuando lo abierto es un filtro.
+  const pestanas = leer('../components/chat/PestanasDeContenido.tsx');
+  assert.match(
+    pestanas,
+    /huella: seccion\?\.tipo === 'filtro' \? huellaDeCriterios\(seccion\.filtro\) : ''/,
+  );
 });

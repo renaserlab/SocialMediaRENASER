@@ -14,7 +14,7 @@
  */
 
 /** Las categorías automáticas, en el orden en que se ofrecen. */
-export const CATEGORIAS = ['all', 'image', 'video', 'document', 'audio', 'link'] as const;
+export const CATEGORIAS = ['all', 'media', 'image', 'video', 'document', 'audio', 'link'] as const;
 export type Categoria = (typeof CATEGORIAS)[number];
 
 /** Los tipos de contenido que un filtro puede pedir. */
@@ -43,6 +43,11 @@ export type VistasDeChat = {
   esGrupo: boolean;
   /** Cuántos mensajes tiene cada categoría. `all` no se cuenta. */
   cuentas: Record<Categoria, number>;
+  /**
+   * El servidor sabe servir fotos y vídeos JUNTOS (`category=media`). Uno
+   * anterior no la nombra, y entonces solo se pueden pedir por separado.
+   */
+  conMedia: boolean;
   /** Este chat puede tener filtros propios (es un grupo y el servidor los conoce). */
   hayFiltros: boolean;
   filtros: FiltroDeGrupo[];
@@ -54,6 +59,7 @@ export type VistasDeChat = {
 
 const CUENTAS_A_CERO: Record<Categoria, number> = {
   all: 0,
+  media: 0,
   image: 0,
   video: 0,
   document: 0,
@@ -65,6 +71,7 @@ const CUENTAS_A_CERO: Record<Categoria, number> = {
 export const SIN_VISTAS: VistasDeChat = {
   esGrupo: false,
   cuentas: CUENTAS_A_CERO,
+  conMedia: false,
   hayFiltros: false,
   filtros: [],
   puedoAdministrar: false,
@@ -114,10 +121,12 @@ export function leerVistas(bruto: unknown): VistasDeChat {
   if (!esObjeto(bruto)) return SIN_VISTAS;
 
   const cuentas = { ...CUENTAS_A_CERO };
+  let conMedia = false;
   if (Array.isArray(bruto.categories)) {
     for (const fila of bruto.categories) {
       if (!esObjeto(fila) || typeof fila.key !== 'string') continue;
       if (!(CATEGORIAS as readonly string[]).includes(fila.key)) continue;
+      if (fila.key === 'media') conMedia = true;
       const cuantos = typeof fila.count === 'number' && fila.count > 0 ? Math.floor(fila.count) : 0;
       cuentas[fila.key as Categoria] = cuantos;
     }
@@ -131,6 +140,7 @@ export function leerVistas(bruto: unknown): VistasDeChat {
   return {
     esGrupo: bruto.kind === 'group',
     cuentas,
+    conMedia,
     hayFiltros,
     filtros,
     puedoAdministrar: hayFiltros && bruto.can_manage === true,
@@ -152,33 +162,81 @@ export function claveDeVista(vista: VistaElegida): string {
   return vista.tipo === 'categoria' ? `c:${vista.clave}` : `f:${vista.id}`;
 }
 
-export type Pestana =
-  | { vista: VistaElegida & { tipo: 'categoria' }; cuantos: number }
-  | { vista: VistaElegida & { tipo: 'filtro' }; filtro: FiltroDeGrupo };
+/**
+ * Las secciones del contenido compartido, como las enseña cualquier
+ * mensajería: «Media» (fotos y vídeos juntos), «Enlaces», «Archivos», «Audios»
+ * y, en un grupo, sus filtros.
+ */
+export type SeccionDeContenido =
+  | { clave: 'media' | 'link' | 'document' | 'audio'; tipo: 'media' | 'link' | 'document' | 'audio' }
+  | { clave: string; tipo: 'filtro'; filtro: FiltroDeGrupo };
+
+/** Cuánto hay en «Media»: lo que diga el servidor, o la suma si es antiguo. */
+function cuantosDeMedia(vistas: VistasDeChat): number {
+  return vistas.conMedia
+    ? vistas.cuentas.media
+    : vistas.cuentas.image + vistas.cuentas.video;
+}
 
 /**
- * Las pestañas que se ofrecen, en orden: «Todo», las categorías QUE TIENEN
- * ALGO, y los filtros del grupo.
+ * Las secciones que se ofrecen, en orden.
  *
- * Una categoría a cero no se ofrece: una pestaña que siempre sale vacía es un
- * botón muerto. `conservar` es la vista abierta ahora mismo, que se mantiene
- * aunque se haya quedado a cero —se acaba de borrar su último mensaje— para
- * que la pestaña no desaparezca debajo del dedo.
+ * SOLO LAS QUE TIENEN ALGO: una pestaña que siempre sale vacía es un botón
+ * muerto. Si nadie ha mandado un audio, no hay «Audios». `conservar` es la
+ * clave de la que está abierta ahora, que se mantiene aunque se haya quedado
+ * a cero —se acaba de borrar lo último que tenía— para que no desaparezca
+ * debajo del dedo.
  */
-export function pestanasDe(vistas: VistasDeChat, conservar?: VistaElegida): Pestana[] {
-  const abierta = conservar ? claveDeVista(conservar) : null;
-  const salida: Pestana[] = [];
-  for (const clave of CATEGORIAS) {
-    const vista = { tipo: 'categoria' as const, clave };
-    const cuantos = vistas.cuentas[clave] ?? 0;
-    if (clave === 'all' || cuantos > 0 || claveDeVista(vista) === abierta) {
-      salida.push({ vista, cuantos });
-    }
+export function seccionesDeContenido(
+  vistas: VistasDeChat,
+  conservar?: string | null,
+): SeccionDeContenido[] {
+  const salida: SeccionDeContenido[] = [];
+  const cuantos: Record<'media' | 'link' | 'document' | 'audio', number> = {
+    media: cuantosDeMedia(vistas),
+    link: vistas.cuentas.link,
+    document: vistas.cuentas.document,
+    audio: vistas.cuentas.audio,
+  };
+  for (const clave of ['media', 'link', 'document', 'audio'] as const) {
+    if (cuantos[clave] > 0 || clave === conservar) salida.push({ clave, tipo: clave });
   }
   for (const filtro of vistas.filtros) {
-    salida.push({ vista: { tipo: 'filtro', id: filtro.id }, filtro });
+    salida.push({ clave: `f:${filtro.id}`, tipo: 'filtro', filtro });
   }
   return salida;
+}
+
+/** Con qué quedarse dentro de «Media». */
+export type SoloDeMedia = 'todo' | 'image' | 'video';
+
+/**
+ * Los filtros que se ofrecen dentro de «Media».
+ *
+ * Solo cuando hay DE LAS DOS COSAS: con fotos nada más, elegir entre «Fotos» y
+ * «Vídeos» no sirve de nada. «Todo» necesita que el servidor sepa juntarlas.
+ */
+export function opcionesDeMedia(vistas: VistasDeChat): SoloDeMedia[] {
+  if (vistas.cuentas.image === 0 || vistas.cuentas.video === 0) return [];
+  return vistas.conMedia ? ['todo', 'image', 'video'] : ['image', 'video'];
+}
+
+/**
+ * La vista que hay que pedirle al servidor para una sección.
+ *
+ * En «Media», `solo` elige entre todo, fotos o vídeos. Con un servidor que no
+ * sabe juntarlas se pide lo que haya: fotos si hay, y si no, vídeos.
+ */
+export function vistaDeSeccion(
+  seccion: SeccionDeContenido,
+  vistas: VistasDeChat,
+  solo: SoloDeMedia = 'todo',
+): VistaElegida {
+  if (seccion.tipo === 'filtro') return { tipo: 'filtro', id: seccion.filtro.id };
+  if (seccion.tipo !== 'media') return { tipo: 'categoria', clave: seccion.tipo };
+  if (solo !== 'todo') return { tipo: 'categoria', clave: solo };
+  if (vistas.conMedia) return { tipo: 'categoria', clave: 'media' };
+  return { tipo: 'categoria', clave: vistas.cuentas.image > 0 ? 'image' : 'video' };
 }
 
 /**

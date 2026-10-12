@@ -189,7 +189,11 @@ async def test_la_interfaz_sabe_que_no_debe_ofrecer_grabar(base_sin_0044):
     http, _ = base_sin_0044
     respuesta = await http.get(f"{API}/availability")
     assert respuesta.status_code == 200
-    assert respuesta.json() == {"voice_notes": False, "story_replies": False}
+    # Cada funcion responde por SU migracion. Aqui falta la 0044 y se mira lo
+    # que depende de ella; las reacciones (0106) tienen sus propias pruebas.
+    cuerpo = respuesta.json()
+    assert cuerpo["voice_notes"] is False
+    assert cuerpo["story_replies"] is False
 
 
 @pytest.mark.asyncio

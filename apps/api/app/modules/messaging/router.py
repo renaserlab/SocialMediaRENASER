@@ -30,10 +30,21 @@ from app.core.exceptions import (
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
-from app.modules.messaging import audio, avisos, esquema, historias, sesiones
+from app.modules.messaging import (
+    audio,
+    avisos,
+    esquema,
+    historias,
+    preferencias,
+    reacciones,
+    sesiones,
+)
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
+from app.modules.messaging.entrada_a_grupos import router as entrada_router
 from app.modules.messaging.etiquetas import router as etiquetas_router
 from app.modules.messaging.grupos import router as grupos_router
+from app.modules.messaging.preferencias import router as preferencias_router
+from app.modules.messaging.reacciones import router as reacciones_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
     Conversation,
@@ -82,6 +93,16 @@ router.include_router(vistas_router)
 # `POST /groups` se declara antes que las rutas con `{conversation_id}` de
 # este fichero por la misma precaución que las etiquetas.
 router.include_router(grupos_router)
+
+# Como se entra a un grupo (`entrada_a_grupos.py`): su tarjeta, su enlace,
+# su foto y las solicitudes. Sus rutas fijas empiezan por `/groups/…`.
+router.include_router(entrada_router)
+
+# Reaccionar a un mensaje y consultar reacciones (`reacciones.py`).
+router.include_router(reacciones_router)
+
+# Silenciar una conversación y vaciarla para uno mismo (`preferencias.py`).
+router.include_router(preferencias_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
@@ -462,6 +483,8 @@ async def messaging_availability(
     return MessagingAvailability(
         voice_notes=disponible,
         story_replies=await esquema.hay_respuestas_a_historias(db),
+        reactions=await esquema.hay_reacciones_y_respuestas(db),
+        preferences=await esquema.hay_preferencias_de_conversacion(db),
     )
 
 
@@ -797,6 +820,11 @@ async def list_messages(
         consulta = consulta.where(Message.created_at < before)
     if after is not None:
         consulta = consulta.where(Message.created_at > after)
+    # LO QUE ESTA PERSONA VACIO NO SE LE ENSEÑA. Es suyo: a los demas
+    # miembros el historial les sale entero. Ver `preferencias.py`.
+    vaciado = await preferencias.vaciado_desde(db, conversation_id, current_user.id)
+    if vaciado is not None:
+        consulta = consulta.where(Message.created_at > vaciado)
 
     rows = (
         await db.execute(
@@ -830,6 +858,12 @@ async def list_messages(
     # Tambien una consulta para toda la pagina; sin la 0097, `{}`.
     de_sesion = await sesiones.contextos_por_mensaje(db, vivos, current_user.id)
 
+    # Las reacciones y las citas de la página, también por lotes. Sin la
+    # 0106, las dos devuelven `{}` sin tocar la base. Las de un mensaje
+    # borrado no se piden.
+    reacciones_de = await reacciones.reacciones_por_mensaje(db, vivos, current_user.id)
+    citas = await reacciones.respuestas_por_mensaje(db, vivos)
+
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
         MessageRead(
@@ -848,6 +882,8 @@ async def list_messages(
             attachments=adjuntos.get(msg_id, []),
             story_context=contextos.get(msg_id),
             booking_context=de_sesion.get(msg_id),
+            reactions=reacciones_de.get(msg_id, []),
+            reply_to=citas.get(msg_id),
         )
         for (
             msg_id,
@@ -991,6 +1027,19 @@ async def send_message(
         ensure_uuid(payload.story_id, "Historia no encontrada.")
         contexto = await historias.guardar_contexto(db, message_id, payload.story_id)
 
+    # A QUÉ MENSAJE RESPONDE, si responde a alguno. Dentro de la misma
+    # transacción, y sin bloquear el envío: si el original no es de esta
+    # conversación o la 0106 no está, el mensaje se manda sin cita.
+    con_cita = False
+    if payload.reply_to_id:
+        ensure_uuid(payload.reply_to_id, "Mensaje no encontrado.")
+        con_cita = await reacciones.guardar_respuesta(
+            db,
+            message_id=str(message_id),
+            conversation_id=conversation_id,
+            reply_to_id=payload.reply_to_id,
+        )
+
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id)
@@ -1032,6 +1081,11 @@ async def send_message(
         created_at=created_at,
         attachments=adjuntos,
         story_context=contexto,
+        reply_to=(
+            (await reacciones.respuestas_por_mensaje(db, [str(message_id)])).get(str(message_id))
+            if con_cita
+            else None
+        ),
     )
 
 

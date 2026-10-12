@@ -1,3 +1,4 @@
+import { leerCita, leerReacciones } from '@/lib/reaccionesDeChat';
 import { profileImageUrl } from '@/services/storage';
 import type {
   Conversation,
@@ -22,6 +23,7 @@ export type ConversationDto = {
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  muted?: boolean;
   updated_at: string;
   /**
    * Las etiquetas del CRM de QUIEN PREGUNTA (migración 0045).
@@ -32,6 +34,8 @@ export type ConversationDto = {
    * no está desplegada.
    */
   labels?: { id: string; nombre: string }[];
+  /** La foto de un GRUPO. En un chat de dos viene a nulo: la foto es la de `other`. */
+  avatar_path?: string | null;
 };
 
 export type AttachmentDto = {
@@ -83,6 +87,9 @@ export type MessageDto = {
    * blanco por una función que todavía no está desplegada.
    */
   deleted_at?: string | null;
+  /** Las reacciones y la cita, tal como las manda el servidor (0106). */
+  reactions?: unknown;
+  reply_to?: unknown;
   /**
    * A qué historia respondía, si respondía a alguna.
    *
@@ -149,12 +156,14 @@ export function toConversation(dto: ConversationDto): Conversation {
     esGrupo: dto.kind === 'group',
     subtitle: dto.last_message ?? 'Sin mensajes aún',
     unread: dto.unread_count,
+    silenciada: dto.muted === true,
     messages: [],
     time: formatTime(dto.last_message_at),
     // El backend ya manda al otro participante con su foto; antes se descartaba
     // y la lista pintaba imagenes de muestra segun la posicion de la fila, de
     // modo que quien tenia foto salia con la de otra persona.
-    avatarUrl: profileImageUrl(dto.other?.avatar_path) ?? undefined,
+    // En un grupo no hay «el otro»: la foto es la del grupo, si tiene.
+    avatarUrl: profileImageUrl(dto.other?.avatar_path ?? dto.avatar_path) ?? undefined,
     otherId: dto.other?.id,
     // `?? []` y no `dto.labels`: la fila pinta `labels.length` sin comprobar
     // nada, y una API vieja que no mande el campo no puede reventar la bandeja.
@@ -230,6 +239,8 @@ export function toMessage(dto: MessageDto, currentUserId?: string | null): Messa
     // enseña a qué respondía. Aquí no hay nada que esconder.
     storyContext: dto.story_context ? toStoryContext(dto.story_context) : undefined,
     sesion: dto.booking_context ? toSesionDelMensaje(dto.booking_context) : undefined,
+    reacciones: leerReacciones(dto.reactions),
+    respuestaA: leerCita(dto.reply_to),
   };
 }
 

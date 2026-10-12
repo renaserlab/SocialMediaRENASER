@@ -59,6 +59,12 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "message_group": ("Nuevo mensaje", "{actor} envió un mensaje al grupo «{grupo}»."),
     # Te han metido en un grupo. Sin esto aparecería en la bandeja sin más.
     "group_added": ("Nuevo grupo", "{actor} te añadió al grupo «{grupo}»."),
+    # Alguien pide entrar a un grupo que administras. Dice quien y a cual:
+    # la respuesta se da dentro, en la ficha del grupo.
+    "group_join_request": (
+        "Solicitud para unirse",
+        "{actor} quiere unirse a tu grupo «{grupo}».",
+    ),
     # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
     # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
     "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
@@ -112,6 +118,7 @@ CHANNELS: dict[str, str] = {
     "message": "mensajes",
     "message_group": "mensajes",
     "group_added": "mensajes",
+    "group_join_request": "mensajes",
     # Con los seguidores y los «me gusta»: es alguien a quien sigues haciendo
     # algo, no una gestion tuya.
     "live_started": "interacciones",

@@ -20,6 +20,7 @@ import { Button } from '@/components/Button';
 import { Avatar } from '@/components/Avatar';
 import { EditarPerfilSheet } from '@/components/EditarPerfilSheet';
 import { ListRow } from '@/components/ListRow';
+import { GruposDelPerfil } from '@/components/chat/GruposDelPerfil';
 import { OfertaDelPerfil } from '@/components/OfertaDelPerfil';
 import { ProfileGallery } from '@/components/ProfileGallery';
 import { Aparecer } from '@/components/Aparecer';
@@ -1048,6 +1049,16 @@ export function ProfileScreen() {
           */}
           {galleryOwnerId ? (
             <OfertaDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
+          ) : null}
+
+          {/*
+            «ÚNETE A MI GRUPO» (10/10/2026). Los grupos que esta persona
+            decidió enseñar aquí. Si no enseña ninguno —o hay un bloqueo, o
+            el servidor no conoce la función— el componente no pinta nada.
+            Pedir entrar no mete en el grupo: avisa a quien lo administra.
+          */}
+          {galleryOwnerId ? (
+            <GruposDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
           ) : null}
 
           {/* TODO: Reactivar el shortcut "Círculos" (icon="users") cuando el perfil alcance un umbral de seguidores */}

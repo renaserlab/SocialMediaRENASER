@@ -190,8 +190,15 @@ describe('sin la migración 0044 no se ofrece grabar', () => {
       'Hay que exigir un `true` explícito, no dar por buena la ausencia del campo.',
     );
     assert.ok(
-      /catch \{\s*\n\s*return \{ notasDeVoz: false, respuestasAHistorias: false \};/.test(funciones),
+      /catch \{\s*\n\s*return SIN_FUNCIONES;/.test(funciones),
       'Un fallo de red tiene que responder que NO hay notas de voz.',
+    );
+    // Y «sin funciones» es de verdad ninguna: cada una nueva nace apagada.
+    assert.ok(
+      /export const SIN_FUNCIONES: FuncionesDelChat = \{\s*notasDeVoz: false,\s*respuestasAHistorias: false,\s*reacciones: false,\s*preferencias: false,\s*\};/.test(
+        REPO,
+      ),
+      'Lo que se da por hecho sin respuesta del servidor tiene que ser «nada».',
     );
   });
 

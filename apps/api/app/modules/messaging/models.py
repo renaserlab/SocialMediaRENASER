@@ -14,11 +14,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -325,6 +327,190 @@ class ConversationFilter(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GroupSettings(Base):
+    """La foto de un grupo, su enlace y si se enseña en el perfil (migracion 0104).
+
+    UNA FILA POR GRUPO, y solo cuando hace falta: un grupo recien creado no
+    tiene fila, y eso significa «sin foto, sin enlace y sin aparecer en ningun
+    perfil». Quien comprueba que la tabla existe es
+    `esquema.hay_puertas_de_grupo`.
+
+    TABLA APARTE Y NINGUNA COLUMNA NUEVA EN `conversations`, por lo mismo que
+    `MessageAttachment`.
+
+    `avatar_path` es una RUTA del almacenamiento, no la imagen. `invite_code`
+    es el secreto del enlace: no sale nunca en una respuesta que no sea para
+    quien administra el grupo.
+    """
+
+    __tablename__ = "group_settings"
+
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    avatar_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    listed_on_profile: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    invite_code: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    invite_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class GroupJoinRequest(Base):
+    """Alguien pide entrar a un grupo (migracion 0104).
+
+    UNA SOLA VIVA POR PERSONA Y GRUPO: lo impone el indice unico parcial de
+    abajo, que es el mismo de la migracion. Las resueltas se conservan.
+
+    `status`: pending | approved | rejected | cancelled.
+    `source`: profile (desde «Unete a mi grupo») | link (desde el enlace).
+    """
+
+    __tablename__ = "group_join_requests"
+    __table_args__ = (
+        Index(
+            "group_join_requests_pending_uidx",
+            "conversation_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    source: Mapped[str] = mapped_column(String(16), default="profile", server_default="profile")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class MessageReaction(Base):
+    """La reaccion de una persona a un mensaje (migracion 0106).
+
+    UNA POR PERSONA Y MENSAJE: es la clave primaria. Reaccionar otra vez
+    cambia el emoji, no añade otra fila.
+
+    `conversation_id` va repetido —tambien lo sabe el mensaje— por lo mismo que
+    en `MessageAttachment`: acota las consultas a una conversacion sin pasar
+    por `messages`. Quien comprueba que la tabla existe es
+    `esquema.hay_reacciones_y_respuestas`.
+    """
+
+    __tablename__ = "message_reactions"
+
+    message_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    emoji: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MessageReply(Base):
+    """A que mensaje responde un mensaje (migracion 0106).
+
+    LA CLAVE PRIMARIA ES `message_id`: un mensaje responde a UNO o a ninguno.
+    `reply_to_id` es anulable por lo mismo que `MessageStoryContext.story_id`:
+    si el original llegara a quitarse de verdad, la respuesta sigue en pie sin
+    su cita.
+    """
+
+    __tablename__ = "message_replies"
+
+    message_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    reply_to_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ConversationPreference(Base):
+    """Lo que una persona decide PARA SI sobre una conversacion (migracion 0107).
+
+    UNA FILA POR PERSONA Y CONVERSACION, y solo cuando ha decidido algo: quien
+    no tiene fila no la tiene silenciada ni vaciada.
+
+    `muted`: no quiere avisos de esa conversacion. `cleared_at`: la vacio en ese
+    instante y lo anterior deja de enseñarsele A ELLA; los mensajes siguen en
+    `messages` para los demas.
+
+    Va en una tabla aparte y no en `conversation_members` por lo mismo que las
+    reacciones: una columna nueva rompe el codigo ya desplegado que pide la
+    tabla entera. Quien comprueba que existe es
+    `esquema.hay_preferencias_de_conversacion`.
+    """
+
+    __tablename__ = "conversation_preferences"
+
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    muted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    cleared_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
