@@ -607,7 +607,7 @@ export async function uploadPostMedia(
   }
   if (videoSinComprimir && local.size > MAX_VIDEO_SIN_COMPRIMIR_BYTES) {
     throw new Error(
-      `Este video pesa ${formatMb(local.size)} y no se ha podido comprimir en este dispositivo. ` +
+      `Este video pesa ${formatMb(local.size)} y no se pudo comprimir en este dispositivo. ` +
         `Súbelo desde la aplicación instalada, o elige uno de menos de ${formatMb(MAX_VIDEO_SIN_COMPRIMIR_BYTES)}: ` +
         'a ese tamaño tardaría demasiado en cargar y consumiría muchos datos a quien lo vea.',
     );

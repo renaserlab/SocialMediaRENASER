@@ -78,7 +78,7 @@ test('el enlace caducado invita a pedir otro', () => {
     errorSupabase('Email link is invalid or has expired', 'otp_expired', 401),
     'nueva-contrasena',
   );
-  assert.match(texto, /caducado/i);
+  assert.match(texto, /caducó/i);
 });
 
 test('la recuperacion nunca revela si el correo tiene cuenta', () => {

@@ -42,10 +42,10 @@ export const RESPALDOS_ES = {
   'valoracion.deCinco': '{n} de 5',
   'valoracion.resumenA11y': 'Valoración media {media} sobre 5. {total}.',
   'valoracion.distribucionA11y': '{n} de 5: {total}',
-  'valoracion.necesitaCompra': 'Solo puede valorar quien ha comprado el curso.',
+  'valoracion.necesitaCompra': 'Solo puede valorar quien compró el curso.',
   'valoracion.necesitaAcceso':
     'Devolviste este curso, así que ya no puedes valorarlo.',
-  'valoracion.esTuCurso': 'No puedes valorar un curso que has publicado tú.',
+  'valoracion.esTuCurso': 'No puedes valorar un curso que publicaste tú.',
   'valoracion.yaValoraste': 'Ya valoraste este curso. Edita la que ya tienes.',
   'valoracion.noDisponible': 'Las valoraciones todavía no están disponibles.',
   'valoracion.comentarioLargo': 'El comentario no puede pasar de 2000 caracteres.',

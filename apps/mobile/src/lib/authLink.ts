@@ -107,7 +107,7 @@ export type Traductor = (
  * se desvíen lo comprueba `i18n/diccionariosSincronizados.test.mts`.
  */
 export const RESPALDOS_ES = {
-  'authError.linkExpired': 'El enlace de recuperación ha caducado. Solicita uno nuevo.',
+  'authError.linkExpired': 'El enlace de recuperación caducó. Solicita uno nuevo.',
   'authLink.alreadyUsed':
     'Este enlace ya no es válido. Puede que se haya usado antes o que hayas pedido otro más reciente.',
   'authLink.cannotOpen': 'No pudimos abrir el enlace de recuperación. Solicita uno nuevo.',

@@ -68,7 +68,7 @@ export const MOTIVOS: Record<string, string> = {
   no_publicado: 'Este curso todavía no está a la venta.',
   no_aprobado: 'Este curso todavía no está a la venta.',
   sin_tienda: 'Las compras no están disponibles en esta versión de la aplicación.',
-  sin_precio: 'No se ha podido consultar el precio en la tienda.',
+  sin_precio: 'No se pudo consultar el precio en la tienda.',
 };
 
 export function explicar(motivo: string): string {

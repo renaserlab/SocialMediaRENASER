@@ -43,7 +43,7 @@ test('reconoce el enlace caducado que devuelve Supabase', () => {
   );
   assert.ok(enlace);
   assert.equal(enlace.errorCode, 'otp_expired');
-  assert.match(mensajeDeEnlace(enlace), /caducado/i);
+  assert.match(mensajeDeEnlace(enlace), /caducó/i);
   // El texto tecnico de Supabase NO puede acabar en la pantalla.
   assert.doesNotMatch(mensajeDeEnlace(enlace), /Email link|invalid|expired$/);
 });

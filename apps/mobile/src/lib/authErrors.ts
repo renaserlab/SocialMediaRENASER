@@ -46,10 +46,10 @@ export const RESPALDOS_ES = {
   'authError.offline': 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
   'authError.waitSeconds':
     'Acabamos de enviarte un correo. Espera {segundos} segundos antes de pedir otro.',
-  'authError.tooManyAttempts': 'Has hecho demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
-  'authError.linkExpired': 'El enlace de recuperación ha caducado. Solicita uno nuevo.',
+  'authError.tooManyAttempts': 'Hiciste demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
+  'authError.linkExpired': 'El enlace de recuperación caducó. Solicita uno nuevo.',
   'authError.sessionLost':
-    'Tu enlace de recuperación ha caducado. Pide uno nuevo para crear tu contraseña.',
+    'Tu enlace de recuperación caducó. Pide uno nuevo para crear tu contraseña.',
   'authError.samePassword': 'La contraseña nueva debe ser distinta de la anterior.',
   'authError.weakPassword': 'La contraseña es demasiado corta. Usa al menos 6 caracteres.',
   'authError.pwnedPassword': 'Esa contraseña aparece en filtraciones conocidas. Elige otra distinta.',

@@ -57,7 +57,7 @@ export class ApiError extends Error {
  */
 function mensajePorEstado(status: number): string {
   if (status === 401 || status === 403) {
-    return 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+    return 'Tu sesión caducó. Inicia sesión de nuevo.';
   }
   if (status === 404) return 'No encontramos lo que buscabas.';
   if (status === 429) return 'Demasiadas peticiones. Espera un momento e inténtalo de nuevo.';

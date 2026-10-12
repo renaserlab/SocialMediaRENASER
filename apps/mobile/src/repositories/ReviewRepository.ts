@@ -298,7 +298,7 @@ export function mensajeDeErrorDeResena(fallo: unknown): string {
       case 'review_blocked':
         return 'No puedes escribir una reseña sobre esta persona.';
       case 'review_not_yours_to_delete':
-        return 'No puedes modificar ni borrar una reseña que han escrito sobre ti. Si incumple las normas, repórtala.';
+        return 'No puedes modificar ni borrar una reseña que escribieron sobre ti. Si incumple las normas, repórtala.';
       case 'review_media_path_invalid':
         return 'No se pudo adjuntar el archivo. Inténtalo de nuevo.';
       default:

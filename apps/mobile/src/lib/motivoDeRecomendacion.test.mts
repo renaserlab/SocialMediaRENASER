@@ -49,7 +49,7 @@ describe('la frase de un motivo', () => {
     // Es la regla de privacidad hecha prueba: nombrar el tema diria que busca
     // la otra persona, y eso no es informacion publica.
     const frase = frasePorMotivo({ code: 'SIMILAR_INTERESTS', topics: [] });
-    assert.equal(frase, 'Tenéis intereses parecidos');
+    assert.equal(frase, 'Tienen intereses parecidos');
     assert.ok(!frase.includes(':'));
   });
 

@@ -69,6 +69,26 @@ describe('las palabras son las de aquí', () => {
     });
   }
 
+  const GIROS: { deAlla: RegExp; deAqui: string; salvo?: string[] }[] = [
+    { deAlla: /\bno val(e|en)\b/i, deAqui: '«no es válido»' },
+    { deAlla: /\bfallos?\b/i, deAqui: '«error» o «falla»' },
+    { deAlla: /\baverías?\b/i, deAqui: '«falla»' },
+    { deAlla: /\bcomo mucho\b/i, deAqui: '«como máximo»' },
+    { deAlla: /\blaborables?\b/i, deAqui: '«hábiles»' },
+    {
+      deAlla: /\benseñ/i,
+      deAqui: '«mostrar»',
+      // Aquí «enseñar» es dar clase, que es lo que quiere decir.
+      salvo: ['offer.teaches', 'offer.teachesOwn', 'reason.teaches', 'reason.teachesGeneric'],
+    },
+  ];
+
+  for (const { deAlla, deAqui, salvo } of GIROS) {
+    it(`no se dice ${deAlla.source}: se dice ${deAqui}`, () => {
+      assert.deepEqual(clavesCon(deAlla, new Set(salvo)), []);
+    });
+  }
+
   it('una transmisión se «transmite», no se «emite»', () => {
     // Solo en los textos de las transmisiones: en el resto «emitir» es otra
     // cosa —un certificado, una entrada, un comprobante— y está bien dicho.
@@ -80,5 +100,32 @@ describe('las palabras son las de aquí', () => {
       deTransmisiones.filter(([, texto]) => /\bemi(sión|siones|t[eia])/i.test(texto)).map(([clave]) => clave),
       [],
     );
+  });
+});
+
+describe('las frases también', () => {
+  it('se habla de «ustedes», nunca de «vosotros»', () => {
+    // «Dejaréis de seguiros», «Tenéis intereses parecidos». Los números
+    // «dieciséis» y «veintiséis» acaban igual y no tienen nada que ver.
+    //
+    // Con `\p{L}` y no con `\b`: para JavaScript una «í» no es letra, y
+    // «envíos» o «vacíos» le parecían la palabra «os».
+    const vosotros =
+      /(?<!\p{L})(?!dieciséis|veintiséis)\p{L}+[áé]is(?!\p{L})|(?<!\p{L})(vosotr[oa]s|vuestr[oa]s?|os)(?!\p{L})/iu;
+    assert.deepEqual(clavesCon(vosotros), []);
+  });
+
+  it('lo que acaba de pasar se cuenta en pasado simple', () => {
+    /*
+      «Ocurrió un error», «Cancelaste el pago», «Se volvió a cargar»; no «Ha
+      ocurrido», «Has cancelado», «Se ha vuelto a cargar».
+
+      Solo se vigila la frase que EMPIEZA así, que es la forma inconfundible.
+      «Todavía no has publicado nada» o «Nadie ha escrito todavía» se dicen
+      igual aquí y no se tocan: hablan de algo que sigue sin ocurrir.
+    */
+    const reciente =
+      /(^|[.:;!?»…]\s+)((Has|Hemos|Ha|Se han?)\s+([a-záéíóúñ]+\s+)?[a-záéíóúñ]+(ado|ido|to|cho|so)\b|No se han? podido\b)/;
+    assert.deepEqual(clavesCon(reciente), []);
   });
 });

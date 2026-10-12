@@ -110,7 +110,7 @@ test('la sesion caducada se explica, no se numera', async () => {
   const fallo = await apiRequest('/algo', { auth: false }).catch((e) => e);
 
   assert.equal(fallo.status, 401);
-  assert.match(fallo.message, /sesión ha caducado/i);
+  assert.match(fallo.message, /sesión caducó/i);
 });
 
 /*

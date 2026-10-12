@@ -48,7 +48,7 @@ export const RESPALDOS_ES = {
   'courseReason.preferredFormat': 'Prefieres aprender en formato curso',
   'courseReason.creatorAffinity': 'De alguien cuyo contenido ya te interesa',
   'courseReason.recentInterest': 'Por lo que has estado viendo últimamente',
-  'courseReason.newCourse': 'Se ha publicado hace poco',
+  'courseReason.newCourse': 'Se publicó hace poco',
   'courseReason.worthALook': 'Todavía no lo ha visto mucha gente',
   // Las mismas dos que en `motivoDeRecomendacion`: se repiten aquí porque no se
   // puede importar de allí un valor sin romper la prueba de este módulo (el

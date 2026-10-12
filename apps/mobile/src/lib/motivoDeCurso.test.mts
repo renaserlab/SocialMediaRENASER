@@ -119,7 +119,7 @@ describe('la frase de un motivo', () => {
     );
     assert.equal(
       frasePorMotivoDeCurso({ code: 'NEW_COURSE', topics: [] }, CATALOGO),
-      'Se ha publicado hace poco',
+      'Se publicó hace poco',
     );
   });
 
@@ -190,7 +190,7 @@ describe('el detalle de por que aparece', () => {
 
   it('un curso nuevo se dice tal cual, sin disfrazarlo de coincidencia', () => {
     assert.deepEqual(frasesDeMotivosDeCurso([{ code: 'NEW_COURSE', topics: [] }], CATALOGO), [
-      'Se ha publicado hace poco',
+      'Se publicó hace poco',
     ]);
   });
 });
