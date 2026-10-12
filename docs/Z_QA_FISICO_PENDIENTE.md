@@ -3345,13 +3345,15 @@ la primera fila de «Archivos» es la que lo confirma o lo desmiente.
 
 ### «Únete a mi grupo» en el perfil
 
+Cómo se ven los grupos en el perfil cambió el 12/10/2026: ya no son
+tarjetas, son botones pequeños. Lo que hay que mirar está en «Los grupos
+en el perfil, como botones», al final de este documento. De la lista de
+antes solo siguen valiendo estas tres filas.
+
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
-| Quien administra puede encender «Mostrar en mi perfil» en la ficha del grupo | | | |
-| Al visitar su perfil aparece la sección con ese grupo, su foto, cuántos son y «Pedir unirme» | | | |
+| Quien administra puede encender «Mostrar en mi perfil» en «Editar grupo» | | | |
 | Un grupo que no se marcó no aparece en el perfil | | | |
-| Quien ya es miembro ve «Abrir el grupo» en vez de «Pedir unirme» | | | |
-| En el perfil propio se ven los grupos marcados, sin botón de pedir | | | |
 | Apagarlo lo quita del perfil sin tocar el grupo | | | |
 
 ## Ficha del grupo como en Telegram, menú del chat y fondo (11/10/2026)
@@ -3499,3 +3501,68 @@ silenciar.
 | La foto sigue ahí al día siguiente, aunque se borre de la galería | | | |
 | «Por defecto» devuelve el fondo de siempre | | | |
 | En otro teléfono con la misma cuenta el fondo NO cambia: es de cada teléfono | | | |
+
+---
+
+## Correcciones del 12/10/2026: grupos del perfil, ayuda de Mensajes y castellano
+
+Hace falta una **compilación nueva** para todo lo de esta sección. Lo del
+castellano que viene del servidor —los avisos que salen en el teléfono y
+algunos mensajes de error— necesita además el servidor desplegado. No hay
+ninguna migración.
+
+Visto en la copia web local con datos inventados: los botones de grupo con uno
+y con doce grupos, el corte de un nombre largo, abrir el grupo propio, pedir
+entrar y retirar la solicitud en el perfil de otra persona, la explicación de
+las etiquetas a todo el ancho, «Castellano» en la pantalla de idioma y
+«Configuración» como título. Sin ver: nada en teléfono, los avisos de permiso
+del sistema y los avisos que llegan con la aplicación cerrada.
+
+### Los grupos en el perfil, como botones
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En el perfil propio, justo debajo de la descripción, cada grupo marcado es un botón pequeño: un icono de dos globos y el nombre | | | |
+| Ya no aparecen el título «Tus grupos en tu perfil», la frase de ayuda ni la tarjeta con «Abrir el grupo» | | | |
+| Con un solo grupo el botón queda centrado bajo la descripción | | | |
+| Con varios grupos van todos en UNA fila; si no caben, la fila se desliza de lado y el perfil no crece hacia abajo | | | |
+| Deslizar esa fila de lado no cambia de pestaña (no salta a Mensajes) | | | |
+| Un nombre muy largo se corta con puntos suspensivos; el icono se sigue viendo entero | | | |
+| En el perfil propio, tocar un botón abre el chat de ese grupo | | | |
+| En el perfil de OTRA persona, tocar un botón sube una hoja con la foto del grupo, cuántos son, quién administra y «Pedir unirme» | | | |
+| «Pedir unirme» cambia la hoja a «Solicitud enviada» y ofrece «Retirar mi solicitud» | | | |
+| Quien ya es miembro de ese grupo, al tocar el botón en el perfil de quien administra, entra directo al chat, sin hoja | | | |
+| Sin descripción en el perfil, los botones salen igual, bajo las cifras | | | |
+| En oscuro el icono y el borde del botón se ven bien | | | |
+
+### La explicación de las etiquetas, en Mensajes
+
+Solo se ve con una cuenta que todavía **no ha creado ninguna etiqueta**.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| El texto «Ordena tu bandeja como quieras…» va de un margen al otro, igual de ancho que el buscador | | | |
+| Ya no queda un hueco vacío a su derecha, debajo de «Filtros» | | | |
+| No se sale de la pantalla ni se corta por la derecha, tampoco con la letra del teléfono agrandada | | | |
+| «Todos», «Crear etiqueta» y «Filtros» siguen en el mismo renglón de antes | | | |
+| Al crear la primera etiqueta el texto desaparece, como antes | | | |
+
+### Castellano del Perú
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En la pantalla de idioma la primera opción dice «Castellano» | | | |
+| En la configuración, la fila «Idioma de la App» dice «Castellano» | | | |
+| El título de esa pantalla es «Configuración», no «Ajustes» | | | |
+| Al bloquear a alguien, el aviso dice «Dejarán de seguirse», no «Dejaréis de seguiros» | | | |
+| En Crear y en el chat se lee «video», sin tilde | | | |
+| Los botones dicen «Agregar» («Agregar personas», «Agregar a la galería»), no «Añadir» | | | |
+| Al mantener el dedo sobre un mensaje, la ayuda dice «Mantén presionado» | | | |
+| En las transmisiones se lee «transmisión», «en vivo», «Empezar a transmitir» y «Terminar transmisión»; en ningún sitio «directo» ni «emitir» | | | |
+| Un error cualquiera dice «Ocurrió un error», no «Ha ocurrido un error» | | | |
+| En un evento con cupo, el botón dice «Reservar mi cupo» | | | |
+| El permiso de cámara y el de micrófono que pregunta el teléfono (compilación nueva, primera vez) dicen «video» y «transmitir en vivo» | | | |
+| Con el servidor desplegado: al agregar a alguien a un grupo, el aviso que le llega dice «te agregó al grupo» | | | |
+| Con el servidor desplegado: la invitación a salir en una transmisión dice «Te invitan a una transmisión en vivo» | | | |
+| Con el servidor desplegado: en la bandeja, un mensaje que solo trae un video se resume como «Video» | | | |
+| Con la aplicación en inglés o en portugués no ha cambiado ningún texto | | | |
