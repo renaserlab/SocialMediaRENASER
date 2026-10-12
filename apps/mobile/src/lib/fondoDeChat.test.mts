@@ -3,12 +3,18 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import {
+  CLAVE_DEL_FONDO_COMUN,
+  CLAVE_DE_FONDOS,
   COLORES_DE_FONDO,
   FONDO_POR_DEFECTO,
   colorDeFondo,
-  escribirFondo,
+  conFondo,
+  escribirFondos,
+  fondoDe,
   leerFondo,
+  leerFondos,
   mismoFondo,
+  proporcionDelFondo,
   veloSobreLaFoto,
 } from './fondoDeChat.ts';
 
@@ -16,6 +22,9 @@ import {
   El fondo del chat (11/10/2026). Lo esencial: es del teléfono y no viaja a
   ningún sitio, lo que no se entiende se queda en «por defecto» y ningún fondo
   deja el chat sin poder leerse.
+
+  Desde el 12/10/2026 es DE CADA CHAT. Nació como uno solo para todos, y
+  cambiar el fondo de un grupo cambiaba el de todas las conversaciones.
 */
 
 const leer = (ruta: string) =>
@@ -36,12 +45,12 @@ const contraste = (a: string, b: string) => {
 };
 
 test('lo guardado se lee sin fiarse de nada', () => {
-  assert.deepEqual(leerFondo(escribirFondo({ tipo: 'color', id: 'menta' })), { tipo: 'color', id: 'menta' });
-  assert.deepEqual(leerFondo(escribirFondo({ tipo: 'foto', uri: 'file:///f.jpg' })), {
+  assert.deepEqual(leerFondo(JSON.stringify({ tipo: 'color', id: 'menta' })), { tipo: 'color', id: 'menta' });
+  assert.deepEqual(leerFondo(JSON.stringify({ tipo: 'foto', uri: 'file:///f.jpg' })), {
     tipo: 'foto',
     uri: 'file:///f.jpg',
   });
-  assert.deepEqual(leerFondo(escribirFondo(FONDO_POR_DEFECTO)), FONDO_POR_DEFECTO);
+  assert.deepEqual(leerFondo(JSON.stringify(FONDO_POR_DEFECTO)), FONDO_POR_DEFECTO);
   // Lo que no se entiende es «por defecto»: el chat nunca se queda en blanco.
   for (const raro of [
     null,
@@ -57,6 +66,85 @@ test('lo guardado se lee sin fiarse de nada', () => {
     { tipo: 'foto', uri: 7 },
   ]) {
     assert.deepEqual(leerFondo(raro), FONDO_POR_DEFECTO, JSON.stringify(raro));
+  }
+});
+
+const GRUPO = 'aaaaaaaa-0000-4000-8000-000000000003';
+const OTRO = 'bbbbbbbb-0000-4000-8000-000000000004';
+
+test('cambiar el fondo de un chat no toca el de ningún otro', () => {
+  // Lo que se reportó el 12/10: se le puso una foto a un grupo y salió
+  // detrás de todas las conversaciones.
+  const conFoto = conFondo({}, GRUPO, { tipo: 'foto', uri: 'file:///equipo.jpg' });
+  assert.deepEqual(fondoDe(conFoto, GRUPO), { tipo: 'foto', uri: 'file:///equipo.jpg' });
+  assert.deepEqual(fondoDe(conFoto, OTRO), FONDO_POR_DEFECTO);
+
+  // Cada chat con el suyo, y cambiar uno deja el otro como estaba.
+  const losDos = conFondo(conFoto, OTRO, { tipo: 'color', id: 'menta' });
+  assert.deepEqual(fondoDe(losDos, GRUPO), { tipo: 'foto', uri: 'file:///equipo.jpg' });
+  assert.deepEqual(fondoDe(losDos, OTRO), { tipo: 'color', id: 'menta' });
+  const cambiado = conFondo(losDos, GRUPO, { tipo: 'color', id: 'rosa' });
+  assert.deepEqual(fondoDe(cambiado, GRUPO), { tipo: 'color', id: 'rosa' });
+  assert.deepEqual(fondoDe(cambiado, OTRO), { tipo: 'color', id: 'menta' });
+
+  // No se cambia la lista que se recibió: es el estado que hay en pantalla.
+  assert.deepEqual(conFoto, { [GRUPO]: { tipo: 'foto', uri: 'file:///equipo.jpg' } });
+
+  // Volver al de siempre quita ese chat de la lista, y solo ese.
+  const sinGrupo = conFondo(cambiado, GRUPO, FONDO_POR_DEFECTO);
+  assert.deepEqual(sinGrupo, { [OTRO]: { tipo: 'color', id: 'menta' } });
+  assert.deepEqual(fondoDe(sinGrupo, GRUPO), FONDO_POR_DEFECTO);
+
+  // Sin conversación no se guarda nada, y un identificador raro no saca
+  // nada heredado del objeto.
+  assert.deepEqual(conFondo(losDos, '', { tipo: 'color', id: 'rosa' }), losDos);
+  for (const raro of ['', 'constructor', 'toString', '__proto__']) {
+    assert.deepEqual(fondoDe(losDos, raro), FONDO_POR_DEFECTO, raro);
+  }
+});
+
+test('la lista de fondos se guarda y se lee entera, sin fiarse de nada', () => {
+  const fondos = {
+    [GRUPO]: { tipo: 'foto', uri: 'file:///equipo.jpg' },
+    [OTRO]: { tipo: 'color', id: 'menta' },
+  } as const;
+  assert.deepEqual(leerFondos(escribirFondos(fondos)), fondos);
+
+  // Lo que no es un fondo de verdad no entra: ese chat se ve como siempre.
+  assert.deepEqual(
+    leerFondos(
+      JSON.stringify({
+        [GRUPO]: { tipo: 'color', id: 'un-color-que-ya-no-existe' },
+        [OTRO]: { tipo: 'color', id: 'menta' },
+        '  ': { tipo: 'color', id: 'rosa' },
+        tercero: { tipo: 'defecto' },
+        cuarto: 7,
+      }),
+    ),
+    { [OTRO]: { tipo: 'color', id: 'menta' } },
+  );
+
+  // Un guardado estropeado entero es «ningún chat tiene fondo».
+  for (const raro of [null, undefined, '', 'no es json', '[]', '7', '"texto"', 7, []]) {
+    assert.deepEqual(leerFondos(raro), {}, JSON.stringify(raro));
+  }
+
+  // El fondo de cuando era uno solo NO se lee como lista: se queda en nada.
+  assert.deepEqual(leerFondos(JSON.stringify({ tipo: 'foto', uri: 'file:///viejo.jpg' })), {});
+  assert.notEqual(CLAVE_DE_FONDOS, CLAVE_DEL_FONDO_COMUN);
+});
+
+test('la foto del fondo se recorta con la forma de la pantalla, de pie', () => {
+  assert.deepEqual(proporcionDelFondo(360, 800), [9, 20]);
+  assert.deepEqual(proporcionDelFondo(1080, 1920), [9, 16]);
+  // Con el teléfono echado, la misma: el chat se usa de pie.
+  assert.deepEqual(proporcionDelFondo(800, 360), [9, 20]);
+  // Medidas con decimales: el recortador del teléfono solo admite enteros.
+  const [a, b] = proporcionDelFondo(392.7, 850.9);
+  assert.ok(Number.isInteger(a) && Number.isInteger(b) && a > 0 && b > a);
+  // Sin medidas que valgan, 9:16.
+  for (const [ancho, alto] of [[0, 0], [0, 800], [NaN, 800], [-5, 10]] as const) {
+    assert.deepEqual(proporcionDelFondo(ancho, alto), [9, 16]);
   }
 });
 
@@ -122,16 +210,77 @@ test('cada color tiene su nombre en los tres idiomas', () => {
 
 test('el fondo es del teléfono: se guarda aquí y no viaja a ningún sitio', () => {
   const almacen = leer('../store/useFondoDeChatStore.ts');
-  assert.match(almacen, /AsyncStorage\.setItem\(CLAVE_DE_FONDO, escribirFondo\(fondo\)\)/);
+  assert.match(almacen, /AsyncStorage\.setItem\(CLAVE_DE_FONDOS, escribirFondos\(fondos\)\)/);
   assert.doesNotMatch(almacen, /apiRequest|fetch\(|supabase/);
   // Una foto se COPIA a la carpeta de la aplicación: la ruta de la caché no dura.
   assert.match(almacen, /new File\(Paths\.document,/);
   assert.match(almacen, /new File\(uri\)\.copy\(destino\);/);
-  // Y la anterior se borra al cambiarla.
+  // Y la anterior DE ESE CHAT se borra al cambiarla.
+  assert.match(almacen, /const anterior = fondoDe\(get\(\)\.fondos, conversacionId\);/);
   assert.match(almacen, /if \(anterior\.tipo === 'foto' &&[^)]*\)\) \{\s*borrarCopia\(anterior\.uri\);/);
   // En web la ruta de una foto no sobrevive a recargar: no se ofrece.
   assert.match(almacen, /export const FONDO_CON_FOTO = Platform\.OS !== 'web';/);
   assert.match(leer('../components/chat/HojaDeFondoDeChat.tsx'), /\{FONDO_CON_FOTO \? \(\s*<ListRow/);
+});
+
+test('el fondo se elige y se pinta para la conversación abierta, no para todas', () => {
+  const almacen = leer('../store/useFondoDeChatStore.ts');
+  const chat = leer('../screens/ChatScreen.tsx');
+  const hoja = leer('../components/chat/HojaDeFondoDeChat.tsx');
+
+  // El chat pinta SU fondo, y la hoja cambia el de ESE chat.
+  assert.match(
+    chat,
+    /const fondoDelChat = useFondoDeChatStore\(\(estado\) => fondoDe\(estado\.fondos, params\.id \?\? ''\)\);/,
+  );
+  assert.match(chat, /<HojaDeFondoDeChat\s+conversacionId=\{params\.id \?\? ''\}/);
+  assert.match(hoja, /useFondoDeChatStore\(\(estado\) => fondoDe\(estado\.fondos, conversacionId\)\)/);
+  assert.match(hoja, /void elegir\(conversacionId, nuevo\);/);
+  assert.match(hoja, /await elegirFoto\(conversacionId, elegida\.uri\)/);
+  // Ya no existe un fondo suelto que valga para todos.
+  for (const fuente of [almacen, chat, hoja]) assert.doesNotMatch(fuente, /estado\.fondo\b(?!s)/);
+
+  // Lo que se guarda es la lista entera: antes de cambiar un chat hay que
+  // haberla leído, o guardar borraría los fondos de los demás.
+  const elegir = almacen.slice(almacen.indexOf('async elegir('), almacen.indexOf('async elegirFoto('));
+  assert.ok(
+    elegir.indexOf('await get().leer();') > 0 &&
+      elegir.indexOf('await get().leer();') < elegir.indexOf('conFondo(get().fondos, conversacionId, fondo)'),
+  );
+  // Y dos lecturas a la vez son la misma.
+  assert.match(almacen, /leyendo \?\?= leerDelDisco\(\)/);
+
+  // El fondo de cuando era uno solo se retira; no se le pone a ningún chat.
+  const retirar = almacen.slice(
+    almacen.indexOf('async function retirarElFondoComun'),
+    almacen.indexOf('async function leerDelDisco'),
+  );
+  assert.match(retirar, /AsyncStorage\.getItem\(CLAVE_DEL_FONDO_COMUN\)/);
+  assert.match(retirar, /if \(comun\.tipo === 'foto'\) borrarCopia\(comun\.uri\);/);
+  assert.match(retirar, /AsyncStorage\.removeItem\(CLAVE_DEL_FONDO_COMUN\)/);
+  assert.doesNotMatch(retirar, /set\(|conFondo|guardar\(/);
+
+  // Y se le dice a la persona en los tres idiomas.
+  assert.match(leer('../i18n/es.ts'), /'chatBackground\.hint': 'Cambia solo este chat y solo en este teléfono\./);
+  for (const idioma of ['es', 'en', 'pt']) {
+    assert.doesNotMatch(
+      leer(`../i18n/${idioma}.ts`),
+      /'chatBackground\.hint': '[^']*(todos tus chats|all your chats|todos os seus chats)/,
+      idioma,
+    );
+  }
+});
+
+test('la foto del fondo pasa por el recortador del teléfono, con la forma de la pantalla', () => {
+  const hoja = leer('../components/chat/HojaDeFondoDeChat.tsx');
+  // En Android, con la proporción de la pantalla. En iOS el recorte del
+  // sistema es siempre cuadrado, y para un fondo de pie eso quita más de lo
+  // que deja elegir: ahí la foto entra entera.
+  assert.match(
+    hoja,
+    /Platform\.OS === 'android'\s*\? \{ aspect: proporcionDelFondo\(ancho, alto\) \}\s*: \{ allowsEditing: false \}/,
+  );
+  assert.match(hoja, /const \{ width: ancho, height: alto \} = useWindowDimensions\(\);/);
 });
 
 test('el fondo se pinta detrás de los mensajes y no recibe toques', () => {

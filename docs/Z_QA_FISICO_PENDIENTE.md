@@ -3493,7 +3493,7 @@ silenciar.
 |---|---|---|---|
 | «Fondo del chat» enseña «Por defecto», ocho colores y «Elegir una foto» | | | |
 | Tocar un color lo pone al momento detrás de los mensajes; la cabecera y el cuadro de texto no cambian | | | |
-| El fondo vale para todos los chats, no solo para el que se tenía abierto | | | |
+| El fondo vale SOLO para el chat donde se eligió (corregido el 12/10: antes valía para todos; ver «Fondo por chat y recorte de fotos») | | | |
 | Cerrar la aplicación y volver: el fondo elegido sigue puesto | | | |
 | Con cada color se leen bien la hora de un sticker, el nombre de quien escribe y las reacciones, en claro y en oscuro | | | |
 | Cambiar el tema del teléfono a oscuro deja el mismo color en su tono oscuro | | | |
@@ -3691,3 +3691,54 @@ mirar es que el gesto no estorbe a subir y bajar por el chat.
 | En un chat de dos personas funciona igual que en un grupo | | | |
 | En iPhone: deslizar desde el borde izquierdo de la pantalla sigue volviendo atrás | | | |
 | Con «reducir movimiento» activado en el teléfono, responde igual y la burbuja vuelve de golpe | | | |
+
+---
+
+## Fondo por chat y recorte de fotos (12/10/2026)
+
+Hace falta una **compilación nueva**. No hay migración ni cambio en el
+servidor, y no se instala ningún paquete.
+
+Qué cambia:
+
+- **El fondo es de cada chat.** Antes había un solo fondo en el teléfono y
+  cambiarlo en un grupo lo cambiaba en todas las conversaciones.
+- **El fondo que ya estaba puesto se pierde una vez.** Valía para todos los
+  chats y no se sabe en cuál se eligió, así que no se le pone a ninguno: hay
+  que volver a elegirlo en el chat donde se quiere.
+- **La foto del fondo se recorta** con la forma de la pantalla (Android).
+- **«Recortar una foto»** en el menú de adjuntar del chat.
+
+El recorte es el del propio teléfono, el mismo de la foto de perfil: Z no trae
+editor de imágenes. Por eso es una foto por vez, y en iPhone el recorte es
+cuadrado.
+
+Visto en la copia web local: un color puesto en un grupo no aparece en otro
+chat, cada chat guarda el suyo, el fondo de antes se retira sin aplicarse a
+ninguno, y el menú de adjuntar muestra las cuatro opciones. **Sin ver:** nada
+en teléfono; la foto de fondo y los dos recortes no existen en la web.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Al abrir la versión nueva, ningún chat tiene el fondo que se había puesto antes: todos salen con el de siempre | | | |
+| Poner un color de fondo en un GRUPO: se ve en ese grupo | | | |
+| Abrir otro grupo y un chat de dos personas: siguen con el fondo de siempre | | | |
+| Poner otro color en ese segundo chat: cada uno conserva el suyo al ir y volver | | | |
+| La hoja «Fondo del chat» dice «Cambia solo este chat y solo en este teléfono» | | | |
+| En cada chat, la hoja marca el fondo de ESE chat, no el del último que se tocó | | | |
+| Cerrar la aplicación del todo y volver: cada chat sigue con su fondo | | | |
+| «Por defecto» en un chat le quita el fondo a ese chat y a ningún otro | | | |
+| «Elegir una foto» (Android): después de elegirla se abre el recortador, con un marco alto como la pantalla | | | |
+| Lo que se encuadra en el recortador es lo que se ve detrás de los mensajes, sin que el chat le corte los lados | | | |
+| Cancelar el recortador deja el fondo como estaba | | | |
+| Con una foto de fondo en un chat, los demás chats no la muestran | | | |
+| Cambiar la foto de fondo de un chat no borra la foto de fondo de otro | | | |
+| «Elegir una foto» (iPhone): la foto entra entera, sin recortador | | | |
+| El clip de adjuntar muestra cuatro opciones: «Fotos y videos», «Recortar una foto», «Cámara» y «Archivo» | | | |
+| «Recortar una foto»: se elige UNA foto y se abre el recortador del teléfono | | | |
+| En Android el marco del recortador se puede mover y estirar libremente | | | |
+| Al aceptar, la foto recortada queda en la tira de lo que se va a mandar, y se puede quitar con su X | | | |
+| Enviarla: llega recortada, se ve sin marco como las demás fotos y se abre en el visor | | | |
+| Cancelar el recortador no agrega nada a la tira | | | |
+| «Fotos y videos» sigue dejando elegir varias a la vez, sin recortador | | | |
+| «Cámara» sigue igual: toma la foto y la deja lista para mandar | | | |

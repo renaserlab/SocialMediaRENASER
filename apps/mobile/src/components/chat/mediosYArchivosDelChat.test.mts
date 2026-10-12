@@ -232,3 +232,71 @@ describe('un archivo se descarga dentro de la aplicación', () => {
     assert.doesNotMatch(PESTANAS, /abrirArchivo/);
   });
 });
+
+/*
+  Recortar una foto antes de enviarla (12/10/2026).
+
+  Pedido: «recorte de fotos en chats para mayor personalización». El recorte es
+  el del TELÉFONO: no hay biblioteca de edición instalada, y lo que se vigila
+  aquí es que la opción exista, que no rompa la de elegir varias y que una foto
+  recortada siga el mismo camino que cualquier otra.
+*/
+describe('Recortar una foto antes de enviarla', () => {
+  const funcion = ENVIO.slice(
+    ENVIO.indexOf('export async function elegirFotoRecortada('),
+    ENVIO.indexOf('export async function hacerFoto('),
+  );
+
+  it('abre el recortador del teléfono con UNA foto', () => {
+    assert.ok(funcion.length > 0, 'no está elegirFotoRecortada');
+    assert.match(funcion, /mediaTypes: \['images'\],\s*allowsEditing: true,/);
+    // Elegir varias y recortar se excluyen: con las dos, el sistema no recorta.
+    assert.doesNotMatch(funcion, /allowsMultipleSelection|selectionLimit/);
+    // Un video no pasa por aquí.
+    assert.doesNotMatch(funcion, /'videos'/);
+  });
+
+  it('un permiso denegado se explica, igual que en las otras opciones', () => {
+    assert.match(funcion, /if \(!permiso\.granted\) throw new PermisoDenegadoError\(AVISO_FOTOS\);/);
+    assert.match(funcion, /if \(resultado\.canceled\) return null;/);
+  });
+
+  it('la foto recortada es un adjunto como cualquier otro: se achica y se sube igual', () => {
+    assert.match(funcion, /return asset \? desdeAsset\(asset\) : null;/);
+  });
+
+  it('«Fotos y videos» sigue dejando elegir varias, sin recorte', () => {
+    const varias = ENVIO.slice(
+      ENVIO.indexOf('export async function elegirFotosOVideos('),
+      ENVIO.indexOf('export async function elegirFotoRecortada('),
+    );
+    assert.match(varias, /allowsMultipleSelection: maximo > 1,/);
+    assert.doesNotMatch(varias, /allowsEditing:/);
+  });
+
+  it('está en el menú de adjuntar, aparte y con su explicación', () => {
+    const menu = CHAT.slice(
+      CHAT.indexOf('<BottomSheet visible={menuAbierto}'),
+      CHAT.indexOf('{/* El menú de acciones de una burbuja. */}'),
+    );
+    assert.match(
+      menu,
+      /title=\{t\('chat\.cropPhoto'\)\}\s*subtitle=\{t\('chat\.cropPhotoHint'\)\}\s*leftIcon="crop"\s*onPress=\{\(\) => void elegirCon\(elegirFotoRecortada\)\}/,
+    );
+    // Las cuatro opciones, en este orden.
+    const orden = ['chat.photosAndVideos', 'chat.cropPhoto', 'chat.camera', 'chat.file'].map((clave) =>
+      menu.indexOf(`t('${clave}')`),
+    );
+    assert.ok(orden.every((posicion) => posicion >= 0), 'falta una opción del menú');
+    assert.deepEqual([...orden].sort((a, b) => a - b), orden);
+  });
+
+  it('tiene sus textos en los tres idiomas', () => {
+    for (const idioma of ['es', 'en', 'pt']) {
+      const diccionario = fuente(`i18n/${idioma}.ts`);
+      for (const clave of ['chat.cropPhoto', 'chat.cropPhotoHint']) {
+        assert.ok(diccionario.includes(`'${clave}':`), `${idioma}: falta ${clave}`);
+      }
+    }
+  });
+});

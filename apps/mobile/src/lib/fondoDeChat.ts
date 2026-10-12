@@ -1,9 +1,10 @@
 /**
- * El fondo del chat, que cada persona elige en su teléfono.
+ * El fondo de un chat, que cada persona elige en su teléfono.
  *
- * ES UNA PREFERENCIA DEL APARATO, no de la cuenta ni de la conversación: no
- * viaja al servidor, nadie más la ve y vale para todos los chats. Se guarda
- * en el propio teléfono.
+ * ES DE CADA CONVERSACIÓN Y DE ESTE APARATO. Cambiar el fondo de un grupo
+ * cambia ese grupo y ninguno más: quien pone una foto del equipo en el chat
+ * del equipo no la quiere detrás de la conversación con su jefe. No viaja al
+ * servidor y nadie más lo ve.
  *
  * LOS COLORES VAN POR PAREJAS, uno para el tema claro y otro para el oscuro.
  * Sobre el fondo se pinta texto que no lleva burbuja —la hora de un sticker,
@@ -21,8 +22,18 @@ export type FondoDeChat =
 
 export const FONDO_POR_DEFECTO: FondoDeChat = { tipo: 'defecto' };
 
-/** Dónde se guarda en el teléfono. */
-export const CLAVE_DE_FONDO = 'z.chat.fondo.v1';
+/** El fondo de cada conversación que tiene uno. Las demás no aparecen. */
+export type FondosPorChat = Readonly<Record<string, FondoDeChat>>;
+
+/** Dónde se guardan en el teléfono. */
+export const CLAVE_DE_FONDOS = 'z.chat.fondos.v2';
+
+/**
+ * Donde se guardaba el fondo cuando era UNO SOLO para todos los chats
+ * (11/10/2026). Ya no se lee como fondo: no se sabe en qué chat se eligió, y
+ * ponérselo a todos es justo lo que se corrigió. Solo se usa para retirarlo.
+ */
+export const CLAVE_DEL_FONDO_COMUN = 'z.chat.fondo.v1';
 
 export type ColorDeFondo = { id: string; claro: string; oscuro: string };
 
@@ -39,7 +50,7 @@ export const COLORES_DE_FONDO: readonly ColorDeFondo[] = [
 ];
 
 /**
- * Lo guardado, leído sin fiarse de nada.
+ * Un fondo guardado, leído sin fiarse de nada.
  *
  * Cualquier cosa que no se entienda —un color que ya no existe, un texto
  * estropeado— es «por defecto»: el chat se ve como siempre, nunca en blanco.
@@ -64,9 +75,63 @@ export function leerFondo(crudo: unknown): FondoDeChat {
   return FONDO_POR_DEFECTO;
 }
 
+/**
+ * Los fondos guardados, leídos igual: sin fiarse de nada.
+ *
+ * Lo que no sea un fondo de verdad no entra en la lista, así que ese chat se
+ * ve con el de siempre. Un guardado estropeado entero es una lista vacía.
+ */
+export function leerFondos(crudo: unknown): FondosPorChat {
+  let valor: unknown = crudo;
+  if (typeof crudo === 'string') {
+    try {
+      valor = JSON.parse(crudo);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof valor !== 'object' || valor === null || Array.isArray(valor)) return {};
+  const fondos: Record<string, FondoDeChat> = {};
+  for (const [conversacionId, guardado] of Object.entries(valor)) {
+    if (!conversacionId.trim()) continue;
+    const fondo = leerFondo(guardado);
+    if (fondo.tipo !== 'defecto') fondos[conversacionId] = fondo;
+  }
+  return fondos;
+}
+
 /** Lo que se guarda. */
-export function escribirFondo(fondo: FondoDeChat): string {
-  return JSON.stringify(fondo);
+export function escribirFondos(fondos: FondosPorChat): string {
+  return JSON.stringify(fondos);
+}
+
+/** El fondo de ESTA conversación. Si no eligió ninguno, el de siempre. */
+export function fondoDe(fondos: FondosPorChat, conversacionId: string): FondoDeChat {
+  // `hasOwn`, no `fondos[id]`: un identificador raro no puede sacar algo
+  // heredado del objeto y hacerlo pasar por un fondo.
+  return Object.prototype.hasOwnProperty.call(fondos, conversacionId)
+    ? (fondos[conversacionId] ?? FONDO_POR_DEFECTO)
+    : FONDO_POR_DEFECTO;
+}
+
+/**
+ * La lista con el fondo de UNA conversación cambiado. Las demás, intactas.
+ *
+ * Volver al de siempre quita la conversación de la lista en vez de apuntar
+ * «por defecto»: la lista solo crece con los chats que de verdad tienen fondo.
+ */
+export function conFondo(
+  fondos: FondosPorChat,
+  conversacionId: string,
+  fondo: FondoDeChat,
+): FondosPorChat {
+  if (!conversacionId.trim()) return fondos;
+  const resultado: Record<string, FondoDeChat> = {};
+  for (const [id, suFondo] of Object.entries(fondos)) {
+    if (id !== conversacionId) resultado[id] = suFondo;
+  }
+  if (fondo.tipo !== 'defecto') resultado[conversacionId] = fondo;
+  return resultado;
 }
 
 /**
@@ -98,4 +163,22 @@ export function mismoFondo(a: FondoDeChat, b: FondoDeChat): boolean {
   if (a.tipo === 'color' && b.tipo === 'color') return a.id === b.id;
   if (a.tipo === 'foto' && b.tipo === 'foto') return a.uri === b.uri;
   return true;
+}
+
+/**
+ * La proporción con la que se recorta la foto que va de fondo: la de la
+ * pantalla, de pie.
+ *
+ * El fondo llena la zona de los mensajes. Recortada con esa forma, lo que la
+ * persona encuadra es lo que después ve; con cualquier otra, el chat le corta
+ * los lados por su cuenta. Va en enteros y reducida, que es como la pide el
+ * recortador del teléfono. Sin medidas que valgan, 9:16.
+ */
+export function proporcionDelFondo(ancho: number, alto: number): [number, number] {
+  const corto = Math.round(Math.min(ancho, alto));
+  const largo = Math.round(Math.max(ancho, alto));
+  if (!Number.isFinite(corto) || !Number.isFinite(largo) || corto <= 0) return [9, 16];
+  const divisor = (a: number, b: number): number => (b === 0 ? a : divisor(b, a % b));
+  const comun = divisor(largo, corto);
+  return [corto / comun, largo / comun];
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { BottomSheet } from '@/components/BottomSheet';
@@ -8,7 +8,13 @@ import { ListRow } from '@/components/ListRow';
 import { Text } from '@/components/Text';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
-import { COLORES_DE_FONDO, mismoFondo, type FondoDeChat } from '@/lib/fondoDeChat';
+import {
+  COLORES_DE_FONDO,
+  fondoDe,
+  mismoFondo,
+  proporcionDelFondo,
+  type FondoDeChat,
+} from '@/lib/fondoDeChat';
 import { PermisoDenegadoError, pickImage } from '@/services/storage';
 import { FONDO_CON_FOTO, useFondoDeChatStore } from '@/store/useFondoDeChatStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -17,34 +23,42 @@ import { useAppTheme } from '@/theme/useAppTheme';
 const MUESTRA = 56;
 
 type Props = {
+  /** El chat al que se le cambia el fondo. Solo ese. */
+  conversacionId: string;
   visible: boolean;
   onClose: () => void;
 };
 
 /**
- * Elegir el fondo del chat: el de siempre, uno de los colores o una foto.
+ * Elegir el fondo de ESTE chat: el de siempre, uno de los colores o una foto.
  *
- * VALE PARA TODOS LOS CHATS Y SOLO EN ESTE TELÉFONO. No se guarda en el
- * servidor ni lo ve nadie más.
+ * VALE PARA ESTE CHAT Y SOLO EN ESTE TELÉFONO. Los demás chats no cambian.
+ * No se guarda en el servidor ni lo ve nadie más.
+ *
+ * LA FOTO SE RECORTA con la forma de la pantalla, en el recortador del
+ * teléfono: lo que la persona encuadra es lo que después ve detrás de los
+ * mensajes. Solo en Android: el de iOS recorta siempre en cuadrado, y un
+ * cuadrado estirado a lo alto pierde más foto de la que deja elegir.
  *
  * LOS COLORES SE ENSEÑAN COMO SE VAN A VER: cada muestra pinta el tono del
  * tema que está puesto, que es el que acabará detrás de los mensajes.
  */
-export function HojaDeFondoDeChat({ visible, onClose }: Props) {
+export function HojaDeFondoDeChat({ conversacionId, visible, onClose }: Props) {
   const { colors, mode } = useAppTheme();
   const { t } = useTranslation();
-  const fondo = useFondoDeChatStore((estado) => estado.fondo);
+  const fondo = useFondoDeChatStore((estado) => fondoDe(estado.fondos, conversacionId));
   const elegir = useFondoDeChatStore((estado) => estado.elegir);
   const elegirFoto = useFondoDeChatStore((estado) => estado.elegirFoto);
   const [fallo, setFallo] = useState<string | null>(null);
+  const { width: ancho, height: alto } = useWindowDimensions();
   const oscuro = mode === 'dark';
 
   const poner = useCallback(
     (nuevo: FondoDeChat) => {
       setFallo(null);
-      void elegir(nuevo);
+      void elegir(conversacionId, nuevo);
     },
-    [elegir],
+    [conversacionId, elegir],
   );
 
   const ponerFoto = useCallback(async () => {
@@ -52,15 +66,21 @@ export function HojaDeFondoDeChat({ visible, onClose }: Props) {
     try {
       // La hoja se queda abierta mientras se elige: en iOS el selector no se
       // abre mientras un Modal se está cerrando (ver `FotoDelGrupo`).
-      const elegida = await pickImage({ allowsEditing: false });
+      const elegida = await pickImage(
+        Platform.OS === 'android'
+          ? { aspect: proporcionDelFondo(ancho, alto) }
+          : { allowsEditing: false },
+      );
       if (!elegida) return;
-      if (!(await elegirFoto(elegida.uri))) setFallo(t('chatBackground.photoFailed'));
+      if (!(await elegirFoto(conversacionId, elegida.uri))) {
+        setFallo(t('chatBackground.photoFailed'));
+      }
     } catch (error) {
       setFallo(
         error instanceof PermisoDenegadoError ? error.message : t('chatBackground.photoFailed'),
       );
     }
-  }, [elegirFoto, t]);
+  }, [alto, ancho, conversacionId, elegirFoto, t]);
 
   const muestra = (
     clave: string,
