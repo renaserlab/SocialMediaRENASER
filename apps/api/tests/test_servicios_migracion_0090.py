@@ -161,9 +161,14 @@ APLICADAS = {
     "0106_reacciones_y_respuestas.sql": "d65aa960989ff04e55b1b2dd590129aad4e3ee61",
     # 0107 (lo que cada persona decide para si sobre una conversacion:
     # silenciarla y vaciarla). Edson la ejecuto a mano en Supabase el
-    # 11/10/2026 y asi lo comunico. PENDIENTE la consulta de comprobacion en
-    # solo lectura (8 filas): todavia no hay resultado que anotar. Desde que
-    # esta aplicada no se edita: se corrige hacia delante, con otra.
+    # 11/10/2026 y asi lo comunico. COMPROBADA ESE MISMO DIA, EN SOLO LECTURA
+    # Y SIN DIVERGENCIAS: una consulta de 8 comprobaciones sobre
+    # `conversation_preferences`, las 8 en OK, vistas en las dos capturas que
+    # pego Edson —columnas con su tipo y nulo; valores por defecto; claves
+    # ajenas y que hace cada una al borrar; una fila por persona y
+    # conversacion; indices; RLS activada; ninguna politica; fuera de la
+    # publicacion de tiempo real—. La igualdad la calcula la propia base.
+    # Desde que esta aplicada no se edita: se corrige hacia delante, con otra.
     "0107_preferencias_de_conversacion.sql": "746746dfc37da46a76e5ae792b3b5bce77dcb082",
 }
 
