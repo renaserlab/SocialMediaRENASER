@@ -49,12 +49,12 @@ export type TraductorDeEnlaces = (
 export const RESPALDOS_ES = {
   'share.audio': 'Escucha este audio en Z',
   'share.audioBy': 'Escucha este audio de {nombre} en Z',
-  'share.video': 'Mira este vídeo en Z',
-  'share.videoBy': 'Mira este vídeo de {nombre} en Z',
+  'share.video': 'Mira este video en Z',
+  'share.videoBy': 'Mira este video de {nombre} en Z',
   'share.post': 'Mira esta publicación en Z',
   'share.postBy': 'Mira esta publicación de {nombre} en Z',
-  'share.live': 'Mira este directo en Z',
-  'share.liveBy': 'Mira el directo de {nombre} en Z',
+  'share.live': 'Mira esta transmisión en vivo en Z',
+  'share.liveBy': 'Mira la transmisión en vivo de {nombre} en Z',
   'share.group': 'Únete a mi grupo en Z',
   'share.groupNamed': 'Únete al grupo «{nombre}» en Z',
 } as const;

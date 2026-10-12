@@ -134,7 +134,7 @@ export function SelectorDePersonas({
         */}
         <Text variant="caption" color={superficie.textMuted}>
           {alTope
-            ? `Máximo ${maximo}. Quita a alguien para añadir a otra persona.`
+            ? `Máximo ${maximo}. Quita a alguien para agregar a otra persona.`
             : (ayuda ?? `Etiqueta hasta ${maximo} personas`)}
         </Text>
       </View>

@@ -39,7 +39,7 @@ class SlugRepetido(ConflictError):
 
 class JerarquiaInvalida(ValidationAppError):
     code = "service_category_hierarchy_invalid"
-    message = "Una categoría tiene, como mucho, un nivel de subcategorías."
+    message = "Una categoría tiene, como máximo, un nivel de subcategorías."
 
 
 def _ahora() -> datetime:

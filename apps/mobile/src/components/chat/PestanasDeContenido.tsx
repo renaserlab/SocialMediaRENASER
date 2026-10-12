@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Linking,
   Pressable,
   RefreshControl,
@@ -16,6 +15,8 @@ import { Feather } from '@expo/vector-icons';
 
 import { Avatar } from '@/components/Avatar';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
+import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
+import { MedioDeChat } from '@/components/chat/MedioDeChat';
 import { Chip } from '@/components/Chip';
 import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
 import { StateView } from '@/components/StateView';
@@ -29,7 +30,6 @@ import {
   adjuntosDe,
   columnasDeRejilla,
   direccionesDe,
-  duracionLegible,
   enFilasDe,
   nombreDeSitio,
   sitioDe,
@@ -39,7 +39,7 @@ import {
 import { rutaInternaDe } from '@/lib/enlaces';
 import { colorDelEnlace, partirEnEnlaces } from '@/lib/enlacesEnTexto';
 import { pedirSalto } from '@/lib/saltoDeChat';
-import { enlaceDeDescarga, esHtml } from '@/lib/tiposDeArchivo';
+import { medioQueEs } from '@/lib/mediosDeChat';
 import {
   SIN_VISTAS,
   huellaDeCriterios,
@@ -90,12 +90,6 @@ type Fila =
   | { tipo: 'archivo'; clave: string; mensaje: MensajeDeVista; adjunto: MessageAttachment }
   | { tipo: 'audio'; clave: string; mensaje: MensajeDeVista; adjunto: MessageAttachment }
   | { tipo: 'mensaje'; clave: string; mensaje: MensajeDeVista };
-
-function pesoLegible(bytes?: number | null): string {
-  if (!bytes || bytes <= 0) return '';
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function fechaLegible(iso: string): string {
   const fecha = new Date(iso);
@@ -275,19 +269,18 @@ export function PestanasDeContenido({
     [router, t],
   );
 
-  const abrirArchivo = useCallback(
-    (adjunto: MessageAttachment) => {
-      if (!adjunto.url) return;
-      // Un HTML se DESCARGA, no se abre como página: ver `enlaceDeDescarga`.
-      const destino = esHtml(adjunto.mimeType, adjunto.fileName)
-        ? enlaceDeDescarga(adjunto.url, adjunto.fileName)
-        : adjunto.url;
-      Linking.openURL(destino).catch(() => {
-        notify(t('common.couldNotOpen'), t('common.tryAgainSoon'));
-      });
-    },
-    [t],
-  );
+  /**
+   * Qué hace tocar un archivo que en realidad es una foto o un video: verlo
+   * en el visor. Para los demás devuelve `undefined`, y tocarlo lo descarga
+   * dentro de la aplicación (ver `ArchivoDeChat`). Ya no se abre nada en el
+   * navegador.
+   */
+  const verSiEsMedio = (clave: string, mensaje: MensajeDeVista, adjunto: MessageAttachment) => {
+    const medio = adjunto.url ? medioQueEs(adjunto.mimeType, adjunto.fileName) : null;
+    return medio
+      ? () => setAmpliado({ clave, mensaje, adjunto: { ...adjunto, kind: medio } })
+      : undefined;
+  };
 
   const quien = (mensaje: MensajeDeVista) =>
     mensaje.mio ? t('chatViews.you') : mensaje.autor.nombre;
@@ -307,7 +300,6 @@ export function PestanasDeContenido({
   const pintarTesela = (tesela: UnaTesela, indice: number) => {
     const { adjunto } = tesela;
     const esVideo = adjunto.kind === 'video';
-    const duracion = esVideo ? duracionLegible(adjunto.durationS) : '';
     return (
       <Pressable
         key={tesela.clave}
@@ -319,32 +311,15 @@ export function PestanasDeContenido({
         accessibilityLabel={esVideo ? t('chat.viewVideo') : t('chat.viewPhoto')}
         style={[
           styles.tesela,
-          {
-            width: lado,
-            height: lado,
-            marginLeft: indice === 0 ? 0 : HUECO,
-            backgroundColor: esVideo ? '#111' : colors.surfaceAlt,
-          },
+          { width: lado, height: lado, marginLeft: indice === 0 ? 0 : HUECO },
         ]}
       >
-        {/* De un vídeo no hay fotograma que enseñar: se dice que lo es. */}
-        {!esVideo && adjunto.url ? (
-          <Image source={{ uri: adjunto.url }} style={StyleSheet.absoluteFill} />
-        ) : null}
-        {esVideo ? (
-          <>
-            <View style={styles.play}>
-              <Feather name="play" size={18} color="#FFF" />
-            </View>
-            {duracion ? (
-              <View style={styles.duracion}>
-                <Text color="#FFF" weight="600" style={styles.duracionTexto}>
-                  {duracion}
-                </Text>
-              </View>
-            ) : null}
-          </>
-        ) : null}
+        {/*
+          La misma pieza que la burbuja del chat: lo que ya se vio allí sale
+          aquí del disco sin volver a bajarlo, y un video enseña su portada
+          en vez de un cuadro negro.
+        */}
+        <MedioDeChat adjunto={adjunto} compacto style={StyleSheet.absoluteFill} />
       </Pressable>
     );
   };
@@ -404,31 +379,19 @@ export function PestanasDeContenido({
     }
 
     if (item.tipo === 'archivo') {
-      const peso = pesoLegible(item.adjunto.bytes);
       return (
-        <Pressable
-          onPress={() => abrirArchivo(item.adjunto)}
-          accessibilityRole="button"
-          accessibilityLabel={item.adjunto.fileName ?? t('chat.file')}
-          style={[styles.fila, { borderBottomColor: colors.border }]}
-        >
-          <View style={[styles.sitio, { backgroundColor: colors.surfaceAlt }]}>
-            <Feather name="file-text" size={22} color={colors.primary} />
-          </View>
-          <View style={styles.cuerpo}>
-            <View style={styles.titular}>
-              <Text weight="700" numberOfLines={1} style={styles.nombre}>
-                {item.adjunto.fileName ?? t('chat.file')}
-              </Text>
-              {botonDeIrAlChat(item.mensaje)}
-            </View>
-            <Text color={colors.textMuted} numberOfLines={1} style={styles.detalle}>
-              {[peso, quien(item.mensaje), fechaLegible(item.mensaje.fechaIso)]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
-          </View>
-        </Pressable>
+        <View style={[styles.fila, styles.filaDeArchivo, { borderBottomColor: colors.border }]}>
+          {/* El mismo archivo que en la burbuja, con su botón de descargar. */}
+          <ArchivoDeChat
+            adjunto={item.adjunto}
+            style={styles.archivoAncho}
+            pie={[quien(item.mensaje), fechaLegible(item.mensaje.fechaIso)]
+              .filter(Boolean)
+              .join(' · ')}
+            alVer={verSiEsMedio(item.clave, item.mensaje, item.adjunto)}
+          />
+          {botonDeIrAlChat(item.mensaje)}
+        </View>
       );
     }
 
@@ -493,36 +456,24 @@ export function PestanasDeContenido({
                 accessibilityLabel={
                   tesela.adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')
                 }
-                style={[
-                  styles.medioDeMensaje,
-                  { backgroundColor: tesela.adjunto.kind === 'video' ? '#111' : colors.surfaceAlt },
-                ]}
+                style={styles.medioDeMensaje}
               >
-                {tesela.adjunto.kind !== 'video' && tesela.adjunto.url ? (
-                  <Image source={{ uri: tesela.adjunto.url }} style={StyleSheet.absoluteFill} />
-                ) : null}
-                {tesela.adjunto.kind === 'video' ? (
-                  <View style={styles.play}>
-                    <Feather name="play" size={18} color="#FFF" />
-                  </View>
-                ) : null}
+                <MedioDeChat
+                  adjunto={tesela.adjunto}
+                  compacto
+                  style={StyleSheet.absoluteFill}
+                />
               </Pressable>
             ))}
           </View>
         ) : null}
         {archivos.map((tesela) => (
-          <Pressable
+          <ArchivoDeChat
             key={tesela.clave}
-            onPress={() => abrirArchivo(tesela.adjunto)}
-            accessibilityRole="button"
-            accessibilityLabel={tesela.adjunto.fileName ?? t('chat.file')}
+            adjunto={tesela.adjunto}
             style={styles.archivoDeMensaje}
-          >
-            <Feather name="file-text" size={18} color={colors.primary} />
-            <Text numberOfLines={1} weight="600" style={styles.nombre}>
-              {tesela.adjunto.fileName ?? t('chat.file')}
-            </Text>
-          </Pressable>
+            alVer={verSiEsMedio(tesela.clave, tesela.mensaje, tesela.adjunto)}
+          />
         ))}
       </View>
     );
@@ -715,25 +666,10 @@ const styles = StyleSheet.create({
   pie: { paddingVertical: spacing.md },
 
   filaDeTeselas: { flexDirection: 'row', marginBottom: HUECO },
-  tesela: { overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  play: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  duracion: {
-    position: 'absolute',
-    left: 6,
-    bottom: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  duracionTexto: { fontSize: 11 },
+  tesela: { overflow: 'hidden' },
+  // Un archivo en su fila: ocupa el ancho y deja sitio al «ver en el chat».
+  filaDeArchivo: { alignItems: 'center' },
+  archivoAncho: { flex: 1, width: undefined },
 
   fila: {
     flexDirection: 'row',
@@ -776,5 +712,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  archivoDeMensaje: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  archivoDeMensaje: { width: undefined, alignSelf: 'stretch' },
 });

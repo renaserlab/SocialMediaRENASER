@@ -101,7 +101,7 @@ async def invitar(
     _exigir_en_directo(sesion)
     if user_id == sesion.host_id:
         raise ConflictError(
-            "Quien emite ya está en pantalla.", code="live_guest_is_host"
+            "Quien transmite ya está en pantalla.", code="live_guest_is_host"
         )
 
     # SE BLOQUEA LA EMISIÓN mientras se cuenta. Dos invitaciones a la vez

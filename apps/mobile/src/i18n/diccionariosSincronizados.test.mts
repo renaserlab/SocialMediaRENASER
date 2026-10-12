@@ -75,6 +75,11 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
     // Reaccionar y responder: «Audio» se escribe igual en inglés.
     'chat.replyAudio',
+    // «Video» y «Videos»: en el castellano del Perú van sin tilde, y así
+    // se escriben también en inglés.
+    'chat.replyVideo',
+    'syllabus.video',
+    'chatViews.videos',
     // El contenido de un chat: «Media» es la misma palabra en inglés.
     'chatViews.media',
     // Servicios, Incremento 4: formato puro («{n} min», «{desde} → {hasta}»),
@@ -145,11 +150,10 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
-    // Reaccionar y responder: «Responder», «Foto» y «Vídeo» se escriben
-    // igual en portugués.
+    // Reaccionar y responder: «Responder» y «Foto» se escriben igual en
+    // portugués. («Vídeo» ya no: en el castellano del Perú va sin tilde.)
     'chat.reply',
     'chat.replyPhoto',
-    'chat.replyVideo',
     // El menú del chat y la ficha del grupo: palabras que coinciden en
     // portugués («Buscar», «Silenciar», «Silenciado», «Editar»,
     // «Administrador») y un formato puro («Buscar · {nombre}»).
@@ -165,8 +169,6 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'chatBackground.color.lavanda',
     'chatBackground.color.rosa',
     'chatBackground.color.oliva',
-    // Contenido del chat: «Vídeos» se escribe igual en portugués.
-    'chatViews.videos',
     // Servicios, Incremento 6: «Casos», «Caso», «Caso retirado», «Reserva
     // confirmada», «Cancelada», «Publicada», «Publicar», «Nota interna» y
     // «Marcar como realizada» se escriben EXACTAMENTE igual en portugués;
@@ -502,7 +504,6 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'event.editNamed',
     'chat.sending',
     'chat.viewPhoto',
-    'chat.viewVideo',
     'create.modeReel',
     'create.publishReel',
     'video.mute',
@@ -562,7 +563,6 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'catalog.publishCourse',
     'syllabus.optional',
     'syllabus.text',
-    'syllabus.video',
     'syllabus.editModuleTitle',
     'syllabus.moduleTitleExample',
     'syllabus.titleField',

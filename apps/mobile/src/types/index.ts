@@ -198,6 +198,11 @@ export type MessageAttachment = {
   durationS?: number | null;
   /** URL firmada, cuando ya se ha pedido. Caduca. */
   url?: string;
+  /**
+   * Solo en un video: la URL firmada de su portada, si quien lo mandó la
+   * subió. Sin ella, la burbuja saca el fotograma del propio video.
+   */
+  posterUrl?: string;
 };
 
 export type Message = {

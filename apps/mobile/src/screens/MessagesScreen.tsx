@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { BuscadorDeConversaciones } from '@/components/BuscadorDeConversaciones';
-import { ChipsDeEtiquetas } from '@/components/ChipsDeEtiquetas';
+import { ChipsDeEtiquetas, ExplicacionDeEtiquetas } from '@/components/ChipsDeEtiquetas';
 import { useEspacioInferior } from '@/components/espacioInferior';
 import { FilaDeConversacion } from '@/components/FilaDeConversacion';
 import { FiltrosDeBandeja } from '@/components/FiltrosDeBandeja';
@@ -522,10 +522,9 @@ export function MessagesScreen() {
         <View style={styles.controles}>
           {/*
             PRIMERO LAS ETIQUETAS Y «FILTROS» A LA DERECHA (pedido el 25/09/2026:
-            antes iba a la izquierda y el texto de ayuda de las etiquetas se
-            partía a su lado). Los chips del CRM, en su propia fila desplazable,
-            desaparecen enteros sin la 0045; entonces «Filtros» queda solo, a la
-            derecha.
+            antes iba a la izquierda). Los chips del CRM, en su propia fila
+            desplazable, desaparecen enteros sin la 0045; entonces «Filtros»
+            queda solo, a la derecha.
           */}
           <View style={styles.filaDeFiltros}>
             <View style={styles.chips}>
@@ -545,6 +544,18 @@ export function MessagesScreen() {
               />
             </View>
           </View>
+
+          {/*
+            LA EXPLICACIÓN, DEBAJO DEL RENGLÓN Y A TODO EL ANCHO (12/10/2026).
+            Dentro de la columna de las etiquetas se quedaba con el ancho que
+            le dejaba «Filtros»: tres líneas estrechas y un hueco a la derecha.
+            Aquí llega hasta el mismo margen que el buscador, y no más.
+          */}
+          <ExplicacionDeEtiquetas
+            etiquetas={etiquetas.etiquetas}
+            disponible={etiquetas.disponible}
+            alGestionar={abrirGestorDeLaLista}
+          />
         </View>
       </View>
     ),
@@ -694,9 +705,11 @@ const styles = StyleSheet.create({
   // sobresale; el resto de la cabecera respeta el mismo margen que las filas.
   cabecera: { marginHorizontal: -spacing.lg },
   buscador: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.sm },
-  controles: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.xs },
-  // Arriba y no al centro: debajo de los chips puede ir el texto de ayuda, y
-  // «Filtros» tiene que quedar a la altura de los chips, no a media altura.
+  // Sin `gap`: la explicación va pegada a la fila, como cuando vivía dentro de
+  // ella. El aire de arriba y de abajo ya lo ponen la fila y el propio texto.
+  controles: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xs },
+  // Arriba y no al centro: «Filtros» tiene que quedar a la altura de los
+  // chips aunque una de las dos columnas crezca.
   filaDeFiltros: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   // `flex: 1` y `minWidth: 0`: sin esto, una fila de etiquetas larga empuja el
   // botón de filtros fuera de la pantalla en vez de desplazarse por dentro.

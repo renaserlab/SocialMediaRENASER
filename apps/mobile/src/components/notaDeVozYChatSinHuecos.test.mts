@@ -572,25 +572,39 @@ describe('abrir un vídeo o un documento', () => {
     );
   });
 
-  it('un documento se puede abrir', () => {
+  it('un archivo se descarga dentro; si es una foto, se ve en el visor', () => {
+    // Desde el 12/10 un archivo ya no se abre fuera: lleva su botón de
+    // descargar (`ArchivoDeChat`). Lo que no cambia es que, mientras sube,
+    // no se ofrece nada: solo hay una ruta de este teléfono.
     const documento = tramo(CHAT, "if (adjunto.kind === 'document') {", 'const proporcion =');
-    assert.match(documento, /<Pressable[\s\S]{0,120}?onPress=\{\(\) => abrirFuera\(adjunto\)\}/);
+    assert.match(documento, /<ArchivoDeChat\s+key=\{adjunto\.id\}\s+adjunto=\{adjunto\}/);
     assert.match(
       documento,
-      /disabled=\{!sePuedeAbrir\}/,
+      /const medio = estaEnElServidor\(adjunto\)\s*\? medioQueEs\(adjunto\.mimeType, adjunto\.fileName\)\s*: null;/,
+    );
+    assert.match(
+      documento,
+      /alVer=\{medio \? \(\) => setFotoAmpliada\(\{ \.\.\.adjunto, kind: medio \}\) : undefined\}/,
+    );
+    const archivo = fuente('components/chat/ArchivoDeChat.tsx');
+    assert.match(archivo, /const disponible = !!adjunto\.url && adjunto\.url\.startsWith\('http'\);/);
+    assert.match(
+      archivo,
+      /disabled=\{!disponible\}/,
       'Mientras sube solo hay una ruta local: un botón que no hace nada no se ofrece.',
     );
   });
 
-  it('solo se abre fuera lo que ya tiene enlace del servidor', () => {
+  it('nada del chat se abre fuera de la aplicación', () => {
     assert.match(CHAT, /return !!adjunto\.url && adjunto\.url\.startsWith\('http'\);/);
-    const abrir = tramo(CHAT, 'const abrirFuera =', 'const pintarAdjunto =');
-    assert.match(abrir, /if \(!adjunto\.url \|\| !estaEnElServidor\(adjunto\)\) return;/);
+    // Lo visto en teléfono el 12/10: tocar un archivo abría una pestaña de
+    // Chrome con la dirección del almacén.
+    assert.doesNotMatch(CHAT, /Linking\.openURL|abrirFuera/);
+    const descarga = fuente('services/descargarArchivo.ts');
     assert.match(
-      abrir,
-      // `destino` es la dirección del adjunto, o la de descarga si es un HTML.
-      /Linking\.openURL\(destino\)\.catch\(\(\) => \{\s*notify\(/,
-      'Si el teléfono no sabe abrirlo hay que decirlo, no callar.',
+      descarga,
+      /\} catch \{\s*return \{ estado: 'fallo' \};\s*\} finally \{/,
+      'Si no se puede descargar hay que decirlo, no callar ni lanzar.',
     );
   });
 });

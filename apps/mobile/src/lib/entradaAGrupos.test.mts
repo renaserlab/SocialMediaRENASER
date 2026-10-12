@@ -91,13 +91,19 @@ test('un HTML se descarga: la dirección lleva `download` y no se duplica', () =
   assert.equal(descarga, `${firmada}&download=Mi%20p%C3%A1gina.html`);
   assert.equal(enlaceDeDescarga(descarga, 'otra.html'), descarga);
   assert.equal(enlaceDeDescarga('https://x.example/a.html', null), 'https://x.example/a.html?download=archivo');
-  // En el chat y en el contenido compartido, un HTML se abre SIEMPRE por ese camino.
+  /*
+    Desde el 12/10 ningún archivo del chat se abre: se descarga. En la web,
+    SIEMPRE por la dirección de descarga —un HTML también—, que es lo que
+    impide que una página mandada por el chat se ejecute con la dirección
+    del almacén de Z delante. Y ninguna de las dos pantallas abre por su
+    cuenta la dirección de un adjunto.
+  */
+  assert.match(
+    leer('../services/descargarArchivo.ts'),
+    /if \(Platform\.OS === 'web'\) \{\s*await Linking\.openURL\(enlaceDeDescarga\(url, pedido\.nombre\)\);/,
+  );
   for (const pantalla of ['../screens/ChatScreen.tsx', '../components/chat/PestanasDeContenido.tsx']) {
-    assert.match(
-      leer(pantalla),
-      /esHtml\(adjunto\.mimeType, adjunto\.fileName\)\s*\? enlaceDeDescarga\(adjunto\.url, adjunto\.fileName\)/,
-      pantalla,
-    );
+    assert.doesNotMatch(leer(pantalla), /Linking\.openURL\((destino|adjunto\.url)/, pantalla);
   }
 });
 
@@ -411,6 +417,46 @@ test('el perfil no pinta la sección si no hay grupos que enseñar', () => {
   const repositorio = leer('../repositories/GroupRepository.ts');
   const funcion = repositorio.slice(repositorio.indexOf('async tarjetasDe('));
   assert.match(funcion.slice(0, 400), /catch \{\s*return \[\];\s*\}/);
+});
+
+test('en el perfil los grupos son una fila de botones pequeños, no tarjetas', () => {
+  const seccion = leer('../components/chat/GruposDelPerfil.tsx');
+  // Una sola línea haya los grupos que haya: la fila se desplaza de lado,
+  // y arrastrarla no cambia de pestaña.
+  assert.match(seccion, /<SinCambioDeSeccion>\s*<ScrollView\s+horizontal/);
+  // Icono y nombre; un nombre largo se corta, no empuja a los demás.
+  assert.match(seccion, /<IconoDeGrupos size=\{16\} color=\{colors\.text\} \/>/);
+  assert.match(seccion, /numberOfLines=\{1\}/);
+  assert.match(seccion, /maxWidth: ANCHO_MAXIMO/);
+  // Sin rótulo ni ayuda encima: era lo que ocupaba media pantalla.
+  assert.doesNotMatch(seccion, /profileTitle/);
+  const es = leer('../i18n/es.ts');
+  assert.doesNotMatch(es, /'groupJoin\.profileTitle(Own)?':/);
+
+  // Quien ya está dentro abre el grupo; quien no, ve la tarjeta en una hoja
+  // y desde ahí pide entrar. La hoja nunca enseña un grupo que se puede abrir.
+  assert.match(
+    seccion,
+    /if \(accionDeTarjeta\(tarjeta\) === 'abrir'\) \{\s*router\.push\(\{ pathname: '\/chat\/\[id\]'/,
+  );
+  assert.match(seccion, /accionDeTarjeta\(elegida\) !== 'abrir' \? elegida : null/);
+  assert.match(seccion, /<TarjetaDeGrupoVista tarjeta=\{enLaHoja\} alCambiar=\{releer\} \/>/);
+  assert.match(seccion, /t\('groupJoin\.explain'\)/);
+
+  // Va justo debajo de la descripción, antes del audio y de lo que aporta.
+  const perfil = leer('../screens/ProfileScreen.tsx');
+  const bio = perfil.indexOf('{profileData.bio}\n');
+  const grupos = perfil.indexOf('<GruposDelPerfil ');
+  assert.ok(bio > 0 && grupos > bio);
+  assert.ok(grupos < perfil.indexOf('<AudioDePresentacion'));
+  assert.ok(grupos < perfil.indexOf('<OfertaDelPerfil '));
+
+  // El icono va dibujado con el trazo de Feather. No se anuncia aparte: lo
+  // hace, entero, el botón que lo lleva.
+  const icono = leer('../components/chat/IconoDeGrupos.tsx');
+  assert.match(icono, /viewBox="0 0 24 24"/);
+  assert.equal([...icono.matchAll(/strokeWidth=\{2\}/g)].length, 2);
+  assert.match(seccion, /accessibilityRole="button"\s+accessibilityLabel=\{t\(/);
 });
 
 test('cada rechazo nuevo del servidor tiene su texto', () => {

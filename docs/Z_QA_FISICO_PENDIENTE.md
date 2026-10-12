@@ -3345,13 +3345,15 @@ la primera fila de «Archivos» es la que lo confirma o lo desmiente.
 
 ### «Únete a mi grupo» en el perfil
 
+Cómo se ven los grupos en el perfil cambió el 12/10/2026: ya no son
+tarjetas, son botones pequeños. Lo que hay que mirar está en «Los grupos
+en el perfil, como botones», al final de este documento. De la lista de
+antes solo siguen valiendo estas tres filas.
+
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
-| Quien administra puede encender «Mostrar en mi perfil» en la ficha del grupo | | | |
-| Al visitar su perfil aparece la sección con ese grupo, su foto, cuántos son y «Pedir unirme» | | | |
+| Quien administra puede encender «Mostrar en mi perfil» en «Editar grupo» | | | |
 | Un grupo que no se marcó no aparece en el perfil | | | |
-| Quien ya es miembro ve «Abrir el grupo» en vez de «Pedir unirme» | | | |
-| En el perfil propio se ven los grupos marcados, sin botón de pedir | | | |
 | Apagarlo lo quita del perfil sin tocar el grupo | | | |
 
 ## Ficha del grupo como en Telegram, menú del chat y fondo (11/10/2026)
@@ -3499,3 +3501,193 @@ silenciar.
 | La foto sigue ahí al día siguiente, aunque se borre de la galería | | | |
 | «Por defecto» devuelve el fondo de siempre | | | |
 | En otro teléfono con la misma cuenta el fondo NO cambia: es de cada teléfono | | | |
+
+---
+
+## Correcciones del 12/10/2026: grupos del perfil, ayuda de Mensajes y castellano
+
+Hace falta una **compilación nueva** para todo lo de esta sección. Lo del
+castellano que viene del servidor —los avisos que salen en el teléfono y
+algunos mensajes de error— necesita además el servidor desplegado. No hay
+ninguna migración.
+
+Visto en la copia web local con datos inventados: los botones de grupo con uno
+y con doce grupos, el corte de un nombre largo, abrir el grupo propio, pedir
+entrar y retirar la solicitud en el perfil de otra persona, la explicación de
+las etiquetas a todo el ancho, «Castellano» en la pantalla de idioma y
+«Configuración» como título. Sin ver: nada en teléfono, los avisos de permiso
+del sistema y los avisos que llegan con la aplicación cerrada.
+
+### Los grupos en el perfil, como botones
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En el perfil propio, justo debajo de la descripción, cada grupo marcado es un botón pequeño: un icono de dos globos y el nombre | | | |
+| Ya no aparecen el título «Tus grupos en tu perfil», la frase de ayuda ni la tarjeta con «Abrir el grupo» | | | |
+| Con un solo grupo el botón queda centrado bajo la descripción | | | |
+| Con varios grupos van todos en UNA fila; si no caben, la fila se desliza de lado y el perfil no crece hacia abajo | | | |
+| Deslizar esa fila de lado no cambia de pestaña (no salta a Mensajes) | | | |
+| Un nombre muy largo se corta con puntos suspensivos; el icono se sigue viendo entero | | | |
+| En el perfil propio, tocar un botón abre el chat de ese grupo | | | |
+| En el perfil de OTRA persona, tocar un botón sube una hoja con la foto del grupo, cuántos son, quién administra y «Pedir unirme» | | | |
+| «Pedir unirme» cambia la hoja a «Solicitud enviada» y ofrece «Retirar mi solicitud» | | | |
+| Quien ya es miembro de ese grupo, al tocar el botón en el perfil de quien administra, entra directo al chat, sin hoja | | | |
+| Sin descripción en el perfil, los botones salen igual, bajo las cifras | | | |
+| En oscuro el icono y el borde del botón se ven bien | | | |
+
+### La explicación de las etiquetas, en Mensajes
+
+Solo se ve con una cuenta que todavía **no ha creado ninguna etiqueta**.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| El texto «Ordena tu bandeja como quieras…» va de un margen al otro, igual de ancho que el buscador | | | |
+| Ya no queda un hueco vacío a su derecha, debajo de «Filtros» | | | |
+| No se sale de la pantalla ni se corta por la derecha, tampoco con la letra del teléfono agrandada | | | |
+| «Todos», «Crear etiqueta» y «Filtros» siguen en el mismo renglón de antes | | | |
+| Al crear la primera etiqueta el texto desaparece, como antes | | | |
+
+### Castellano del Perú
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En la pantalla de idioma la primera opción dice «Castellano» | | | |
+| En la configuración, la fila «Idioma de la App» dice «Castellano» | | | |
+| El título de esa pantalla es «Configuración», no «Ajustes» | | | |
+| Al bloquear a alguien, el aviso dice «Dejarán de seguirse», no «Dejaréis de seguiros» | | | |
+| En Crear y en el chat se lee «video», sin tilde | | | |
+| Los botones dicen «Agregar» («Agregar personas», «Agregar a la galería»), no «Añadir» | | | |
+| Al mantener el dedo sobre un mensaje, la ayuda dice «Mantén presionado» | | | |
+| En las transmisiones se lee «transmisión», «en vivo», «Empezar a transmitir» y «Terminar transmisión»; en ningún sitio «directo» ni «emitir» | | | |
+| Un error cualquiera dice «Ocurrió un error», no «Ha ocurrido un error» | | | |
+| En un evento con cupo, el botón dice «Reservar mi cupo» | | | |
+| El permiso de cámara y el de micrófono que pregunta el teléfono (compilación nueva, primera vez) dicen «video» y «transmitir en vivo» | | | |
+| Con el servidor desplegado: al agregar a alguien a un grupo, el aviso que le llega dice «te agregó al grupo» | | | |
+| Con el servidor desplegado: la invitación a salir en una transmisión dice «Te invitan a una transmisión en vivo» | | | |
+| Con el servidor desplegado: en la bandeja, un mensaje que solo trae un video se resume como «Video» | | | |
+| Con la aplicación en inglés o en portugués no ha cambiado ningún texto | | | |
+
+---
+
+## Fotos, videos y archivos del chat (12/10/2026)
+
+Hace falta una **compilación nueva**. No hay migración ni cambio en el
+servidor. Para ver lo que recibe la otra persona hacen falta **dos teléfonos
+con esta misma compilación**.
+
+Visto en la copia web local con datos inventados: la foto sin marco con la hora
+encima, la foto con texto con su marco fino, el nombre de quien escribe sobre
+la foto en un grupo, el video con portada y sin ella, la fila del archivo con
+su botón y abrir en el visor una foto mandada como archivo.
+
+**Sin ver, y es lo principal de esta sección:** todo lo que solo ocurre en un
+teléfono. Comprimir antes de enviar, sacar la portada de un video, guardar en
+disco lo ya visto, descargar a la galería y descargar a una carpeta no se
+pueden ejecutar fuera de un teléfono. Está escrito leyendo el código de las
+bibliotecas instaladas, no probándolo.
+
+### Enviar una foto
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| La foto que se acaba de mandar se ve al instante y NO vuelve a cargarse cuando aparece la marca de enviado | | | |
+| En el otro teléfono aparece en pocos segundos, también con datos móviles | | | |
+| La foto se ve nítida al ampliarla (se manda a 1280 puntos de lado) | | | |
+| Una foto mandada por «Archivo» llega con su peso original (el que dice la fila) | | | |
+| Un GIF mandado desde la galería se sigue moviendo | | | |
+| Mandar diez fotos de una vez: la barra avanza de corrido y llegan todas | | | |
+
+### Volver a abrir el chat
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Cerrar la aplicación del todo y volver a abrir el chat: las fotos ya vistas salen de inmediato | | | |
+| En modo avión, las fotos ya vistas se siguen viendo | | | |
+| Al ampliar una foto ya vista en la burbuja, no se queda cargando | | | |
+| En «Media», las fotos que ya se vieron en el chat salen sin esperar | | | |
+| Al desplazar rápido un chat con muchas fotos, ninguna celda enseña un instante la foto de otro mensaje | | | |
+
+### Videos
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Al elegir un video, en la franja de «lo que se va a enviar» se ve un fotograma, no un cuadro negro | | | |
+| Mientras se envía, la barra avanza desde el principio (la primera mitad es comprimir) | | | |
+| La burbuja del video enviado enseña su portada, el triángulo y la duración | | | |
+| En el otro teléfono la portada sale enseguida, sin tener que tocar el video | | | |
+| Un video de un minuto grabado con la cámara se envía (antes superaba los 100 MB y se rechazaba) | | | |
+| Un video mandado ANTES de esta versión enseña su portada a los pocos segundos; al volver a pasar por él, al instante | | | |
+| Tocar el video lo reproduce dentro de la aplicación, con sonido | | | |
+| En «Media», los videos enseñan su portada y la duración | | | |
+
+### Fotos sin marco
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Una foto o un video solos se ven sin burbuja: ni marco negro en los propios ni gris en los ajenos | | | |
+| La hora (y la marca de enviado) va sobre la foto, abajo a la derecha, y se lee con fotos claras y oscuras | | | |
+| En un grupo, el nombre de quien la manda va sobre la foto, arriba a la izquierda | | | |
+| Una foto con texto conserva la burbuja, con un marco fino alrededor de la foto y el texto debajo | | | |
+| Mantener presionada una foto abre el menú (reaccionar, responder, borrar) | | | |
+| La reacción a una foto sin marco se ve debajo de ella | | | |
+| Con el fondo del chat puesto (color o foto), las fotos sin marco se ven bien | | | |
+| Una foto que no se pudo enviar dice «No se envió» sobre la foto y ofrece reintentar | | | |
+| En un teléfono angosto, ni la foto ni la fila de un archivo se salen de la pantalla | | | |
+
+### Archivos
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Un archivo se ve con un recuadro de color y su tipo (PDF en rojo, DOCX en azul, XLSX en verde), el nombre y el peso | | | |
+| A su derecha hay un botón redondo de descargar | | | |
+| Tocar el archivo o el botón NO abre Chrome ni ninguna otra aplicación | | | |
+| La primera vez con un PDF sale el aviso «Elige dónde guardar» y después el selector de carpetas del teléfono | | | |
+| Al elegir «Documentos» y tocar «Usar esta carpeta» → «Permitir», el archivo se descarga y avisa de dónde quedó | | | |
+| Mientras baja, bajo el nombre se lee «Descargando… N %» | | | |
+| El archivo está en esa carpeta (se ve con la aplicación «Archivos» del teléfono) y se abre bien | | | |
+| La segunda descarga de otro archivo ya no pregunta: va directa a la misma carpeta | | | |
+| Cerrar el selector sin elegir no descarga nada ni da error | | | |
+| Tras descargar, el botón enseña una marca y bajo el nombre dice «Descargado» | | | |
+| Una FOTO mandada como archivo: tocarla la abre en el visor de la aplicación | | | |
+| Esa misma foto, con el botón de descargar, queda en la galería sin preguntar por carpeta | | | |
+| Un archivo de más de 40 MB avisa de que todavía no se puede descargar desde la aplicación | | | |
+| En la pestaña «Archivos» de un grupo, cada archivo lleva el mismo botón y tampoco abre el navegador | | | |
+| En iPhone: tocar descargar un PDF abre la hoja del sistema con «Guardar en Archivos» | | | |
+
+### Cerrar sesión
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Tras cerrar sesión y entrar con otra cuenta, el muro carga sus imágenes con normalidad | | | |
+
+---
+
+## Responder deslizando (12/10/2026)
+
+Hace falta una **compilación nueva**. No hay migración ni cambio en el
+servidor. El gesto solo existe donde el menú ya ofrece «Responder».
+
+Visto en la copia web local, simulando el dedo: la burbuja se mueve hacia los
+dos lados, aparece la flecha, soltar pasado el punto deja el mensaje citado y
+soltar antes no hace nada. **Sin ver:** nada en teléfono. Lo que más importa
+mirar es que el gesto no estorbe a subir y bajar por el chat.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Deslizar un mensaje AJENO hacia la derecha: la burbuja sigue al dedo y a su izquierda aparece una flecha de responder | | | |
+| Al soltar, el mensaje queda citado sobre el cuadro de escribir, igual que con «Responder» del menú | | | |
+| Lo mismo deslizando hacia la IZQUIERDA: la flecha sale a la derecha | | | |
+| Con un mensaje PROPIO funciona igual, hacia los dos lados | | | |
+| Al llegar al punto en que soltar ya responde, el teléfono da un toque corto, uno solo | | | |
+| Soltar antes de ese punto: la burbuja vuelve a su sitio y no se cita nada | | | |
+| Al soltar, la burbuja vuelve suave a su sitio, sin rebote y sin quedarse corrida | | | |
+| Subir y bajar por el chat con el dedo encima de los mensajes NO mueve ninguna burbuja de lado | | | |
+| Desplazar la lista se siente igual de fluido que antes | | | |
+| Tocar una foto la sigue abriendo; mantener presionado sigue abriendo el menú | | | |
+| Una foto sin marco, un archivo y una nota de voz también se responden deslizando | | | |
+| Un mensaje que se está enviando, uno que no se envió y uno eliminado no se deslizan | | | |
+| Escribir y enviar: el mensaje sale con la cita encima, y tocar la cita lleva al original | | | |
+| La X de la cita, sobre el cuadro de escribir, la quita | | | |
+| En un chat de dos personas funciona igual que en un grupo | | | |
+| En iPhone: deslizar desde el borde izquierdo de la pantalla sigue volviendo atrás | | | |
+| Con «reducir movimiento» activado en el teléfono, responde igual y la burbuja vuelve de golpe | | | |

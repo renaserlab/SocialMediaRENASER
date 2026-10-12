@@ -77,7 +77,7 @@ MAX_TITULO = 60
 #: Cuantos grupos puede crear una persona en una hora.
 GRUPOS_POR_HORA = 10
 
-_NO_SE_PUEDE_ANADIR = "No se puede añadir a alguna de esas personas."
+_NO_SE_PUEDE_ANADIR = "No se puede agregar a alguna de esas personas."
 
 
 # --------------------------------------------------------------------------- #
@@ -275,7 +275,7 @@ async def crear_grupo(
     otros = [persona for persona in payload.member_ids if persona != uid]
     if not otros:
         raise ValidationAppError(
-            "Añade al menos a una persona.", code="group_needs_members"
+            "Agrega al menos a una persona.", code="group_needs_members"
         )
     if len(otros) + 1 > MAX_MIEMBROS:
         raise ValidationAppError(
@@ -294,7 +294,7 @@ async def crear_grupo(
     )
     if (recientes or 0) >= GRUPOS_POR_HORA:
         raise ConflictError(
-            "Has creado muchos grupos seguidos. Inténtalo más tarde.",
+            "Creaste muchos grupos seguidos. Inténtalo más tarde.",
             code="group_rate_limited",
         )
 

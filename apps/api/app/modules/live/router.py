@@ -478,7 +478,7 @@ async def _exigir_hueco_para_emitir(db: AsyncSession) -> None:
         await _caducar_si_toca(db, otra)
     if await _emisiones_vivas(db) >= ajustes.live_max_concurrent:
         raise ConflictError(
-            "Hay demasiadas transmisiones en directo ahora mismo. "
+            "Hay demasiadas transmisiones en vivo ahora mismo. "
             "Inténtalo en unos minutos.",
             code="live_too_many_concurrent",
         )
@@ -659,7 +659,7 @@ async def terminar(
         # ocurrir»— se podia marcar como terminada desde una pestaña vieja y
         # reaparecia en el listado publico como un directo que nunca existio.
         raise ConflictError(
-            "Esta transmisión no está en directo.", code="live_not_live"
+            "Esta transmisión no está en vivo.", code="live_not_live"
         )
 
     proveedor = providers.obtener_proveedor(sesion.provider)
@@ -728,7 +728,7 @@ async def informar_espectadores(
     await _exigir_esquema(db)
     sesion = await _sesion_visible(db, session_id, current_user.id)
     if sesion.host_id != current_user.id:
-        raise ForbiddenError("Solo quien emite informa de su audiencia.")
+        raise ForbiddenError("Solo quien transmite informa de su audiencia.")
     if count > sesion.viewer_peak:
         sesion.viewer_peak = count
         await db.commit()
@@ -835,7 +835,7 @@ async def escribir(
 
     if sesion.status != "live":
         raise ConflictError(
-            "El chat solo está abierto mientras la transmisión está en directo.",
+            "El chat solo está abierto mientras la transmisión está en vivo.",
             code="live_chat_closed",
         )
 
@@ -943,7 +943,7 @@ async def sumar_reacciones(
     sesion = await _sesion_visible(db, session_id, current_user.id)
     if sesion.status != "live":
         raise ConflictError(
-            "Solo se puede reaccionar mientras la transmisión está en directo.",
+            "Solo se puede reaccionar mientras la transmisión está en vivo.",
             code="live_reactions_closed",
         )
     if not limites.reacciones.permitido(f"{sesion.id}|{current_user.id}"):
@@ -1066,12 +1066,12 @@ async def _para_destacar(
     await _exigir_destacado(db)
     sesion = await _sesion_visible(db, session_id, uid)
     if not await _puede_gestionar(db, uid, sesion):
-        raise ForbiddenError("Solo quien emite puede destacar algo en su transmisión.")
+        raise ForbiddenError("Solo quien transmite puede destacar algo en su transmisión.")
     # Quitar no se limita: retirar algo de la vista tiene que poder hacerse
     # siempre, tambien justo despues de haber cambiado muchas cosas.
     if con_limite and not limites.destacados.permitido(sesion.id):
         raise ConflictError(
-            "Has cambiado lo destacado demasiadas veces seguidas. Espera un momento.",
+            "Cambiaste lo destacado demasiadas veces seguidas. Espera un momento.",
             code="live_spotlight_rate_limited",
         )
     return sesion
@@ -1177,7 +1177,7 @@ async def ver_grabacion(
     await _exigir_esquema(db)
     sesion = await _sesion_visible(db, session_id, current_user.id)
     if not await _puede_gestionar(db, current_user.id, sesion):
-        raise ForbiddenError("Solo quien emitió puede descargar la grabación.")
+        raise ForbiddenError("Solo quien transmitió puede descargar la grabación.")
     if not await esquema.hay_grabaciones_de_directo(db):
         return LiveRecordingRead(available=False)
 
@@ -1386,7 +1386,7 @@ async def invitar_al_escenario(
     await _exigir_escenario(db)
     sesion = await _sesion_visible(db, session_id, current_user.id)
     if not await _puede_gestionar(db, current_user.id, sesion):
-        raise ForbiddenError("Solo quien emite puede invitar.")
+        raise ForbiddenError("Solo quien transmite puede invitar.")
 
     maximo = max(0, settings.live_max_guests)
     if maximo <= 0:
@@ -1459,7 +1459,7 @@ async def retirar_del_escenario(
     await _exigir_escenario(db)
     sesion = await _sesion_visible(db, session_id, current_user.id)
     if not await _puede_gestionar(db, current_user.id, sesion):
-        raise ForbiddenError("Solo quien emite puede quitar a un invitado.")
+        raise ForbiddenError("Solo quien transmite puede quitar a un invitado.")
     ensure_uuid(user_id, "Persona no encontrada.")
 
     estaba_arriba = await escenario.quitar(db, sesion=sesion, user_id=user_id)
@@ -1586,7 +1586,7 @@ async def credencial(
 
     if not providers.hay_proveedor_real() or not sesion.provider_room_id:
         raise ServiceUnavailableError(
-            "Todavía no hay proveedor de vídeo configurado.",
+            "Todavía no hay proveedor de video configurado.",
             code="live_provider_not_configured",
         )
 
@@ -1634,7 +1634,7 @@ async def credencial(
         )
     except NotImplementedError:
         raise ServiceUnavailableError(
-            "Todavía no hay proveedor de vídeo configurado.",
+            "Todavía no hay proveedor de video configurado.",
             code="live_provider_not_configured",
         ) from None
     except providers.ErrorDeProveedor as error:

@@ -205,15 +205,15 @@ describe('compartir la sala', () => {
     assert.equal(enlaceDeDirecto('abc-123'), 'https://z.example/live/abc-123');
     const { message, url } = compartirDirecto({ emisionId: 'abc-123', anfitrion: 'Klein' });
     assert.equal(url, 'https://z.example/live/abc-123');
-    assert.equal(message, 'Mira el directo de Klein en Z\nhttps://z.example/live/abc-123');
+    assert.equal(message, 'Mira la transmisión en vivo de Klein en Z\nhttps://z.example/live/abc-123');
   });
 
   it('sin nombre la frase sigue leyéndose bien, y sin web no se inventa un dominio', () => {
     process.env.EXPO_PUBLIC_WEB_URL = 'https://z.example';
-    assert.equal(compartirDirecto({ emisionId: 'a' }).message, 'Mira este directo en Z\nhttps://z.example/live/a');
+    assert.equal(compartirDirecto({ emisionId: 'a' }).message, 'Mira esta transmisión en vivo en Z\nhttps://z.example/live/a');
     delete process.env.EXPO_PUBLIC_WEB_URL;
     assert.deepEqual(compartirDirecto({ emisionId: 'a', anfitrion: 'Klein' }), {
-      message: 'Mira el directo de Klein en Z',
+      message: 'Mira la transmisión en vivo de Klein en Z',
       url: null,
     });
   });

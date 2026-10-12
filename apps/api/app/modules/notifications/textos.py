@@ -187,7 +187,7 @@ TEXTOS: dict[str, dict[str, tuple[str, str]]] = {
     # SE AVISA AUNQUE LO HAYA DICHO QUIEN VENDE, y es justo por eso: es la
     # única forma de que quien compró pueda desmentirlo si no es verdad.
     "product_shipment_delivered": {
-        "es": ("Tu pedido figura entregado", "Ábrelo si no lo has recibido."),
+        "es": ("Tu pedido figura entregado", "Ábrelo si no lo recibiste."),
         "en": ("Your order is marked delivered", "Open it if it has not arrived."),
         "pt": ("Seu pedido consta como entregue", "Abra-o se não o recebeu."),
     },

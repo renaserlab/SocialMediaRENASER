@@ -597,7 +597,7 @@ async def crear_etiqueta(
     ).scalar_one()
     if cuantas >= MAX_ETIQUETAS:
         raise ValidationAppError(
-            f"Has llegado al máximo de {MAX_ETIQUETAS} etiquetas. "
+            f"Llegaste al máximo de {MAX_ETIQUETAS} etiquetas. "
             "Borra alguna que ya no uses.",
             code="conversation_labels_max",
         )

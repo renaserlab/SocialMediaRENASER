@@ -142,6 +142,13 @@ export function VisorDeAdjunto({ adjunto, autor, fecha, acciones, pie, onClose }
   return (
     <ImageViewer
       uri={adjunto?.kind === 'image' ? adjunto.url ?? null : null}
+      // La misma clave de disco que usa la burbuja: la ruta del archivo. Lo
+      // que ya se vio en el chat sale al instante, sin volver a bajarlo.
+      claveDeCache={
+        adjunto?.kind === 'image' && adjunto.storagePath && adjunto.url?.startsWith('http')
+          ? adjunto.storagePath
+          : undefined
+      }
       caption={adjunto?.fileName ?? undefined}
       onClose={onClose}
       cabecera={barra}

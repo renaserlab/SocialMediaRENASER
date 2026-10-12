@@ -295,11 +295,11 @@ def traducir_error(error: ErrorDe100ms) -> tuple[str, str]:
     hacer nada con eso, y quien esté probando la seguridad sí.
     """
     if error.codigo in ("network_timeout", "unreadable_response"):
-        return "live_provider_unavailable", "El vídeo no está disponible ahora mismo."
+        return "live_provider_unavailable", "El video no está disponible ahora mismo."
     if error.estado == 404:
         return "live_room_missing", "Esta transmisión ya no tiene sala."
     if error.estado in (401, 403):
-        return "live_provider_not_configured", "El vídeo no está configurado."
+        return "live_provider_not_configured", "El video no está configurado."
     if error.estado == 429:
         return "live_provider_busy", "Hay demasiadas peticiones. Inténtalo en un momento."
-    return "live_provider_error", "No se pudo preparar el vídeo."
+    return "live_provider_error", "No se pudo preparar el video."

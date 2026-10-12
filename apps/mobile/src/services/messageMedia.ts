@@ -24,11 +24,33 @@
  * token de la persona, igual que hacen las publicaciones; a la API solo viaja la
  * ruta. Es lo que permite mandar un vídeo grande por trozos reanudables sin que
  * el servidor tenga que sostener la conexión mientras tanto.
+ *
+ * LAS FOTOS Y LOS VIDEOS SE ACHICAN ANTES DE SUBIR (12/10/2026). Hasta ese día
+ * el chat mandaba el original de la cámara —fotos de 3 a 8 MB, videos de 100 MB
+ * por minuto— aunque las publicaciones llevaban meses comprimiéndose. Era la
+ * raíz de que una foto del chat tardara en aparecer: cada persona del grupo
+ * bajaba varios megas para verla en una burbuja. Un archivo mandado como
+ * «Archivo» sigue llegando tal cual. Ver `lib/mediosDeChat.ts`.
  */
+import {
+  avanceDelEnvio,
+  conExtension,
+  esRutaDePortada,
+  nombreLocalDePortada,
+  rutaDePortada,
+  seComprime,
+} from '@/lib/mediosDeChat';
 import { tipoDeContenidoDe } from '@/lib/tiposDeArchivo';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 
+import { olvidarCopiasDeChat, recordarCopia, recordarPortada } from '@/services/copiasDeChat';
+import {
+  compressImage,
+  compressVideo,
+  compressionAvailable,
+  createVideoPoster,
+} from '@/services/mediaCompressor';
 import { uploadResumable } from '@/services/resumableUpload';
 import {
   describeStorageError,
@@ -94,10 +116,10 @@ export type AdjuntoSubido = {
 };
 
 const AVISO_FOTOS =
-  'Z no tiene permiso para acceder a tus fotos. Actívalo en Ajustes del ' +
+  'Z no tiene permiso para acceder a tus fotos. Actívalo en la configuración del ' +
   'teléfono → Z → Fotos.';
 const AVISO_CAMARA =
-  'Z no tiene permiso para usar la cámara. Actívalo en Ajustes del ' +
+  'Z no tiene permiso para usar la cámara. Actívalo en la configuración del ' +
   'teléfono → Z → Cámara.';
 
 // ---------------------------------------------------------------------------
@@ -217,11 +239,41 @@ function tipoDeContenido(adjunto: AdjuntoElegido, ext: string): string {
 }
 
 /**
+ * Deja la portada de un video al lado del video, en el almacén.
+ *
+ * Es lo que ven los demás en la burbuja antes de reproducirlo. Va ANTES de
+ * mandar el mensaje: cuando alguien lo recibe, la portada ya está.
+ *
+ * NUNCA LANZA. Sin portada el video se manda igual; quien lo reciba la sacará
+ * del propio video (`generarPortada`).
+ */
+async function subirPortada(rutaDelVideo: string, uriDelVideo: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    const portada = await createVideoPoster(uriDelVideo, nombreLocalDePortada(rutaDelVideo));
+    if (!portada?.uri) return;
+    // Quien manda ya la tiene: su burbuja no espera a nadie.
+    recordarPortada(rutaDelVideo, portada.uri);
+    const archivo = await readLocalFile(portada.uri);
+    if (archivo.size === 0) return;
+    await supabase.storage
+      .from(BUCKET)
+      .upload(rutaDePortada(rutaDelVideo), await archivo.directBody(), {
+        contentType: 'image/jpeg',
+        upsert: false,
+      });
+  } catch {
+    // Sin portada no se pierde el envío.
+  }
+}
+
+/**
  * Sube un archivo al bucket privado y devuelve lo que el backend necesita.
  *
- * `onProgress` recibe el avance real de la subida, no una animación: mandar un
+ * `onProgress` recibe el avance real del envío, no una animación: mandar un
  * vídeo por datos móviles tarda, y una barra que no se mueve es indistinguible
- * de una aplicación colgada.
+ * de una aplicación colgada. El `ratio` es el de TODO el envío de ese archivo,
+ * comprimir incluido: ver `avanceDelEnvio`.
  */
 export async function subirAdjunto(
   conversationId: string,
@@ -235,17 +287,49 @@ export async function subirAdjunto(
   const uid = sesion?.user?.id;
   if (!sesion || !uid) throw new Error('Inicia sesión para enviar archivos.');
 
-  const ext = extensionDe(adjunto);
+  /*
+    1. ACHICAR EN EL TELÉFONO, si es una foto o un video (no hace nada en la
+    web ni en Expo Go). Si falla, se manda el original: comprimir es una
+    mejora, no una condición para poder enviar.
+  */
+  const esVideo = adjunto.kind === 'video';
+  const comprime =
+    compressionAvailable && seComprime(adjunto.kind, adjunto.mimeType, adjunto.name);
+  const avisar = (fase: 'comprimiendo' | 'subiendo', ratio: number) =>
+    onProgress?.({
+      phase: fase === 'comprimiendo' ? 'compressing' : 'uploading',
+      ratio: avanceDelEnvio(fase, ratio, comprime && esVideo),
+    });
+
+  let uri = adjunto.uri;
+  if (comprime) {
+    try {
+      avisar('comprimiendo', 0);
+      uri = esVideo
+        ? await compressVideo(adjunto.uri, (ratio) => avisar('comprimiendo', ratio))
+        : await compressImage(adjunto.uri);
+    } catch {
+      uri = adjunto.uri;
+    }
+  }
+  const comprimido = uri !== adjunto.uri;
+  // Tras comprimir el archivo es otro (un JPG, un MP4): ni el nombre ni el
+  // tipo que dio el teléfono describen ya lo que se sube.
+  const final: AdjuntoElegido = comprimido
+    ? { ...adjunto, uri, name: null, mimeType: null }
+    : adjunto;
+
+  const ext = extensionDe(final);
   // La ruta ES el permiso: conversación primero, persona después. Cambiar este
   // orden rompería la política del bucket sin que ningún tipo lo avisara.
   const ruta = `${conversationId}/${uid}/${randomName(ext)}`;
-  const contentType = tipoDeContenido(adjunto, ext);
+  const contentType = tipoDeContenido(final, ext);
 
   // Los bytes reales. En React Native `fetch(uri).blob()` devuelve un Blob que
   // informa bien su tamaño pero viaja VACIO en el POST: las fotos se subían con
   // 0 bytes. `readLocalFile` es lo que resolvió eso, y por eso se reutiliza en
   // vez de volver a escribirlo aquí.
-  const local = await readLocalFile(adjunto.uri);
+  const local = await readLocalFile(uri);
   if (local.size === 0) throw new Error('El archivo seleccionado está vacío.');
   if (local.size > MAX_ADJUNTO_BYTES) {
     throw new Error(
@@ -254,7 +338,11 @@ export async function subirAdjunto(
     );
   }
 
-  onProgress?.({ phase: 'uploading', ratio: 0 });
+  // 2. LA PORTADA, si es un video. Antes que el video: es pequeña y, si el
+  // envío se corta a medias, no deja nada a la vista de nadie.
+  if (esVideo) await subirPortada(ruta, uri);
+
+  avisar('subiendo', 0);
 
   if (local.size > RESUMABLE_THRESHOLD && supabaseUrl) {
     // Archivo grande: por trozos, para sobrevivir a un corte de red.
@@ -265,7 +353,7 @@ export async function subirAdjunto(
       path: ruta,
       file: await local.resumableBody(),
       contentType,
-      onProgress: (ratio) => onProgress?.({ phase: 'uploading', ratio }),
+      onProgress: (ratio) => avisar('subiendo', ratio),
     });
     try {
       await done;
@@ -277,15 +365,21 @@ export async function subirAdjunto(
       .from(BUCKET)
       .upload(ruta, await local.directBody(), { contentType, upsert: false });
     if (error) throw new Error(describeStorageError(error));
-    onProgress?.({ phase: 'uploading', ratio: 1 });
+    avisar('subiendo', 1);
   }
+
+  // 3. Lo que se acaba de subir ESTÁ en este teléfono: la burbuja lo pinta de
+  // aquí en vez de volver a bajarlo del servidor. Solo fotos y videos, que es
+  // lo que se ve; un archivo o una nota de voz no ganan nada con esto.
+  if (adjunto.kind === 'image' || esVideo) recordarCopia(ruta, uri);
 
   return {
     storage_path: ruta,
     kind: adjunto.kind,
     // El tipo con el que de verdad se subió, no el que dijo el teléfono.
     mime_type: contentType,
-    file_name: adjunto.name,
+    // Con el nombre de siempre, pero la extensión de lo que es ahora.
+    file_name: comprimido ? conExtension(adjunto.name, ext) : adjunto.name,
     // El tamaño REAL del archivo leído, no el que informó el selector: no
     // siempre coinciden, y el que cuenta es el que se ha subido.
     bytes: local.size,
@@ -316,6 +410,17 @@ export async function subirAdjunto(
 const CACHE_TTL_MS = (SIGNED_URL_TTL - 600) * 1000;
 const firmas = new Map<string, { url: string; caducaEn: number }>();
 
+/**
+ * Portadas que el almacén dijo que no existen.
+ *
+ * Los videos anteriores al 12/10/2026 no tienen portada subida. Sin apuntarlo,
+ * cada página del chat volvería a preguntar por ellas y ninguna firma saldría
+ * nunca de la cache: una petición de más en cada apertura, para siempre. SOLO
+ * PORTADAS: que falte la firma de un adjunto de verdad puede ser un corte de
+ * red, y eso sí se reintenta.
+ */
+const portadasQueNoEstan = new Set<string>();
+
 /** Firma varias rutas de golpe y reutiliza las que sigan vigentes. */
 export async function firmarAdjuntos(
   rutas: readonly string[],
@@ -330,7 +435,7 @@ export async function firmarAdjuntos(
   for (const ruta of rutas) {
     const vigente = firmas.get(ruta);
     if (vigente && vigente.caducaEn > ahora) mapa[ruta] = vigente.url;
-    else faltan.push(ruta);
+    else if (!portadasQueNoEstan.has(ruta)) faltan.push(ruta);
   }
   if (faltan.length === 0) return mapa;
 
@@ -348,10 +453,19 @@ export async function firmarAdjuntos(
       firmas.set(item.path, { url: item.signedUrl, caducaEn });
     }
   }
+  // El almacén contestó y esa portada no vino: no existe.
+  for (const ruta of faltan) {
+    if (!mapa[ruta] && esRutaDePortada(ruta)) portadasQueNoEstan.add(ruta);
+  }
   return mapa;
 }
 
-/** Se vacía al cerrar sesión: las firmas van atadas a quien las pidió. */
+/**
+ * Se vacía al cerrar sesión: las firmas van atadas a quien las pidió, y lo que
+ * este teléfono recordaba de los archivos de esa cuenta, también.
+ */
 export function olvidarFirmasDeAdjuntos(): void {
   firmas.clear();
+  portadasQueNoEstan.clear();
+  olvidarCopiasDeChat();
 }

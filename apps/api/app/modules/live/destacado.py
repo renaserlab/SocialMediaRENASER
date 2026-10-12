@@ -106,7 +106,7 @@ async def _fila_para_escribir(db: AsyncSession, sesion: LiveSession) -> LiveSpot
 def _exigir_en_directo(sesion: LiveSession) -> None:
     if sesion.status != "live":
         raise ConflictError(
-            "Solo se puede destacar algo mientras la transmisión está en directo.",
+            "Solo se puede destacar algo mientras la transmisión está en vivo.",
             code="live_spotlight_closed",
         )
 

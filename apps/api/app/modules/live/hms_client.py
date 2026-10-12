@@ -260,7 +260,7 @@ class Cliente100ms:
             # sala se creó: quien llama tiene que consultar antes de reintentar.
             logger.error("[live] 100ms no responde a %s %s: %s", metodo, ruta, error)
             raise ErrorDe100ms(
-                "El proveedor de vídeo no responde.", codigo="network_timeout"
+                "El proveedor de video no responde.", codigo="network_timeout"
             ) from error
 
         if respuesta.status_code >= 400:
@@ -270,7 +270,7 @@ class Cliente100ms:
                 "[live] 100ms rechazo %s %s con %s", metodo, ruta, respuesta.status_code
             )
             raise ErrorDe100ms(
-                "El proveedor de vídeo rechazó la petición.",
+                "El proveedor de video rechazó la petición.",
                 codigo=f"http_{respuesta.status_code}",
                 estado=respuesta.status_code,
             )
@@ -279,12 +279,12 @@ class Cliente100ms:
             datos = respuesta.json()
         except Exception as error:  # el parser no promete un tipo concreto
             raise ErrorDe100ms(
-                "El proveedor de vídeo contestó algo ilegible.",
+                "El proveedor de video contestó algo ilegible.",
                 codigo="unreadable_response",
             ) from error
         if not isinstance(datos, dict):
             raise ErrorDe100ms(
-                "El proveedor de vídeo contestó algo ilegible.",
+                "El proveedor de video contestó algo ilegible.",
                 codigo="unreadable_response",
             )
         return datos

@@ -58,7 +58,7 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     # no se sabe ni dónde mirar. Tampoco lleva el texto del mensaje.
     "message_group": ("Nuevo mensaje", "{actor} envió un mensaje al grupo «{grupo}»."),
     # Te han metido en un grupo. Sin esto aparecería en la bandeja sin más.
-    "group_added": ("Nuevo grupo", "{actor} te añadió al grupo «{grupo}»."),
+    "group_added": ("Nuevo grupo", "{actor} te agregó al grupo «{grupo}»."),
     # Alguien pide entrar a un grupo que administras. Dice quien y a cual:
     # la respuesta se da dentro, en la ficha del grupo.
     "group_join_request": (
@@ -70,7 +70,10 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "live_started": ("En vivo ahora", "{actor} está transmitiendo en vivo."),
     # Quien emite te invita a salir con tu cámara (`live/escenario.py`). Dice
     # QUÉ te piden: aceptar es salir en pantalla, y eso se decide dentro.
-    "live_invited": ("Te invitan a un directo", "{actor} te invita a participar en su directo."),
+    "live_invited": (
+        "Te invitan a una transmisión en vivo",
+        "{actor} te invita a participar en su transmisión en vivo.",
+    ),
     "session_booked": ("Nueva solicitud de sesión", "{actor} quiere agendar contigo."),
     # Cada respuesta lleva su propio texto. Con un unico tipo para todo, a
     # quien le rechazaban una sesion le llegaba «reservó una sesión contigo».

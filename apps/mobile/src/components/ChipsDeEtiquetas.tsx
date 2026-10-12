@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, View, ViewStyle } from 'react-native';
+import { ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
 import { Pulsable } from '@/components/Pulsable';
@@ -67,8 +67,9 @@ type Props = {
  * nada dice qué es eso, a qué se le pone ni quién lo ve. Eran las tres
  * preguntas que frenaban la función: quien no sabe que son privadas o no la usa
  * —por no etiquetar a una persona delante de ella— o la usa creyendo que es
- * compartido. Por eso `label.explain` sale AQUÍ, a la vista, y no sólo dentro
- * del gestor que hay que abrir para leerlo.
+ * compartido. Por eso `label.explain` sale a la vista, junto a la fila, y no
+ * sólo dentro del gestor que hay que abrir para leerlo. Lo pinta
+ * `ExplicacionDeEtiquetas`, más abajo en este fichero.
  *
  * Y DESAPARECE EN CUANTO HAY UNA. Un cartel permanente encima de la bandeja
  * roba la altura de la primera conversación todos los días para explicar algo
@@ -148,18 +149,43 @@ export function ChipsDeEtiquetas({
           ) : null}
         </ScrollView>
       </SinCambioDeSeccion>
-
-      {/*
-        Sólo mientras no hay ninguna: ver la cabecera. Va FUERA del ScrollView
-        horizontal para que se lea entera sin arrastrar nada.
-      */}
-      {etiquetas.length === 0 && alGestionar ? (
-        <Text variant="caption" color={colors.textMuted} style={styles.explicacion}>
-          {t('label.explain')}
-        </Text>
-      ) : null}
     </View>
   );
+}
+
+type PropsDeLaExplicacion = Pick<Props, 'etiquetas' | 'disponible' | 'alGestionar'> & {
+  style?: StyleProp<TextStyle>;
+};
+
+/**
+ * Qué son las etiquetas y quién las ve. Sólo mientras no hay ninguna: ver la
+ * cabecera de `ChipsDeEtiquetas`.
+ *
+ * ES UNA PIEZA APARTE PARA PODER OCUPAR TODO EL ANCHO (12/10/2026). Iba dentro
+ * de la fila de etiquetas, y en la bandeja esa fila comparte renglón con el
+ * botón «Filtros»: el texto heredaba el ancho que «Filtros» le dejaba y se
+ * partía en tres líneas estrechas con un hueco a su derecha. Quien pinta la
+ * fila lo coloca ahora DEBAJO de ese renglón, y se lee de borde a borde.
+ *
+ * Recibe lo mismo que la fila, y con la misma condición, para que nunca se
+ * explique una fila que no se está viendo.
+ */
+export function ExplicacionDeEtiquetas({
+  etiquetas,
+  disponible = true,
+  alGestionar,
+  style,
+}: PropsDeLaExplicacion) {
+  const { t } = useTranslation();
+  const { colors } = useAppTheme();
+
+  if (!disponible) return null;
+
+  return etiquetas.length === 0 && alGestionar ? (
+    <Text variant="caption" color={colors.textMuted} style={[styles.explicacion, style]}>
+      {t('label.explain')}
+    </Text>
+  ) : null;
 }
 
 const styles = StyleSheet.create({

@@ -440,7 +440,7 @@ async def pedir_entrar(
     )
     if (recientes or 0) >= SOLICITUDES_POR_HORA:
         raise ConflictError(
-            "Has enviado muchas solicitudes seguidas. Inténtalo más tarde.",
+            "Enviaste muchas solicitudes seguidas. Inténtalo más tarde.",
             code="join_rate_limited",
         )
 

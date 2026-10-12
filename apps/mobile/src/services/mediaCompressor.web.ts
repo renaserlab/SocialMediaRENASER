@@ -53,6 +53,7 @@ export async function readVideoMetadata(uri: string): Promise<MediaMetadata | nu
  */
 export async function createVideoPoster(
   uri: string,
+  _nombreEnCache?: string,
 ): Promise<{ uri: string; width?: number; height?: number } | null> {
   if (typeof document === 'undefined') return null;
   return new Promise((resolve) => {
@@ -94,3 +95,6 @@ export async function createVideoPoster(
     video.src = uri;
   });
 }
+
+/** En web no hay carpeta de portadas que vaciar. */
+export async function clearVideoPosters(): Promise<void> {}

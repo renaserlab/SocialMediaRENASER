@@ -399,7 +399,7 @@ def test_el_nombre_del_grupo_es_un_valor_y_no_una_plantilla():
     )
     assert push.build_message("group_added", "Ana", "Aula") == (
         "Nuevo grupo",
-        "Ana te añadió al grupo «Aula».",
+        "Ana te agregó al grupo «Aula».",
     )
     # Los dos avisos suenan por el canal de los mensajes.
     assert push.CHANNELS["message_group"] == push.CHANNELS["group_added"] == "mensajes"

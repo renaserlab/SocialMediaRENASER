@@ -48,7 +48,7 @@ export const RESPALDOS_ES = {
   'reason.oneToOne': 'Ofrece sesiones 1 a 1',
   'reason.preferredFormat': 'Publica en el formato que prefieres',
   'reason.engagedBefore': 'Ya mostraste interés por su contenido',
-  'reason.similarInterests': 'Tenéis intereses parecidos',
+  'reason.similarInterests': 'Tienen intereses parecidos',
   'reason.activeCreator': 'Comparte cosas a menudo',
   'reason.newVoice': 'Una voz nueva que quizá no conoces',
 } as const;

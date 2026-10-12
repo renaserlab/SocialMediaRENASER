@@ -194,7 +194,7 @@ async def aprobar(
         raise DevolucionNoEncontrada("Pedido no encontrado.")
     if orden.status != PEDIDO_PAGADO or orden.paid_at is None:
         raise DevolucionNoPermitida(
-            "No se devuelve lo que no se ha cobrado.",
+            "No se devuelve lo que no se cobró.",
             details={"reason": "order_not_paid", "status": orden.status},
         )
 

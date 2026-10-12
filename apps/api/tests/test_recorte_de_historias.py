@@ -383,7 +383,7 @@ async def test_si_ffmpeg_falla_no_se_publica_nada(entorno, monkeypatch):
     )
 
     assert respuesta.status_code == 503
-    assert "no hemos publicado nada" in respuesta.json()["error"]["message"].lower()
+    assert "no publicamos nada" in respuesta.json()["error"]["message"].lower()
     assert await _cuantas_historias(sesiones) == 0
     assert subidas == []
 

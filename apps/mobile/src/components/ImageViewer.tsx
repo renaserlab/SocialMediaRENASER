@@ -30,6 +30,13 @@ const CIERRE_POR_ARRASTRE_PX = 120;
 type Props = {
   /** URL de la imagen. `null` mantiene el visor cerrado. */
   uri: string | null;
+  /**
+   * Con qué nombre está (o se guarda) en el disco. Para imágenes cuya URL
+   * cambia aunque el archivo sea el mismo —las firmadas del chat—: con la
+   * misma clave que usó la burbuja, abrirla a pantalla completa no la vuelve
+   * a descargar.
+   */
+  claveDeCache?: string;
   onClose: () => void;
   /** Texto opcional bajo la imagen (el pie del testimonio, por ejemplo). */
   caption?: string | null;
@@ -57,7 +64,7 @@ type Props = {
  *
  * Se cierra con la X, tocando fuera o arrastrando hacia abajo.
  */
-export function ImageViewer({ uri, onClose, caption, cabecera, pie }: Props) {
+export function ImageViewer({ uri, claveDeCache, onClose, caption, cabecera, pie }: Props) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const escala = useSharedValue(1);
@@ -174,7 +181,7 @@ export function ImageViewer({ uri, onClose, caption, cabecera, pie }: Props) {
           <View style={styles.lienzo}>
             {uri ? (
               <AnimatedImage
-                source={{ uri }}
+                source={claveDeCache ? { uri, cacheKey: claveDeCache } : { uri }}
                 style={[styles.imagen, estiloImagen]}
                 // `contain` y no `cover`: se ve ENTERA, que es el motivo de
                 // que este visor exista.

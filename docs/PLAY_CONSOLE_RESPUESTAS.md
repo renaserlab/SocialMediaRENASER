@@ -124,8 +124,8 @@ Google pregunta cómo se modera. Está resuelto en la aplicación:
 - **Denunciar**: en el menú de cada publicación.
 - **Bloquear**: desde el perfil y desde la propia publicación. El bloqueo es
   efectivo —el contenido desaparece del muro— y se revierte en
-  *Ajustes › Cuentas bloqueadas*.
-- **Eliminar cuenta**: *Ajustes › Eliminar cuenta*, y también por web.
+  *Configuración › Cuentas bloqueadas*.
+- **Eliminar cuenta**: *Configuración › Eliminar cuenta*, y también por web.
 
 Hace falta una persona responsable de revisar las denuncias que lleguen.
 

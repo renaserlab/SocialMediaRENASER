@@ -121,7 +121,10 @@ test('en un grupo, dos personas distintas no comparten ráfaga', () => {
     /actual\.sender === 'them' &&\s*anterior\.autorId &&\s*actual\.autorId &&\s*anterior\.autorId !== actual\.autorId/,
   );
   // El nombre va solo en un grupo, solo en lo ajeno y solo al empezar ráfaga.
-  assert.match(chat, /\{esGrupo && !mine && !agrupado \? \(/);
+  assert.match(chat, /const conAutor = esGrupo && !mine && !agrupado;/);
+  assert.match(chat, /\{conAutor && !sinMarco \? \(/);
+  // En una foto sin marco no hay burbuja donde escribirlo: va encima de la primera.
+  assert.match(chat, /\{indice === 0 && conAutor \? \(/);
   assert.match(chat, /nombreDelAutor\(infoDeConversacion, item\.autorId, item\.autorNombre\)/);
 });
 

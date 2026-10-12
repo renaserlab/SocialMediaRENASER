@@ -540,7 +540,7 @@ async def decidir(
     razon = (motivo or "").strip() or None
     if not aceptar and not razon:
         raise ValidationAppError(
-            "Un rechazo necesita un motivo que se le pueda enseñar a la persona.",
+            "Un rechazo necesita un motivo que se le pueda mostrar a la persona.",
             code="seller_application_reject_needs_reason",
         )
     if razon is not None and len(razon) > 2_000:

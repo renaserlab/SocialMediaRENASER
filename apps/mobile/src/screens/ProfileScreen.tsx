@@ -1016,6 +1016,22 @@ export function ProfileScreen() {
           ) : null}
 
           {/*
+            LOS GRUPOS DE ESTA PERSONA, JUSTO DEBAJO DE LA DESCRIPCIÓN
+            (10/10/2026; aquí y con esta forma desde el 12/10/2026).
+
+            Una fila de botones pequeños —icono y nombre del grupo— que se
+            desplaza de lado. Antes iban más abajo y como tarjetas enteras:
+            con un solo grupo ya ocupaban media pantalla, y quien administra
+            muchos tenía que deslizar un buen rato para ver sus
+            publicaciones. Si no enseña ninguno —o hay un bloqueo, o el
+            servidor no conoce la función— el componente no pinta nada.
+            Pedir entrar no mete en el grupo: avisa a quien lo administra.
+          */}
+          {galleryOwnerId ? (
+            <GruposDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
+          ) : null}
+
+          {/*
             EL AUDIO DE PRESENTACIÓN, DESPUÉS DE LA DESCRIPCIÓN.
 
             Va dentro de este bloque y no fuera porque es contenido de la
@@ -1049,16 +1065,6 @@ export function ProfileScreen() {
           */}
           {galleryOwnerId ? (
             <OfertaDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
-          ) : null}
-
-          {/*
-            «ÚNETE A MI GRUPO» (10/10/2026). Los grupos que esta persona
-            decidió enseñar aquí. Si no enseña ninguno —o hay un bloqueo, o
-            el servidor no conoce la función— el componente no pinta nada.
-            Pedir entrar no mete en el grupo: avisa a quien lo administra.
-          */}
-          {galleryOwnerId ? (
-            <GruposDelPerfil perfilId={galleryOwnerId} esPropio={!isPublic} />
           ) : null}
 
           {/* TODO: Reactivar el shortcut "Círculos" (icon="users") cuando el perfil alcance un umbral de seguidores */}

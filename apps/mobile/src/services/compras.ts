@@ -68,7 +68,7 @@ export const MOTIVOS: Record<string, string> = {
   no_publicado: 'Este curso todavía no está a la venta.',
   no_aprobado: 'Este curso todavía no está a la venta.',
   sin_tienda: 'Las compras no están disponibles en esta versión de la aplicación.',
-  sin_precio: 'No se ha podido consultar el precio en la tienda.',
+  sin_precio: 'No se pudo consultar el precio en la tienda.',
 };
 
 export function explicar(motivo: string): string {
@@ -217,7 +217,7 @@ export async function comprarEnTienda(
  */
 export async function restaurarCompras(): Promise<ResultadoDeCompraCompleta> {
   if (!esMovil()) {
-    return { estado: 'error', mensaje: 'Restaurar compras es solo para móvil.' };
+    return { estado: 'error', mensaje: 'Restaurar compras solo funciona en la aplicación del celular.' };
   }
   const ok = await revenueCat.restaurar();
   if (!ok) {
@@ -238,7 +238,7 @@ export async function restaurarCompras(): Promise<ResultadoDeCompraCompleta> {
  */
 export async function sincronizar(): Promise<ResultadoDeCompraCompleta> {
   const plataforma = plataformaDeCompra();
-  if (plataforma === 'web') return { estado: 'error', mensaje: 'Solo móvil.' };
+  if (plataforma === 'web') return { estado: 'error', mensaje: 'Solo en la aplicación del celular.' };
   try {
     // SE MIRA LO QUE CONTESTA, no solo que no falle. El resultado se tiraba y
     // se devolvía «comprada» con que la petición no reventara, así que quien

@@ -107,7 +107,7 @@ lecciones y material descargable.
 • Eventos y encuentros, presenciales y en línea, con toda la información y el
 acceso al grupo de cada uno.
 
-• Reseñas y testimonios de la comunidad, en foto y vídeo.
+• Reseñas y testimonios de la comunidad, en foto y video.
 
 • Sesiones 1:1. Propón fecha y hora a quien quieras y acordad los detalles por
 mensaje.
