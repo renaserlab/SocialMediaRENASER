@@ -1,17 +1,25 @@
 # Flujo de trabajo
 
-1. Crear una tarea con criterios de aceptación.
-2. Crear rama `feature/nombre-corto` desde `develop`.
-3. Mantener cambios pequeños y con tipos estrictos.
-4. Ejecutar `npm run mobile:check` y pruebas del backend.
-5. Abrir Pull Request con capturas de Android e iOS.
-6. Revisión de código obligatoria antes de merge.
-7. Probar en `staging` antes de pasar a `main`.
+1. Trabajar en una rama propia. La rama `main` es producción.
+2. Mantener los cambios pequeños, con su prueba y con tipos estrictos.
+3. Antes de subir: `npm run mobile:check`, `npm run mobile:test` y, en
+   `apps/api`, `python -m pytest`.
+4. Abrir una solicitud de integración hacia `main` y esperar a que las
+   comprobaciones automáticas estén en verde.
+5. Fusionar. Si cambió algo en `apps/api`, el servidor se despliega solo.
+
+No existe un entorno de ensayo separado: lo que llega a `main` llega a
+producción.
 
 ## Convenciones
 
-- Componentes y tipos en inglés; textos visibles en español.
-- No guardar secretos en Git.
-- No utilizar la service role de Supabase dentro de la app móvil.
-- Toda tabla nueva debe incluir RLS y pruebas de permisos.
-- Pagos, moderación y generación de tokens deben pasar por backend.
+- Los textos visibles van en `apps/mobile/src/i18n`, en castellano del Perú,
+  con sus traducciones al inglés y al portugués.
+- Las reglas que se pueden probar sin pantalla van en `apps/mobile/src/lib`,
+  sin dependencias y con su prueba al lado.
+- Todo lo nuevo que mueva dinero o abra un apartado nace apagado, con su
+  bandera en `apps/api/app/core/config.py`.
+- Una migración aplicada no se edita: un cambio posterior es otra migración.
+- Al cambiar algo nativo de la aplicación —un permiso, una biblioteca con
+  código nativo, un sonido— se sube `expo.version` en `apps/mobile/app.json`.
+- No guardar secretos en Git. Ver `SECURITY.md`.
