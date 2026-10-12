@@ -3742,3 +3742,71 @@ en teléfono; la foto de fondo y los dos recortes no existen en la web.
 | Cancelar el recortador no agrega nada a la tira | | | |
 | «Fotos y videos» sigue dejando elegir varias a la vez, sin recortador | | | |
 | «Cámara» sigue igual: toma la foto y la deja lista para mandar | | | |
+
+---
+
+## Confirmación de lectura y «está escribiendo» (12/10/2026)
+
+Hacen falta **dos cosas**: el servidor desplegado (trae dos rutas nuevas; no
+hay migración) y una **compilación nueva, que sale como 1.2.2**. La versión
+sube porque entra un sonido nuevo dentro de la aplicación.
+
+Qué trae:
+
+- **La marca de cada mensaje propio:** reloj mientras se envía, una marca
+  cuando el servidor lo tiene y dos, en azul, cuando lo leyeron. En un grupo
+  las dos marcas salen cuando lo leyeron TODOS.
+- **«Detalles del mensaje»**, en el menú de un mensaje propio: quién lo leyó y
+  quién todavía no.
+- **«Está escribiendo»:** tres puntos animados y el nombre, con un sonido
+  corto cuando alguien empieza.
+
+Lo que conviene saber antes de probar:
+
+- «Leído» significa que la persona **abrió el chat** después del mensaje. No
+  hay «entregado al teléfono» como en WhatsApp: Z no lo sabe.
+- No se muestra la hora en que cada quien lo leyó: el servidor sabe hasta
+  dónde leyó cada persona, no cuándo vio cada mensaje.
+- «Está escribiendo» solo se ve entre teléfonos que tienen **ese chat
+  abierto**, y hacen falta los dos con la versión nueva.
+
+Visto en la copia web local: la marca sencilla y la doble según lo que dice el
+servidor, el menú con «Detalles del mensaje» y la hoja con las dos listas.
+**Sin ver:** nada en teléfono. «Está escribiendo» y su sonido no se pueden
+ver en la copia web: necesitan dos aparatos conectados de verdad.
+
+Para probar hacen falta **dos teléfonos** (tres para el grupo).
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Enviar un mensaje en un chat de dos: sale con UNA marca | | | |
+| La otra persona abre el chat: la marca pasa a DOS, en azul, sin salir ni volver a entrar | | | |
+| Con el chat de la otra persona ya abierto, enviar otro: pasa a dos marcas casi en el acto | | | |
+| Las dos marcas se distinguen bien de la marca sencilla, en tema claro y en oscuro | | | |
+| En una foto sin marco, la marca va junto a la hora, sobre la foto, y se lee | | | |
+| En varios mensajes seguidos, el último que uno mandó siempre muestra su hora y su marca | | | |
+| En un GRUPO de tres: si solo lo leyó uno, sigue con una marca | | | |
+| En el grupo, cuando lo leyeron los dos, pasa a dos marcas | | | |
+| Mantener presionado un mensaje PROPIO: aparece «Detalles del mensaje» | | | |
+| En un mensaje AJENO no aparece «Detalles del mensaje» | | | |
+| En un mensaje que todavía se está enviando, o que no se envió, tampoco | | | |
+| Los detalles muestran «Leído por» y «Todavía no lo leen», con foto y nombre | | | |
+| Las dos listas juntas son todos los demás del grupo, sin uno mismo | | | |
+| Cerrar los detalles, esperar a que alguien más lea, volver a abrirlos: la lista se actualizó | | | |
+| En un chat de dos, los detalles dicen si la otra persona lo leyó o todavía no | | | |
+| Sin conexión, los detalles avisan que no se pudieron cargar y ofrecen «Reintentar» | | | |
+| Volver a la aplicación después de tenerla en segundo plano: las marcas se ponen al día | | | |
+| Con los dos en el mismo chat, uno empieza a escribir: al otro le aparecen los tres puntos | | | |
+| Los puntos se mueven; con «reducir movimiento» activado, se quedan quietos | | | |
+| En un chat de dos dice «Escribiendo»; en un grupo, «Ana está escribiendo» | | | |
+| Dos personas escribiendo a la vez en un grupo: «Ana y Luis están escribiendo» | | | |
+| Al aparecer los puntos suena un sonido corto, UNA vez, no mientras sigue escribiendo | | | |
+| El sonido no corta la música de otra aplicación y respeta el modo silencio | | | |
+| Con la conversación silenciada, los puntos salen pero no suena | | | |
+| Al enviar el mensaje, los puntos desaparecen en el otro teléfono | | | |
+| Si quien escribía borra todo el texto, los puntos desaparecen | | | |
+| Si quien escribía sale del chat o pierde la conexión, los puntos se van solos en unos segundos | | | |
+| Los puntos no tapan el botón de «ir al último mensaje» ni impiden tocar los mensajes | | | |
+| Que aparezcan o desaparezcan los puntos no mueve los mensajes de su sitio | | | |
+| Desplazar el chat se siente igual de fluido que antes | | | |
+| Con una aplicación de la versión anterior del otro lado: no se rompe nada; simplemente no se ven sus puntos | | | |
