@@ -164,3 +164,21 @@ export function mismoFondo(a: FondoDeChat, b: FondoDeChat): boolean {
   if (a.tipo === 'foto' && b.tipo === 'foto') return a.uri === b.uri;
   return true;
 }
+
+/**
+ * La proporción con la que se recorta la foto que va de fondo: la de la
+ * pantalla, de pie.
+ *
+ * El fondo llena la zona de los mensajes. Recortada con esa forma, lo que la
+ * persona encuadra es lo que después ve; con cualquier otra, el chat le corta
+ * los lados por su cuenta. Va en enteros y reducida, que es como la pide el
+ * recortador del teléfono. Sin medidas que valgan, 9:16.
+ */
+export function proporcionDelFondo(ancho: number, alto: number): [number, number] {
+  const corto = Math.round(Math.min(ancho, alto));
+  const largo = Math.round(Math.max(ancho, alto));
+  if (!Number.isFinite(corto) || !Number.isFinite(largo) || corto <= 0) return [9, 16];
+  const divisor = (a: number, b: number): number => (b === 0 ? a : divisor(b, a % b));
+  const comun = divisor(largo, corto);
+  return [corto / comun, largo / comun];
+}

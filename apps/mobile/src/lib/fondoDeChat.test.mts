@@ -14,6 +14,7 @@ import {
   leerFondo,
   leerFondos,
   mismoFondo,
+  proporcionDelFondo,
   veloSobreLaFoto,
 } from './fondoDeChat.ts';
 
@@ -131,6 +132,20 @@ test('la lista de fondos se guarda y se lee entera, sin fiarse de nada', () => {
   // El fondo de cuando era uno solo NO se lee como lista: se queda en nada.
   assert.deepEqual(leerFondos(JSON.stringify({ tipo: 'foto', uri: 'file:///viejo.jpg' })), {});
   assert.notEqual(CLAVE_DE_FONDOS, CLAVE_DEL_FONDO_COMUN);
+});
+
+test('la foto del fondo se recorta con la forma de la pantalla, de pie', () => {
+  assert.deepEqual(proporcionDelFondo(360, 800), [9, 20]);
+  assert.deepEqual(proporcionDelFondo(1080, 1920), [9, 16]);
+  // Con el teléfono echado, la misma: el chat se usa de pie.
+  assert.deepEqual(proporcionDelFondo(800, 360), [9, 20]);
+  // Medidas con decimales: el recortador del teléfono solo admite enteros.
+  const [a, b] = proporcionDelFondo(392.7, 850.9);
+  assert.ok(Number.isInteger(a) && Number.isInteger(b) && a > 0 && b > a);
+  // Sin medidas que valgan, 9:16.
+  for (const [ancho, alto] of [[0, 0], [0, 800], [NaN, 800], [-5, 10]] as const) {
+    assert.deepEqual(proporcionDelFondo(ancho, alto), [9, 16]);
+  }
 });
 
 test('cada color tiene su tono para el tema claro y para el oscuro', () => {
@@ -254,6 +269,18 @@ test('el fondo se elige y se pinta para la conversación abierta, no para todas'
       idioma,
     );
   }
+});
+
+test('la foto del fondo pasa por el recortador del teléfono, con la forma de la pantalla', () => {
+  const hoja = leer('../components/chat/HojaDeFondoDeChat.tsx');
+  // En Android, con la proporción de la pantalla. En iOS el recorte del
+  // sistema es siempre cuadrado, y para un fondo de pie eso quita más de lo
+  // que deja elegir: ahí la foto entra entera.
+  assert.match(
+    hoja,
+    /Platform\.OS === 'android'\s*\? \{ aspect: proporcionDelFondo\(ancho, alto\) \}\s*: \{ allowsEditing: false \}/,
+  );
+  assert.match(hoja, /const \{ width: ancho, height: alto \} = useWindowDimensions\(\);/);
 });
 
 test('el fondo se pinta detrás de los mensajes y no recibe toques', () => {
