@@ -359,7 +359,11 @@ test('el chat sube por el historial hasta el mensaje, con tope, y avisa si no ll
   assert.match(chat, /pegadoAlFinal\.current = false;\s*setLejosDelFinal\(true\);\s*setResaltado\(buscado\);/);
   assert.match(chat, /notify\(t\('chat\.jumpNotFoundTitle'\), t\('chat\.jumpNotFoundBody'\)\)/);
   // La lista recicla celdas: tiene que enterarse del resalte y del grupo.
-  assert.match(chat, /\(\{ estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado \}\)/);
+  // Y de las marcas de lectura, que cambian la marca de las burbujas propias.
+  assert.match(
+    chat,
+    /\(\{\s*estadosDeSesion,\s*sesionOcupada,\s*infoDeConversacion,\s*resaltado,\s*marcas: lecturas\.marcas,\s*\}\)/,
+  );
 });
 
 test('desde Contenido y desde Buscar se vuelve al chat abierto, no se apila otro', () => {

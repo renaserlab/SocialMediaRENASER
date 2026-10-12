@@ -24,6 +24,12 @@ import {
   type ConsultaDeBandeja,
 } from '@/lib/bandeja';
 import {
+  leerDetalles,
+  leerMarcas,
+  type DetallesDeMensaje,
+  type MarcaDeLectura,
+} from '@/lib/lecturaDeMensajes';
+import {
   leerConsultaDeReacciones,
   leerReacciones,
   type ReaccionDeMensaje,
@@ -178,6 +184,8 @@ export type FuncionesDelChat = {
   reacciones: boolean;
   /** Se puede silenciar una conversación y vaciarla para uno mismo (0107). */
   preferencias: boolean;
+  /** El servidor dice quién leyó cada mensaje: la confirmación de lectura. */
+  lecturas: boolean;
 };
 
 /** Lo que se da por hecho mientras el servidor no contesta: nada. */
@@ -186,6 +194,7 @@ export const SIN_FUNCIONES: FuncionesDelChat = {
   respuestasAHistorias: false,
   reacciones: false,
   preferencias: false,
+  lecturas: false,
 };
 
 export const MessageRepository = {
@@ -209,12 +218,14 @@ export const MessageRepository = {
         story_replies?: boolean;
         reactions?: boolean;
         preferences?: boolean;
+        read_receipts?: boolean;
       }>(`${API_V1}/conversations/availability`);
       return {
         notasDeVoz: dto.voice_notes === true,
         respuestasAHistorias: dto.story_replies === true,
         reacciones: dto.reactions === true,
         preferencias: dto.preferences === true,
+        lecturas: dto.read_receipts === true,
       };
     } catch {
       return SIN_FUNCIONES;
@@ -523,6 +534,35 @@ export const MessageRepository = {
         method: 'POST',
         body: JSON.stringify({ message_ids: messageIds }),
       }),
+    );
+  },
+
+  /**
+   * Hasta dónde ha leído cada una de las OTRAS personas de la conversación.
+   *
+   * Con eso se pinta la marca de cada burbuja propia sin preguntar mensaje
+   * por mensaje. Lanza si falla: quien llama decide quedarse con lo que tenía.
+   */
+  async marcasDeLectura(conversationId: string): Promise<MarcaDeLectura[]> {
+    return leerMarcas(
+      await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/read-state`),
+    );
+  },
+
+  /**
+   * Los detalles de un mensaje PROPIO: quién lo leyó y quién todavía no.
+   *
+   * `null` si el servidor contesta algo que no se entiende. De un mensaje
+   * ajeno, borrado o de otra conversación el servidor responde 404.
+   */
+  async detallesDeMensaje(
+    conversationId: string,
+    messageId: string,
+  ): Promise<DetallesDeMensaje | null> {
+    return leerDetalles(
+      await apiRequest<unknown>(
+        `${API_V1}/conversations/${conversationId}/messages/${messageId}/receipts`,
+      ),
     );
   },
 

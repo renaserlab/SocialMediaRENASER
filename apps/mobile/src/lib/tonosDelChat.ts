@@ -1,6 +1,6 @@
 /**
- * Los tonos del chat: uno al enviar un mensaje y otro al recibirlo con la
- * conversación delante.
+ * Los tonos del chat: uno al enviar un mensaje, otro al recibirlo con la
+ * conversación delante y un tercero cuando alguien empieza a escribir.
  *
  * LO PEDIDO (06/10/2026): «agregarle un sonido de que se envió el mensaje o
  * cuando recibe», como en cualquier chat.
@@ -15,7 +15,7 @@
  * silencio y el volumen de avisos, y no le quita el sonido a nadie.
  *
  * Se programa un aviso local que NO SE ENSEÑA —ni tira, ni lista, ni globo— y
- * solo suena (`services/notifications`). Los dos ficheros van dentro de la
+ * solo suena (`services/notifications`). Los ficheros van dentro de la
  * compilación (`sounds` del plugin `expo-notifications` en `app.json`), así
  * que esto no llega por actualización: hace falta un binario nuevo.
  *
@@ -23,7 +23,7 @@
  * distingue un tono de un aviso de verdad y cuándo toca que suene.
  */
 
-export type TonoDelChat = 'enviado' | 'recibido';
+export type TonoDelChat = 'enviado' | 'recibido' | 'escribiendo';
 
 /**
  * Cada tono: su fichero y su canal de Android.
@@ -46,6 +46,14 @@ export const TONOS: Record<TonoDelChat, { fichero: string; canal: string; nombre
     canal: 'tono-recibido-v1',
     nombre: 'Sonido al recibir un mensaje',
   },
+  // 12/10/2026: «un sonido que indique que una persona está escribiendo».
+  // Tres toques muy cortos y más bajos que los otros dos: avisa sin pedir
+  // que se mire. Cuándo suena lo decide `lib/escribiendo.suenaElTono`.
+  escribiendo: {
+    fichero: 'alguien_escribe.wav',
+    canal: 'tono-escribiendo-v1',
+    nombre: 'Sonido cuando alguien está escribiendo',
+  },
 };
 
 /** La clave que llevan en sus datos, para no confundirlos con un aviso. */
@@ -60,7 +68,7 @@ export function datosDelTono(cual: TonoDelChat): Record<string, string> {
 export function esUnTono(datos: unknown): boolean {
   if (typeof datos !== 'object' || datos === null) return false;
   const marca = (datos as Record<string, unknown>)[MARCA_DE_TONO];
-  return marca === 'enviado' || marca === 'recibido';
+  return marca === 'enviado' || marca === 'recibido' || marca === 'escribiendo';
 }
 
 /** Entre dos tonos iguales tiene que pasar al menos esto. */
