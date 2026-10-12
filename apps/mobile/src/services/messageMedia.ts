@@ -94,10 +94,10 @@ export type AdjuntoSubido = {
 };
 
 const AVISO_FOTOS =
-  'Z no tiene permiso para acceder a tus fotos. Actívalo en Ajustes del ' +
+  'Z no tiene permiso para acceder a tus fotos. Actívalo en la configuración del ' +
   'teléfono → Z → Fotos.';
 const AVISO_CAMARA =
-  'Z no tiene permiso para usar la cámara. Actívalo en Ajustes del ' +
+  'Z no tiene permiso para usar la cámara. Actívalo en la configuración del ' +
   'teléfono → Z → Cámara.';
 
 // ---------------------------------------------------------------------------

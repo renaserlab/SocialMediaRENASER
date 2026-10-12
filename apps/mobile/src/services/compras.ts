@@ -217,7 +217,7 @@ export async function comprarEnTienda(
  */
 export async function restaurarCompras(): Promise<ResultadoDeCompraCompleta> {
   if (!esMovil()) {
-    return { estado: 'error', mensaje: 'Restaurar compras es solo para móvil.' };
+    return { estado: 'error', mensaje: 'Restaurar compras solo funciona en la aplicación del celular.' };
   }
   const ok = await revenueCat.restaurar();
   if (!ok) {
@@ -238,7 +238,7 @@ export async function restaurarCompras(): Promise<ResultadoDeCompraCompleta> {
  */
 export async function sincronizar(): Promise<ResultadoDeCompraCompleta> {
   const plataforma = plataformaDeCompra();
-  if (plataforma === 'web') return { estado: 'error', mensaje: 'Solo móvil.' };
+  if (plataforma === 'web') return { estado: 'error', mensaje: 'Solo en la aplicación del celular.' };
   try {
     // SE MIRA LO QUE CONTESTA, no solo que no falle. El resultado se tiraba y
     // se devolvía «comprada» con que la petición no reventara, así que quien

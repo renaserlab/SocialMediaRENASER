@@ -260,7 +260,7 @@ describe('`isOwnProfile` y `canManage` son cosas distintas', () => {
       /\{isOwnProfile \? \(\s*\n\s*<Button\s*\n\s*label=\{t\('gallery\.add'\)\}/.test(galeria),
       'Añadir a la galeria tiene que colgar de `isOwnProfile`.',
     );
-    assert.equal(es['gallery.add'], 'Añadir a la galería');
+    assert.equal(es['gallery.add'], 'Agregar a la galería');
   });
 });
 

@@ -22,7 +22,7 @@ const SECTIONS: LegalSection[] = [
     heading: '3. Tu cuenta',
     paragraphs: [
       'Eres responsable de la confidencialidad de tus credenciales y de toda la actividad realizada desde tu cuenta. Avísanos de inmediato si detectas un uso no autorizado.',
-      'Puedes eliminar tu cuenta en cualquier momento desde Ajustes, dentro de la propia aplicación.',
+      'Puedes eliminar tu cuenta en cualquier momento desde Configuración, dentro de la propia aplicación.',
     ],
   },
   {

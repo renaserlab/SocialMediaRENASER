@@ -164,10 +164,10 @@ export class PermisoDenegadoError extends Error {
 }
 
 const AVISO_FOTOS =
-  'Z no tiene permiso para acceder a tus fotos. Actívalo en Ajustes del ' +
+  'Z no tiene permiso para acceder a tus fotos. Actívalo en la configuración del ' +
   'teléfono → Z → Fotos.';
 const AVISO_CAMARA =
-  'Z no tiene permiso para usar la cámara. Actívalo en Ajustes del ' +
+  'Z no tiene permiso para usar la cámara. Actívalo en la configuración del ' +
   'teléfono → Z → Cámara.';
 
 /**
@@ -607,7 +607,7 @@ export async function uploadPostMedia(
   }
   if (videoSinComprimir && local.size > MAX_VIDEO_SIN_COMPRIMIR_BYTES) {
     throw new Error(
-      `Este vídeo pesa ${formatMb(local.size)} y no se ha podido comprimir en este dispositivo. ` +
+      `Este video pesa ${formatMb(local.size)} y no se ha podido comprimir en este dispositivo. ` +
         `Súbelo desde la aplicación instalada, o elige uno de menos de ${formatMb(MAX_VIDEO_SIN_COMPRIMIR_BYTES)}: ` +
         'a ese tamaño tardaría demasiado en cargar y consumiría muchos datos a quien lo vea.',
     );

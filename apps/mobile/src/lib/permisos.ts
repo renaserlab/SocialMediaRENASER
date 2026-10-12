@@ -72,7 +72,7 @@ export function abrirAjustes(): void {
 }
 
 const NOMBRE: Record<TipoDePermiso, string> = {
-  fotos: 'tus fotos y vídeos',
+  fotos: 'tus fotos y videos',
   camara: 'la cámara',
   microfono: 'el micrófono',
 };
@@ -92,8 +92,8 @@ export function textoDePermiso(
       titulo: `Z no puede acceder a ${NOMBRE[tipo]}`,
       cuerpo:
         'Ya se rechazó antes y el teléfono no volverá a preguntar. Puedes ' +
-        'activarlo en los ajustes; volvemos aquí en cuanto lo hagas.',
-      accion: 'Abrir ajustes',
+        'activarlo en la configuración; volvemos aquí en cuanto lo hagas.',
+      accion: 'Abrir configuración',
       vaAAjustes: true,
     };
   }
@@ -102,7 +102,7 @@ export function textoDePermiso(
       titulo: 'Solo vemos algunas fotos',
       cuerpo:
         'Diste acceso a una selección. Puedes seguir así y elegir entre esas, ' +
-        'o ampliar la selección desde los ajustes.',
+        'o ampliar la selección desde la configuración.',
       accion: 'Gestionar selección',
       vaAAjustes: true,
     };
@@ -126,7 +126,7 @@ export function textoDePermiso(
     titulo: `Z necesita ${NOMBRE[tipo]}`,
     cuerpo:
       tipo === 'microfono'
-        ? 'Sin micrófono el vídeo se graba mudo.'
+        ? 'Sin micrófono el video se graba mudo.'
         : 'Solo se usa cuando tú lo pides, para crear el contenido que publicas.',
     accion: 'Permitir',
     vaAAjustes: false,

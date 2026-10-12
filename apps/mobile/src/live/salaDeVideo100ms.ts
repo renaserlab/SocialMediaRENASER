@@ -419,7 +419,7 @@ class SalaDe100ms implements SalaDeVideo {
   ): Promise<void> {
     return new Promise<void>((resolver, rechazar) => {
       const reloj = setTimeout(() => {
-        rechazar(new Error('El vídeo no respondió a tiempo.'));
+        rechazar(new Error('El video no respondió a tiempo.'));
       }, ESPERA_DE_ENTRADA_MS);
 
       sdk.addEventListener(HMSUpdateListenerActions.ON_JOIN, () => {
@@ -428,7 +428,7 @@ class SalaDe100ms implements SalaDeVideo {
       });
       sdk.addEventListener(HMSUpdateListenerActions.ON_ERROR, (error: unknown) => {
         clearTimeout(reloj);
-        rechazar(error instanceof Error ? error : new Error('Error del vídeo.'));
+        rechazar(error instanceof Error ? error : new Error('Error del video.'));
       });
 
       sdk
@@ -442,7 +442,7 @@ class SalaDe100ms implements SalaDeVideo {
         )
         .catch((error: unknown) => {
           clearTimeout(reloj);
-          rechazar(error instanceof Error ? error : new Error('Error del vídeo.'));
+          rechazar(error instanceof Error ? error : new Error('Error del video.'));
         });
     });
   }
@@ -538,7 +538,7 @@ class SalaDe100ms implements SalaDeVideo {
     if (!sdk) throw new Error('No hay sala.');
     const pista = await sdk.getRemoteVideoTrackFromTrackId(pistaId);
     const hecho: unknown = await pista.setLayer(CAPA_DEL_SDK[capa]);
-    if (hecho === false) throw new Error('El vídeo no aceptó esa calidad.');
+    if (hecho === false) throw new Error('El video no aceptó esa calidad.');
   }
 
   private escuchar(sdk: HMSSDK): void {

@@ -134,7 +134,7 @@ export function EditorDeFrases({
             onPress={anadir}
             disabled={!borrador.trim()}
             accessibilityRole="button"
-            accessibilityLabel={`Añadir a ${etiqueta}`}
+            accessibilityLabel={`Agregar a ${etiqueta}`}
             style={({ pressed }) => [
               styles.anadir,
               {

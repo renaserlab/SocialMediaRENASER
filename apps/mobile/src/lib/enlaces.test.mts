@@ -127,7 +127,7 @@ test('sin id no hay enlace, y sin autor la frase sigue leyendose bien', () => {
 
   // Degradar con dignidad: nunca «de undefined» ni un nombre inventado.
   assert.equal(textoParaCompartir('publicacion', null), 'Mira esta publicación en Z');
-  assert.equal(textoParaCompartir('video', '   '), 'Mira este vídeo en Z');
+  assert.equal(textoParaCompartir('video', '   '), 'Mira este video en Z');
   assert.equal(textoParaCompartir('audio', undefined), 'Escucha este audio en Z');
 });
 

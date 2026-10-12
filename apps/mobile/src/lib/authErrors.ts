@@ -56,7 +56,7 @@ export const RESPALDOS_ES = {
   'authError.invalidEmail': 'Ese correo no parece válido. Revísalo e inténtalo de nuevo.',
   'authError.badCredentials': 'Correo o contraseña incorrectos.',
   'authError.emailNotConfirmed':
-    'Todavía no has confirmado tu correo. Busca el mensaje de bienvenida y pulsa el enlace.',
+    'Todavía no has confirmado tu correo. Busca el mensaje de bienvenida y toca el enlace.',
   'authError.emailTaken': 'Ese correo ya tiene una cuenta. Inicia sesión o recupera tu contraseña.',
   'authError.banned': 'Esta cuenta está suspendida. Escríbenos si crees que es un error.',
   'authError.signupDisabled': 'El registro no está disponible en este momento. Inténtalo más tarde.',

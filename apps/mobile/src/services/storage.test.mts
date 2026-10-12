@@ -44,9 +44,9 @@ test('un permiso denegado lanza, no devuelve null', () => {
 
 test('el aviso dice donde activar el permiso', () => {
   // "No se pudo abrir el selector" no ayuda: en iOS el sistema solo pregunta
-  // UNA vez, asi que la unica salida es ir a los ajustes del telefono.
+  // UNA vez, asi que la unica salida es ir a la configuracion del telefono.
   assert.ok(
-    /Ajustes del/.test(FUENTE),
+    /en la configuración del/.test(FUENTE),
     'El mensaje de permiso denegado debe indicar donde activarlo.',
   );
 });

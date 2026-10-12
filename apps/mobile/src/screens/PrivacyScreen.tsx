@@ -49,13 +49,13 @@ const SECTIONS: LegalSection[] = [
     heading: '6. Cuánto tiempo los conservamos',
     paragraphs: [
       'Mantenemos tus datos mientras tu cuenta esté activa. Las historias se eliminan automáticamente a las 24 horas.',
-      'Si eliminas tu cuenta desde Ajustes, se borran tu perfil y el contenido asociado. Podemos conservar registros mínimos durante el tiempo necesario para cumplir obligaciones legales o resolver reportes en curso.',
+      'Si eliminas tu cuenta desde Configuración, se borran tu perfil y el contenido asociado. Podemos conservar registros mínimos durante el tiempo necesario para cumplir obligaciones legales o resolver reportes en curso.',
     ],
   },
   {
     heading: '7. Tus derechos',
     paragraphs: [
-      'Puedes acceder a tus datos, rectificarlos, eliminarlos, oponerte a su tratamiento y solicitar una copia. La forma más rápida de ejercer el borrado es la opción «Eliminar cuenta», disponible dentro de Ajustes en la propia aplicación.',
+      'Puedes acceder a tus datos, rectificarlos, eliminarlos, oponerte a su tratamiento y solicitar una copia. La forma más rápida de ejercer el borrado es la opción «Eliminar cuenta», disponible dentro de Configuración en la propia aplicación.',
       'Para el resto de solicitudes escríbenos a ' +
         PRIVACY_CONTACT +
         '. Responderemos en un plazo máximo de 30 días. Si resides en Perú, puedes además presentar una reclamación ante la Autoridad Nacional de Protección de Datos Personales.',

@@ -88,9 +88,9 @@ export type Traductor = (
  */
 export const RESPALDOS_ES = {
   'story.cannotMeasure':
-    'No pudimos comprobar cuánto dura este vídeo. Grábalo con la cámara de la app, que ya corta a los {tope} segundos.',
+    'No pudimos comprobar cuánto dura este video. Grábalo con la cámara de la app, que ya corta a los {tope} segundos.',
   'story.tooLong':
-    'Este vídeo dura {duracion} s y las historias admiten hasta {tope}. Elige el tramo que quieres publicar: lo recortamos al subirlo.',
+    'Este video dura {duracion} s y las historias admiten hasta {tope}. Elige el tramo que quieres publicar: lo recortamos al subirlo.',
 } as const;
 
 const enEspanol: Traductor = (clave, params) => {
