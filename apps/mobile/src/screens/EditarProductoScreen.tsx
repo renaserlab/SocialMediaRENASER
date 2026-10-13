@@ -9,6 +9,7 @@ import { Chip } from '@/components/Chip';
 import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
+import { afterSheetClose } from '@/lib/afterSheetClose';
 import { confirm, notify } from '@/lib/confirm';
 import { esFalloDeRed } from '@/lib/entradasDeEvento';
 import { toast } from '@/lib/toast';
@@ -250,6 +251,10 @@ export function EditarProductoScreen() {
         confirmLabel: etiquetaDeEnviar,
       });
       if (!aceptado) return;
+      // El cuadro es un Modal y aun se esta yendo: se espera antes de publicar
+      // y repintar la pantalla de debajo (`lib/afterSheetClose`). El cerrojo
+      // sigue tomado, asi que otra pulsacion no entra mientras tanto.
+      await afterSheetClose();
       const resultado = await ProductSellerRepository.postularProducto(producto.id);
       // Lo dice el SERVIDOR: si quedó publicado, fue publicado.
       toast(

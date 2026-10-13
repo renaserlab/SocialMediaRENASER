@@ -15,6 +15,7 @@ import { Input } from '@/components/Input';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { claveDelEstado } from '@/lib/admisionDeEvento';
+import { afterSheetClose } from '@/lib/afterSheetClose';
 import { confirm, notify } from '@/lib/confirm';
 import {
   CATEGORIAS,
@@ -253,6 +254,15 @@ export function EditarEventoScreen() {
       confirmLabel: flexible ? t('miEvento.publicar') : t('miEvento.enviar'),
     });
     if (!aceptado) return;
+    /*
+      EL CUADRO DE CONFIRMACION ES UN MODAL, y al aceptar todavia esta en
+      pantalla, fundiendose con su velo oscuro. Se espera a que se haya ido
+      antes de guardar, enviar y repintar la pantalla de debajo: es la regla de
+      `lib/afterSheetClose` (13/10/2026, la pantalla gris al publicar).
+      Mientras tanto otra pulsacion pudo empezar a enviarlo: esa manda.
+    */
+    await afterSheetClose();
+    if (ocupadoRef.current) return;
 
     // Se guarda primero: enviar lo que hay en la pantalla y no lo que quedó en
     // el servidor la última vez. Si el guardado falla, no se envía nada.

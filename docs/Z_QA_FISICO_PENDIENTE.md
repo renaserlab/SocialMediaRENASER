@@ -3862,8 +3862,14 @@ una tiene ya una corrección.
    un EVENTO y publicar un PRODUCTO no cambian de pantalla: preguntan con un
    cuadro de confirmación, guardan y avisan. Ese cuadro —y la hoja de «Crear»—
    oscurecen la pantalla con un velo; si el velo se quedara puesto, se vería un
-   gris OSCURO, «plomo», con la pantalla de detrás adivinándose. **Esto no está
-   corregido**, porque no hay nada que lo demuestre todavía.
+   gris OSCURO, «plomo», con la pantalla de detrás adivinándose. **Corregido el
+   13/10, también sin confirmar:** la hoja de «Crear» cerraba y abría el
+   asistente del curso o el borrador del evento EN EL MISMO INSTANTE, con la
+   hoja todavía fundiéndose; ahora espera a que se haya ido y después cambia de
+   pantalla. Y al aceptar el cuadro de «¿Publicar?» de un evento o de un
+   producto, se espera a que el cuadro se haya ido antes de guardar y repintar
+   la pantalla. Es la regla que el proyecto ya tenía para las hojas
+   (`lib/afterSheetClose`) y que ahí no se cumplía.
 
 **Si vuelve a salir, lo que hace falta para saber cuál es** (un minuto, sin
 herramientas):

@@ -23,6 +23,7 @@ import {
 import { SelectorDeCategoria } from '@/components/SelectorDeCategoria';
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import { useAppStore } from '@/store/useAppStore';
+import { afterSheetClose, closeThen } from '@/lib/afterSheetClose';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { CourseContentRepository } from '@/repositories/CourseContentRepository';
@@ -371,33 +372,47 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
         }
       }
       onCreated?.();
-      // El aviso va DESPUES de cerrar. Mientras la hoja (un Modal) siga
-      // montada, en iOS tapa cualquier cosa que se pinte por encima: el
-      // mensaje de exito no llegaba a verse nunca.
-      close();
-      toast(
-        editing
-          ? isEvent ? t('catalog.eventUpdated') : t('catalog.courseUpdated')
-          : isPodcast ? t('catalog.episodePublished')
-          : isEvent ? t('catalog.eventDraftCreated') : t('catalog.courseDraftCreated'),
-      );
+      const hecho = editing
+        ? isEvent ? t('catalog.eventUpdated') : t('catalog.courseUpdated')
+        : isPodcast ? t('catalog.episodePublished')
+        : isEvent ? t('catalog.eventDraftCreated') : t('catalog.courseDraftCreated');
       /*
         UN CURSO RECIEN CREADO NO ESTA TERMINADO, y esta hoja no puede
         terminarlo: le faltan el temario, lo que se aprende, el nivel y la
         vista previa. Antes se cerraba aqui y el borrador se quedaba en una
-        lista, sin que nada dijera que el siguiente paso existia.
+        lista, sin que nada dijera que el siguiente paso existia. Se abre el
+        asistente, que es donde se completa.
 
-        Se abre el asistente, que es donde se completa. Nunca ANTES de cerrar:
-        en iOS esta hoja es un Modal y navegar por debajo la dejaria encima.
-      */
-      if (nuevoCurso) router.push(`/editar-curso/${nuevoCurso}` as never);
-      /*
         UN EVENTO RECIEN CREADO YA NO SE PUBLICA SOLO. Nace borrador y pasa por
         admision, asi que el aviso decia «Evento publicado» sobre algo que no
         se ve en ningun sitio. Se lleva a su borrador, que es donde se completa
         y desde donde se envia a revision.
       */
-      if (nuevoEvento) router.push(`/editar-evento/${nuevoEvento}` as never);
+      const destino = nuevoCurso
+        ? `/editar-curso/${nuevoCurso}`
+        : nuevoEvento
+          ? `/editar-evento/${nuevoEvento}`
+          : null;
+      // El aviso va DESPUES de cerrar. Mientras la hoja (un Modal) siga
+      // montada, en iOS tapa cualquier cosa que se pinte por encima: el
+      // mensaje de exito no llegaba a verse nunca.
+      close();
+      if (destino === null) {
+        toast(hecho);
+      } else {
+        /*
+          SE ESPERA A QUE LA HOJA SE HAYA IDO ANTES DE CAMBIAR DE PANTALLA
+          (13/10/2026). Se cerraba y se navegaba en el mismo instante: la hoja
+          es un Modal —otra ventana, con su velo oscuro— y todavia estaba en
+          pantalla, fundiendose, cuando la pila empezaba a meter el asistente.
+          Es la regla de `lib/afterSheetClose`, que esta misma hoja ya cumplia
+          al borrar y aqui no; y es donde se vio la pantalla gris al terminar
+          de crear un curso o un evento. El aviso sale al llegar.
+        */
+        await afterSheetClose();
+        router.push(destino as never);
+        toast(hecho);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('create.publishFailed'));
     } finally {
@@ -599,8 +614,8 @@ export function CreateCatalogSheet({ kind, visible, onClose, onCreated, editing,
           <Pressable
             onPress={() => {
               const destino = editing.id;
-              close();
-              router.push(`/editar-curso/${destino}` as never);
+              // Primero se va la hoja; despues se cambia de pantalla.
+              closeThen(close, () => router.push(`/editar-curso/${destino}` as never));
             }}
             accessibilityRole="button"
             accessibilityLabel={t('catalog.openWizard')}
