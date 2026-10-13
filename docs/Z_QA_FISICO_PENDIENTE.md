@@ -3848,19 +3848,45 @@ escribir la burbuja se va y la lista queda en el final.
 
 ### La pantalla gris al terminar de crear
 
-Qué se hizo: en Android, la pantalla que **sustituye** a la de arriba (lo que
-pasa al publicar un curso, crear un producto, guardar la contraseña nueva o
-terminar un paso de Servicios) llega **sin animación**. Es el tramo donde la
-pantalla retirada se quedaba pintada encima, ya vacía. La causa exacta no se
-pudo reproducir fuera del teléfono: si vuelve a salir, anotar en qué paso,
-con qué versión, y **si al tocar la pantalla gris responde lo que hay debajo**.
+**No está demostrado que esté resuelta.** La causa exacta no se conoce: nunca
+se pudo reproducir fuera de un teléfono. Hay dos explicaciones posibles, y solo
+una tiene ya una corrección.
+
+1. **Al cambiar una pantalla por otra.** Publicar un curso desde el asistente,
+   crear un producto («nuevo» pasa a ser su ficha), crear un servicio y guardar
+   la contraseña nueva quitan la pantalla de arriba y ponen otra en el mismo
+   paso. En Android la que sale puede quedarse pintada encima, ya vacía. **Esto
+   es lo corregido:** esa llegada va ahora sin animación. Se vería un gris MUY
+   CLARO, casi blanco, liso.
+2. **El velo oscuro de un cuadro o de una hoja que no se va.** Enviar o publicar
+   un EVENTO y publicar un PRODUCTO no cambian de pantalla: preguntan con un
+   cuadro de confirmación, guardan y avisan. Ese cuadro —y la hoja de «Crear»—
+   oscurecen la pantalla con un velo; si el velo se quedara puesto, se vería un
+   gris OSCURO, «plomo», con la pantalla de detrás adivinándose. **Esto no está
+   corregido**, porque no hay nada que lo demuestre todavía.
+
+**Si vuelve a salir, lo que hace falta para saber cuál es** (un minuto, sin
+herramientas):
+
+- una **captura de pantalla** del gris: el tono, y si se adivina algo detrás,
+  distinguen las dos explicaciones;
+- cuál fue el **último botón** que se tocó, y si antes salió un cuadro de
+  confirmación;
+- si **al tocar** responde lo que hay debajo, y qué hace el botón «Atrás»;
+- si al mandar la aplicación al fondo y volver, sigue gris;
+- el teléfono, su versión de Android y la versión de Z (Configuración).
+
+Con el teléfono conectado por cable se puede además sacar el registro del
+sistema en ese momento, que es la prueba definitiva.
 
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
 | Crear un curso desde «Crear», completarlo y publicarlo: se llega a Cursos, con el curso arriba, sin pantalla gris | | | |
 | Lo mismo abriendo el asistente desde «Gestionar curso» (Cursos ya estaba abierta): se vuelve a Cursos | | | |
 | Crear un producto nuevo y guardar: se llega a la ficha del producto, sin pantalla gris | | | |
-| Crear un evento, completarlo y enviarlo: se vuelve a donde se estaba, sin pantalla gris | | | |
+| Crear un evento, completarlo y enviarlo (sale un cuadro de confirmación; la pantalla NO cambia): al aceptar se ve el evento, sin pantalla gris | | | |
+| Publicar un producto («Postula tu producto»; también pregunta antes): al aceptar se ve la ficha, sin pantalla gris | | | |
+| Crear un curso o un evento desde la hoja de «Crear»: al tocar «Crear» la hoja se cierra y se abre el asistente, sin quedarse gris | | | |
 | Recuperar la contraseña desde el correo y guardar la nueva: se llega a Inicio | | | |
 | En Servicios, terminar un paso del alta (datos, condiciones, credencial): se llega al paso siguiente | | | |
 | Esas llegadas son de golpe, sin deslizar; avanzar y volver atrás en el resto de la aplicación siguen deslizando | | | |
