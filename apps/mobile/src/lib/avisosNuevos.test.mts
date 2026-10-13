@@ -202,7 +202,9 @@ describe('un solo sistema de avisos, enchufado', () => {
     // vivo, que ya puede haber anunciado ese mismo mensaje.
     assert.match(
       PUSH,
-      /conversacion &&\s*alRecibirUnMensajePorPush\(conversacion, mensajeDelPush\(data\), \(body \?\? ''\)\.trim\(\) \|\| null\)\s*\) \{\s*return;/,
+      // El texto es la ÚLTIMA línea del push: desde el 13/10/2026 el cuerpo
+      // trae todo lo que hay sin leer, y el aviso flotante habla de uno.
+      /conversacion &&\s*alRecibirUnMensajePorPush\(conversacion, mensajeDelPush\(data\), ultimoTextoDelPush\(body\)\)\s*\) \{\s*return;/,
     );
     // Y allí el segundo se descarta por su identificador.
     assert.match(VIVO, /if \(anunciados\.has\(mensajeId\)\) return;/);

@@ -160,6 +160,23 @@ export function mensajeDelPush(datos: unknown): string | null {
 }
 
 /**
+ * Lo último que dice el push de un mensaje.
+ *
+ * Desde el 13/10/2026 el cuerpo de ese push trae TODO lo que la persona tiene
+ * sin leer en el chat, un mensaje por línea, para que el aviso del sistema se
+ * pueda desplegar. Con la aplicación abierta el aviso flotante habla de UN
+ * mensaje —el que acaba de llegar—, que es la última línea; las de antes ya se
+ * anunciaron cuando llegaron.
+ */
+export function ultimoTextoDelPush(cuerpo: string | null | undefined): string | null {
+  const lineas = (cuerpo ?? '')
+    .split('\n')
+    .map((linea) => linea.trim())
+    .filter(Boolean);
+  return lineas.length > 0 ? (lineas[lineas.length - 1] as string) : null;
+}
+
+/**
  * Si un push es de la agenda: pedir una sesión, aceptarla, cancelarla…
  *
  * Con la aplicación abierta ese aviso no lo pinta el oyente del push: se

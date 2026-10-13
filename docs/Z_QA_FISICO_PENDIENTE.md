@@ -3177,8 +3177,7 @@ ficha, crear un grupo, crear un filtro y Contenido. Nada visto en teléfono.
 
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
-| Con la aplicación cerrada, un mensaje en el grupo avisa «X envió un mensaje al grupo «Y»» | | | |
-| El aviso NO lleva el texto del mensaje | | | |
+| Con la aplicación cerrada, un mensaje en el grupo avisa con el nombre del grupo y, en cada línea, quién escribió y qué (cambió el 13/10: antes decía «X envió un mensaje al grupo «Y»», sin el texto) | | | |
 | Tocar el aviso abre el chat del grupo | | | |
 | A quien escribe no le llega su propio aviso | | | |
 | Un mensaje en un chat de dos sigue avisando «X te envió un mensaje» | | | |
@@ -4022,3 +4021,58 @@ Sin ver en teléfono.
 | Con la aplicación abierta, un aviso nuevo sigue saliendo al momento, como siempre | | | |
 | Fuera de la aplicación, las notificaciones muestran la Z y no la «R» | | | |
 | La Z se ve bien en la barra de arriba (pequeña) y en el panel de notificaciones | | | |
+
+---
+
+## Notificaciones de mensajes: una casilla por chat, con el texto (13/10/2026)
+
+Es un cambio del **servidor**: hay que desplegarlo (a mano mientras GitHub siga
+sin cupo). No necesita una compilación nueva para verse fuera de la aplicación;
+la 1.2.4 trae además un ajuste pequeño del aviso flotante con la aplicación
+abierta.
+
+Qué cambia, como en WhatsApp:
+
+- **Una casilla por conversación.** Cada mensaje nuevo del mismo chat REEMPLAZA
+  la casilla anterior en vez de sumar otra. Otra persona u otro grupo, otra
+  casilla.
+- **Con lo que hay sin leer en ese chat**, un mensaje por línea, de lo más
+  antiguo a lo más nuevo. Plegada se ve el principio; al desplegarla, todo. El
+  título es la persona (o el grupo) y cuántos mensajes hay.
+- **En un grupo** cada línea dice quién la escribió.
+- Una foto es «📷 Foto», un video «🎥 Video», una nota de voz «🎤 Nota de voz»
+  y un archivo «📎 Archivo»: el nombre del archivo no viaja.
+
+**Decisión que conviene conocer:** hasta este cambio el aviso NO llevaba el
+texto del mensaje, a propósito, porque se lee con el teléfono bloqueado. Ahora
+lo lleva. Quien no quiera que se vea en la pantalla de bloqueo lo oculta en los
+ajustes de notificaciones de Android.
+
+Lo que no cambia: las demás notificaciones (reacciones, comentarios,
+seguidores, sesiones) siguen cada una en su casilla y con su texto.
+
+Comprobado con las pruebas del servidor qué texto y qué etiqueta se manda a
+cada persona. **Sin ver en ningún teléfono**: que Android reemplace la casilla
+y que al desplegarla se lean todas las líneas solo se ve ahí. Solo Android: en
+iPhone seguiría saliendo una casilla por mensaje.
+
+Para probar hacen falta dos teléfonos (tres para el grupo), con la aplicación
+CERRADA en el que recibe.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| A manda un mensaje a B: a B le sale UNA casilla con el nombre de A y el texto | | | |
+| A manda dos más sin que B abra: sigue habiendo UNA casilla, y el título dice «A (3 mensajes)» | | | |
+| Al desplegar esa casilla se leen los tres mensajes, en orden | | | |
+| C le escribe a B: sale OTRA casilla, la de C; la de A sigue ahí | | | |
+| B abre el chat de A y lo cierra; A manda otro: la casilla trae solo ese, no los ya leídos | | | |
+| Más de seis sin leer: salen los seis últimos y arriba «… y N anteriores» | | | |
+| En un grupo: el título es el nombre del grupo y cada línea empieza por quién escribió | | | |
+| Una foto sale como «📷 Foto», sin el nombre del archivo; igual video, nota de voz y archivo | | | |
+| Un mensaje muy largo sale recortado en una línea, con «…» | | | |
+| Tocar la casilla abre ESE chat | | | |
+| Una reacción a una publicación sale en su propia casilla: «A X le gustó tu publicación» | | | |
+| Un chat silenciado sigue sin avisar | | | |
+| Alguien bloqueado sigue sin poder hacer sonar el teléfono | | | |
+| Con la aplicación ABIERTA y en otra pantalla: el aviso flotante dice solo el último mensaje, no la lista | | | |
+| Con el teléfono bloqueado: se ve lo que el teléfono tenga configurado para la pantalla de bloqueo | | | |

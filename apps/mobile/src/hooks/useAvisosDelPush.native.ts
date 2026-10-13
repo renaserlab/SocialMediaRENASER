@@ -14,6 +14,7 @@ import {
   conversacionDelPush,
   esPushDeSesion,
   mensajeDelPush,
+  ultimoTextoDelPush,
   rutaDelPush,
 } from '@/lib/rutaDelPush';
 import { avisar } from '@/lib/toast';
@@ -79,7 +80,7 @@ export function useAvisosDelPush(): void {
       */
       if (
         conversacion &&
-        alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data), (body ?? '').trim() || null)
+        alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data), ultimoTextoDelPush(body))
       ) {
         return;
       }

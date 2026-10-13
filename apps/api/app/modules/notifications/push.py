@@ -50,8 +50,9 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "refund_rejected": ("Solicitud rechazada", "Revisa el motivo en tus compras."),
     "refund_refunded": ("Devolución completada", "El importe vuelve a tu método de pago."),
     "follow": ("Nuevo seguidor", "{actor} empezó a seguirte."),
-    # Un mensaje de chat. SIN EL TEXTO DEL MENSAJE: un push se lee en la
-    # pantalla bloqueada. Dice quién escribe; el contenido se lee dentro.
+    # Un mensaje de chat. ESTE ES EL TEXTO DE RESERVA: desde el 13/10/2026 el
+    # aviso de un mensaje dice lo que la persona tiene sin leer en ese chat
+    # (`messaging/avisos.textos_para`). Si eso no se pudo armar, sale este.
     "message": ("Nuevo mensaje", "{actor} te envió un mensaje."),
     # El mismo aviso, en un GRUPO: dice quién y en cuál, porque «te envió un
     # mensaje» sería mentira —no era para ti solo— y sin el nombre del grupo
@@ -305,6 +306,64 @@ async def _enviar_a(
         }
         for token in tokens
     ]
+    await _enviar_lotes(messages)
+
+
+async def _leer_tokens_por_persona(db: AsyncSession, user_ids: list[str]) -> list[tuple[str, str]]:
+    """Los aparatos de esas personas, cada uno con su dueño. NUNCA LANZA.
+
+    Hace falta saber de quién es cada aparato cuando el aviso no es el mismo
+    para todos (el de un mensaje: cada quien tiene sin leer una cosa distinta).
+    """
+    try:
+        result = await db.execute(
+            select(DeviceToken.user_id, DeviceToken.token).where(
+                DeviceToken.user_id.in_(user_ids)
+            )
+        )
+        return [(str(fila[0]), fila[1]) for fila in result.all()]
+    except Exception:  # noqa: BLE001 - un fallo aquí no debe romper la petición
+        logger.warning("[push] no se pudieron leer los tokens", exc_info=True)
+        return []
+
+
+def mensajes_personales(
+    aparatos: list[tuple[str, str]],
+    *,
+    de_reserva: tuple[str, str],
+    personales: dict[str, tuple[str, str]],
+    channel: str,
+    data: dict | None,
+    etiqueta: str | None,
+) -> list[dict]:
+    """Un mensaje por aparato, con el título y el cuerpo de SU dueño.
+
+    `etiqueta` es el `tag` de Expo (solo Android): con la misma etiqueta, el
+    teléfono reemplaza el aviso que ya enseñaba en vez de añadir otro. A quien
+    no tenga texto propio le llega el de reserva.
+    """
+    salida: list[dict] = []
+    for persona, token in aparatos:
+        title, body = personales.get(persona) or de_reserva
+        mensaje = {
+            "to": token,
+            "title": title,
+            "body": body,
+            "sound": "default",
+            "channelId": canal_android(channel),
+            "priority": "high",
+            "data": data or {},
+        }
+        if etiqueta:
+            mensaje["tag"] = etiqueta
+        salida.append(mensaje)
+    return salida
+
+
+async def _enviar_lotes(messages: list[dict]) -> None:
+    """Manda a Expo los mensajes ya armados, de cien en cien. NO TOCA LA BASE."""
+    if not messages:
+        return
 
     muertos: list[str] = []
     for start in range(0, len(messages), BATCH_SIZE):
@@ -431,6 +490,8 @@ async def _enviar_con_sesion_propia(
     actor_name: str | None,
     data: dict | None,
     grupo: str | None = None,
+    personales: dict[str, tuple[str, str]] | None = None,
+    etiqueta: str | None = None,
 ) -> None:
     """El envío real, ya fuera de la petición y con su propia sesión.
 
@@ -452,6 +513,30 @@ async def _enviar_con_sesion_propia(
     if message is None:
         return
     title, body = message
+
+    if personales or etiqueta:
+        # A CADA PERSONA LO SUYO. El aviso de un mensaje no es igual para
+        # todos, así que hay que saber de quién es cada aparato. La conexión
+        # se suelta igual antes de hablar con Expo.
+        async with SessionLocal() as db:
+            aparatos = await _leer_tokens_por_persona(db, user_ids)
+        if not aparatos:
+            logger.info(
+                "[push] %s: %s destinatario(s) sin ningún aparato registrado",
+                notification_type,
+                len(user_ids),
+            )
+        await _enviar_lotes(
+            mensajes_personales(
+                aparatos,
+                de_reserva=(title, body),
+                personales=personales or {},
+                channel=CHANNELS.get(notification_type, "interacciones"),
+                data=data,
+                etiqueta=etiqueta,
+            )
+        )
+        return
 
     async with SessionLocal() as db:
         tokens = await _leer_tokens(db, user_ids)
@@ -483,8 +568,14 @@ def encolar_push(
     actor_name: str | None = None,
     data: dict | None = None,
     grupo: str | None = None,
+    personales: dict[str, tuple[str, str]] | None = None,
+    etiqueta: str | None = None,
 ) -> None:
     """Programa el aviso para DESPUÉS de responder. Úsese siempre esto.
+
+    `personales` es el título y el cuerpo de cada destinatario cuando el aviso
+    no es el mismo para todos, y `etiqueta` hace que el teléfono reemplace el
+    aviso anterior con esa misma etiqueta. Los usa el aviso de un mensaje.
 
     POR QUE NO SE ENVIA DENTRO DE LA PETICION.
 
@@ -514,6 +605,8 @@ def encolar_push(
         actor_name,
         data,
         grupo,
+        personales,
+        etiqueta,
     )
 
 

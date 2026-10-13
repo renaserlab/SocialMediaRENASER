@@ -26,7 +26,9 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from datetime import datetime, timedelta
+
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.security import AuthUser, get_current_user
@@ -34,7 +36,12 @@ from app.main import app
 from app.modules.messaging import avisos
 from app.modules.messaging import esquema as esquema_mensajes
 from app.modules.messaging import router as messaging_router
-from app.modules.messaging.models import Conversation, ConversationMember, Message
+from app.modules.messaging.models import (
+    Conversation,
+    ConversationMember,
+    Message,
+    MessageAttachment,
+)
 from app.modules.notifications import push
 from app.modules.notifications.models import Notification
 from app.modules.profiles.models import Profile
@@ -194,16 +201,23 @@ async def test_en_un_grupo_el_bloqueo_solo_quita_a_esa_persona(entorno, pushes):
 # --------------------------------------------------------------------------- #
 # 2. Qué dice y qué viaja
 # --------------------------------------------------------------------------- #
-async def test_el_aviso_dice_quien_escribe_y_nunca_que_escribio(entorno, pushes):
+async def test_el_aviso_dice_quien_escribe_y_que_escribio(entorno, pushes):
+    """Decidido el 13/10/2026, como en WhatsApp: el aviso lleva el texto.
+
+    Hasta entonces decía «Ana te envió un mensaje» y nada más, y en el teléfono
+    eran casillas iguales, una por mensaje, sin saber qué se había escrito.
+    """
     http, _, _ = entorno
     await _enviar(http, texto=SECRETO)
 
     aviso = pushes[0]
     assert aviso["actor_name"] == "Ana Pérez"
-    # Ni en los datos ni en el texto que se va a mandar.
-    assert SECRETO not in str(aviso)
+    # A quien lo recibe: de quién es, y qué dice.
+    assert aviso["personales"] == {BRUNO: ("Ana Pérez", SECRETO)}
+    # En los DATOS sigue sin viajar: son identificadores para abrir el chat.
+    assert SECRETO not in str(aviso["data"])
+    # Y el texto de reserva, por si no se pudo armar, sigue sin llevarlo.
     titulo, cuerpo = push.build_message("message", aviso["actor_name"])
-    assert "Ana Pérez" in cuerpo
     assert SECRETO not in titulo + cuerpo
 
 
@@ -473,3 +487,333 @@ async def test_sin_aparato_registrado_se_dice_cuantos_y_no_quienes(monkeypatch, 
     registro = " ".join(r.getMessage() for r in caplog.records)
     assert "message: 1 destinatario(s) sin ningún aparato registrado" in registro
     assert BRUNO not in registro
+
+
+# --------------------------------------------------------------------------- #
+# UNA CASILLA POR CONVERSACIÓN, CON LO QUE HAY SIN LEER (13/10/2026)
+# --------------------------------------------------------------------------- #
+async def _leyo_hasta_ahora(sesiones, persona: str, chat: str = CHAT) -> None:
+    """Esa persona abre el chat: su marca de lectura queda después de todo."""
+    async with sesiones() as db:
+        await db.execute(
+            update(ConversationMember)
+            .where(
+                ConversationMember.conversation_id == chat,
+                ConversationMember.user_id == persona,
+            )
+            .values(last_read_at=datetime.utcnow() + timedelta(seconds=5))
+        )
+        await db.commit()
+
+
+async def _enviar_fechado(http, sesiones, puesto: int, chat: str = CHAT, texto: str = "hola") -> None:
+    """Envía un mensaje y lo deja fechado en su puesto, en el pasado.
+
+    SQLite guarda la hora con segundos: varios mensajes mandados seguidos en
+    una prueba empatan, y el orden entre ellos no estaría definido. En
+    PostgreSQL la hora lleva microsegundos y no hace falta.
+    """
+    respuesta = await http.post(f"{API}/{chat}/messages", json={"body": texto})
+    assert respuesta.status_code == 201, respuesta.text
+    async with sesiones() as db:
+        await db.execute(
+            update(Message)
+            .where(Message.id == respuesta.json()["id"])
+            .values(created_at=datetime.utcnow() - timedelta(hours=1) + timedelta(minutes=puesto))
+        )
+        await db.commit()
+
+
+async def test_cada_conversacion_tiene_su_etiqueta_y_siempre_la_misma(entorno, pushes):
+    http, _, _ = entorno
+    await _enviar(http, texto="uno")
+    await _enviar(http, texto="dos")
+    await _enviar(http, GRUPO, texto="al grupo")
+
+    # Con la misma etiqueta el teléfono reemplaza el aviso en vez de sumar otro.
+    assert pushes[0]["etiqueta"] == pushes[1]["etiqueta"] == f"chat-{CHAT}"
+    # Otra conversación, otra casilla.
+    assert pushes[2]["etiqueta"] == f"chat-{GRUPO}"
+    assert pushes[2]["etiqueta"] != pushes[0]["etiqueta"]
+
+
+async def test_los_mensajes_sin_leer_se_acumulan_en_el_mismo_aviso(entorno, pushes):
+    http, sesiones, _ = entorno
+    await _enviar_fechado(http, sesiones, 1, texto="Hola")
+    await _enviar_fechado(http, sesiones, 2, texto="¿Estás?")
+    await _enviar_fechado(http, sesiones, 3, texto="Te mandé el archivo")
+
+    assert pushes[0]["personales"][BRUNO] == ("Ana Pérez", "Hola")
+    assert pushes[1]["personales"][BRUNO] == ("Ana Pérez (2 mensajes)", "Hola\n¿Estás?")
+    assert pushes[2]["personales"][BRUNO] == (
+        "Ana Pérez (3 mensajes)",
+        "Hola\n¿Estás?\nTe mandé el archivo",
+    )
+
+
+async def test_lo_que_ya_se_leyo_no_vuelve_a_salir(entorno, pushes):
+    http, sesiones, _ = entorno
+    await _enviar(http, texto="viejo uno")
+    await _enviar(http, texto="viejo dos")
+    await _leyo_hasta_ahora(sesiones, BRUNO)
+    # El reloj de la base tiene que pasar de la marca de lectura.
+    async with sesiones() as db:
+        await db.execute(
+            update(ConversationMember)
+            .where(ConversationMember.conversation_id == CHAT, ConversationMember.user_id == BRUNO)
+            .values(last_read_at=datetime.utcnow() - timedelta(seconds=1))
+        )
+        await db.execute(
+            update(Message)
+            .where(Message.conversation_id == CHAT)
+            .values(created_at=datetime.utcnow() - timedelta(minutes=5))
+        )
+        await db.commit()
+
+    await _enviar(http, texto="nuevo")
+
+    assert pushes[-1]["personales"][BRUNO] == ("Ana Pérez", "nuevo")
+
+
+async def test_en_un_grupo_cada_linea_dice_quien_y_el_titulo_es_el_grupo(entorno, pushes):
+    http, sesiones, identidad = entorno
+    async with sesiones() as db:
+        await db.execute(update(Conversation).where(Conversation.id == GRUPO).values(title="Talento"))
+        await db.commit()
+
+    await _enviar_fechado(http, sesiones, 1, GRUPO, texto="Reunión a las 5")
+    identidad["uid"] = CARLA
+    await _enviar_fechado(http, sesiones, 2, GRUPO, texto="Voy")
+
+    # A Bruno le escribieron Ana y Carla; Carla no tiene nombre y sale su usuario.
+    assert pushes[1]["personales"][BRUNO] == (
+        "Talento (2 mensajes)",
+        "Ana: Reunión a las 5\ncarla: Voy",
+    )
+    # A Ana, lo suyo no: solo lo que escribió Carla.
+    assert pushes[1]["personales"][ANA] == ("Talento", "carla: Voy")
+    # Nadie se avisa a sí mismo.
+    assert CARLA not in pushes[1]["personales"]
+
+
+async def test_un_grupo_sin_nombre_no_deja_el_titulo_vacio(entorno, pushes):
+    http, _, _ = entorno
+    await _enviar(http, GRUPO, texto="hola")
+    assert pushes[0]["personales"][BRUNO][0] == "Grupo"
+
+
+async def test_a_cada_quien_lo_que_tiene_sin_leer_y_no_lo_del_otro(entorno, pushes):
+    http, sesiones, _ = entorno
+    await _enviar(http, GRUPO, texto="primero")
+    # Bruno abre el grupo; Carla, no.
+    async with sesiones() as db:
+        await db.execute(
+            update(Message)
+            .where(Message.conversation_id == GRUPO)
+            .values(created_at=datetime.utcnow() - timedelta(minutes=5))
+        )
+        await db.execute(
+            update(ConversationMember)
+            .where(ConversationMember.conversation_id == GRUPO, ConversationMember.user_id == BRUNO)
+            .values(last_read_at=datetime.utcnow() - timedelta(seconds=1))
+        )
+        await db.commit()
+
+    await _enviar(http, GRUPO, texto="segundo")
+
+    assert pushes[-1]["personales"][BRUNO][1] == "Ana: segundo"
+    assert pushes[-1]["personales"][CARLA][1] == "Ana: primero\nAna: segundo"
+
+
+async def test_con_muchos_sin_leer_salen_los_ultimos_y_se_dice_cuantos_quedan_fuera(entorno, pushes):
+    http, sesiones, _ = entorno
+    for numero in range(1, 10):
+        await _enviar_fechado(http, sesiones, numero, texto=f"mensaje {numero}")
+
+    titulo, cuerpo = pushes[-1]["personales"][BRUNO]
+    assert titulo == "Ana Pérez (9 mensajes)"
+    lineas = cuerpo.split("\n")
+    assert lineas[0] == "… y 3 anteriores"
+    assert lineas[1:] == [f"mensaje {n}" for n in range(4, 10)]
+    assert len(lineas) == avisos.MENSAJES_EN_EL_AVISO + 1
+
+
+async def test_un_mensaje_borrado_no_sale_en_el_aviso(entorno, pushes):
+    http, sesiones, _ = entorno
+    await _enviar(http, texto="me arrepentí")
+    async with sesiones() as db:
+        await db.execute(
+            update(Message).where(Message.conversation_id == CHAT).values(deleted_at=datetime.utcnow())
+        )
+        await db.commit()
+
+    await _enviar(http, texto="mejor esto")
+
+    assert pushes[-1]["personales"][BRUNO] == ("Ana Pérez", "mejor esto")
+
+
+async def test_una_foto_se_dice_foto_y_nunca_el_nombre_del_archivo(entorno, pushes):
+    http, sesiones, _ = entorno
+    foto = "ffffffff-0000-0000-0000-000000000001"
+    async with sesiones() as db:
+        db.add(Message(id=foto, conversation_id=CHAT, sender_id=ANA, body=""))
+        db.add(
+            MessageAttachment(
+                message_id=foto,
+                conversation_id=CHAT,
+                storage_path=f"{CHAT}/informe-medico-confidencial.jpg",
+                kind="image",
+                file_name="informe-medico-confidencial.jpg",
+            )
+        )
+        await db.commit()
+
+    textos = None
+    async with sesiones() as db:
+        textos = await avisos.textos_para(
+            db, conversation_id=CHAT, destinatarios=[BRUNO], grupo=None, remitente="Ana Pérez"
+        )
+
+    assert textos[BRUNO] == ("Ana Pérez", "📷 Foto")
+    assert "informe" not in str(textos)
+
+
+async def test_el_texto_va_en_una_linea_y_no_se_pasa_de_largo():
+    assert avisos.en_una_linea("  hola\n\nqué   tal  ") == "hola qué tal"
+    largo = avisos.en_una_linea("a" * 500)
+    assert len(largo) == avisos.LARGO_DE_UN_MENSAJE
+    assert largo.endswith("…")
+    assert avisos.en_una_linea(None) == ""
+
+
+async def test_sin_nada_sin_leer_no_hay_texto_propio_y_sale_el_de_reserva():
+    assert avisos.componer([], grupo=None, remitente="Ana") is None
+    # Sin nombre de quien escribe, el título no queda vacío.
+    assert avisos.componer([(None, "hola")], grupo=None, remitente=None) == ("Nuevo mensaje", "hola")
+
+
+async def test_armar_el_texto_nunca_tumba_el_aviso():
+    class _BaseRota:
+        async def execute(self, *_a, **_k):
+            raise RuntimeError("sin base")
+
+    textos = await avisos.textos_para(
+        _BaseRota(), conversation_id=CHAT, destinatarios=[BRUNO], grupo=None, remitente="Ana"
+    )
+    assert textos == {}
+    assert await avisos.textos_para(
+        _BaseRota(), conversation_id=CHAT, destinatarios=[], grupo=None, remitente="Ana"
+    ) == {}
+
+
+async def test_cada_aparato_recibe_el_texto_de_su_dueno_y_la_etiqueta():
+    mensajes = push.mensajes_personales(
+        [(BRUNO, "ExponentPushToken[b1]"), (BRUNO, "ExponentPushToken[b2]"), (CARLA, "ExponentPushToken[c1]")],
+        de_reserva=("Nuevo mensaje", "Ana te envió un mensaje."),
+        personales={BRUNO: ("Ana (2 mensajes)", "Hola\n¿Estás?")},
+        channel="mensajes",
+        data={"type": "message", "conversationId": CHAT},
+        etiqueta=f"chat-{CHAT}",
+    )
+
+    assert [m["to"] for m in mensajes] == [
+        "ExponentPushToken[b1]",
+        "ExponentPushToken[b2]",
+        "ExponentPushToken[c1]",
+    ]
+    # Los dos teléfonos de Bruno, lo de Bruno.
+    assert mensajes[0]["title"] == mensajes[1]["title"] == "Ana (2 mensajes)"
+    assert mensajes[0]["body"] == "Hola\n¿Estás?"
+    # Carla no tenía texto propio: le llega el de reserva.
+    assert (mensajes[2]["title"], mensajes[2]["body"]) == ("Nuevo mensaje", "Ana te envió un mensaje.")
+    # Todos con la etiqueta de la conversación, el canal y los datos de siempre.
+    for mensaje in mensajes:
+        assert mensaje["tag"] == f"chat-{CHAT}"
+        assert mensaje["channelId"] == push.canal_android("mensajes")
+        assert mensaje["priority"] == "high"
+        assert mensaje["data"] == {"type": "message", "conversationId": CHAT}
+
+
+async def test_sin_etiqueta_el_mensaje_no_lleva_ese_campo():
+    (mensaje,) = push.mensajes_personales(
+        [(BRUNO, "ExponentPushToken[b1]")],
+        de_reserva=("t", "c"),
+        personales={},
+        channel="mensajes",
+        data=None,
+        etiqueta=None,
+    )
+    assert "tag" not in mensaje
+    assert mensaje["data"] == {}
+
+
+async def test_el_envio_personal_suelta_la_base_antes_de_hablar_con_expo(monkeypatch):
+    pasos: list[str] = []
+
+    class _Sesion:
+        async def __aenter__(self):
+            pasos.append("abre")
+            return self
+
+        async def __aexit__(self, *_a):
+            pasos.append("cierra")
+
+    async def _aparatos(_db, user_ids):
+        pasos.append("lee")
+        return [(BRUNO, "ExponentPushToken[b1]")]
+
+    enviados: list[list[dict]] = []
+
+    async def _lotes(mensajes):
+        pasos.append("envia")
+        enviados.append(mensajes)
+
+    monkeypatch.setattr(push, "SessionLocal", lambda: _Sesion())
+    monkeypatch.setattr(push, "_leer_tokens_por_persona", _aparatos)
+    monkeypatch.setattr(push, "_enviar_lotes", _lotes)
+
+    await push._enviar_con_sesion_propia(
+        [BRUNO],
+        "message",
+        "Ana",
+        {"type": "message"},
+        None,
+        {BRUNO: ("Ana", "hola")},
+        f"chat-{CHAT}",
+    )
+
+    assert pasos == ["abre", "lee", "cierra", "envia"]
+    assert enviados[0][0]["body"] == "hola"
+    assert enviados[0][0]["tag"] == f"chat-{CHAT}"
+
+
+async def test_los_demas_avisos_siguen_saliendo_igual_para_todos(monkeypatch):
+    """Un «me gusta» no es personal ni lleva etiqueta: sale por el camino de siempre."""
+    llamadas: list[str] = []
+
+    class _Sesion:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return None
+
+    async def _tokens(_db, user_ids):
+        llamadas.append("tokens")
+        return ["ExponentPushToken[b1]"]
+
+    async def _enviar_a(tokens, **kwargs):
+        llamadas.append("igual-para-todos")
+        assert kwargs["title"] == "Nueva reacción"
+
+    async def _personales(*_a, **_k):
+        raise AssertionError("un aviso sin texto propio no pregunta de quién es cada aparato")
+
+    monkeypatch.setattr(push, "SessionLocal", lambda: _Sesion())
+    monkeypatch.setattr(push, "_leer_tokens", _tokens)
+    monkeypatch.setattr(push, "_enviar_a", _enviar_a)
+    monkeypatch.setattr(push, "_leer_tokens_por_persona", _personales)
+
+    await push._enviar_con_sesion_propia([BRUNO], "like", "Ana", None)
+
+    assert llamadas == ["tokens", "igual-para-todos"]

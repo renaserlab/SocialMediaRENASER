@@ -354,14 +354,24 @@ async def test_el_aviso_de_un_grupo_dice_quien_y_en_cual(entorno, avisos_de_grup
     assert sorted(aviso["user_ids"]) == [ANA, CARLA]      # todos menos quien escribe
     assert aviso["actor_name"] == "Bruno"
     assert aviso["grupo"] == "Aula 3"
-    # Lleva a la conversación, y NO lleva el texto del mensaje.
+    # Lleva a la conversación. En los DATOS no viaja el texto del mensaje.
     assert aviso["data"] == {
         "type": "message",
         "conversationId": grupo,
         "messageId": enviado.json()["id"],
     }
-    assert "examen" not in str(aviso)
+    assert "examen" not in str(aviso["data"])
 
+    # Desde el 13/10/2026 el aviso dice lo que cada quien tiene sin leer: el
+    # título es el grupo y cada línea, quién la escribió. Y hay UNA casilla por
+    # conversación en el teléfono (ver `test_aviso_de_mensaje.py`).
+    assert aviso["personales"] == {
+        ANA: ("Aula 3", "Bruno: El examen es el viernes"),
+        CARLA: ("Aula 3", "Bruno: El examen es el viernes"),
+    }
+    assert aviso["etiqueta"] == f"chat-{grupo}"
+
+    # El texto de reserva, por si eso no se pudo armar, sigue siendo el de antes.
     titulo, cuerpo = push.build_message(aviso["notification_type"], aviso["actor_name"], aviso["grupo"])
     assert (titulo, cuerpo) == ("Nuevo mensaje", "Bruno envió un mensaje al grupo «Aula 3».")
 

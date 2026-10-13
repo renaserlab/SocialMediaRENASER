@@ -223,3 +223,24 @@ test('un aviso sin destino propio ya no abre la bandeja: se entra por Inicio', (
   // aplicación abierta: lo que cambia es que ARRANCAR no acaba allí.
   assert.equal(rutaDelPush({ type: 'algo_nuevo' }), RUTA_DE_LA_BANDEJA);
 });
+
+// El push de un mensaje trae todo lo que hay sin leer (13/10/2026).
+{
+  const { ultimoTextoDelPush } = await import('./rutaDelPush.ts');
+  const { test: prueba } = await import('node:test');
+  const { default: afirma } = await import('node:assert/strict');
+
+  prueba('del push de un mensaje, el aviso flotante usa lo último que dice', () => {
+    afirma.equal(ultimoTextoDelPush('Hola\n¿Estás?\nTe mandé el archivo'), 'Te mandé el archivo');
+    afirma.equal(ultimoTextoDelPush('… y 3 anteriores\nmensaje 4\nmensaje 9\n'), 'mensaje 9');
+    // En un grupo la línea ya dice quién.
+    afirma.equal(ultimoTextoDelPush('Ana: Reunión a las 5\ncarla: Voy'), 'carla: Voy');
+  });
+
+  prueba('un push de una sola línea sale tal cual, y uno vacío no dice nada', () => {
+    afirma.equal(ultimoTextoDelPush('Ana te envió un mensaje.'), 'Ana te envió un mensaje.');
+    afirma.equal(ultimoTextoDelPush('   '), null);
+    afirma.equal(ultimoTextoDelPush(null), null);
+    afirma.equal(ultimoTextoDelPush(undefined), null);
+  });
+}
