@@ -4,17 +4,28 @@ import { test } from 'node:test';
 import {
   CADA_CUANTO_AVISAR_MS,
   CADUCA_A_LOS_MS,
+  CONVERSACIONES_ATENDIDAS,
   NADIE,
+  NADIE_EN_NINGUNA,
   PAUSA_DEL_TONO_MS,
   anotar,
+  anotarEn,
   avisoDe,
+  cambioDeAtendidas,
   esDeFiar,
+  esDeFiarEnBandeja,
   faltaParaCaducar,
+  faltaParaCaducarAlguna,
   fraseDeEscritura,
+  lasQueSeAtienden,
   leerAviso,
   limpiar,
+  limpiarTodas,
+  nombreDePila,
   quienesEscriben,
   quitar,
+  quitarDe,
+  soloDe,
   suenaElTono,
   tocaAvisar,
   tocaAvisarQueParo,
@@ -139,4 +150,100 @@ test('el tono suena cuando alguien empieza, una vez, y solo si se está mirando'
   // Y con una pausa mínima: quien escribe a trompicones no lo hace sonar sin parar.
   assert.ok(!suenaElTono({ ...base, antes: 0, ahora: 1, ultimoTono: T - PAUSA_DEL_TONO_MS + 1 }));
   assert.ok(suenaElTono({ ...base, antes: 0, ahora: 1, ultimoTono: T - PAUSA_DEL_TONO_MS }));
+});
+
+/* ------------------------------------------------------------------------- */
+/* EN LA BANDEJA (12/10/2026): «escribiendo…» sin entrar al chat             */
+/* ------------------------------------------------------------------------- */
+
+test('la bandeja atiende sus primeras conversaciones, no todas', () => {
+  const ids = Array.from({ length: 60 }, (_, i) => `c${i}`);
+  const atendidas = lasQueSeAtienden(ids);
+  assert.equal(atendidas.length, CONVERSACIONES_ATENDIDAS);
+  // Las primeras: la bandeja llega ordenada por el último mensaje.
+  assert.deepEqual(atendidas.slice(0, 3), ['c0', 'c1', 'c2']);
+  // Muy por debajo de los cien canales que el proveedor deja por teléfono.
+  assert.ok(CONVERSACIONES_ATENDIDAS <= 30);
+  // Sin repetidos ni vacíos.
+  assert.deepEqual(lasQueSeAtienden(['a', '', 'a', 'b']), ['a', 'b']);
+  assert.deepEqual(lasQueSeAtienden([]), []);
+});
+
+test('si la bandeja se reordena, no se reabre ningún canal', () => {
+  assert.deepEqual(cambioDeAtendidas(['a', 'b', 'c'], ['c', 'a', 'b']), { abrir: [], cerrar: [] });
+  // Entra una conversación nueva y sale la última: un alta y una baja.
+  assert.deepEqual(cambioDeAtendidas(['a', 'b', 'c'], ['d', 'a', 'b']), { abrir: ['d'], cerrar: ['c'] });
+  assert.deepEqual(cambioDeAtendidas([], ['a']), { abrir: ['a'], cerrar: [] });
+  assert.deepEqual(cambioDeAtendidas(['a'], []), { abrir: [], cerrar: ['a'] });
+});
+
+test('quién escribe se lleva por conversación', () => {
+  let todas = NADIE_EN_NINGUNA;
+  todas = anotarEn(todas, 'grupo', 'katy', 1_000);
+  todas = anotarEn(todas, 'grupo', 'luis', 1_500);
+  todas = anotarEn(todas, 'ana', 'ana', 2_000);
+  assert.deepEqual(quienesEscriben(todas.grupo ?? NADIE, 2_000), ['katy', 'luis']);
+  assert.deepEqual(quienesEscriben(todas.ana ?? NADIE, 2_000), ['ana']);
+
+  // Quien paró sale; si era el último, la conversación entera.
+  todas = quitarDe(todas, 'ana', 'ana');
+  assert.equal('ana' in todas, false);
+  todas = quitarDe(todas, 'grupo', 'katy');
+  assert.deepEqual(Object.keys(todas.grupo ?? {}), ['luis']);
+});
+
+test('quitar a quien no estaba devuelve lo mismo: ninguna fila se repinta', () => {
+  const todas = anotarEn(NADIE_EN_NINGUNA, 'grupo', 'katy', 1_000);
+  assert.equal(quitarDe(todas, 'grupo', 'otro'), todas);
+  assert.equal(quitarDe(todas, 'no-atendida', 'katy'), todas);
+});
+
+test('lo caducado se retira de todas, y sin cambios devuelve lo mismo', () => {
+  let todas = anotarEn(NADIE_EN_NINGUNA, 'grupo', 'katy', 1_000);
+  todas = anotarEn(todas, 'ana', 'ana', 5_000);
+  assert.equal(limpiarTodas(todas, 2_000), todas);
+
+  const tras = limpiarTodas(todas, 1_000 + CADUCA_A_LOS_MS + 1);
+  assert.equal('grupo' in tras, false, 'el aviso de Katy caducó');
+  assert.equal('ana' in tras, true);
+  assert.deepEqual(limpiarTodas(tras, 99_999_999), {});
+});
+
+test('el reloj se arma para el primero que caduque, en la conversación que sea', () => {
+  assert.equal(faltaParaCaducarAlguna(NADIE_EN_NINGUNA, 0), null);
+  let todas = anotarEn(NADIE_EN_NINGUNA, 'grupo', 'katy', 1_000);
+  todas = anotarEn(todas, 'ana', 'ana', 3_000);
+  assert.equal(faltaParaCaducarAlguna(todas, 3_000), CADUCA_A_LOS_MS - 2_000);
+});
+
+test('al dejar de atender una conversación, se olvida quién escribía en ella', () => {
+  let todas = anotarEn(NADIE_EN_NINGUNA, 'grupo', 'katy', 1_000);
+  todas = anotarEn(todas, 'ana', 'ana', 1_000);
+  assert.equal(soloDe(todas, ['grupo', 'ana', 'otra']), todas);
+  assert.deepEqual(Object.keys(soloDe(todas, ['ana'])), ['ana']);
+  assert.deepEqual(soloDe(todas, []), {});
+});
+
+test('en la bandeja, en un chat de dos solo se le cree a la otra persona', () => {
+  const directo = { esGrupo: false, otroId: 'ana' };
+  assert.ok(esDeFiarEnBandeja('ana', 'yo', directo, null));
+  assert.ok(!esDeFiarEnBandeja('intruso', 'yo', directo, null));
+  // Nunca a uno mismo: escribir desde otro teléfono no es «te están escribiendo».
+  assert.ok(!esDeFiarEnBandeja('yo', 'yo', directo, null));
+  assert.ok(!esDeFiarEnBandeja('', 'yo', directo, null));
+});
+
+test('en un grupo se acepta mientras no se sabe quién está, y después solo a los miembros', () => {
+  const grupo = { esGrupo: true };
+  assert.ok(esDeFiarEnBandeja('katy', 'yo', grupo, null));
+  assert.ok(esDeFiarEnBandeja('katy', 'yo', grupo, ['yo', 'katy']));
+  assert.ok(!esDeFiarEnBandeja('intruso', 'yo', grupo, ['yo', 'katy']));
+  assert.ok(!esDeFiarEnBandeja('yo', 'yo', grupo, ['yo', 'katy']));
+});
+
+test('en la fila cabe el nombre de pila, no el nombre entero', () => {
+  assert.equal(nombreDePila('Katy Béjar Román'), 'Katy');
+  assert.equal(nombreDePila('  Luis  '), 'Luis');
+  assert.equal(nombreDePila(''), '');
+  assert.equal(nombreDePila(undefined), '');
 });

@@ -12,14 +12,19 @@
  *
  *     una persona leyó un mensaje  ⇔  su marca es igual o posterior al envío
  *
- * TRES ESTADOS A LA VISTA, y no cuatro. WhatsApp distingue además «entregado
- * al teléfono»; Z no lo sabe —nadie le avisa de que un mensaje llegó a un
- * aparato— y no se finge:
+ * LO QUE SE VE, como se pidió el 12/10/2026 por la noche («deben haber dos
+ * aspas para todo, sea el mensaje que sea»):
  *
- *   · una marca       → enviado: el servidor lo tiene;
- *   · dos, con color  → leído: en un chat de dos, por la otra persona; en un
- *                       grupo, por TODOS los demás. Con que falte una, sigue
- *                       en «enviado», y quién falta se ve en los detalles.
+ *   · una marca        → saliendo: todavía no llegó al servidor (poca señal);
+ *   · dos marcas       → enviado: el servidor lo tiene;
+ *   · dos, en celeste  → leído: en un chat de dos, por la otra persona; en un
+ *                        grupo, por TODOS los demás. Con que falte una, sigue
+ *                        en «enviado», y quién falta se ve en «Info. del
+ *                        mensaje».
+ *
+ * Las dos marcas dicen «enviado», no «entregado al teléfono» como en WhatsApp:
+ * Z no lo sabe —nadie le avisa de que un mensaje llegó a un aparato— y no se
+ * finge.
  *
  * Sin importaciones, a propósito: se prueba con `node --test` tal cual.
  */
@@ -160,17 +165,32 @@ export function tieneDetalles(mensaje: {
 /**
  * Si la franja de la hora —que es donde va la marca— se pinta en un mensaje.
  *
- * Dentro de una ráfaga la hora no se repite. Pero la marca de lectura tiene
- * que verse en lo ÚLTIMO que uno mandó, que es lo que quiere saber si ya
- * leyeron: por eso un mensaje propio que cierra su ráfaga la lleva siempre.
+ * LO PROPIO LA LLEVA SIEMPRE: texto, foto, emoji o archivo, cada mensaje que
+ * uno manda enseña su marca. Hasta el 12/10/2026 dentro de una ráfaga solo la
+ * llevaba el último, y un emoji o una foto a mitad de ráfaga se quedaban sin
+ * ninguna: «cuando es foto no hay aspa».
+ *
+ * En lo ajeno no hay marca que enseñar, así que la hora sigue sin repetirse
+ * dentro de una ráfaga.
  */
 export function llevaFranjaDeHora(caso: {
   agrupado: boolean;
   tieneTexto: boolean;
   tieneEstado: boolean;
   esMio: boolean;
-  cierraLaRafaga: boolean;
 }): boolean {
-  if (!caso.agrupado || !caso.tieneTexto || caso.tieneEstado) return true;
-  return caso.esMio && caso.cierraLaRafaga;
+  if (caso.esMio) return true;
+  return !caso.agrupado || !caso.tieneTexto || caso.tieneEstado;
+}
+
+/** Cuánto ha avanzado un envío. Un fallo no es un paso adelante. */
+const PASO: Record<EstadoDeEntrega, number> = { fallido: -1, enviando: 0, enviado: 1, leido: 2 };
+
+/**
+ * Si el cambio de la marca se anima: solo cuando el mensaje AVANZA —sale, o
+ * lo leen—. Al fallar, o al volver a intentarlo, la marca cambia sin más: un
+ * salto alegre sobre un «no se envió» diría lo contrario de lo que pasa.
+ */
+export function seAnimaElPaso(antes: EstadoDeEntrega, ahora: EstadoDeEntrega): boolean {
+  return PASO[antes] >= 0 && PASO[ahora] > PASO[antes];
 }

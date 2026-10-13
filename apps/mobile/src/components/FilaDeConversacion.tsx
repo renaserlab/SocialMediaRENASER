@@ -3,10 +3,12 @@ import { StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 
+import { PuntosDeEscritura } from '@/components/chat/PuntosDeEscritura';
 import { GloboDeNoLeidos } from '@/components/GloboDeNoLeidos';
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
+import { useQuienEscribeEn } from '@/hooks/useEscribiendoEnBandeja';
 import { haptics } from '@/lib/haptics';
 import { useTranslation } from '@/i18n/useTranslation';
 import { radius, spacing } from '@/theme/tokens';
@@ -87,6 +89,26 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
   const sinLeer = conversacion.unread > 0;
   const hora = conversacion.time ?? conversacion.messages.at(-1)?.createdAt;
 
+  /*
+    «ESCRIBIENDO…» TAMBIÉN AQUÍ, sin entrar al chat (12/10/2026, pedido con
+    capturas de WhatsApp): mientras alguien teclea, la frase ocupa el sitio
+    del último mensaje. En un chat de dos, solo «escribiendo…»; en un grupo,
+    con el nombre de quien escribe.
+
+    Cada fila lee SOLO lo suyo del almacén: un aviso repinta una fila, no la
+    bandeja. Casi siempre es `null`, y la fila queda como estaba.
+  */
+  const escribe = useQuienEscribeEn(conversacion);
+  const escribiendo = !escribe
+    ? null
+    : escribe.clave === 'solo'
+      ? t('messages.typingSolo')
+      : escribe.clave === 'uno'
+        ? t('messages.typingOne', { nombre: escribe.nombre })
+        : escribe.clave === 'dos'
+          ? t('messages.typingTwo', { primero: escribe.primero, segundo: escribe.segundo })
+          : t('messages.typingMany', { n: escribe.cuantos });
+
   return (
     <Pulsable
       onPress={abrir}
@@ -99,7 +121,7 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
       accessibilityRole="button"
       accessibilityLabel={t('messages.chatWith', {
         nombre: conversacion.name,
-        detalle: conversacion.subtitle,
+        detalle: escribiendo ?? conversacion.subtitle,
       })}
       style={styles.fila}
     >
@@ -149,21 +171,32 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
           recorta si no cabe; la hora no encoge, porque siempre es corta y es
           lo que dice de cuándo es lo que se está leyendo.
         */}
-        <View style={styles.lineaDeResumen}>
-          <Text
-            numberOfLines={1}
-            style={styles.resumen}
-            color={sinLeer ? colors.text : colors.textMuted}
-            weight={sinLeer ? '700' : '400'}
-          >
-            {conversacion.subtitle}
-          </Text>
-          {hora ? (
-            <Text style={styles.hora} color={colors.textMuted} numberOfLines={1}>
-              {` · ${hora}`}
+        {escribiendo ? (
+          // Los puntos solo existen mientras alguien escribe: en reposo la
+          // fila no tiene nada animado.
+          <View style={[styles.lineaDeResumen, styles.lineaDeEscritura]}>
+            <PuntosDeEscritura color={colors.success} size={5} />
+            <Text numberOfLines={1} style={styles.resumen} color={colors.success} weight="700">
+              {escribiendo}
             </Text>
-          ) : null}
-        </View>
+          </View>
+        ) : (
+          <View style={styles.lineaDeResumen}>
+            <Text
+              numberOfLines={1}
+              style={styles.resumen}
+              color={sinLeer ? colors.text : colors.textMuted}
+              weight={sinLeer ? '700' : '400'}
+            >
+              {conversacion.subtitle}
+            </Text>
+            {hora ? (
+              <Text style={styles.hora} color={colors.textMuted} numberOfLines={1}>
+                {` · ${hora}`}
+              </Text>
+            ) : null}
+          </View>
+        )}
 
         {/*
           Las etiquetas del CRM, si las hay. SON PRIVADAS: el servidor solo manda
@@ -212,6 +245,7 @@ const styles = StyleSheet.create({
   lineaDeNombre: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   nombre: { fontSize: 15, lineHeight: 20, flexShrink: 1 },
   lineaDeResumen: { flexDirection: 'row', alignItems: 'center' },
+  lineaDeEscritura: { gap: 6 },
   // `flexShrink` en el resumen y no en la hora: se recorta el mensaje.
   resumen: { fontSize: 14, lineHeight: 19, flexShrink: 1 },
   hora: { fontSize: 14, lineHeight: 19 },

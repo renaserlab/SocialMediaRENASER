@@ -423,6 +423,11 @@ export const es = {
   'messages.noResultsTitle': 'Nada por aquí',
   'messages.noResultsBody': 'Prueba con otro nombre o quita los filtros.',
   'messages.chatWith': 'Chat con {nombre}. {detalle}',
+  // «Escribiendo…» en la fila de la bandeja, sin entrar al chat.
+  'messages.typingSolo': 'escribiendo…',
+  'messages.typingOne': '{nombre} está escribiendo…',
+  'messages.typingTwo': '{primero} y {segundo} están escribiendo…',
+  'messages.typingMany': '{n} personas están escribiendo…',
   'messages.filters': 'Filtros',
   'messages.filtersTitle': 'Filtrar conversaciones',
   'messages.filterAll': 'Todas',
@@ -445,7 +450,7 @@ export const es = {
   // Reaccionar a un mensaje y responder a uno concreto (10/10/2026).
   'chat.reply': 'Responder',
   // Confirmación de lectura y «está escribiendo» (12/10/2026).
-  'chat.messageDetails': 'Detalles del mensaje',
+  'chat.messageDetails': 'Info. del mensaje',
   'chat.detailsOf': '«{texto}» · enviado a las {hora}',
   'chat.detailsSentAt': 'Enviado a las {hora}',
   'chat.readBy': 'Leído por ({n})',

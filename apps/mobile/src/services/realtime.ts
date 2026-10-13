@@ -170,13 +170,30 @@ export function avisosDeLectura(
   };
 }
 
+type CanalAbierto = {
+  enviar: (aviso: Record<string, unknown>) => void;
+  cerrar: () => void;
+  oyentes: Set<(aviso: unknown) => void>;
+};
+
+/** Los canales de escritura abiertos ahora mismo, uno por conversación. */
+const canalesDeEscritura = new Map<string, CanalAbierto>();
+
 /**
- * «Está escribiendo», entre los teléfonos que tienen la conversación abierta.
+ * «Está escribiendo», entre los teléfonos que atienden la conversación.
  *
  * No se guarda en ningún sitio: es difusión pura, y caduca sola en quien la
  * recibe (`lib/escribiendo`). Lo que viaja es SOLO un identificador y si
  * escribe o paró; el nombre no, porque a un canal que puede escribir
  * cualquiera no se le cree. Quien recibe decide a quién le hace caso.
+ *
+ * UN SOLO CANAL POR CONVERSACIÓN, LO PIDA QUIEN LO PIDA. Lo atienden dos
+ * sitios a la vez: el chat abierto y la bandeja, que enseña «escribiendo…»
+ * en su fila. La librería devuelve EL MISMO canal a quien pide un tema que ya
+ * existe (`RealtimeClient.channel`): el segundo no podría añadirle su oyente
+ * —ya está suscrito— y el primero que cerrase dejaría sordo al otro. Así que
+ * el canal se abre con el primero que llega, reparte a todos y se cierra
+ * cuando se va el último.
  */
 export function canalDeEscritura(
   conversationId: string,
@@ -185,25 +202,51 @@ export function canalDeEscritura(
   const client = supabase;
   if (!client || !conversationId) return { avisar: () => {}, cerrar: () => {} };
 
-  let unido = false;
-  const channel = client
-    .channel(`chat-escribiendo:${conversationId}`, { config: { broadcast: { self: false } } })
-    .on('broadcast', { event: 'escribe' }, (mensaje: { payload?: unknown }) =>
-      alRecibir(mensaje?.payload),
-    )
-    .subscribe((estado: string) => {
-      unido = estado === 'SUBSCRIBED';
-    });
+  let abierto = canalesDeEscritura.get(conversationId);
+  if (!abierto) {
+    const oyentes = new Set<(aviso: unknown) => void>();
+    let unido = false;
+    const channel = client
+      .channel(`chat-escribiendo:${conversationId}`, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'escribe' }, (mensaje: { payload?: unknown }) => {
+        // Sobre una copia: un oyente puede darse de baja mientras se reparte.
+        for (const oyente of [...oyentes]) oyente(mensaje?.payload);
+      })
+      .subscribe((estado: string) => {
+        unido = estado === 'SUBSCRIBED';
+      });
+    abierto = {
+      oyentes,
+      // Antes de estar dentro del canal el aviso se pierde, y no pasa nada: el
+      // siguiente sale a los pocos segundos si la persona sigue tecleando.
+      enviar: (aviso) => {
+        if (!unido) return;
+        void channel.send({ type: 'broadcast', event: 'escribe', payload: aviso });
+      },
+      cerrar: () => {
+        void client.removeChannel(channel);
+      },
+    };
+    canalesDeEscritura.set(conversationId, abierto);
+  }
 
+  const elCanal = abierto;
+  elCanal.oyentes.add(alRecibir);
+  let cerrado = false;
   return {
-    // Antes de estar dentro del canal el aviso se pierde, y no pasa nada: el
-    // siguiente sale a los pocos segundos si la persona sigue tecleando.
     avisar: (aviso) => {
-      if (!unido) return;
-      void channel.send({ type: 'broadcast', event: 'escribe', payload: aviso });
+      if (!cerrado) elCanal.enviar(aviso);
     },
     cerrar: () => {
-      void client.removeChannel(channel);
+      if (cerrado) return;
+      cerrado = true;
+      elCanal.oyentes.delete(alRecibir);
+      if (elCanal.oyentes.size > 0) return;
+      // Solo si sigue siendo el vigente: otro pudo abrir uno nuevo entretanto.
+      if (canalesDeEscritura.get(conversationId) === elCanal) {
+        canalesDeEscritura.delete(conversationId);
+      }
+      elCanal.cerrar();
     },
   };
 }
