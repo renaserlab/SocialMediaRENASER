@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { Appearance, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
@@ -29,6 +29,13 @@ import { useAvisosEnVivo } from '@/hooks/useAvisosEnVivo';
 import { useNavegadorMontado } from '@/hooks/useNavegadorMontado';
 import { useSalidaConDoblePulsacion } from '@/hooks/useSalidaConDoblePulsacion';
 import { perfMark } from '@/lib/perf';
+import {
+  anotar,
+  asentar,
+  fotoDe,
+  llegaSinAnimacion,
+  nuevoRegistro,
+} from '@/navigation/sustitucionDePantalla';
 import { DURACION_DE_LA_TRANSICION_MS } from '@/navigation/transicion';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -149,6 +156,14 @@ export default function RootLayout() {
   // la aplicacion desde cerrada, con cualquier pantalla por debajo.
   useAbrirDesdeElPush(navegadorMontado);
 
+  /*
+    La pantalla que SUSTITUYE a la de arriba llega sin animación (Android):
+    es el tramo donde la pila se quedaba en gris tras guardar. Qué se
+    recuerda y por qué, en `navigation/sustitucionDePantalla`.
+  */
+  const llegadas = useRef(nuevoRegistro()).current;
+  const [, repintarLaPila] = useReducer((veces: number) => veces + 1, 0);
+
   useEffect(() => {
     if (hydrated) perfMark('STORE_HYDRATED');
   }, [hydrated]);
@@ -186,10 +201,24 @@ export default function RootLayout() {
               escrito aqui: el anfitrion de los avisos espera ESE MISMO tiempo
               antes de ensenar un aviso tras un cambio de pantalla.
             */
-            screenOptions={{
-              headerShown: false,
-              animation: 'slide_from_right',
-              animationDuration: DURACION_DE_LA_TRANSICION_MS,
+            screenOptions={({ route, navigation }) => {
+              anotar(llegadas, fotoDe(navigation.getState()));
+              const sinAnimacion =
+                Platform.OS === 'android' && llegaSinAnimacion(llegadas, route.key);
+              return {
+                headerShown: false,
+                animation: sinAnimacion ? 'none' : 'slide_from_right',
+                animationDuration: DURACION_DE_LA_TRANSICION_MS,
+              };
+            }}
+            /*
+              Terminada la llegada, la pantalla recupera su animación: si
+              no, «Atrás» desde ella también saldría de golpe.
+            */
+            screenListeners={{
+              transitionEnd: (evento) => {
+                if (asentar(llegadas, evento.target)) repintarLaPila();
+              },
             }}
           />
           {/*
