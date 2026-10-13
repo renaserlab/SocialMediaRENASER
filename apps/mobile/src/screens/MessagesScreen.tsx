@@ -36,6 +36,7 @@ import {
   type EstadoDeEtiquetas,
 } from '@/repositories/EtiquetasRepository';
 import { useAppStore } from '@/store/useAppStore';
+import { useEscribiendoEnBandeja } from '@/hooks/useEscribiendoEnBandeja';
 import { useAuthStore } from '@/store/useAuthStore';
 import { alLeerUnaConversacion, alLlegarLaBandeja, anotarMensajes } from '@/services/contadores';
 import { spacing } from '@/theme/tokens';
@@ -456,6 +457,14 @@ export function MessagesScreen() {
       return coincide && pasaFiltro;
     });
   }, [supabaseEnabled, remote, demoConversations, consulta, tecleado, servido]);
+
+  /*
+    «ESCRIBIENDO…» EN LAS FILAS. Aquí solo se abren los canales de las
+    primeras conversaciones; quién escribe lo lee cada fila por su cuenta,
+    así que un aviso no repinta esta pantalla. Ver `useEscribiendoEnBandeja`.
+  */
+  const yo = useAppStore((state) => state.user?.id);
+  useEscribiendoEnBandeja(conversations, yo, supabaseEnabled && signedIn);
 
   const hasMessages = conversations.length > 0;
   const uiState = supabaseEnabled && status === 'loading'

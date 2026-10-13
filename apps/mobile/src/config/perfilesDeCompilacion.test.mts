@@ -311,6 +311,14 @@ NATIVO_POR_VERSION['1.2.1'] = {
 // teléfono cada vez que alguien teclea.
 NATIVO_POR_VERSION['1.2.2'] = NATIVO_POR_VERSION['1.2.1'] as (typeof NATIVO_POR_VERSION)[string];
 
+// 1.2.3: dependencias, plugins y permisos iguales que 1.2.2. Sube porque el
+// tono de «alguien está escribiendo» es OTRO sonido con el mismo nombre: el
+// de la 1.2.2 no se oía en el teléfono (salió a la mitad de volumen que los
+// otros dos y con siete centésimas de sonido). El archivo va dentro del
+// binario, así que solo cambia con una compilación nueva; con otro número se
+// sabe cuál de los dos lleva cada teléfono.
+NATIVO_POR_VERSION['1.2.3'] = NATIVO_POR_VERSION['1.2.2'] as (typeof NATIVO_POR_VERSION)[string];
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];

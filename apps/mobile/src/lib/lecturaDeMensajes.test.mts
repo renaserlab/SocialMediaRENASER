@@ -9,6 +9,7 @@ import {
   leerDetalles,
   leerMarcas,
   llevaFranjaDeHora,
+  seAnimaElPaso,
   loLeyo,
   tieneDetalles,
 } from './lecturaDeMensajes.ts';
@@ -136,18 +137,33 @@ test('solo un mensaje propio, enviado y sin borrar tiene detalles', () => {
   assert.ok(!tieneDetalles({ sender: 'me', esSesion: true }));
 });
 
-test('lo último que uno mandó siempre enseña su marca', () => {
+test('todo mensaje propio enseña su marca, también a mitad de ráfaga', () => {
   const base = { agrupado: true, tieneTexto: true, tieneEstado: false };
-  // Como hasta ahora: dentro de una ráfaga la hora no se repite…
-  assert.ok(!llevaFranjaDeHora({ ...base, esMio: true, cierraLaRafaga: false }));
-  assert.ok(!llevaFranjaDeHora({ ...base, esMio: false, cierraLaRafaga: true }));
-  // …salvo en el mensaje propio que cierra la ráfaga: ahí va la marca.
-  assert.ok(llevaFranjaDeHora({ ...base, esMio: true, cierraLaRafaga: true }));
-  // Y lo de siempre no cambia: el primero de la ráfaga, lo que no trae texto
-  // y lo que se está enviando la llevan.
-  assert.ok(llevaFranjaDeHora({ ...base, agrupado: false, esMio: false, cierraLaRafaga: false }));
-  assert.ok(llevaFranjaDeHora({ ...base, tieneTexto: false, esMio: false, cierraLaRafaga: false }));
-  assert.ok(llevaFranjaDeHora({ ...base, tieneEstado: true, esMio: true, cierraLaRafaga: false }));
+  // Lo propio, siempre: «deben haber dos aspas para todo, sea el mensaje que sea».
+  assert.ok(llevaFranjaDeHora({ ...base, esMio: true }));
+  assert.ok(llevaFranjaDeHora({ ...base, esMio: true, tieneTexto: false }));
+  assert.ok(llevaFranjaDeHora({ ...base, esMio: true, agrupado: false }));
+  // Lo ajeno no tiene marca: dentro de una ráfaga la hora sigue sin repetirse…
+  assert.ok(!llevaFranjaDeHora({ ...base, esMio: false }));
+  // …y la lleva donde siempre: el primero de la ráfaga, lo que no trae texto
+  // y lo que se está enviando.
+  assert.ok(llevaFranjaDeHora({ ...base, agrupado: false, esMio: false }));
+  assert.ok(llevaFranjaDeHora({ ...base, tieneTexto: false, esMio: false }));
+  assert.ok(llevaFranjaDeHora({ ...base, tieneEstado: true, esMio: false }));
+});
+
+test('la marca se anima cuando el mensaje avanza, no cuando falla', () => {
+  assert.ok(seAnimaElPaso('enviando', 'enviado'));
+  assert.ok(seAnimaElPaso('enviado', 'leido'));
+  // De golpe: quien lo recibe tenía el chat abierto.
+  assert.ok(seAnimaElPaso('enviando', 'leido'));
+  // Un «no se envió» no se celebra, ni el reintento que viene después.
+  assert.ok(!seAnimaElPaso('enviando', 'fallido'));
+  assert.ok(!seAnimaElPaso('fallido', 'enviando'));
+  assert.ok(!seAnimaElPaso('fallido', 'enviado'));
+  // Y lo que no cambia, o retrocede, tampoco.
+  assert.ok(!seAnimaElPaso('enviado', 'enviado'));
+  assert.ok(!seAnimaElPaso('leido', 'enviado'));
 });
 
 test('el color de leído tiene contraste sobre las dos burbujas', () => {

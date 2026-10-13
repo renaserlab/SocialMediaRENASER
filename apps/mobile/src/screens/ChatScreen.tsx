@@ -14,11 +14,11 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useMargenInferior } from '@/components/teclado';
 import { TextoConEnlaces } from '@/components/TextoConEnlaces';
 import { Aparecer } from '@/components/Aparecer';
 import { BotonDeEnviar } from '@/components/BotonDeEnviar';
@@ -168,6 +168,13 @@ const ESTILO_ELIMINADO = {
  */
 const MINUTOS_DE_RAFAGA = 5;
 
+/**
+ * El elemento de la lista que pinta «está escribiendo». No es un mensaje: solo
+ * ocupa el último sitio mientras alguien escribe, para que la burbuja empuje
+ * los mensajes en vez de taparlos.
+ */
+const ELEMENTO_DE_ESCRITURA: Message = { id: 'escribiendo', text: '', sender: 'them', createdAt: '' };
+
 /** El relleno de una burbuja. Lo necesita también la foto que la llena. */
 const RELLENO_V = spacing.sm + 2;
 const RELLENO_H = spacing.md + 2;
@@ -240,7 +247,8 @@ export function ChatScreen() {
   const { colors, mode } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  // El de la barra de gestos; con el teclado abierto, cero: ya está encima.
+  const margenInferior = useMargenInferior();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -377,6 +385,8 @@ export function ChatScreen() {
     conocidos: miembrosConocidos,
     activo: supabaseEnabled && !!params.id,
   });
+  // Un texto y no la lista: la lista es un objeto nuevo en cada dibujo.
+  const claveDeEscritura = escritura.quienes.join('|');
 
   /*
     Lo último que se intentó enviar DESDE CADA BURBUJA, para poder repetirlo.
@@ -765,7 +775,7 @@ export function ChatScreen() {
     después del mensaje— se quedaba por debajo del borde y había que
     desplazar para encontrar los botones.
   */
-  const elementos = useMemo<Message[]>(
+  const mensajesYTarjetas = useMemo<Message[]>(
     () =>
       sesionesAlFinal.length === 0
         ? messages
@@ -780,6 +790,20 @@ export function ChatScreen() {
             })),
           ],
     [messages, sesionesAlFinal],
+  );
+  /*
+    Y, MIENTRAS ALGUIEN ESCRIBE, LA BURBUJA DE «ESTÁ ESCRIBIENDO», TAMBIÉN COMO
+    ELEMENTO (12/10/2026). Antes flotaba encima de la lista para no mover nada,
+    y por eso tapaba la hora y las marcas del último mensaje. Ahora es el
+    último elemento: ocupa su sitio y empuja los mensajes hacia arriba, como en
+    WhatsApp. Por ser un elemento —y no un pie— la lista baja sola hasta ella
+    si se estaba abajo, y no mueve a quien subió a leer el historial.
+
+    En reposo no existe: la lista vuelve a ser los mensajes y las tarjetas.
+  */
+  const elementos = useMemo<Message[]>(
+    () => (claveDeEscritura ? [...mensajesYTarjetas, ELEMENTO_DE_ESCRITURA] : mensajesYTarjetas),
+    [mensajesYTarjetas, claveDeEscritura],
   );
 
   // En cuanto un mensaje trae esa versión, deja de hacer falta recordarla.
@@ -818,8 +842,10 @@ export function ChatScreen() {
       infoDeConversacion,
       resaltado,
       marcas: lecturas.marcas,
+      // Y con quién escribe: cambia la frase de la burbuja del final.
+      claveDeEscritura,
     }),
-    [estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado, lecturas.marcas],
+    [estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado, lecturas.marcas, claveDeEscritura],
   );
 
   // -------------------------------------------------------------------------
@@ -906,7 +932,10 @@ export function ChatScreen() {
     });
   }, []);
 
-  const ultimoElemento = elementos.length > 0 ? elementos[elementos.length - 1] : undefined;
+  // De los mensajes y las tarjetas, no de `elementos`: que alguien escriba no
+  // es que haya llegado algo (ni suena «recibido» ni marca «hay nuevos»).
+  const ultimoElemento =
+    mensajesYTarjetas.length > 0 ? mensajesYTarjetas[mensajesYTarjetas.length - 1] : undefined;
   const idDeLoUltimo = ultimoElemento?.id ?? null;
   const loUltimoEsMio = ultimoElemento?.sender === 'me';
   const ultimoVisto = useRef<string | null>(null);
@@ -2214,6 +2243,12 @@ export function ChatScreen() {
             ) : null
           }
           renderItem={({ item, index }: { item: Message; index: number }) => {
+            // La burbuja de «está escribiendo»: no es un mensaje.
+            if (item.id === ELEMENTO_DE_ESCRITURA.id) {
+              return fraseDeQuienEscribe ? (
+                <IndicadorDeEscritura frase={fraseDeQuienEscribe} />
+              ) : null;
+            }
             const mine = item.sender === 'me';
             const fallido = item.estado === 'error';
             const anterior = messages[index - 1];
@@ -2237,20 +2272,17 @@ export function ChatScreen() {
               ninguna zona con la que abrir el menú de acciones.
             */
             /*
-              Y LO ÚLTIMO QUE UNO MANDÓ LA LLEVA SIEMPRE: en esa franja va la
-              marca de lectura, y es justo del último mensaje del que se
-              quiere saber si ya lo leyeron.
+              Y LO PROPIO LA LLEVA SIEMPRE: en esa franja va la marca, y cada
+              mensaje que uno manda —texto, foto, emoji, archivo— enseña la
+              suya.
             */
-            const siguiente = messages[index + 1];
             const mostrarHora = llevaFranjaDeHora({
               agrupado,
               tieneTexto: !!item.text,
               tieneEstado: !!item.estado,
               esMio: mine,
-              cierraLaRafaga:
-                !siguiente || !mismaRafaga(siguiente, item) || diaDe(siguiente) !== dia,
             });
-            // Reloj, una marca o dos: enviándose, enviado o leído.
+            // Una marca, dos, o dos en celeste: saliendo, enviado o leído.
             const entrega = estadoDeEntrega(item, lecturas.marcas);
             /*
               STICKER: un mensaje que es solo uno, dos o tres emoji, sin
@@ -2654,12 +2686,9 @@ export function ChatScreen() {
                           LA HORA Y EL ESTADO, legibles. Eran 9 puntos al 70 %:
                           sobre la burbuja negra no se leía. Y el estado del
                           envío se dice con un icono además de con el texto:
-                          reloj mientras sale, una marca cuando el servidor lo
-                          confirma, aviso si no salió.
-
-                          UNA SOLA MARCA Y NO DOS. Significa «enviado», que es
-                          lo que el servidor confirma. La aplicación no sabe si
-                          se ha leído, y dos marcas lo darían a entender.
+                          una marca mientras sale, dos cuando el servidor lo
+                          confirma, dos en celeste cuando lo leyeron, y un
+                          aviso si no salió. Ver `lib/lecturaDeMensajes`.
                         */
                         <View style={[styles.pieDeBurbuja, mine && styles.pieDeBurbujaMia]}>
                           <Text
@@ -2762,11 +2791,6 @@ export function ChatScreen() {
             );
           }}
         />
-        {/*
-          «ESTÁ ESCRIBIENDO». Solo existe mientras alguien escribe, va sobre
-          la lista —no la empuja— y no recibe toques.
-        */}
-        {fraseDeQuienEscribe ? <IndicadorDeEscritura frase={fraseDeQuienEscribe} /> : null}
         {/*
           IR A LO ÚLTIMO. Solo cuando se ha subido a leer: abajo no hay a dónde
           ir. El punto dice que, mientras tanto, ha llegado algo.
@@ -2884,7 +2908,7 @@ export function ChatScreen() {
               borderTopColor: colors.border,
               backgroundColor: colors.background,
               // Evita que el campo quede bajo la barra de gestos / home indicator.
-              paddingBottom: spacing.lg + insets.bottom,
+              paddingBottom: spacing.lg + margenInferior,
             },
           ]}
         >

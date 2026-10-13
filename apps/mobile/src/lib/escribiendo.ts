@@ -157,3 +157,142 @@ export function suenaElTono(caso: {
   if (!caso.seEstaMirando || caso.silenciada) return false;
   return caso.ultimoTono === undefined || caso.momento - caso.ultimoTono >= PAUSA_DEL_TONO_MS;
 }
+
+/* ------------------------------------------------------------------------- */
+/* EN LA BANDEJA                                                             */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Cuántas conversaciones de la bandeja se atienden a la vez.
+ *
+ * Lo pedido (12/10/2026, con capturas de WhatsApp): que «escribiendo…» se vea
+ * también FUERA del chat, en la fila de la conversación.
+ *
+ * Atender una conversación es estar suscrito a su canal, y los canales no son
+ * gratis: el proveedor limita cuántos tiene abiertos un teléfono (cien) y
+ * cuántas altas por segundo admite entre TODOS los teléfonos. Así que no se
+ * atiende la bandeja entera sino su principio, que es lo que se ve y donde
+ * está la actividad reciente: la bandeja llega ordenada por el último mensaje.
+ * Veinte son más de dos pantallas de filas.
+ *
+ * Si Z crece hasta que esto pese, el paso siguiente es que el servidor reparta
+ * los avisos por un canal de cada persona, en vez de que cada teléfono se
+ * suscriba a los de sus conversaciones.
+ */
+export const CONVERSACIONES_ATENDIDAS = 20;
+
+/** Las que la bandeja atiende: las primeras, sin repetir. */
+export function lasQueSeAtienden(
+  ids: readonly string[],
+  cuantas: number = CONVERSACIONES_ATENDIDAS,
+): string[] {
+  const vistas = new Set<string>();
+  for (const id of ids) {
+    if (!id || vistas.has(id)) continue;
+    vistas.add(id);
+    if (vistas.size >= cuantas) break;
+  }
+  return [...vistas];
+}
+
+/**
+ * Qué cambia al pasar de atender unas conversaciones a atender otras.
+ *
+ * La bandeja se reordena cada vez que llega un mensaje: cerrar y volver a
+ * abrir los veinte canales por eso sería gastar altas para quedar igual.
+ */
+export function cambioDeAtendidas(
+  antes: readonly string[],
+  ahora: readonly string[],
+): { abrir: string[]; cerrar: string[] } {
+  return {
+    abrir: ahora.filter((id) => !antes.includes(id)),
+    cerrar: antes.filter((id) => !ahora.includes(id)),
+  };
+}
+
+/** Quién escribe en cada conversación de la bandeja. */
+export type EscribiendoEnBandeja = Readonly<Record<string, Escribiendo>>;
+
+export const NADIE_EN_NINGUNA: EscribiendoEnBandeja = Object.freeze({});
+
+export function anotarEn(
+  todas: EscribiendoEnBandeja,
+  conversacionId: string,
+  usuarioId: string,
+  ahora: number,
+): EscribiendoEnBandeja {
+  return { ...todas, [conversacionId]: anotar(todas[conversacionId] ?? NADIE, usuarioId, ahora) };
+}
+
+/** Devuelve EL MISMO objeto si no había nada que quitar: nadie se repinta. */
+export function quitarDe(
+  todas: EscribiendoEnBandeja,
+  conversacionId: string,
+  usuarioId: string,
+): EscribiendoEnBandeja {
+  const lista = todas[conversacionId];
+  if (!lista || !(usuarioId in lista)) return todas;
+  const queda = quitar(lista, usuarioId);
+  const { [conversacionId]: _fuera, ...resto } = todas;
+  return Object.keys(queda).length === 0 ? resto : { ...resto, [conversacionId]: queda };
+}
+
+/** Retira lo caducado de todas. El mismo objeto si no caducó nada. */
+export function limpiarTodas(todas: EscribiendoEnBandeja, ahora: number): EscribiendoEnBandeja {
+  let cambio = false;
+  const siguen: Record<string, Escribiendo> = {};
+  for (const [conversacionId, lista] of Object.entries(todas)) {
+    const queda = limpiar(lista, ahora);
+    if (queda !== lista) cambio = true;
+    if (Object.keys(queda).length > 0) siguen[conversacionId] = queda;
+    else cambio = true;
+  }
+  return cambio ? siguen : todas;
+}
+
+/** Cuánto falta para que caduque el primero, en cualquier conversación. */
+export function faltaParaCaducarAlguna(todas: EscribiendoEnBandeja, ahora: number): number | null {
+  let menor: number | null = null;
+  for (const lista of Object.values(todas)) {
+    const falta = faltaParaCaducar(lista, ahora);
+    if (falta !== null && (menor === null || falta < menor)) menor = falta;
+  }
+  return menor;
+}
+
+/** Se queda solo con las conversaciones que se siguen atendiendo. */
+export function soloDe(
+  todas: EscribiendoEnBandeja,
+  atendidas: readonly string[],
+): EscribiendoEnBandeja {
+  const claves = Object.keys(todas);
+  if (claves.every((id) => atendidas.includes(id))) return todas;
+  const siguen: Record<string, Escribiendo> = {};
+  for (const id of claves) if (atendidas.includes(id)) siguen[id] = todas[id] as Escribiendo;
+  return siguen;
+}
+
+/**
+ * Si en la bandeja se le hace caso a un aviso.
+ *
+ * En un chat de dos solo puede escribir LA OTRA persona, y la bandeja sabe
+ * quién es. En un grupo la bandeja no trae la lista de miembros: mientras no
+ * se conoce se acepta —se verá «Alguien está escribiendo…»— y, en cuanto
+ * llega, solo vale quien está en ella.
+ */
+export function esDeFiarEnBandeja(
+  usuarioId: string,
+  yo: string | null | undefined,
+  conversacion: { esGrupo: boolean; otroId?: string | null },
+  miembros: readonly string[] | null,
+): boolean {
+  if (!usuarioId || usuarioId === yo) return false;
+  if (!conversacion.esGrupo) return !conversacion.otroId || conversacion.otroId === usuarioId;
+  return miembros === null || miembros.includes(usuarioId);
+}
+
+/** «Katy», de «Katy Béjar Román»: en una fila de la bandeja no cabe más. */
+export function nombreDePila(nombre: string | null | undefined): string {
+  return (nombre ?? '').trim().split(/\s+/)[0] ?? '';
+}

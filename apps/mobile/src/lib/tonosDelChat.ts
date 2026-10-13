@@ -47,8 +47,10 @@ export const TONOS: Record<TonoDelChat, { fichero: string; canal: string; nombre
     nombre: 'Sonido al recibir un mensaje',
   },
   // 12/10/2026: «un sonido que indique que una persona está escribiendo».
-  // Tres toques muy cortos y más bajos que los otros dos: avisa sin pedir
-  // que se mire. Cuándo suena lo decide `lib/escribiendo.suenaElTono`.
+  // Tres toques redondos que suben. El primero que se hizo era más bajo que
+  // los otros dos tonos y en el teléfono no se oía; este suena más que ellos
+  // a propósito: llega una vez, cuando alguien empieza, y tiene que notarse.
+  // Cuándo suena lo decide `lib/escribiendo.suenaElTono`.
   escribiendo: {
     fichero: 'alguien_escribe.wav',
     canal: 'tono-escribiendo-v1',

@@ -397,6 +397,11 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'messages.noResultsTitle': 'Nada por aqui',
   'messages.noResultsBody': 'Tente outro nome ou tire os filtros.',
   'messages.chatWith': 'Chat com {nombre}. {detalle}',
+  // «Escribiendo…» en la fila de la bandeja, sin entrar al chat.
+  'messages.typingSolo': 'digitando…',
+  'messages.typingOne': '{nombre} está digitando…',
+  'messages.typingTwo': '{primero} e {segundo} estão digitando…',
+  'messages.typingMany': '{n} pessoas estão digitando…',
   'messages.filters': 'Filtros',
   'messages.filtersTitle': 'Filtrar conversas',
   'messages.filterAll': 'Todas',
@@ -417,7 +422,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'chat.deletedMessage': 'Mensagem excluída',
   // Reaccionar a un mensaje y responder a uno concreto (10/10/2026).
   'chat.reply': 'Responder',
-  'chat.messageDetails': 'Detalhes da mensagem',
+  'chat.messageDetails': 'Dados da mensagem',
   'chat.detailsOf': '«{texto}» · enviada às {hora}',
   'chat.detailsSentAt': 'Enviada às {hora}',
   'chat.readBy': 'Lida por ({n})',

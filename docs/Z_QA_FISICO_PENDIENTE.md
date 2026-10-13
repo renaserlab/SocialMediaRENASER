@@ -3747,6 +3747,13 @@ en teléfono; la foto de fondo y los dos recortes no existen en la web.
 
 ## Confirmación de lectura y «está escribiendo» (12/10/2026)
 
+> **Cambió esa misma noche.** Las marcas ya no son «una = enviado, dos =
+> leído»: ahora son una mientras sale, dos al quedar enviado y dos en celeste
+> al leerse; la opción se llama «Info. del mensaje»; el indicador y el sonido
+> se rehicieron, y «escribiendo…» sale también en la bandeja. Las filas de
+> esta tabla que hablan de UNA marca o de «Detalles del mensaje» valen con ese
+> cambio. La lista al día está en la sección siguiente.
+
 Hacen falta **dos cosas**: el servidor desplegado (trae dos rutas nuevas; no
 hay migración) y una **compilación nueva, que sale como 1.2.2**. La versión
 sube porque entra un sonido nuevo dentro de la aplicación.
@@ -3810,3 +3817,171 @@ Para probar hacen falta **dos teléfonos** (tres para el grupo).
 | Que aparezcan o desaparezcan los puntos no mueve los mensajes de su sitio | | | |
 | Desplazar el chat se siente igual de fluido que antes | | | |
 | Con una aplicación de la versión anterior del otro lado: no se rompe nada; simplemente no se ven sus puntos | | | |
+
+---
+
+## Lo del documento «bugs z» (12/10/2026, noche)
+
+Hace falta una **compilación nueva, que sale como 1.2.3** (el sonido de
+«escribiendo» es otro y va dentro de la aplicación). Para las dos marcas en
+celeste y para «Info. del mensaje» hace falta además **el servidor
+desplegado**, que el 12/10 quedó sin desplegar porque la cuenta de GitHub se
+quedó sin cupo de comprobaciones. Lo demás no depende del servidor.
+
+Visto en la copia web local: la cabecera del directo de quien emite y de quien
+mira; las dos marcas en gris y en celeste sobre texto, foto y video; la burbuja
+de «escribiendo» dentro del chat; la frase en la fila de la bandeja, en un
+grupo (con el nombre) y en chats de dos, y que se retira sola; y que con el
+chat abierto encima de la bandeja el canal sigue siendo uno y el aviso llega a
+los dos sitios. **Sin ver:** nada en teléfono, y tampoco la marca sobre un
+emoji solo ni la marca única de «saliendo» (en la copia web no había ninguno).
+El sonido, la pantalla gris y los saltos de las marcas solo se ven en un
+teléfono.
+
+La burbuja de «escribiendo» iba **encima** de la lista y tapaba un momento la
+hora y las marcas del último mensaje. Se decidió esa misma noche que vaya
+**dentro** de la lista, como en WhatsApp: es el último elemento y empuja los
+mensajes hacia arriba. Visto en la copia web: estando abajo, la lista crece lo
+que mide la burbuja y sigue en el final, con la hora y las marcas del último
+mensaje a la vista; habiendo subido a leer, no se mueve nada; y al dejar de
+escribir la burbuja se va y la lista queda en el final.
+
+### La pantalla gris al terminar de crear
+
+**No está demostrado que esté resuelta.** La causa exacta no se conoce: nunca
+se pudo reproducir fuera de un teléfono. Hay dos explicaciones posibles, y solo
+una tiene ya una corrección.
+
+1. **Al cambiar una pantalla por otra.** Publicar un curso desde el asistente,
+   crear un producto («nuevo» pasa a ser su ficha), crear un servicio y guardar
+   la contraseña nueva quitan la pantalla de arriba y ponen otra en el mismo
+   paso. En Android la que sale puede quedarse pintada encima, ya vacía. **Esto
+   es lo corregido:** esa llegada va ahora sin animación. Se vería un gris MUY
+   CLARO, casi blanco, liso.
+2. **El velo oscuro de un cuadro o de una hoja que no se va.** Enviar o publicar
+   un EVENTO y publicar un PRODUCTO no cambian de pantalla: preguntan con un
+   cuadro de confirmación, guardan y avisan. Ese cuadro —y la hoja de «Crear»—
+   oscurecen la pantalla con un velo; si el velo se quedara puesto, se vería un
+   gris OSCURO, «plomo», con la pantalla de detrás adivinándose. **Esto no está
+   corregido**, porque no hay nada que lo demuestre todavía.
+
+**Si vuelve a salir, lo que hace falta para saber cuál es** (un minuto, sin
+herramientas):
+
+- una **captura de pantalla** del gris: el tono, y si se adivina algo detrás,
+  distinguen las dos explicaciones;
+- cuál fue el **último botón** que se tocó, y si antes salió un cuadro de
+  confirmación;
+- si **al tocar** responde lo que hay debajo, y qué hace el botón «Atrás»;
+- si al mandar la aplicación al fondo y volver, sigue gris;
+- el teléfono, su versión de Android y la versión de Z (Configuración).
+
+Con el teléfono conectado por cable se puede además sacar el registro del
+sistema en ese momento, que es la prueba definitiva.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Crear un curso desde «Crear», completarlo y publicarlo: se llega a Cursos, con el curso arriba, sin pantalla gris | | | |
+| Lo mismo abriendo el asistente desde «Gestionar curso» (Cursos ya estaba abierta): se vuelve a Cursos | | | |
+| Crear un producto nuevo y guardar: se llega a la ficha del producto, sin pantalla gris | | | |
+| Crear un evento, completarlo y enviarlo (sale un cuadro de confirmación; la pantalla NO cambia): al aceptar se ve el evento, sin pantalla gris | | | |
+| Publicar un producto («Postula tu producto»; también pregunta antes): al aceptar se ve la ficha, sin pantalla gris | | | |
+| Crear un curso o un evento desde la hoja de «Crear»: al tocar «Crear» la hoja se cierra y se abre el asistente, sin quedarse gris | | | |
+| Recuperar la contraseña desde el correo y guardar la nueva: se llega a Inicio | | | |
+| En Servicios, terminar un paso del alta (datos, condiciones, credencial): se llega al paso siguiente | | | |
+| Esas llegadas son de golpe, sin deslizar; avanzar y volver atrás en el resto de la aplicación siguen deslizando | | | |
+| «Atrás» desde la pantalla a la que se llegó sale deslizando, como siempre, y no vuelve al formulario | | | |
+| Repetir un flujo saliendo a elegir una foto de la galería a mitad (portada del curso): tampoco sale gris | | | |
+| El aviso de «hecho» («Curso publicado») aparece al llegar, no antes | | | |
+
+### La vista de quien transmite
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien emite ve arriba UNA píldora roja: el punto y «Terminar». Ya no hay «EN VIVO» y otro «Terminar» debajo | | | |
+| Tocarla pregunta «¿Terminar la transmisión?» antes de cortar | | | |
+| Se acierta con el dedo sin esfuerzo, aunque la píldora sea baja | | | |
+| Queda más imagen libre que antes debajo de la cabecera | | | |
+| Quien MIRA sigue viendo «EN VIVO» y no puede terminar nada | | | |
+| Con la transmisión programada (sin empezar) sigue saliendo «Empezar ahora» | | | |
+| Un invitado en pantalla sigue viendo «Bajarme» debajo de la cabecera | | | |
+
+### Las marcas de los mensajes
+
+Para probar hacen falta **dos teléfonos** (tres para el grupo).
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Enviar un texto: sale con DOS marcas en gris en cuanto queda enviado | | | |
+| Con mala señal o en modo avión: mientras no sale muestra UNA marca y «Enviando…» | | | |
+| Si no se envió: muestra el aviso y «No se envió», sin marcas | | | |
+| Enviar una FOTO: lleva sus dos marcas junto a la hora, sobre la foto | | | |
+| Enviar un EMOJI solo (sale grande, sin burbuja): lleva sus dos marcas | | | |
+| Enviar un ARCHIVO y una NOTA DE VOZ: llevan sus dos marcas | | | |
+| Varios mensajes seguidos: TODOS los propios muestran hora y marcas, no solo el último | | | |
+| Los mensajes ajenos seguidos no repiten la hora | | | |
+| Al pasar de una marca a dos se ve un pequeño salto | | | |
+| Con el servidor desplegado: cuando la otra persona abre el chat, las dos marcas pasan a CELESTE, con su salto | | | |
+| En un grupo pasan a celeste solo cuando lo leyeron TODOS | | | |
+| El celeste se distingue del gris en tema claro y en oscuro, y sobre una foto | | | |
+| Mantener presionado un mensaje propio: aparece «Info. del mensaje» (con el servidor desplegado) | | | |
+| «Info. del mensaje» muestra quién lo leyó y quién todavía no | | | |
+| Desplazar un chat largo se siente igual de fluido que antes | | | |
+| Con «reducir movimiento» activado, las marcas cambian sin salto | | | |
+
+### «Escribiendo…»
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Dentro del chat, cuando el otro escribe: aparece una burbuja con tres puntos verdes que hacen la ola, y se nota | | | |
+| La burbuja sale DEBAJO del último mensaje y lo empuja hacia arriba: no tapa su hora ni sus marcas | | | |
+| Estando abajo del todo, la lista baja sola para que la burbuja se vea entera | | | |
+| Habiendo subido a leer mensajes antiguos, que alguien escriba NO mueve lo que se está leyendo | | | |
+| Cuando llega el mensaje, ocupa el sitio de la burbuja sin saltos raros | | | |
+| Que alguien escriba no hace sonar el tono de «mensaje recibido» ni enciende el aviso de «hay nuevos» | | | |
+| La burbuja entra creciendo, como un mensaje que llega | | | |
+| Al aparecer SUENA un tono corto de tres toques, una vez | | | |
+| El tono se oye claramente con el volumen de notificaciones a la mitad | | | |
+| Con la conversación silenciada, la burbuja sale pero no suena | | | |
+| En la BANDEJA de Mensajes, sin entrar al chat: la fila de un chat de dos dice «escribiendo…» en verde | | | |
+| En la fila de un GRUPO dice el nombre: «Katy está escribiendo…» | | | |
+| La primera vez en un grupo puede decir «escribiendo…» un instante y luego el nombre | | | |
+| Dos personas a la vez en un grupo: «Katy y Luis están escribiendo…» | | | |
+| Al enviar el mensaje o dejar de escribir, la fila vuelve al último mensaje en unos segundos | | | |
+| En la bandeja NO suena nada cuando alguien escribe | | | |
+| Solo cambia la fila de quien escribe; el resto de la bandeja no parpadea | | | |
+| Entrar al chat de quien escribe y volver a la bandeja: sigue funcionando en los dos sitios | | | |
+| Una conversación muy abajo en la bandeja (después de las veinte primeras) no muestra «escribiendo…»: es lo esperado | | | |
+| Desplazar la bandeja se siente igual de fluido que antes | | | |
+
+### El teclado y la caja de comentarios del directo
+
+Qué pasaba: al comentar en una transmisión, el teclado tapaba la caja donde se
+escribe. Causa: la aplicación medía dónde acaba la caja con una medida de
+Android que **descuenta la barra de estado** (la de la hora y la batería), y
+dónde empieza el teclado con otra que no. La diferencia es justo el alto de esa
+barra, que es lo que quedaba tapado. En el chat no se notaba porque su barra
+suma por dentro el margen de los botones del teléfono, que tapaba el error; en
+el directo no. Ahora las dos cosas se miden desde el mismo sitio, y donde había
+ese margen por dentro ya no se suma con el teclado abierto, para que no quede
+una banda vacía.
+
+Solo se puede comprobar en teléfono. Conviene probar con **botones** y con
+**gestos** de navegación, y en un teléfono con muesca (barra de estado alta).
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En una transmisión, tocar «Escribe un mensaje…»: la caja queda entera y justo encima del teclado | | | |
+| Lo mismo siendo quien emite y siendo quien mira | | | |
+| Al empezar a escribir (sale la fila de sugerencias) la caja sigue entera | | | |
+| Al abrir el panel de emojis del teclado, la caja sube con él | | | |
+| Al cerrar el teclado, todo vuelve a su sitio, sin hueco abajo | | | |
+| CHAT: con el teclado abierto, la barra de escribir queda pegada al teclado, sin banda vacía ni tapada | | | |
+| CHAT: con el teclado cerrado, la barra no queda debajo de los botones o de la barra de gestos | | | |
+| COMENTARIOS de una publicación (pantalla y hoja): el campo queda entero sobre el teclado | | | |
+| Responder a una HISTORIA: el campo queda entero sobre el teclado | | | |
+| Un formulario largo (editar perfil, crear evento): el último campo se puede ver y escribir | | | |
+| Una hoja con campos (nueva etiqueta, crear grupo): igual que antes, el campo se ve | | | |
+| Publicar desde «Crear» (texto de la publicación): el campo se ve entero | | | |
+| Inicio de sesión y registro: los campos y el botón se ven con el teclado abierto | | | |
+| En un teléfono con navegación por GESTOS, todo lo anterior se ve igual de bien | | | |

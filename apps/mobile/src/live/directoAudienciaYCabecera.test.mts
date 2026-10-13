@@ -189,8 +189,24 @@ describe('cortar la emisión se distingue de un vistazo', () => {
     // El relleno es el rojo que aguanta letra blanca (`rellenoDePeligro`), no
     // el rojo claro de la paleta oscura: ver `rellenoDePeligro.test.mts`.
     assert.match(boton, /backgroundColor: rellenoDePeligro\.fondo/);
-    assert.match(boton, /<Feather name="square"/);
+    // El icono es el punto de «en directo»: el botón ocupa el sitio de la insignia.
+    assert.match(boton, /<View style=\{\[estilos\.punto, \{ backgroundColor: rellenoDePeligro\.texto \}\]\} \/>/);
     assert.match(boton, /accessibilityLabel=\{etiqueta\}/);
+    // Es una píldora baja, para no tapar la imagen: el dedo tiene margen alrededor.
+    assert.match(boton, /hitSlop=\{10\}/);
+  });
+
+  it('quien emite ve UNA píldora roja, no dos: la insignia es el botón (12/10/2026)', () => {
+    // Antes: «EN VIVO» en la cabecera y «Terminar» debajo, sobre la imagen.
+    assert.match(
+      PANTALLA,
+      /insignia=\{\s*puedeGestionar && emision\.estado === 'live' \? \(\s*<BotonDeTerminar[\s\S]*?\) : \(\s*<Insignia estado=\{emision\.estado\} \/>\s*\)\s*\}/,
+    );
+    assert.equal(PANTALLA.match(/<BotonDeTerminar\b/g)?.length, 1, 'un solo «Terminar» en toda la sala');
+    // Debajo de la cabecera solo queda «Empezar ahora», y solo antes de empezar.
+    const fila = /\{puedeGestionar && emision\.estado === 'scheduled' \? \(([\s\S]*?)\) : null\}/.exec(PANTALLA)?.[1] ?? '';
+    assert.match(fila, /texto=\{t\('create\.startNow'\)\}/);
+    assert.doesNotMatch(fila, /live\.end/);
   });
 
   it('sigue pasando por la máquina, que es quien confirma', () => {

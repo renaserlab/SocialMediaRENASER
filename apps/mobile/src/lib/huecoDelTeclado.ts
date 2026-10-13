@@ -53,9 +53,20 @@ export const TECLADO_CERRADO: EstadoDelTeclado = {
 /**
  * El hueco de un marco dado lo que se sabe del teclado.
  *
- * @param bordeInferiorDelMarco Dónde acaba el marco en la ventana, o `null` si
- *                              todavía no se ha medido: sin medida no se aparta
- *                              nada, que es mejor que apartar a ciegas.
+ * LAS DOS MEDIDAS TIENEN QUE CONTARSE DESDE EL MISMO SITIO: el borde superior
+ * de la pantalla. La del teclado ya lo hace. La del marco hay que pedirla con
+ * `measure` (su `pageY`), NO con `measureInWindow`: en Android esa segunda
+ * descuenta la barra de estado (React Native le resta el marco visible de la
+ * ventana, `RootViewUtil.getViewportOffset`), y el hueco salía corto justo en
+ * el alto de esa barra. Donde la pantalla sumaba por dentro el margen inferior
+ * del teléfono —el chat— el error quedaba tapado; en el directo no, y la caja
+ * de comentarios se quedaba debajo del teclado (visto en teléfono varias veces,
+ * la última el 12/10/2026).
+ *
+ * @param bordeInferiorDelMarco Dónde acaba el marco, contado desde el borde
+ *                              superior de la pantalla, o `null` si todavía no
+ *                              se ha medido: sin medida no se aparta nada, que
+ *                              es mejor que apartar a ciegas.
  */
 export function huecoDelMarco(bordeInferiorDelMarco: number | null, teclado: EstadoDelTeclado): number {
   if (bordeInferiorDelMarco === null) return 0;
@@ -79,6 +90,23 @@ export function huecoDelMarco(bordeInferiorDelMarco: number | null, teclado: Est
 export function rellenoInferior(hueco: number, rellenoDeLaPantalla: number): number | null {
   if (hueco <= 0) return null;
   return Math.max(hueco, rellenoDeLaPantalla);
+}
+
+/** Si hay teclado delante: lo dice el aviso, o lo dice su alto. */
+export function tecladoALaVista(teclado: EstadoDelTeclado): boolean {
+  return teclado.visible || teclado.altoAsentado > 0;
+}
+
+/**
+ * El margen inferior del teléfono que una pantalla tiene que dejar por dentro.
+ *
+ * Es la franja de la barra de gestos o de botones. CON EL TECLADO ABIERTO ES
+ * CERO: el teclado ya ocupa esa franja, y el marco ya deja el contenido justo
+ * encima de él. Sumarla además dejaba una banda vacía entre el campo y el
+ * teclado, del alto de la barra de botones.
+ */
+export function margenInferiorConTeclado(margenDelTelefono: number, teclado: EstadoDelTeclado): number {
+  return tecladoALaVista(teclado) ? 0 : margenDelTelefono;
 }
 
 /** Estados del teclado tal y como los numera Reanimated (`KeyboardState`). */

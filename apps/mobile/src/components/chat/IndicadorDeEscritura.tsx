@@ -1,16 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Platform, StyleSheet, View } from 'react-native';
 
+import { PuntosDeEscritura } from '@/components/chat/PuntosDeEscritura';
 import { Text } from '@/components/Text';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
-import { radius, spacing } from '@/theme/tokens';
+import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /** En la web `Animated` no tiene hilo nativo y avisa por consola si se le pide. */
 const HILO_NATIVO = Platform.OS !== 'web';
-
-const PUNTOS = [0, 1, 2] as const;
-const PASO_MS = 280;
 
 type Props = {
   /** La frase ya traducida: «Ana está escribiendo». */
@@ -18,100 +16,90 @@ type Props = {
 };
 
 /**
- * «Está escribiendo»: tres puntos que suben y bajan, y quién.
+ * «Está escribiendo»: una burbuja como las de quien escribe, con tres puntos
+ * que hacen la ola y, al lado, quién.
+ *
+ * QUE SE VEA (12/10/2026). La primera versión era una pastilla gris de letra
+ * pequeña y pasó inadvertida en el teléfono: «se ve muy poco llamativa». Ahora
+ * es una burbuja del tamaño de un mensaje, con los puntos y la frase en el
+ * verde de «en marcha», y entra creciendo desde su esquina, como un mensaje
+ * que llega.
  *
  * SOLO EXISTE MIENTRAS ALGUIEN ESCRIBE. Quien lo usa lo monta cuando hay
  * alguien y lo desmonta cuando no: en reposo no queda nada animado en la
- * pantalla, que es la regla de este proyecto. La animación arranca al montar
- * y se detiene al desmontar.
+ * pantalla. La entrada corre una vez, al montar.
  *
- * Con «reducir movimiento» los puntos se quedan quietos: la frase basta.
- *
- * NO RECIBE TOQUES y va sobre la lista, no dentro: que aparezca o desaparezca
- * no mueve ningún mensaje de su sitio.
+ * VA DENTRO DE LA LISTA, al final, como un mensaje más: ocupa su sitio y no
+ * tapa nada. La primera versión flotaba encima y tapaba la hora y las marcas
+ * del último mensaje. No recibe toques.
  */
 export function IndicadorDeEscritura({ frase }: Props) {
   const { colors } = useAppTheme();
   const reduceMotion = useReduceMotion();
-  const fases = useRef(PUNTOS.map(() => new Animated.Value(0))).current;
+  const entrada = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
 
   useEffect(() => {
     if (reduceMotion) return;
-    const vuelta = Animated.loop(
-      Animated.stagger(
-        PASO_MS / 2,
-        fases.map((fase) =>
-          Animated.sequence([
-            Animated.timing(fase, {
-              toValue: 1,
-              duration: PASO_MS,
-              easing: Easing.out(Easing.quad),
-              useNativeDriver: HILO_NATIVO,
-            }),
-            Animated.timing(fase, {
-              toValue: 0,
-              duration: PASO_MS,
-              easing: Easing.in(Easing.quad),
-              useNativeDriver: HILO_NATIVO,
-            }),
-          ]),
-        ),
-      ),
-    );
-    vuelta.start();
-    return () => vuelta.stop();
-  }, [fases, reduceMotion]);
+    const llegada = Animated.timing(entrada, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.back(1.6)),
+      useNativeDriver: HILO_NATIVO,
+    });
+    llegada.start();
+    return () => llegada.stop();
+  }, [entrada, reduceMotion]);
 
   return (
-    <View
+    <Animated.View
       pointerEvents="none"
       accessible
       accessibilityRole="text"
       accessibilityLiveRegion="polite"
       accessibilityLabel={frase}
-      style={[styles.pildora, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      style={[
+        styles.burbuja,
+        { backgroundColor: colors.surface, borderColor: colors.border, shadowColor: colors.text },
+        {
+          opacity: entrada,
+          transform: [
+            { scale: entrada.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) },
+            { translateY: entrada.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) },
+          ],
+        },
+      ]}
     >
-      <View style={styles.puntos}>
-        {fases.map((fase, indice) => (
-          <Animated.View
-            key={PUNTOS[indice]}
-            style={[
-              styles.punto,
-              { backgroundColor: colors.textMuted },
-              reduceMotion
-                ? null
-                : {
-                    opacity: fase.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
-                    transform: [
-                      { translateY: fase.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) },
-                    ],
-                  },
-            ]}
-          />
-        ))}
+      <PuntosDeEscritura color={colors.success} size={8} />
+      <View style={styles.texto}>
+        <Text numberOfLines={1} weight="700" color={colors.success} style={styles.frase}>
+          {frase}
+        </Text>
       </View>
-      <Text numberOfLines={1} color={colors.textMuted} style={styles.frase}>
-        {frase}
-      </Text>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  pildora: {
-    position: 'absolute',
-    left: spacing.md,
-    bottom: spacing.sm,
-    maxWidth: '82%',
+  burbuja: {
+    // En el flujo de la lista, a la izquierda, donde llegan los mensajes.
+    alignSelf: 'flex-start',
+    marginTop: spacing.sm,
+    maxWidth: '86%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    // La misma forma que la burbuja de un mensaje recibido.
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
+    // Se despega del fondo del chat, que puede ser una foto.
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
-  puntos: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 12 },
-  punto: { width: 6, height: 6, borderRadius: 3 },
-  frase: { fontSize: 12, flexShrink: 1 },
+  texto: { flexShrink: 1 },
+  frase: { fontSize: 14 },
 });
