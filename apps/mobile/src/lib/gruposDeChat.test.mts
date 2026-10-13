@@ -360,9 +360,10 @@ test('el chat sube por el historial hasta el mensaje, con tope, y avisa si no ll
   assert.match(chat, /notify\(t\('chat\.jumpNotFoundTitle'\), t\('chat\.jumpNotFoundBody'\)\)/);
   // La lista recicla celdas: tiene que enterarse del resalte y del grupo.
   // Y de las marcas de lectura, que cambian la marca de las burbujas propias.
+  // Y de quién escribe, que cambia la frase de la burbuja del final.
   assert.match(
     chat,
-    /\(\{\s*estadosDeSesion,\s*sesionOcupada,\s*infoDeConversacion,\s*resaltado,\s*marcas: lecturas\.marcas,\s*\}\)/,
+    /\(\{\s*estadosDeSesion,\s*sesionOcupada,\s*infoDeConversacion,\s*resaltado,\s*marcas: lecturas\.marcas,\s*(?:\/\/[^\n]*\n\s*)?claveDeEscritura,\s*\}\)/,
   );
 });
 

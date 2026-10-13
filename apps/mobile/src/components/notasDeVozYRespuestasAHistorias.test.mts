@@ -433,9 +433,12 @@ describe('el motor del chat no se ha reescrito', () => {
   });
 
   it('la barra del redactor sigue respetando la zona de gestos', () => {
+    // El margen sale del gancho del teclado: el de la barra de gestos y, con el
+    // teclado abierto, cero (el teclado ya ocupa esa franja).
     assert.ok(
-      /paddingBottom: spacing\.lg \+ insets\.bottom/.test(CHAT),
+      /paddingBottom: spacing\.lg \+ margenInferior/.test(CHAT),
       'El campo vuelve a quedar bajo la barra de gestos.',
     );
+    assert.match(CHAT, /const margenInferior = useMargenInferior\(\);/);
   });
 });

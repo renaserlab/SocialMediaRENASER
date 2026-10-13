@@ -10,7 +10,9 @@ import {
   TECLADO_CERRADO,
   altoQueSeAvisa,
   huecoDelMarco,
+  margenInferiorConTeclado,
   rellenoInferior,
+  tecladoALaVista,
   type EstadoDelTeclado,
 } from '../lib/huecoDelTeclado.ts';
 
@@ -210,5 +212,97 @@ describe('ninguna pantalla con campos se queda sin apartar el teclado', () => {
   it('ninguna apaga el apartado de AppScreen', () => {
     const apagadas = pantallas.filter(([, codigo]) => /<AppScreen[^>]*teclado=\{false\}/.test(codigo)).map(([n]) => n);
     assert.deepEqual(apagadas, []);
+  });
+});
+
+describe('la caja del directo, debajo del teclado (teléfono, varias veces; la última el 12/10/2026)', () => {
+  /*
+    Los números del teléfono de la captura: pantalla de 800, barra de estado de
+    40, barra de botones de 48, teclado de 277 contado desde abajo (empieza en
+    523). En el directo la zona segura va por FUERA del marco, así que el marco
+    acaba en 752.
+  */
+  const ESTADO = 40;
+  const BOTONES = 48;
+  const teclado = conTeclado({ visible: true, bordeSegunElAviso: 523, altoAsentado: 277 });
+  const marcoDelDirecto = VENTANA - BOTONES;
+
+  it('medido desde la raíz de la pantalla, el campo queda justo encima del teclado', () => {
+    assert.equal(huecoDelMarco(marcoDelDirecto, teclado), 229);
+    assert.equal(marcoDelDirecto - huecoDelMarco(marcoDelDirecto, teclado), 523);
+  });
+
+  it('EL FALLO: con la medida que descuenta la barra de estado, queda corto en ese alto', () => {
+    // `measureInWindow` daba 712 en vez de 752: cuarenta de menos de relleno,
+    // y la caja cuarenta por debajo del borde del teclado.
+    const conLaOtraMedida = huecoDelMarco(marcoDelDirecto - ESTADO, teclado);
+    assert.equal(conLaOtraMedida, 189);
+    assert.equal(229 - conLaOtraMedida, ESTADO);
+  });
+
+  it('por eso el marco se mide con `measure` y su `pageY`, nunca con `measureInWindow`', () => {
+    const marco = sinComentarios(fuente('components/SinTecladoDelante.tsx'));
+    assert.match(marco, /marco\.current\?\.measure\(\(_x, _y, _ancho, alto, _enX, enY\) => \{\s*const borde = enY \+ alto;/);
+    assert.doesNotMatch(marco, /measureInWindow/);
+    // Nadie más en la aplicación mezcla esa medida con la del teclado.
+    assert.doesNotMatch(sinComentarios(fuente('components/teclado.tsx')), /measureInWindow/);
+  });
+
+  it('en el chat el error estaba tapado por el margen del teléfono: por eso no se veía', () => {
+    // El marco del chat llega al borde (800) y su barra suma por dentro el
+    // margen de los botones. Con la medida vieja: 48 de margen menos 40 de error.
+    const viejo = huecoDelMarco(VENTANA - ESTADO, teclado);
+    assert.equal(VENTANA - viejo - BOTONES, 523 - 8, 'ocho por encima del teclado, de casualidad');
+  });
+});
+
+describe('con el teclado abierto no se suma el margen inferior del teléfono', () => {
+  it('hay teclado si lo dice el aviso o si lo dice su alto', () => {
+    assert.equal(tecladoALaVista(TECLADO_CERRADO), false);
+    assert.equal(tecladoALaVista(conTeclado({ visible: true })), true);
+    assert.equal(tecladoALaVista(conTeclado({ altoAsentado: 277 })), true);
+  });
+
+  it('cerrado, el margen de siempre; abierto, cero', () => {
+    assert.equal(margenInferiorConTeclado(48, TECLADO_CERRADO), 48);
+    assert.equal(margenInferiorConTeclado(48, conTeclado({ visible: true, bordeSegunElAviso: 523 })), 0);
+    assert.equal(margenInferiorConTeclado(0, TECLADO_CERRADO), 0);
+  });
+
+  it('así el chat queda igual de pegado al teclado que antes, ya sin depender del error', () => {
+    const teclado = conTeclado({ visible: true, bordeSegunElAviso: 523, altoAsentado: 277 });
+    const hueco = huecoDelMarco(VENTANA, teclado);
+    assert.equal(VENTANA - hueco - margenInferiorConTeclado(48, teclado), 523);
+  });
+
+  it('el chat y los comentarios piden ese margen al gancho del teclado', () => {
+    const chat = sinComentarios(fuente('screens/ChatScreen.tsx'));
+    assert.match(chat, /const margenInferior = useMargenInferior\(\);/);
+    assert.match(chat, /paddingBottom: spacing\.lg \+ margenInferior,/);
+    assert.doesNotMatch(chat, /insets\.bottom/);
+    const comentarios = sinComentarios(fuente('screens/CommentsScreen.tsx'));
+    assert.match(comentarios, /paddingInferior=\{margenInferior\}/);
+  });
+
+  it('`AppScreen` y las historias sueltan el borde inferior mientras hay teclado', () => {
+    const app = sinComentarios(fuente('components/AppScreen.tsx'));
+    assert.match(app, /teclado && tecladoAbierto \? bordes\.filter\(\(borde\) => borde !== 'bottom'\) : bordes;/);
+    assert.match(app, /edges=\{bordesAhora\}/);
+    // La reserva para `useEspacioInferior` sigue saliendo de los bordes de siempre.
+    assert.match(app, /bordes\.includes\('bottom'\) \? <ReservaDeZonaSegura>/);
+    const historias = sinComentarios(fuente('screens/StoriesScreen.tsx'));
+    assert.match(historias, /edges=\{tecladoAbierto \? BORDES_CON_TECLADO : BORDES_SIN_TECLADO\}/);
+    assert.match(historias, /const BORDES_CON_TECLADO = \['top', 'right', 'left'\] as const;/);
+  });
+
+  it('en iPhone no cambia nada: allí el proveedor no dice que haya teclado', () => {
+    const proveedor = sinComentarios(fuente('components/teclado.tsx'));
+    assert.match(proveedor, /Platform\.OS === 'android' \? ProveedorEnAndroid : ProveedorSinTeclado/);
+    assert.match(proveedor, /return margenInferiorConTeclado\(bottom, useContext\(Contexto\)\);/);
+  });
+
+  it('la sala del directo sigue con la zona segura por fuera del marco', () => {
+    const sala = sinComentarios(fuente('screens/LiveScreen.tsx'));
+    assert.match(sala, /<SafeAreaView style=\{estilos\.seguro\}>\s*<SinTecladoDelante style=\{estilos\.columna\}>/);
   });
 });

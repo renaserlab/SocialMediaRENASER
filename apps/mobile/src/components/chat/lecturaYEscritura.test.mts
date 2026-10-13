@@ -188,16 +188,31 @@ describe('«Está escribiendo»', () => {
   });
 
   it('en reposo no queda nada animado: el indicador solo existe mientras alguien escribe', () => {
-    assert.match(CHAT, /\{fraseDeQuienEscribe \? <IndicadorDeEscritura frase=\{fraseDeQuienEscribe\} \/> : null\}/);
+    // Es el último ELEMENTO de la lista, y solo mientras alguien escribe.
+    assert.match(
+      CHAT,
+      /claveDeEscritura \? \[\.\.\.mensajesYTarjetas, ELEMENTO_DE_ESCRITURA\] : mensajesYTarjetas/,
+    );
+    assert.match(
+      CHAT,
+      /if \(item\.id === ELEMENTO_DE_ESCRITURA\.id\) \{\s*return fraseDeQuienEscribe \? \(\s*<IndicadorDeEscritura frase=\{fraseDeQuienEscribe\} \/>\s*\) : null;/,
+    );
+    // Nunca un pie (quedaba bajo el borde) ni flotando encima (tapaba el último).
+    assert.doesNotMatch(CHAT, /ListFooterComponent/);
+    assert.doesNotMatch(INDICADOR, /position: 'absolute'/);
+    assert.equal([...CHAT.matchAll(/<IndicadorDeEscritura\b/g)].length, 1);
+    // Que alguien escriba no es que haya llegado algo: ni tono ni «hay nuevos».
+    assert.match(CHAT, /mensajesYTarjetas\.length > 0 \? mensajesYTarjetas\[mensajesYTarjetas\.length - 1\] : undefined/);
+    // La lista repinta la burbuja cuando cambia quién escribe, y solo entonces.
+    assert.match(CHAT, /const claveDeEscritura = escritura\.quienes\.join\('\|'\);/);
     // Los puntos arrancan al montar y se detienen al desmontar.
     assert.match(PUNTOS, /vuelta\.start\(\);\s*return \(\) => vuelta\.stop\(\);/);
     // Con «reducir movimiento» no se mueve nada: ni los puntos ni la entrada.
     assert.match(PUNTOS, /if \(reduceMotion\) return;/);
     assert.match(INDICADOR, /if \(reduceMotion\) return;/);
     assert.match(INDICADOR, /llegada\.start\(\);\s*return \(\) => llegada\.stop\(\);/);
-    // Va sobre la lista y no recibe toques: no mueve ni tapa nada que se pulse.
+    // No recibe toques.
     assert.match(INDICADOR, /pointerEvents="none"/);
-    assert.match(INDICADOR, /position: 'absolute'/);
     // Y el hook no deja temporizadores cuando no escribe nadie.
     assert.match(ESCRIBIENDO, /if \(falta === null\) return;/);
     assert.match(ESCRIBIENDO, /return \(\) => clearTimeout\(reloj\);/);

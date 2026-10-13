@@ -20,6 +20,7 @@ import { runOnJS } from 'react-native-reanimated';
 import { BottomSheet } from '@/components/BottomSheet';
 import { ListRow } from '@/components/ListRow';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useTecladoALaVista } from '@/components/teclado';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
@@ -34,7 +35,12 @@ import { useTranslation } from '@/i18n/useTranslation';
 // Visor a pantalla completa sobre imagen → contexto de media (siempre oscuro).
 const media = palette('dark');
 
+/** Los bordes que reserva la pantalla: todos, y sin el de abajo con el teclado. */
+const BORDES_SIN_TECLADO = ['top', 'right', 'bottom', 'left'] as const;
+const BORDES_CON_TECLADO = ['top', 'right', 'left'] as const;
+
 export function StoriesScreen() {
+  const tecladoAbierto = useTecladoALaVista();
   const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -335,7 +341,13 @@ export function StoriesScreen() {
         y retroceder tramo— sigan funcionando a través de él.
       */}
       <SinTecladoDelante style={StyleSheet.absoluteFill as never}>
-      <SafeAreaView style={styles.safe} pointerEvents="box-none">
+      {/* Con el teclado abierto no se reserva el borde inferior: el marco de
+          fuera ya deja el campo justo encima del teclado. */}
+      <SafeAreaView
+        style={styles.safe}
+        pointerEvents="box-none"
+        edges={tecladoAbierto ? BORDES_CON_TECLADO : BORDES_SIN_TECLADO}
+      >
         {/* Barras de progreso, una por tramo */}
         <View style={styles.progressRow} pointerEvents="none">
           {items.map((seg, i) => (

@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMargenInferior } from '@/components/teclado';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
@@ -25,7 +25,8 @@ export function CommentsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useAppTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  // Con el teclado abierto es cero: el teclado ya ocupa esa franja.
+  const margenInferior = useMargenInferior();
 
   const comentarios = useComentarios(id);
 
@@ -50,7 +51,7 @@ export function CommentsScreen() {
           comentarios={comentarios}
           onPersonPress={alTocarPersona}
           // Evita que el campo quede bajo la barra de gestos.
-          paddingInferior={insets.bottom}
+          paddingInferior={margenInferior}
         />
       </View>
     </SinTecladoDelante>

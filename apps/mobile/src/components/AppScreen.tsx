@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ReservaDeZonaSegura, useDentroDeLasPestanas } from '@/components/espacioInferior';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
+import { useTecladoALaVista } from '@/components/teclado';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type Borde = 'top' | 'right' | 'bottom' | 'left';
@@ -60,9 +61,18 @@ export function AppScreen({
   const { colors } = useAppTheme();
   const dentroDeLasPestanas = useDentroDeLasPestanas();
   const bordes = edges ?? bordesPorOmision(dentroDeLasPestanas);
+  /*
+    CON EL TECLADO ABIERTO NO SE RESERVA EL BORDE INFERIOR. El marco de
+    fuera ya deja el contenido justo encima del teclado, que es quien ocupa
+    esa franja: reservarla además dejaba una banda vacía entre el formulario
+    y el teclado. Solo cuando este componente pone el marco.
+  */
+  const tecladoAbierto = useTecladoALaVista();
+  const bordesAhora =
+    teclado && tecladoAbierto ? bordes.filter((borde) => borde !== 'bottom') : bordes;
 
   const pantalla = (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={bordes}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={bordesAhora}>
       {scroll ? (
         <ScrollView
           keyboardShouldPersistTaps="handled"

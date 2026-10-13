@@ -1,8 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Keyboard, Platform, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { runOnJS, useAnimatedKeyboard, useAnimatedReaction } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TECLADO_CERRADO, altoQueSeAvisa, type EstadoDelTeclado } from '@/lib/huecoDelTeclado';
+import {
+  TECLADO_CERRADO,
+  altoQueSeAvisa,
+  margenInferiorConTeclado,
+  tecladoALaVista,
+  type EstadoDelTeclado,
+} from '@/lib/huecoDelTeclado';
 
 /**
  * LO QUE SE SABE DEL TECLADO, EN UN SOLO SITIO.
@@ -39,6 +46,21 @@ const Contexto = createContext<EstadoDelTeclado>(TECLADO_CERRADO);
 /** Lo que se sabe del teclado ahora mismo. Fuera de Android, siempre cerrado. */
 export function useTeclado(): EstadoDelTeclado {
   return useContext(Contexto);
+}
+
+/** Si hay teclado delante. En iOS y en la web, nunca: allí lo aparta otro. */
+export function useTecladoALaVista(): boolean {
+  return tecladoALaVista(useContext(Contexto));
+}
+
+/**
+ * El margen inferior del teléfono para lo que va DENTRO de `SinTecladoDelante`:
+ * el de siempre, y cero con el teclado abierto. Por qué, en
+ * `lib/huecoDelTeclado.margenInferiorConTeclado`.
+ */
+export function useMargenInferior(): number {
+  const { bottom } = useSafeAreaInsets();
+  return margenInferiorConTeclado(bottom, useContext(Contexto));
 }
 
 function ProveedorEnAndroid({ children }: React.PropsWithChildren) {
@@ -109,7 +131,7 @@ function ProveedorEnAndroid({ children }: React.PropsWithChildren) {
       {/*
         Esta vista ocupa la ventana entera y sirve de regla: el alto del
         teclado se cuenta desde su borde inferior, y cada marco se mide contra
-        ella con `measureInWindow`, en la misma medida.
+        la raíz de la pantalla con `measure`, que es la misma medida.
       */}
       <View style={styles.ventana} onLayout={alMedirLaVentana}>
         {children}

@@ -3838,9 +3838,13 @@ emoji solo ni la marca única de «saliendo» (en la copia web no había ninguno
 El sonido, la pantalla gris y los saltos de las marcas solo se ven en un
 teléfono.
 
-Una cosa a decidir al verlo: la burbuja de «escribiendo» va **encima** de la
-lista, para no mover los mensajes, y por eso tapa un momento el pie del último
-mensaje (su hora y sus marcas) mientras alguien teclea.
+La burbuja de «escribiendo» iba **encima** de la lista y tapaba un momento la
+hora y las marcas del último mensaje. Se decidió esa misma noche que vaya
+**dentro** de la lista, como en WhatsApp: es el último elemento y empuja los
+mensajes hacia arriba. Visto en la copia web: estando abajo, la lista crece lo
+que mide la burbuja y sigue en el final, con la hora y las marcas del último
+mensaje a la vista; habiendo subido a leer, no se mueve nada; y al dejar de
+escribir la burbuja se va y la lista queda en el final.
 
 ### La pantalla gris al terminar de crear
 
@@ -3904,6 +3908,11 @@ Para probar hacen falta **dos teléfonos** (tres para el grupo).
 | Qué comprobar | Bien | Mal | Notas |
 |---|---|---|---|
 | Dentro del chat, cuando el otro escribe: aparece una burbuja con tres puntos verdes que hacen la ola, y se nota | | | |
+| La burbuja sale DEBAJO del último mensaje y lo empuja hacia arriba: no tapa su hora ni sus marcas | | | |
+| Estando abajo del todo, la lista baja sola para que la burbuja se vea entera | | | |
+| Habiendo subido a leer mensajes antiguos, que alguien escriba NO mueve lo que se está leyendo | | | |
+| Cuando llega el mensaje, ocupa el sitio de la burbuja sin saltos raros | | | |
+| Que alguien escriba no hace sonar el tono de «mensaje recibido» ni enciende el aviso de «hay nuevos» | | | |
 | La burbuja entra creciendo, como un mensaje que llega | | | |
 | Al aparecer SUENA un tono corto de tres toques, una vez | | | |
 | El tono se oye claramente con el volumen de notificaciones a la mitad | | | |
@@ -3918,3 +3927,35 @@ Para probar hacen falta **dos teléfonos** (tres para el grupo).
 | Entrar al chat de quien escribe y volver a la bandeja: sigue funcionando en los dos sitios | | | |
 | Una conversación muy abajo en la bandeja (después de las veinte primeras) no muestra «escribiendo…»: es lo esperado | | | |
 | Desplazar la bandeja se siente igual de fluido que antes | | | |
+
+### El teclado y la caja de comentarios del directo
+
+Qué pasaba: al comentar en una transmisión, el teclado tapaba la caja donde se
+escribe. Causa: la aplicación medía dónde acaba la caja con una medida de
+Android que **descuenta la barra de estado** (la de la hora y la batería), y
+dónde empieza el teclado con otra que no. La diferencia es justo el alto de esa
+barra, que es lo que quedaba tapado. En el chat no se notaba porque su barra
+suma por dentro el margen de los botones del teléfono, que tapaba el error; en
+el directo no. Ahora las dos cosas se miden desde el mismo sitio, y donde había
+ese margen por dentro ya no se suma con el teclado abierto, para que no quede
+una banda vacía.
+
+Solo se puede comprobar en teléfono. Conviene probar con **botones** y con
+**gestos** de navegación, y en un teléfono con muesca (barra de estado alta).
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| En una transmisión, tocar «Escribe un mensaje…»: la caja queda entera y justo encima del teclado | | | |
+| Lo mismo siendo quien emite y siendo quien mira | | | |
+| Al empezar a escribir (sale la fila de sugerencias) la caja sigue entera | | | |
+| Al abrir el panel de emojis del teclado, la caja sube con él | | | |
+| Al cerrar el teclado, todo vuelve a su sitio, sin hueco abajo | | | |
+| CHAT: con el teclado abierto, la barra de escribir queda pegada al teclado, sin banda vacía ni tapada | | | |
+| CHAT: con el teclado cerrado, la barra no queda debajo de los botones o de la barra de gestos | | | |
+| COMENTARIOS de una publicación (pantalla y hoja): el campo queda entero sobre el teclado | | | |
+| Responder a una HISTORIA: el campo queda entero sobre el teclado | | | |
+| Un formulario largo (editar perfil, crear evento): el último campo se puede ver y escribir | | | |
+| Una hoja con campos (nueva etiqueta, crear grupo): igual que antes, el campo se ve | | | |
+| Publicar desde «Crear» (texto de la publicación): el campo se ve entero | | | |
+| Inicio de sesión y registro: los campos y el botón se ven con el teclado abierto | | | |
+| En un teléfono con navegación por GESTOS, todo lo anterior se ve igual de bien | | | |

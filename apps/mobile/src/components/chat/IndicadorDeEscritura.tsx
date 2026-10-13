@@ -29,8 +29,9 @@ type Props = {
  * alguien y lo desmonta cuando no: en reposo no queda nada animado en la
  * pantalla. La entrada corre una vez, al montar.
  *
- * NO RECIBE TOQUES y va sobre la lista, no dentro: que aparezca o desaparezca
- * no mueve ningún mensaje de su sitio.
+ * VA DENTRO DE LA LISTA, al final, como un mensaje más: ocupa su sitio y no
+ * tapa nada. La primera versión flotaba encima y tapaba la hora y las marcas
+ * del último mensaje. No recibe toques.
  */
 export function IndicadorDeEscritura({ frase }: Props) {
   const { colors } = useAppTheme();
@@ -80,9 +81,9 @@ export function IndicadorDeEscritura({ frase }: Props) {
 
 const styles = StyleSheet.create({
   burbuja: {
-    position: 'absolute',
-    left: spacing.md,
-    bottom: spacing.sm,
+    // En el flujo de la lista, a la izquierda, donde llegan los mensajes.
+    alignSelf: 'flex-start',
+    marginTop: spacing.sm,
     maxWidth: '86%',
     flexDirection: 'row',
     alignItems: 'center',

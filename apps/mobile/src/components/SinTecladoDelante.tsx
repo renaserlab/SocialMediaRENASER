@@ -11,7 +11,7 @@ import {
 import { KeyboardAvoidingView, Platform, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { useTeclado } from '@/components/teclado';
-import { huecoDelMarco, rellenoInferior } from '@/lib/huecoDelTeclado';
+import { huecoDelMarco, rellenoInferior, tecladoALaVista } from '@/lib/huecoDelTeclado';
 
 /**
  * Lo que se escribe no puede quedar debajo del teclado. UN solo sitio.
@@ -145,9 +145,17 @@ function ApartadoEnAndroid({
   /** Donde acaba este marco en la ventana. `null` hasta la primera medida. */
   const [bordeInferior, setBordeInferior] = useState<number | null>(null);
 
+  /*
+    CON `measure`, NO CON `measureInWindow`. Las dos dan «dónde está en la
+    pantalla», pero en Android la segunda descuenta la barra de estado, y la
+    posición del teclado no: el hueco salía corto en el alto de esa barra y el
+    campo quedaba debajo del teclado. `pageY` se cuenta desde la raíz de la
+    pantalla —o de la hoja, si este marco vive en una—, igual que el teclado.
+    Ver `lib/huecoDelTeclado.huecoDelMarco`.
+  */
   const medir = useCallback(() => {
-    marco.current?.measureInWindow((_x, y, _ancho, alto) => {
-      const borde = y + alto;
+    marco.current?.measure((_x, _y, _ancho, alto, _enX, enY) => {
+      const borde = enY + alto;
       if (!Number.isFinite(borde)) return;
       // Mismo numero, mismo estado: medir no repinta si nada se ha movido.
       setBordeInferior((previo) => (previo !== null && Math.abs(previo - borde) < 0.5 ? previo : borde));
@@ -159,10 +167,10 @@ function ApartadoEnAndroid({
     cambia el recuadro de ESTE marco respecto a su padre; si lo que se movio fue
     algo de mas arriba, la medida guardada seria la de antes.
   */
-  const tecladoALaVista = teclado.visible || teclado.altoAsentado > 0;
+  const hayTeclado = tecladoALaVista(teclado);
   useEffect(() => {
-    if (tecladoALaVista) medir();
-  }, [tecladoALaVista, medir]);
+    if (hayTeclado) medir();
+  }, [hayTeclado, medir]);
 
   const hueco = enabled ? huecoDelMarco(bordeInferior, teclado) : 0;
   const relleno = rellenoInferior(hueco, rellenoDeLaPantalla(style));

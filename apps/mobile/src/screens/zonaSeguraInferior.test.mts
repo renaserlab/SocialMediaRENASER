@@ -72,9 +72,13 @@ const RESPETA_POR_SU_CUENTA: RegExp[] = [
   /useEspacioInferior\(\)/,
   /espacioParaLaBarra\(/,
   /insets\.bottom/,
+  // El mismo margen, que con el teclado abierto es cero (`components/teclado`).
+  /useMargenInferior\(\)/,
   // `SafeAreaView` sin `edges` respeta los cuatro bordes.
   /<SafeAreaView(?![^>]*\bedges=)[^>]*>/,
   /<SafeAreaView[^>]*\bedges=\{\[[^\]]*'bottom'/,
+  // Todos los bordes, salvo el de abajo mientras el teclado está abierto.
+  /<SafeAreaView[^>]*\bedges=\{tecladoAbierto \? BORDES_CON_TECLADO : BORDES_SIN_TECLADO\}/,
 ];
 
 /**
