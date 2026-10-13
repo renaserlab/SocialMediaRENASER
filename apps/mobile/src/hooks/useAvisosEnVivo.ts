@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
 import { traduceEnElIdiomaActual } from '@/i18n';
@@ -7,14 +8,18 @@ import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import {
   SILENCIO_TRAS_UN_AVISO_DE_SESION_MS,
   actoresDeSesionNuevos,
+  claveDePendientesDichos,
   conversacionesPendientes,
   desdeCuandoPreguntar,
   destinoDelAviso,
   elMensajeYaLoDijo,
   hayPendientesQueDecir,
+  hayPendientesSinDecir,
   hayQueLeerLaBandeja,
+  leerPendientesDichos,
   queAnunciar,
   queHacerConUnMensaje,
+  ultimoSinLeer,
 } from '@/lib/avisosNuevos';
 import { seEstaViendoLaConversacion } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
@@ -216,7 +221,20 @@ export function useAvisosEnVivo(): void {
     let mensajesDichos = 0;
 
     /** Al entrar: UN aviso con lo que hay en la bandeja sin leer. */
-    const decirAvisosPendientes = (avisos: readonly NotificationItem[], cuenta: number) => {
+    const decirAvisosPendientes = async (
+      avisos: readonly NotificationItem[],
+      cuenta: number,
+    ): Promise<void> => {
+      /*
+        UNA VEZ POR TELÉFONO. Lo ya anunciado se recuerda entre un arranque y
+        otro: sin esto, el mismo aviso sin leer saltaba cada vez que se abría
+        la aplicación. Ver `hayPendientesSinDecir`.
+      */
+      const clave = claveDePendientesDichos(yo);
+      const guardado = await AsyncStorage.getItem(clave).catch(() => null);
+      if (!vivo || !hayPendientesSinDecir(avisos, leerPendientesDichos(guardado))) return;
+      void AsyncStorage.setItem(clave, String(ultimoSinLeer(avisos))).catch(() => {});
+
       // Si es uno solo, se dice cuál: es más útil que «tienes una notificación».
       const unico = cuenta === 1 ? avisos.find((aviso) => !aviso.read) : undefined;
       if (unico) {
@@ -281,7 +299,7 @@ export function useAvisosEnVivo(): void {
         // Callado es lo mismo que la primera vez: solo se fija la marca.
         const resultado = queAnunciar(avisos, callado ? null : marca);
         marca = Math.max(marca ?? 0, resultado.marca);
-        if (decirPendientes) decirAvisosPendientes(avisos, lectura.cuenta);
+        if (decirPendientes) void decirAvisosPendientes(avisos, lectura.cuenta);
         for (const aviso of resultado.anunciar) {
           // Un hecho, un aviso: su mensaje del chat ya lo anunció. Calla UN
           // aviso, no a la persona: el silencio se gasta aquí.

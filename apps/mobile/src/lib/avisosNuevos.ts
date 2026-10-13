@@ -239,6 +239,55 @@ export function hayPendientesQueDecir(cuenta: number, dicho: number): boolean {
   return cuenta > 0 && cuenta > dicho;
 }
 
+/*
+  Y SE DICE UNA VEZ POR TELÉFONO, NO UNA VEZ POR ARRANQUE (13/10/2026).
+
+  Visto en teléfono: a una persona le salía, cada vez que abría la aplicación,
+  la misma ventana flotante —«Sesión confirmada · … aceptó tu solicitud»— de un
+  aviso de hacía días. La regla de arriba recordaba lo ya dicho solo mientras
+  la aplicación seguía abierta: al cerrarla y volver a entrar, la cuenta de «lo
+  dicho» empezaba otra vez en cero, y el mismo aviso sin leer volvía a contar
+  como novedad. Así seguiría hasta que la persona entrase en Notificaciones.
+
+  Ahora se guarda en el teléfono hasta dónde se dijo —el instante del aviso sin
+  leer más reciente— y al entrar solo se anuncia si hay algo sin leer POSTERIOR
+  a eso. El aviso sigue sin leer y sigue contando en la campana: lo que no hace
+  es volver a saltar a la cara.
+*/
+
+/** Dónde se guarda, en el teléfono, hasta qué aviso pendiente ya se dijo. */
+export const CLAVE_DE_PENDIENTES_DICHOS = 'z.avisos.pendientesDichos.v1';
+
+/** Una por cuenta: lo que se le dijo a una persona no calla lo de otra. */
+export function claveDePendientesDichos(usuarioId: string | null | undefined): string {
+  return usuarioId ? `${CLAVE_DE_PENDIENTES_DICHOS}:${usuarioId}` : CLAVE_DE_PENDIENTES_DICHOS;
+}
+
+/** Lo guardado, leído sin fiarse: 0 si no hay nada o no es un instante. */
+export function leerPendientesDichos(crudo: string | null | undefined): number {
+  const instanteGuardado = Number(crudo);
+  return Number.isFinite(instanteGuardado) && instanteGuardado > 0 ? instanteGuardado : 0;
+}
+
+/**
+ * Hasta dónde llegan los avisos sin leer: el instante del más reciente.
+ * 0 si no hay ninguno; 1 si los hay pero el servidor no dijo de cuándo son
+ * (así también se dicen una vez, y solo una).
+ */
+export function ultimoSinLeer(avisos: readonly AvisoFechado[]): number {
+  let tope = 0;
+  for (const aviso of avisos) {
+    if (aviso.read) continue;
+    tope = Math.max(tope, instante(aviso), 1);
+  }
+  return tope;
+}
+
+/** Si entre lo pendiente hay algo que todavía no se dijo en este teléfono. */
+export function hayPendientesSinDecir(avisos: readonly AvisoFechado[], dichoHasta: number): boolean {
+  return ultimoSinLeer(avisos) > dichoHasta;
+}
+
 /**
  * Las conversaciones con mensajes sin leer, sin la que se tiene delante: esa
  * se está leyendo, y anunciarla sería decirle a alguien lo que está mirando.

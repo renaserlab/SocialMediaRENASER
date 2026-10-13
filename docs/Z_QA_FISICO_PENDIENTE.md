@@ -3991,3 +3991,34 @@ Solo se puede comprobar en teléfono. Conviene probar con **botones** y con
 | Publicar desde «Crear» (texto de la publicación): el campo se ve entero | | | |
 | Inicio de sesión y registro: los campos y el botón se ven con el teclado abierto | | | |
 | En un teléfono con navegación por GESTOS, todo lo anterior se ve igual de bien | | | |
+
+---
+
+## Avisos: la ventana que se repetía y el icono (13/10/2026)
+
+Hace falta una **compilación nueva, que sale como 1.2.4** (el icono de las
+notificaciones va dentro de la aplicación). No toca el servidor.
+
+- **La ventana flotante que volvía a salir.** Al abrir la aplicación se
+  anuncia lo que hay sin leer. Lo ya anunciado se recordaba solo mientras la
+  aplicación seguía abierta, así que el mismo aviso —«Sesión confirmada»—
+  saltaba en cada arranque hasta que la persona entraba en Notificaciones.
+  Ahora se recuerda en el teléfono: un aviso pendiente se anuncia una vez. Sigue
+  sin leer y sigue contando en la campana.
+- **El icono de las notificaciones** enseñaba una «R»; ahora es la silueta de
+  la Z del icono de la aplicación.
+
+Sin ver en teléfono.
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Con UN aviso sin leer, abrir la aplicación: sale la ventana flotante con ese aviso | | | |
+| Cerrar la aplicación del todo y volver a abrirla, sin leer el aviso: la ventana YA NO sale | | | |
+| El aviso sigue en Notificaciones, sin leer, y la campana sigue marcando 1 | | | |
+| Llega otro aviso con la aplicación cerrada: al abrir, sale la ventana (ahora dice que hay 2) | | | |
+| Volver a cerrar y abrir: no sale otra vez | | | |
+| Al instalar la versión nueva, un aviso viejo sin leer puede salir UNA última vez; después, nunca más | | | |
+| Cerrar sesión y entrar con otra cuenta en el mismo teléfono: sus avisos pendientes sí se anuncian | | | |
+| Con la aplicación abierta, un aviso nuevo sigue saliendo al momento, como siempre | | | |
+| Fuera de la aplicación, las notificaciones muestran la Z y no la «R» | | | |
+| La Z se ve bien en la barra de arriba (pequeña) y en el panel de notificaciones | | | |

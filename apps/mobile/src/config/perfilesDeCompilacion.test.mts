@@ -319,6 +319,13 @@ NATIVO_POR_VERSION['1.2.2'] = NATIVO_POR_VERSION['1.2.1'] as (typeof NATIVO_POR_
 // sabe cuál de los dos lleva cada teléfono.
 NATIVO_POR_VERSION['1.2.3'] = NATIVO_POR_VERSION['1.2.2'] as (typeof NATIVO_POR_VERSION)[string];
 
+// 1.2.4: dependencias, plugins y permisos iguales que 1.2.3. Sube porque el
+// icono de las notificaciones es otro: la silueta de la Z, donde antes salía
+// una «R». Es el archivo `assets/notification-icon.png`, que el plugin
+// `expo-notifications` convierte en un recurso de Android: va dentro del
+// binario y solo cambia con una compilación nueva.
+NATIVO_POR_VERSION['1.2.4'] = NATIVO_POR_VERSION['1.2.3'] as (typeof NATIVO_POR_VERSION)[string];
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];
