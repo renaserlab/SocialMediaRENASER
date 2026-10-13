@@ -378,10 +378,12 @@ function BotonDeTerminar({
       accessibilityRole="button"
       accessibilityLabel={etiqueta}
       accessibilityState={{ disabled: desactivado }}
-      style={[estilos.terminar, { backgroundColor: rellenoDePeligro.fondo }]}
+      // La píldora es baja para no tapar la imagen; el dedo tiene más sitio.
+      hitSlop={10}
+      style={[estilos.insignia, estilos.terminar, { backgroundColor: rellenoDePeligro.fondo }]}
     >
-      <Feather name="square" size={13} color={rellenoDePeligro.texto} />
-      <Text variant="secondary" weight="800" color={rellenoDePeligro.texto}>
+      <View style={[estilos.punto, { backgroundColor: rellenoDePeligro.texto }]} />
+      <Text variant="caption" weight="900" color={rellenoDePeligro.texto}>
         {texto}
       </Text>
     </Pulsable>
@@ -849,7 +851,25 @@ export function LiveScreen() {
             sobreImagen={hayImagen}
             alSalir={salir}
             alFallar={setAviso}
-            insignia={<Insignia estado={emision.estado} />}
+            /*
+              QUIEN EMITE NO TIENE DOS BOTONES ROJOS, TIENE UNO. Antes veía
+              la insignia «EN VIVO» y, debajo, «Terminar»: dos píldoras
+              iguales, una encima de la imagen que quiere enseñar. Ahora la
+              insignia ES el botón: conserva el punto de «en directo» y dice
+              lo que hace al tocarla. Quien mira sigue viendo «EN VIVO».
+            */
+            insignia={
+              puedeGestionar && emision.estado === 'live' ? (
+                <BotonDeTerminar
+                  texto={t('live.end')}
+                  etiqueta={t('live.endBroadcast')}
+                  alPulsar={terminar}
+                  desactivado={vista.ocupado}
+                />
+              ) : (
+                <Insignia estado={emision.estado} />
+              )
+            }
           />
 
           {avisoDeConexion ? (
@@ -878,30 +898,21 @@ export function LiveScreen() {
             />
           ) : null}
 
-          {/* Gestion de la emision: empezarla o terminarla. */}
-          {puedeGestionar && (emision.estado === 'live' || emision.estado === 'scheduled') ? (
+          {/* Empezar la emision programada. Terminarla va en la cabecera. */}
+          {puedeGestionar && emision.estado === 'scheduled' ? (
             <View style={estilos.filaDeGestion}>
-              {emision.estado === 'scheduled' ? (
-                <BotonDeTexto
-                  texto={t('create.startNow')}
-                  alPulsar={empezar}
-                  desactivado={vista.ocupado}
-                />
-              ) : (
-                <BotonDeTerminar
-                  texto={t('live.end')}
-                  etiqueta={t('live.endBroadcast')}
-                  alPulsar={terminar}
-                  desactivado={vista.ocupado}
-                />
-              )}
+              <BotonDeTexto
+                texto={t('create.startNow')}
+                alPulsar={empezar}
+                desactivado={vista.ocupado}
+              />
             </View>
           ) : null}
 
           {/*
-            Bajarse del escenario, para quien salio invitado. En el mismo sitio
-            donde quien emite tiene «Terminar»: es la misma clase de boton —el
-            que corta lo propio— y cada cual solo ve el suyo.
+            Bajarse del escenario, para quien salio invitado: el boton que
+            corta lo propio. Quien emite tiene el suyo —«Terminar»— arriba,
+            en la cabecera.
           */}
           {escena.enPantalla && emision.estado === 'live' ? (
             <View style={estilos.filaDeGestion}>
@@ -1240,14 +1251,8 @@ const estilos = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.94)',
   },
   textoDelTema: { flexShrink: 1 },
-  terminar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minHeight: 40,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.lg,
-  },
+  // Encima de `insignia`: la misma píldora, un punto más alta porque se toca.
+  terminar: { minHeight: 30 },
   botonDeTexto: {
     borderWidth: 1,
     borderRadius: radius.pill,
