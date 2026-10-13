@@ -108,7 +108,7 @@ el navegador (`localhost:8081`) o el iPhone con Expo Go.
   (adjuntar en Chat, corazon en Live, barra de progreso en Audio); el modulo
   `stories` de la API FastAPI sin usar.
 
-Detalle por escrito en `docs/`: `ARQUITECTURA.md`, `ESTADO_DEL_PROYECTO.md`,
+Detalle por escrito en `docs/`: `ARQUITECTURA.md`,
 `VALIDACION.md`, `IOS_EN_DISPOSITIVO.md` (probar en iPhone y publicar) y
 `RENDIMIENTO.md` (carga rapida: cache local del feed, derivados de media,
 HLS y que ejecutar para reprocesar lo existente).

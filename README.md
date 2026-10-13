@@ -1,105 +1,120 @@
-# RENASER Social Media — MVP móvil
+# Z Excelencia
 
-MVP funcional inspirado en el diseño entregado. La aplicación es **móvil híbrida real** con React Native + Expo y funciona en Android e iOS desde una sola base de código.
+Red social profesional: publicaciones, mensajería con grupos, transmisiones en
+vivo, cursos, eventos, productos y servicios con agenda. Una sola aplicación
+para Android, iPhone y web, con servidor propio.
 
-## Incluye
+Este archivo es la puerta de entrada. El detalle está en `docs/`.
 
-- Landing, quiz de 7 preguntas, resultado, registro local y onboarding.
-- Feed social con historias, publicaciones, reacciones, guardados y creación de posts.
-- Perfil, exploración, círculos privados, eventos y reservas.
-- Audio privado reproducible, curso, checkout simulado y confirmación.
-- Mensajería local, chat y sala en vivo simulada.
-- Persistencia offline con AsyncStorage mediante Zustand.
-- Adaptador preparado para Supabase.
-- API profesional base con FastAPI + SQLAlchemy asíncrono.
-- Migración inicial para Supabase/PostgreSQL con RLS.
-- Docker, CI y configuración EAS para Android/iOS.
+## Qué hay en el repositorio
+
+```text
+apps/mobile          La aplicación (Expo, React Native, TypeScript)
+apps/api             El servidor (FastAPI, Python 3.13)
+supabase/migrations  Las migraciones de la base de datos, numeradas
+infra/aws            Plantillas de CloudFormation y guion de despliegue
+docs                 Arquitectura, guías y decisiones
+.github/workflows    Comprobaciones y despliegue automáticos
+```
+
+## Dónde corre
+
+| Pieza | Dónde |
+|---|---|
+| Servidor | AWS, desplegado con `infra/aws/` |
+| Base de datos, cuentas, archivos y tiempo real | Supabase |
+| Aplicación | Se compila con EAS, desde `apps/mobile` |
+| Versión web | Vercel, desde la rama `main` |
+| Video de las transmisiones | 100ms |
 
 ## Requisitos
 
-- Node.js 22.15 o superior (`module.registerHooks`, que usan cuatro baterías del móvil, se añadió ahí).
-- npm 10 o superior.
-- Expo Go para una prueba rápida, o Development Build para trabajo profesional.
-- Android Studio para emulador Android.
-- macOS + Xcode para simulador y publicación iOS.
+- Node.js 22.15 o superior y npm 10 o superior.
+- Python 3.13 para el servidor.
+- Docker, solo para levantar una base PostgreSQL local o construir la imagen.
 
-## Ejecutar la app móvil
+## Trabajar en un equipo local
 
 ```bash
-cd renaser-universo-mvp
+# En la raíz: instala las dependencias de la aplicación
 npm install
+
+# La aplicación
 npm run mobile
-```
 
-Luego:
-
-- Presiona `a` para Android.
-- Escanea el QR con Expo Go.
-- En macOS presiona `i` para iOS.
-
-También puedes ejecutar:
-
-```bash
-npm run mobile:android
-npm run mobile:ios
-```
-
-## Ejecutar el backend
-
-### Opción rápida con SQLite
-
-```bash
+# El servidor, con una base SQLite local
 cd apps/api
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Documentación interactiva: `http://localhost:8000/docs`
+Cada parte tiene su `.env.example`. Los archivos `.env` no se suben nunca.
 
-### Opción Docker + PostgreSQL
+## Pruebas
 
 ```bash
-docker compose up --build
+# Aplicación: tipos y pruebas (desde la raíz)
+npm run mobile:check
+npm run mobile:test
+
+# Servidor (desde apps/api)
+python -m pytest
 ```
 
-## Supabase
+Las pruebas del servidor que necesitan PostgreSQL se saltan en local y las
+ejecuta GitHub en cada cambio.
 
-1. Crea un proyecto en Supabase.
-2. Ejecuta `supabase/migrations/0001_initial.sql` en SQL Editor.
-3. Copia `apps/mobile/.env.example` como `.env`.
-4. Completa `EXPO_PUBLIC_SUPABASE_URL` y `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
-5. Cambia gradualmente los repositorios locales por el adaptador remoto de `src/services/supabase.ts`.
+## Base de datos
 
-El MVP funciona sin Supabase porque los datos se almacenan localmente. La arquitectura deja listo el camino de migración.
+Las migraciones de `supabase/migrations` se aplican **a mano**, en orden, en el
+editor SQL de Supabase. Una migración aplicada no se edita: un cambio posterior
+es una migración nueva. Después de aplicar una hay que reiniciar el servidor
+para que la detecte.
 
-## Flujo de prueba
+## Cómo llega un cambio a producción
 
-1. Abrir la app y pulsar **Descubrir ahora**.
-2. Completar las siete preguntas.
-3. Crear cuenta local.
-4. Completar onboarding.
-5. Probar feed, crear publicación, reservar evento, escuchar audio, comprar curso y enviar mensajes.
+1. Se trabaja en una rama propia.
+2. Se abre una solicitud de integración hacia `main`.
+3. GitHub ejecuta las comprobaciones (`.github/workflows/ci.yml`).
+4. Al fusionar, si cambió algo en `apps/api`, el servidor se despliega solo
+   (`.github/workflows/desplegar-aws.yml`).
 
-## Compilación Android/iOS
+La infraestructura de AWS solo cambia con `infra/aws/deploy-renaserlab.ps1`.
+Guía: `docs/AWS_MIGRACION_RENASERLAB.md`.
+
+## Compilar la aplicación
+
+Siempre desde `apps/mobile`:
 
 ```bash
 cd apps/mobile
-npx eas login
-npx eas build:configure
-npx eas build --platform android --profile preview
-npx eas build --platform ios --profile preview
+eas build --platform android --profile preview      # APK de pruebas
+eas build --platform android --profile production   # AAB para Google Play
 ```
 
-Antes de publicar, cambia los identificadores `com.renaser.universo` por los definitivos de la empresa y configura credenciales, privacidad, moderación, pagos reales y eliminación de cuenta.
+Guías: `docs/PUBLICAR_EN_GOOGLE_PLAY.md` y `docs/PUBLICAR_EN_APP_STORE.md`.
 
-## Estructura
+## Documentación
 
-```text
-apps/mobile   App React Native + Expo
-apps/api      API FastAPI
-supabase      SQL y políticas RLS
-docs          Arquitectura y referencia visual
-```
+| Tema | Documento |
+|---|---|
+| Arquitectura | `docs/ARQUITECTURA.md` |
+| Decisiones y requisitos | `docs/Z_REQUISITOS_Y_DECISIONES.md` |
+| Despliegue en AWS | `docs/AWS_MIGRACION_RENASERLAB.md` |
+| Cursos | `docs/CONTRATOS_CURSOS_V2.md` |
+| Eventos | `docs/Z_EVENTOS_ARQUITECTURA.md` |
+| Productos | `docs/Z_PRODUCTOS_ARQUITECTURA.md` |
+| Servicios | `docs/Z_SERVICIOS_ARQUITECTURA.md` |
+| Transmisiones en vivo | `docs/Z_DIRECTOS_100MS.md` |
+| Recomendación | `docs/Z_RECOMMENDATION_V1.md` y `docs/Z_RECOMMENDATION_V1_1.md` |
+| Pagos | `docs/Z_STRIPE_PUESTA_EN_MARCHA.md` |
+| Lo que falta probar en teléfono | `docs/Z_QA_FISICO_PENDIENTE.md` |
+
+Varios documentos son registros por fechas y sus partes más antiguas quedaron
+superadas. Si un documento y el código no coinciden, vale el código.
+
+## Seguridad
+
+Antes de traer cambios o compilar, leer `SECURITY.md`.

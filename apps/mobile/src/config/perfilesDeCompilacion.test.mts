@@ -304,6 +304,13 @@ NATIVO_POR_VERSION['1.2.1'] = {
   })(),
 };
 
+// 1.2.2: dependencias, plugins y permisos iguales que 1.2.1. Sube porque entra
+// un tercer tono en `sounds` del plugin `expo-notifications`: el de «alguien
+// está escribiendo» (`alguien_escribe.wav`). Va dentro del binario, y una
+// actualización sobre uno 1.2.1 lo haría sonar como el aviso por defecto del
+// teléfono cada vez que alguien teclea.
+NATIVO_POR_VERSION['1.2.2'] = NATIVO_POR_VERSION['1.2.1'] as (typeof NATIVO_POR_VERSION)[string];
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];

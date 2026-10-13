@@ -147,8 +147,16 @@ export function hayMensajeNuevoEn(conversacionId: string): void {
  *
  * No lanza. Si el servidor falla, la bandeja se corrige sola en su siguiente
  * lectura, que es lo que pasaba antes con todo.
+ *
+ * Devuelve una promesa que dice si el SERVIDOR ya lo anotó. Quien avisa a los
+ * demás de que se leyó tiene que esperar a eso: avisar antes haría que
+ * preguntaran y recibieran todavía la marca anterior.
  */
-export function marcarConversacionLeida(conversacionId: string): void {
-  MessageRepository.markRead(conversacionId).catch(() => {});
+export function marcarConversacionLeida(conversacionId: string): Promise<boolean> {
+  const anotado = MessageRepository.markRead(conversacionId).then(
+    () => true,
+    () => false,
+  );
   for (const oyente of oyentesDeLeida) oyente(conversacionId);
+  return anotado;
 }

@@ -72,14 +72,28 @@ describe('enchufado: el chat avisa y la bandeja escucha', () => {
 
   it('el chat marca leído por la puerta que también avisa a la bandeja', () => {
     assert.ok(!/MessageRepository\.markRead\(/.test(CHAT), 'vuelve a marcar leído sin avisar');
-    // Al abrir y con cada mensaje que llega con el chat delante.
-    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\);/g)?.length, 2);
+    // Al abrir y con cada mensaje que llega con el chat delante. Las dos
+    // veces, cuando el servidor ya lo anotó, se avisa a los demás de que se
+    // leyó (la confirmación de lectura, 12/10/2026).
+    assert.equal(
+      CHAT.match(/void marcarConversacionLeida\(conversationId\)\.then\(avisarSiSeAnoto\);/g)?.length,
+      2,
+    );
+    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\)/g)?.length, 2);
   });
 
   it('marcar leído avisa en el acto, sin esperar al servidor', () => {
     const cuerpo = CONTADORES.slice(CONTADORES.indexOf('export function marcarConversacionLeida'));
-    assert.match(cuerpo, /MessageRepository\.markRead\(conversacionId\)\.catch\(\(\) => \{\}\);/);
-    assert.match(cuerpo, /for \(const oyente of oyentesDeLeida\) oyente\(conversacionId\);/);
+    // La petición sale y NO se espera: la bandeja se entera antes de que
+    // conteste el servidor. Lo que se devuelve es para quien quiera saber
+    // si el servidor lo anotó, y nunca lanza.
+    assert.match(
+      cuerpo,
+      /const anotado = MessageRepository\.markRead\(conversacionId\)\.then\(\s*\(\) => true,\s*\(\) => false,\s*\);/,
+    );
+    assert.match(cuerpo, /for \(const oyente of oyentesDeLeida\) oyente\(conversacionId\);\s*return anotado;/);
+    assert.doesNotMatch(cuerpo.slice(0, cuerpo.indexOf('return anotado;')), /await /);
+    assert.match(cuerpo, /^export function marcarConversacionLeida\(conversacionId: string\): Promise<boolean> \{/);
   });
 
   it('la lectura del contador se le da a quien tenga la bandeja pintada', () => {

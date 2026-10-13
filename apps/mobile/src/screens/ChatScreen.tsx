@@ -28,7 +28,10 @@ import { CabeceraDeChat } from '@/components/CabeceraDeChat';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { Avatar } from '@/components/Avatar';
+import { DetallesDeMensaje } from '@/components/chat/DetallesDeMensaje';
 import { HojaDeFondoDeChat } from '@/components/chat/HojaDeFondoDeChat';
+import { IndicadorDeEscritura } from '@/components/chat/IndicadorDeEscritura';
+import { MarcaDeEntrega } from '@/components/chat/MarcaDeEntrega';
 import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
 import { DeslizarParaResponder } from '@/components/chat/DeslizarParaResponder';
 import { HojaDeStickers } from '@/components/chat/HojaDeStickers';
@@ -40,7 +43,9 @@ import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
 import { SesionEnElChat } from '@/components/SesionEnElChat';
 import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
+import { useEscribiendo } from '@/hooks/useEscribiendo';
 import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
+import { useLecturasDelChat } from '@/hooks/useLecturasDelChat';
 import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -67,7 +72,14 @@ import {
 } from '@/lib/saltoDeChat';
 import { alCambiarElSilencioDeUnChat } from '@/hooks/useAvisosEnVivo';
 import { afterSheetClose } from '@/lib/afterSheetClose';
+import { fraseDeEscritura, suenaElTono } from '@/lib/escribiendo';
 import { colorDeFondo, fondoDe, veloSobreLaFoto } from '@/lib/fondoDeChat';
+import {
+  COLOR_DE_LEIDO,
+  estadoDeEntrega,
+  llevaFranjaDeHora,
+  tieneDetalles,
+} from '@/lib/lecturaDeMensajes';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
 import { retirarAvisosDe, toast } from '@/lib/toast';
@@ -331,6 +343,8 @@ export function ChatScreen() {
   */
   const [opcionesAbiertas, setOpcionesAbiertas] = useState(false);
   const [fondoAbierto, setFondoAbierto] = useState(false);
+  /** El mensaje propio del que se están viendo los detalles (quién lo leyó). */
+  const [detallesDe, setDetallesDe] = useState<Message | null>(null);
   const [silencioPuesto, setSilencioPuesto] = useState<boolean | null>(null);
   const [haciendoOpcion, setHaciendoOpcion] = useState(false);
 
@@ -341,6 +355,28 @@ export function ChatScreen() {
   useEffect(() => {
     void leerFondoDelChat();
   }, [leerFondoDelChat]);
+
+  /*
+    LA CONFIRMACIÓN DE LECTURA Y «ESTÁ ESCRIBIENDO» (12/10/2026), como en
+    WhatsApp. Las marcas de lectura salen del servidor y solo si las conoce;
+    «está escribiendo» es difusión entre los teléfonos que tienen el chat
+    abierto y no depende del servidor. A los avisos de escritura solo se les
+    hace caso si vienen de alguien de esta conversación.
+  */
+  const lecturas = useLecturasDelChat(
+    params.id,
+    supabaseEnabled && !!params.id && funciones.lecturas,
+  );
+  const miembrosConocidos = useMemo(
+    () => (infoDeConversacion ? infoDeConversacion.miembros.map((miembro) => miembro.id) : null),
+    [infoDeConversacion],
+  );
+  const escritura = useEscribiendo({
+    conversationId: params.id,
+    yo: currentUserId,
+    conocidos: miembrosConocidos,
+    activo: supabaseEnabled && !!params.id,
+  });
 
   /*
     Lo último que se intentó enviar DESDE CADA BURBUJA, para poder repetirlo.
@@ -394,10 +430,15 @@ export function ChatScreen() {
     /** La primera página llegó: hay desde dónde pedir «lo que ha entrado después». */
     let cargada = false;
 
+    /** Que los demás vuelvan a preguntar quién leyó: solo si el servidor ya lo anotó. */
+    const avisarSiSeAnoto = (anotado: boolean) => {
+      if (anotado) lecturas.avisarQueLei();
+    };
+
     /** Leído solo si de verdad se está mirando. */
     const leerSiSeVe = () => {
       if (aLaVista.current && AppState.currentState === 'active') {
-        marcarConversacionLeida(conversationId);
+        void marcarConversacionLeida(conversationId).then(avisarSiSeAnoto);
       }
     };
 
@@ -422,7 +463,7 @@ export function ChatScreen() {
       .finally(() => {
         if (montado) setCargandoMensajes(false);
       });
-    marcarConversacionLeida(conversationId);
+    void marcarConversacionLeida(conversationId).then(avisarSiSeAnoto);
 
     /*
       PONERSE AL DÍA: pedir lo que haya entrado desde lo último que se tiene.
@@ -770,8 +811,15 @@ export function ChatScreen() {
   const extraDeSesiones = useMemo(
     // Con `infoDeConversacion` y `resaltado`: la lista solo repinta sus
     // celdas cuando cambia esto, y los dos cambian lo que pinta una burbuja.
-    () => ({ estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado }),
-    [estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado],
+    // Y con las marcas de lectura: cambian la marca de las burbujas propias.
+    () => ({
+      estadosDeSesion,
+      sesionOcupada,
+      infoDeConversacion,
+      resaltado,
+      marcas: lecturas.marcas,
+    }),
+    [estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado, lecturas.marcas],
   );
 
   // -------------------------------------------------------------------------
@@ -1211,6 +1259,8 @@ export function ChatScreen() {
       cita: respondiendoA ? citaDe(respondiendoA) : undefined,
     };
     setText('');
+    // Enviado: para los demás, ya no se está escribiendo.
+    escritura.alParar();
     setElegidos([]);
     setRespondiendoA(null);
     await mandar(envio);
@@ -1387,6 +1437,50 @@ export function ChatScreen() {
   useEffect(() => {
     setSilencioPuesto(null);
   }, [infoDeConversacion?.silenciada]);
+
+  /*
+    QUIÉN ESTÁ ESCRIBIENDO, dicho con palabras. El nombre sale de los miembros
+    que ya se conocen, nunca del aviso. En un chat de dos no hace falta.
+  */
+  const cuantosEscriben = escritura.quienes.length;
+  const fraseDeQuienEscribe = (() => {
+    const frase = fraseDeEscritura(
+      escritura.quienes.map((id) => nombreDelAutor(infoDeConversacion, id)),
+      esGrupo,
+    );
+    if (!frase) return null;
+    if (frase.clave === 'solo') return t('chat.typingSolo');
+    if (frase.clave === 'uno') return t('chat.typingOne', { nombre: frase.nombre });
+    if (frase.clave === 'dos') {
+      return t('chat.typingTwo', { primero: frase.primero, segundo: frase.segundo });
+    }
+    return t('chat.typingMany', { n: frase.cuantos });
+  })();
+
+  /*
+    EL TONO DE «ESTÁ ESCRIBIENDO». Una vez, cuando alguien empieza y antes no
+    escribía nadie; no en cada aviso, no con el chat detrás y no si la
+    conversación está silenciada. Cuándo toca lo decide `suenaElTono`.
+  */
+  const escribianAntes = useRef(0);
+  const ultimoTonoDeEscritura = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const momento = Date.now();
+    if (
+      suenaElTono({
+        antes: escribianAntes.current,
+        ahora: cuantosEscriben,
+        seEstaMirando: aLaVista.current && AppState.currentState === 'active',
+        silenciada: estaSilenciada,
+        momento,
+        ultimoTono: ultimoTonoDeEscritura.current,
+      })
+    ) {
+      ultimoTonoDeEscritura.current = momento;
+      void sonarTono('escribiendo');
+    }
+    escribianAntes.current = cuantosEscriben;
+  }, [cuantosEscriben, estaSilenciada]);
 
   /** Cierra el menú y espera: nada se abre encima de una hoja que se va. */
   const trasElMenu = async () => {
@@ -2142,7 +2236,22 @@ export function ChatScreen() {
               solo tiene una foto; sin ella, esas burbujas se quedarían sin
               ninguna zona con la que abrir el menú de acciones.
             */
-            const mostrarHora = !agrupado || !item.text || !!item.estado;
+            /*
+              Y LO ÚLTIMO QUE UNO MANDÓ LA LLEVA SIEMPRE: en esa franja va la
+              marca de lectura, y es justo del último mensaje del que se
+              quiere saber si ya lo leyeron.
+            */
+            const siguiente = messages[index + 1];
+            const mostrarHora = llevaFranjaDeHora({
+              agrupado,
+              tieneTexto: !!item.text,
+              tieneEstado: !!item.estado,
+              esMio: mine,
+              cierraLaRafaga:
+                !siguiente || !mismaRafaga(siguiente, item) || diaDe(siguiente) !== dia,
+            });
+            // Reloj, una marca o dos: enviándose, enviado o leído.
+            const entrega = estadoDeEntrega(item, lecturas.marcas);
             /*
               STICKER: un mensaje que es solo uno, dos o tres emoji, sin
               adjuntos. Se pinta grande y sin burbuja. Vale igual para el que
@@ -2462,16 +2571,11 @@ export function ChatScreen() {
                                           : item.createdAt}
                                     </Text>
                                     {mine ? (
-                                      <Feather
-                                        name={
-                                          item.estado === 'enviando'
-                                            ? 'clock'
-                                            : fallido
-                                              ? 'alert-circle'
-                                              : 'check'
-                                        }
-                                        size={11}
+                                      // Sobre la foto la franja es oscura en los dos temas.
+                                      <MarcaDeEntrega
+                                        estado={entrega}
                                         color="#FFF"
+                                        colorDeLeido={COLOR_DE_LEIDO.sobreOscuro}
                                       />
                                     ) : null}
                                   </View>
@@ -2573,16 +2677,17 @@ export function ChatScreen() {
                                 : item.createdAt}
                           </Text>
                           {mine ? (
-                            <Feather
-                              name={
-                                item.estado === 'enviando'
-                                  ? 'clock'
-                                  : fallido
-                                    ? 'alert-circle'
-                                    : 'check'
-                              }
-                              size={11}
+                            <MarcaDeEntrega
+                              estado={entrega}
                               color={comoSticker ? colors.textMuted : colors.onPrimary}
+                              // La burbuja propia es del color principal: oscura en
+                              // el tema claro y clara en el oscuro. Un sticker no
+                              // lleva burbuja y va sobre el fondo del tema, al revés.
+                              colorDeLeido={
+                                (mode === 'dark') === comoSticker
+                                  ? COLOR_DE_LEIDO.sobreOscuro
+                                  : COLOR_DE_LEIDO.sobreClaro
+                              }
                               style={styles.iconoDeEstado}
                             />
                           ) : null}
@@ -2657,6 +2762,11 @@ export function ChatScreen() {
             );
           }}
         />
+        {/*
+          «ESTÁ ESCRIBIENDO». Solo existe mientras alguien escribe, va sobre
+          la lista —no la empuja— y no recibe toques.
+        */}
+        {fraseDeQuienEscribe ? <IndicadorDeEscritura frase={fraseDeQuienEscribe} /> : null}
         {/*
           IR A LO ÚLTIMO. Solo cuando se ha subido a leer: abajo no hay a dónde
           ir. El punto dice que, mientras tanto, ha llegado algo.
@@ -2819,7 +2929,11 @@ export function ChatScreen() {
           {grabadora.ocupada ? null : (
             <Input
               value={text}
-              onChangeText={setText}
+              onChangeText={(texto) => {
+                setText(texto);
+                // Mientras se teclea se avisa a quien tenga el chat abierto.
+                escritura.alEscribir(texto);
+              }}
               onSubmitEditing={submit}
               placeholder={t('profile.message')}
               placeholderTextColor={colors.textMuted}
@@ -2997,6 +3111,20 @@ export function ChatScreen() {
             />
           </>
         ) : null}
+        {/* Quién lo leyó y quién no. Solo de lo propio, ya enviado, y solo si
+            el servidor lo sabe decir. */}
+        {accionesDe &&
+        funciones.lecturas &&
+        tieneDetalles({ ...accionesDe, esSesion: accionesDe.id.startsWith('sesion:') }) ? (
+          <ListRow
+            title={t('chat.messageDetails')}
+            leftIcon="info"
+            onPress={() => {
+              setDetallesDe(accionesDe);
+              setAccionesDe(null);
+            }}
+          />
+        ) : null}
         {accionesDe?.sender === 'me' ? (
           <ListRow
             title={t('common.delete')}
@@ -3006,6 +3134,13 @@ export function ChatScreen() {
           />
         ) : null}
       </BottomSheet>
+
+      <DetallesDeMensaje
+        conversacionId={params.id ?? ''}
+        mensaje={detallesDe}
+        esGrupo={esGrupo}
+        onClose={() => setDetallesDe(null)}
+      />
 
       <HojaDeStickers
         visible={!!reaccionandoA}

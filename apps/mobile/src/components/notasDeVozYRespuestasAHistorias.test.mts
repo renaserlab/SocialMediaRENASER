@@ -195,7 +195,7 @@ describe('sin la migración 0044 no se ofrece grabar', () => {
     );
     // Y «sin funciones» es de verdad ninguna: cada una nueva nace apagada.
     assert.ok(
-      /export const SIN_FUNCIONES: FuncionesDelChat = \{\s*notasDeVoz: false,\s*respuestasAHistorias: false,\s*reacciones: false,\s*preferencias: false,\s*\};/.test(
+      /export const SIN_FUNCIONES: FuncionesDelChat = \{\s*notasDeVoz: false,\s*respuestasAHistorias: false,\s*reacciones: false,\s*preferencias: false,\s*lecturas: false,\s*\};/.test(
         REPO,
       ),
       'Lo que se da por hecho sin respuesta del servidor tiene que ser «nada».',

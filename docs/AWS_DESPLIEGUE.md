@@ -3,11 +3,12 @@
 Rama `Edson`, agosto de 2026. Plantillas en `infra/aws/`, workflow en
 `.github/workflows/desplegar-aws.yml`.
 
-> **MIGRACIÓN EN CURSO (23/09/2026).** La API se prepara para mudarse a la
-> cuenta AWS de RenaserLab con el prefijo `zexcelencia` y el guion
-> `infra/aws/deploy-renaserlab.ps1`. El procedimiento vigente, la auditoría y el
-> plan de corte están en [`AWS_MIGRACION_RENASERLAB.md`](AWS_MIGRACION_RENASERLAB.md).
-> Lo que sigue describe la **cuenta anterior**, donde corre hoy producción:
+> **ESTE DOCUMENTO DESCRIBE LA CUENTA ANTERIOR, QUE YA NO EXISTE.** Desde el
+> 23/09/2026 producción corre en la cuenta AWS de RenaserLab, con el prefijo
+> `zexcelencia` y el guion `infra/aws/deploy-renaserlab.ps1`. El procedimiento
+> vigente está en [`AWS_MIGRACION_RENASERLAB.md`](AWS_MIGRACION_RENASERLAB.md).
+> Esto se conserva por la explicación de la arquitectura y de los costos, que
+> sigue valiendo. Lo que NO vale son los nombres y los comandos:
 > sus nombres (`renaser-fundacion`, `renaser/produccion/api`,
 > `/renaser/produccion/imagen-api`) son los de esa cuenta. Los comandos del §6
 > ya no sirven tal cual: `02-plataforma.yaml` pasa de 51 200 bytes y

@@ -325,3 +325,5 @@ class MessagingAvailability(BaseModel):
     reactions: bool = False
     #: Se puede silenciar una conversación y vaciarla para uno mismo (0107).
     preferences: bool = False
+    #: El servidor dice quién leyó cada mensaje (`lecturas.py`, sin migración).
+    read_receipts: bool = False

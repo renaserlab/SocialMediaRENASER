@@ -165,10 +165,10 @@ describe('el chat abierto pregunta lo que le falta', () => {
     */
     assert.match(
       CHAT,
-      /const leerSiSeVe = \(\) => \{\s*if \(aLaVista\.current && AppState\.currentState === 'active'\) \{\s*marcarConversacionLeida\(conversationId\);/,
+      /const leerSiSeVe = \(\) => \{\s*if \(aLaVista\.current && AppState\.currentState === 'active'\) \{\s*void marcarConversacionLeida\(conversationId\)\.then\(avisarSiSeAnoto\);/,
     );
     // Lo único que marca sin mirar es entrar: el montaje.
-    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\);/g)?.length, 2);
+    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\)/g)?.length, 2);
     assert.match(CHAT, /aLaVista\.current = true;\s*marcarConversacionALaVista\(conversacionALaVista\);/);
     assert.match(CHAT, /return \(\) => \{\s*aLaVista\.current = false;/);
   });

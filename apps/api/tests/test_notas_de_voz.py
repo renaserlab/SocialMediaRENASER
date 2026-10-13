@@ -394,6 +394,9 @@ async def test_la_aplicacion_puede_preguntar_si_hay_notas_de_voz(entorno):
         "story_replies": True,
         "reactions": True,
         "preferences": True,
+        # La confirmacion de lectura (12/10/2026): no depende de ninguna
+        # migracion, asi que se anuncia siempre.
+        "read_receipts": True,
     }
 
 

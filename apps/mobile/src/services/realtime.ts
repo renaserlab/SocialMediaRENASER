@@ -121,3 +121,89 @@ export function avisosDeReacciones(
     },
   };
 }
+
+/**
+ * «Alguien ha leído en esta conversación: vuelve a preguntar».
+ *
+ * Igual que con las reacciones, y por lo mismo: que una persona abra el chat
+ * no crea ningún mensaje, así que el canal de mensajes no se entera. Quien lee
+ * manda este aviso DESPUÉS de que el servidor anote su lectura, y los demás le
+ * preguntan a la API hasta dónde ha leído cada quien.
+ *
+ * EL AVISO NO LLEVA NADA, ni quién leyó. Lo peor que consigue quien mande
+ * avisos falsos es una pregunta de más; lo que contesta la API es lo cierto.
+ */
+export function avisosDeLectura(
+  conversationId: string,
+  alAvisar: () => void,
+): { avisar: () => void; cerrar: () => void } {
+  const client = supabase;
+  if (!client || !conversationId) return { avisar: () => {}, cerrar: () => {} };
+
+  // SE AVISA AL ABRIR EL CHAT, que es justo cuando el canal todavía se está
+  // uniendo. Un aviso mandado antes de estar dentro no le llega a nadie, así
+  // que el que llegue pronto espera a que el canal esté listo.
+  let unido = false;
+  let debeAvisar = false;
+  const mandar = () => {
+    void channel.send({ type: 'broadcast', event: 'leido', payload: {} });
+  };
+  const channel = client
+    .channel(`chat-lecturas:${conversationId}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'leido' }, () => alAvisar())
+    .subscribe((estado: string) => {
+      unido = estado === 'SUBSCRIBED';
+      if (unido && debeAvisar) {
+        debeAvisar = false;
+        mandar();
+      }
+    });
+
+  return {
+    avisar: () => {
+      if (unido) mandar();
+      else debeAvisar = true;
+    },
+    cerrar: () => {
+      void client.removeChannel(channel);
+    },
+  };
+}
+
+/**
+ * «Está escribiendo», entre los teléfonos que tienen la conversación abierta.
+ *
+ * No se guarda en ningún sitio: es difusión pura, y caduca sola en quien la
+ * recibe (`lib/escribiendo`). Lo que viaja es SOLO un identificador y si
+ * escribe o paró; el nombre no, porque a un canal que puede escribir
+ * cualquiera no se le cree. Quien recibe decide a quién le hace caso.
+ */
+export function canalDeEscritura(
+  conversationId: string,
+  alRecibir: (aviso: unknown) => void,
+): { avisar: (aviso: Record<string, unknown>) => void; cerrar: () => void } {
+  const client = supabase;
+  if (!client || !conversationId) return { avisar: () => {}, cerrar: () => {} };
+
+  let unido = false;
+  const channel = client
+    .channel(`chat-escribiendo:${conversationId}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'escribe' }, (mensaje: { payload?: unknown }) =>
+      alRecibir(mensaje?.payload),
+    )
+    .subscribe((estado: string) => {
+      unido = estado === 'SUBSCRIBED';
+    });
+
+  return {
+    // Antes de estar dentro del canal el aviso se pierde, y no pasa nada: el
+    // siguiente sale a los pocos segundos si la persona sigue tecleando.
+    avisar: (aviso) => {
+      if (!unido) return;
+      void channel.send({ type: 'broadcast', event: 'escribe', payload: aviso });
+    },
+    cerrar: () => {
+      void client.removeChannel(channel);
+    },
+  };
+}
