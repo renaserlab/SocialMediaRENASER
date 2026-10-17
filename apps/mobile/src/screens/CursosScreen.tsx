@@ -10,6 +10,7 @@ import { AppScreen } from '@/components/AppScreen';
 import { Chip } from '@/components/Chip';
 import { CreateCatalogSheet } from '@/components/CreateCatalogSheet';
 import { CursosParaTi } from '@/components/CursosParaTi';
+import { FiltrosDeCursos, type FiltrosAdicionalesDeCursos } from '@/components/FiltrosDeCursos';
 import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';
 import { PortadaVacia } from '@/components/PortadaVacia';
 import { Pulsable } from '@/components/Pulsable';
@@ -32,12 +33,9 @@ import type { Course, MyCourse } from '@/types';
  * La portada de Cursos.
  *
  * QUÉ SE ENSEÑA Y QUÉ NO, que es la única decisión de peso de esta pantalla.
- * La referencia trae valoración con estrellas, número de alumnos, duración,
- * nivel y una fila de «objetivos». **Nada de eso existe en el servidor** —ver
- * `docs/Z_MATRIZ_DE_VISTAS.md`: `ReviewRead` no tiene puntuación, no hay
- * taxonomía de objetivos y el catálogo no devuelve duración ni nivel—. Pintarlo
- * significaría inventarlo, así que aquí no está. El precio sí: `price_minor` y
- * `currency` son columnas reales del curso.
+ * Las tarjetas muestran el precio real. Las valoraciones de `course_reviews`
+ * permiten filtrar y ordenar en el servidor; no se inventan puntuaciones ni
+ * cantidades para las tarjetas del catálogo.
  *
  * TRES SECCIONES, LAS TRES CON DATOS DEL SERVIDOR:
  *   · «Continúa aprendiendo» — `GET /learning/me/courses`, solo lo empezado y
@@ -46,7 +44,7 @@ import type { Course, MyCourse } from '@/types';
  *     `GET /recommendations/courses`.
  *   · «Todo el catálogo» — `GET /catalog/courses`, que solo trae publicados.
  *
- * EL BUSCADOR Y EL FILTRO DE NIVEL VAN AL SERVIDOR, y ahí está todo el asunto:
+ * EL BUSCADOR, NIVEL Y VALORACIONES VAN AL SERVIDOR:
  * filtrando aquí sobre la página que llega, pedir «avanzado» devolvería los
  * avanzados QUE HUBIERA en los primeros veinticuatro y la pantalla juraría que
  * no hay más.
@@ -76,6 +74,8 @@ export function CursosScreen() {
    */
   const [textoAplicado, setTextoAplicado] = useState('');
   const [nivel, setNivel] = useState<FiltrosDeCatalogo['nivel']>(undefined);
+  const [filtrosAdicionales, setFiltrosAdicionales] = useState<FiltrosAdicionalesDeCursos>({});
+  const solicitud = useRef(0);
   const [guardados, setGuardados] = useState<Course[]>([]);
   /** Ids guardados, para pintar el marcador sin recorrer la lista. */
   const [idsGuardados, setIdsGuardados] = useState<Set<string>>(new Set());
@@ -116,6 +116,7 @@ export function CursosScreen() {
   }, [texto]);
 
   const cargar = useCallback(async () => {
+    const actual = ++solicitud.current;
     setCargando(true);
     setFallo(null);
     try {
@@ -123,7 +124,9 @@ export function CursosScreen() {
       // petición de mis cursos caída, la portada tiene que seguir enseñando el
       // catálogo: convertir un fallo de lo accesorio en una pantalla vacía deja
       // sin ver la tienda a quien solo venía a mirar.
-      const cursos = await LearningRepository.listCourses(24, { texto: textoAplicado, nivel });
+      const cursos = await LearningRepository.listCourses(24, { texto: textoAplicado, nivel, ...filtrosAdicionales });
+      // Una respuesta anterior no puede reemplazar los filtros recién elegidos.
+      if (actual !== solicitud.current) return;
       setCatalogo(cursos);
       setYaCargo(true);
       try {
@@ -141,11 +144,12 @@ export function CursosScreen() {
         setEnCurso([]);
       }
     } catch (e) {
+      if (actual !== solicitud.current) return;
       setFallo(e instanceof Error ? e.message : t('common.tryAgain'));
     } finally {
-      setCargando(false);
+      if (actual === solicitud.current) setCargando(false);
     }
-  }, [t, textoAplicado, nivel]);
+  }, [t, textoAplicado, nivel, filtrosAdicionales]);
 
   const alternarGuardado = useCallback(async (curso: Course) => {
     if (guardando.current.has(curso.id)) return;
@@ -331,6 +335,8 @@ export function CursosScreen() {
         </ScrollView>
       </SinCambioDeSeccion>
 
+      <FiltrosDeCursos valor={filtrosAdicionales} alCambiar={setFiltrosAdicionales} />
+
       {/*
         LA CARGA Y EL FALLO, DEBAJO DEL BUSCADOR. Al buscar o cambiar de nivel
         se vuelve a pedir el catálogo: lo que cambia es esta zona, y el buscador
@@ -427,7 +433,11 @@ export function CursosScreen() {
               <SectionTitle title={t('cursos.todoElCatalogo')} />
             </View>
             {catalogo.length === 0 ? (
-              <StateView state="empty" description={t('cursos.catalogoVacio')} />
+              <StateView
+                state="empty"
+                description={t(textoAplicado.trim() || nivel || filtrosAdicionales.puntuacionMinima !== undefined || filtrosAdicionales.desde || filtrosAdicionales.antesDe
+                  ? 'cursos.sinResultados' : 'cursos.catalogoVacio')}
+              />
             ) : (
               <View style={styles.rejilla}>
                 {catalogo.map((curso) => {
@@ -456,8 +466,7 @@ export function CursosScreen() {
                         <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
                           {curso.title}
                         </Text>
-                        {/* Precio y moneda son columnas reales. Valoración, número de
-                            alumnos, duración y nivel NO lo son, y por eso no están. */}
+                        {/* El catálogo no devuelve estadísticas por tarjeta. */}
                         <Text style={[styles.precio, { color: colors.textMuted }]}>
                           {etiquetaDePrecio(curso.priceMinor, curso.currency)}
                         </Text>

@@ -1,6 +1,7 @@
 """Endpoints del catálogo: eventos (con reservas) y cursos (lista)."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request, Response, status
 from sqlalchemy import delete, func, literal, or_, select
@@ -26,11 +27,13 @@ from app.modules.catalog import (
 from app.modules.catalog.models import (
     Course,
     CourseReview,
+    CourseVersion,
     Event,
     EventRegistration,
     SavedCourse,
 )
 from app.modules.commerce import esquema as esquema_comercio
+from app.modules.gobernanza import esquema as esquema_gobernanza
 from app.modules.commerce.service import _insert as _insert_de_comercio
 from app.modules.catalog.schemas import (
     ResumenDeValoraciones,
@@ -775,6 +778,10 @@ async def list_courses(
     q: str | None = Query(default=None, max_length=120),
     level: str | None = Query(default=None, pattern=NIVEL),
     language: str | None = Query(default=None, pattern=IDIOMA),
+    min_rating: float | None = Query(default=None, ge=1, le=5),
+    sort: Literal["recent", "rating", "reviews"] = Query(default="recent"),
+    published_from: datetime | None = Query(default=None),
+    published_before: datetime | None = Query(default=None),
     page: Page = Depends(pagination_params),
     db: AsyncSession = Depends(get_db),
 ) -> list[CourseRead]:
@@ -790,11 +797,52 @@ async def list_courses(
     avanzados QUE HUBIERA en los veinte primeros: la pantalla ensena tres
     resultados y jura que no hay mas. Aqui la base filtra y despues corta.
 
-    SIN NINGUN PARAMETRO, LA CONSULTA ES LA DE SIEMPRE. Ni un `where` de mas: lo
-    que devuelve hoy el catalogo tiene que seguir devolviendo exactamente lo
-    mismo, o el filtro habria cambiado la pantalla de inicio de todo el mundo.
+    Más recientes usa la última publicación real. Para cursos antiguos sin
+    versiones se conserva la fecha de creación; un backfill no es publicar.
     """
+    # Los límites llegan en UTC desde el calendario local del dispositivo.
+    # El superior es exclusivo para incluir TODO el último día, con microsegundos.
+    if published_from is not None:
+        published_from = (
+            published_from.replace(tzinfo=timezone.utc)
+            if published_from.tzinfo is None
+            else published_from.astimezone(timezone.utc)
+        )
+    if published_before is not None:
+        published_before = (
+            published_before.replace(tzinfo=timezone.utc)
+            if published_before.tzinfo is None
+            else published_before.astimezone(timezone.utc)
+        )
+    if (
+        published_from is not None
+        and published_before is not None
+        and published_from >= published_before
+    ):
+        raise ValidationAppError(
+            "La fecha inicial debe ser anterior al final del rango.",
+            code="course_date_range_invalid",
+        )
     consulta = select(Course).where(Course.status == "published")
+    fecha = Course.created_at
+    if await esquema_gobernanza.hay_versiones_de_curso(db):
+        publicaciones = (
+            select(
+                CourseVersion.course_id,
+                func.max(CourseVersion.published_at).label("fecha"),
+            )
+            .where(CourseVersion.origin == "publish")
+            .group_by(CourseVersion.course_id)
+            .subquery()
+        )
+        consulta = consulta.outerjoin(
+            publicaciones, publicaciones.c.course_id == Course.id
+        )
+        fecha = func.coalesce(publicaciones.c.fecha, Course.created_at)
+    if published_from is not None:
+        consulta = consulta.where(fecha >= published_from)
+    if published_before is not None:
+        consulta = consulta.where(fecha < published_before)
 
     texto = (q or "").strip()
     if texto:
@@ -823,9 +871,37 @@ async def list_courses(
             Course.id.in_(cursos_v2.ids_de_cursos_con(level=level, language=language))
         )
 
+    orden = [fecha.desc(), Course.id.desc()]
+    if min_rating is not None or sort != "recent":
+        await _exigir_valoraciones(db)
+        # Solo opiniones públicas, igual que el resumen de la ficha. Agrupar
+        # antes de paginar evita perder cursos o contarlos una vez por reseña.
+        puntuaciones = (
+            select(
+                CourseReview.course_id,
+                func.avg(CourseReview.rating).label("promedio"),
+                func.count(CourseReview.id).label("total"),
+            )
+            .where(CourseReview.status == "visible")
+            .group_by(CourseReview.course_id)
+            .subquery()
+        )
+        consulta = consulta.outerjoin(
+            puntuaciones, puntuaciones.c.course_id == Course.id
+        )
+        if min_rating is not None:
+            # Sin redondear: un 3.96 no cumple «4 estrellas o más».
+            consulta = consulta.where(puntuaciones.c.promedio >= min_rating)
+        promedio = puntuaciones.c.promedio.desc().nulls_last()
+        total = puntuaciones.c.total.desc().nulls_last()
+        if sort == "rating":
+            orden = [promedio, total, *orden]
+        elif sort == "reviews":
+            orden = [total, promedio, *orden]
+
     cursos = list(
         await db.scalars(
-            consulta.order_by(Course.created_at.desc())
+            consulta.order_by(*orden)
             .limit(page.limit)
             .offset(page.offset)
         )

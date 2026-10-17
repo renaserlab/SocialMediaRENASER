@@ -411,8 +411,6 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'nota.guardada',
     'nota.editar',
     'nota.guardadas',
-    // «Cursos» y «Eventos» se escriben exactamente igual en los dos idiomas.
-    'verticales.cursos',
     // «Todos» y «Principiante» se escriben igual en los dos idiomas.
     'cursos.nivel.todos',
     // «Guardados», «Guardar curso» y «Requisitos» se escriben igual.
@@ -467,14 +465,12 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'tabs.profile',
     'home.live',
     'home.events',
-    'home.courses',
     'home.podcast',
     'profile.titlePublic',
     'profile.followers',
     'profile.follow',
     'profile.podcast',
     'profile.events',
-    'profile.courses',
     'profile.circles',
     'profile.bookSession',
     'profile.editProfile',
@@ -495,7 +491,6 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'explore.circleA11y',
     'search.title',
     'search.searching',
-    'search.groupCourses',
     'search.groupEvents',
     'search.program',
     'events.upcoming',

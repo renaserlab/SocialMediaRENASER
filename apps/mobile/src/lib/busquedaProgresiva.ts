@@ -531,7 +531,7 @@ export const TITULOS: Record<Grupo, string> = {
   people: 'Personas',
   hashtags: 'Etiquetas',
   posts: 'Publicaciones',
-  courses: 'Cursos',
+  courses: 'Escuela',
   events: 'Eventos',
 };
 
