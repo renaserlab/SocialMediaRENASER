@@ -104,7 +104,7 @@ describe('la búsqueda y el filtro van al servidor', () => {
     assert.ok(REPOSITORIO.includes('partes.push(`q=${encodeURIComponent('));
     assert.ok(REPOSITORIO.includes('partes.push(`level=${filtros.nivel}`)'));
     assert.ok(
-      PORTADA_ENTERA.includes('LearningRepository.listCourses(24, { texto: textoAplicado, nivel })'),
+      PORTADA_ENTERA.includes('LearningRepository.listCourses(24, { texto: textoAplicado, nivel, ...filtrosAdicionales })'),
       'la portada tiene que mandar los filtros, no aplicarlos sobre el resultado.',
     );
     assert.ok(

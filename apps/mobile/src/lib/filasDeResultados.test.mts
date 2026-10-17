@@ -78,13 +78,13 @@ describe('un curso encontrado sin ninguna persona', () => {
       filas.map((f) => f.kind),
       ['section', 'course'],
     );
-    assert.equal(filas[0].kind === 'section' && filas[0].title, 'Cursos');
+    assert.equal(filas[0].kind === 'section' && filas[0].title, 'Escuela');
   });
 
   it('no pinta la cabecera de «Personas»: ese grupo no existe en esta respuesta', () => {
     const filas = filasDeResultados(resultados({ courses: [CURSO] }));
     const titulos = filas.flatMap((f) => (f.kind === 'section' ? [f.title] : []));
-    assert.deepEqual(titulos, ['Cursos']);
+    assert.deepEqual(titulos, ['Escuela']);
   });
 
   it('la pantalla NO debe decir «sin resultados»', () => {
@@ -130,7 +130,7 @@ describe('el orden de los grupos', () => {
       }),
     );
     const titulos = filas.flatMap((f) => (f.kind === 'section' ? [f.title] : []));
-    assert.deepEqual(titulos, ['Personas', 'Etiquetas', 'Cursos']);
+    assert.deepEqual(titulos, ['Personas', 'Etiquetas', 'Escuela']);
   });
 
   it('cada fila lleva una clave distinta', () => {
@@ -164,7 +164,7 @@ describe('«Ver mas»', () => {
     );
     assert.deepEqual(acciones, [
       ['Personas', undefined],
-      ['Cursos', 'Ver más'],
+      ['Escuela', 'Ver más'],
     ]);
   });
 

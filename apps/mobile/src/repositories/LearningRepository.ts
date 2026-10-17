@@ -169,6 +169,11 @@ export type FiltrosDeCatalogo = {
   nivel?: 'beginner' | 'intermediate' | 'advanced';
   /** Codigo de dos letras, como lo guarda el curso. */
   idioma?: string;
+  puntuacionMinima?: number;
+  orden?: 'recent' | 'rating' | 'reviews';
+  /** Límites UTC: desde inclusivo y antesDe exclusivo. */
+  desde?: string;
+  antesDe?: string;
 };
 export const LearningRepository = {
   /** El catalogo publico: SOLO cursos publicados. */
@@ -201,6 +206,10 @@ export const LearningRepository = {
     if (filtros?.texto?.trim()) partes.push(`q=${encodeURIComponent(filtros.texto.trim())}`);
     if (filtros?.nivel) partes.push(`level=${filtros.nivel}`);
     if (filtros?.idioma) partes.push(`language=${filtros.idioma}`);
+    if (filtros?.puntuacionMinima !== undefined) partes.push(`min_rating=${filtros.puntuacionMinima}`);
+    if (filtros?.orden && filtros.orden !== 'recent') partes.push(`sort=${filtros.orden}`);
+    if (filtros?.desde) partes.push(`published_from=${encodeURIComponent(filtros.desde)}`);
+    if (filtros?.antesDe) partes.push(`published_before=${encodeURIComponent(filtros.antesDe)}`);
     const consulta = partes.length > 0 ? `?${partes.join('&')}` : '';
     const dtos = await apiRequest<CourseDto[]>(`${API_V1}/catalog/courses${consulta}`, {
       auth: false,

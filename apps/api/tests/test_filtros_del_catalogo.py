@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.main import app
 from app.modules.catalog import esquema as esquema_de_catalogo
-from app.modules.catalog.models import Course
+from app.modules.catalog.models import Course, CourseReview, CourseVersion
 from app.modules.gobernanza import esquema as esquema_gobernanza
 from app.modules.profiles.models import Profile
 from app.shared.database import Base, get_db
@@ -286,3 +286,132 @@ async def test_un_curso_sin_nivel_sale_sin_filtro_y_no_con_filtro(http) -> None:
         assert await _titulos(http, level=nivel) == [], (
             f"un curso sin nivel no puede salir como {nivel}"
         )
+
+
+@pytest_asyncio.fixture
+async def con_valoraciones(http):
+    async for db in app.dependency_overrides[get_db]():
+        # El más antiguo tiene la mejor nota; el más reciente no tiene
+        # opiniones públicas. Así se detecta ordenar/filtrar tras paginar.
+        filas = [
+            (CURSOS[0][0], 5, "visible"),
+            (CURSOS[0][0], 1, "hidden"),
+            (CURSOS[1][0], 4, "visible"),
+            (CURSOS[1][0], 5, "visible"),
+            (CURSOS[2][0], 5, "hidden"),
+            (BORRADOR, 5, "visible"),
+        ]
+        for i, (curso_id, nota, estado) in enumerate(filas):
+            uid = f"bbbbbbbb-0000-0000-0000-{i:012d}"
+            db.add(Profile(id=uid, username=f"alumno{i}", full_name=f"Alumno {i}"))
+            db.add(CourseReview(course_id=curso_id, user_id=uid, rating=nota, status=estado))
+        await db.commit()
+        break
+    return http
+
+
+@pytest.mark.asyncio
+async def test_la_nota_filtra_antes_de_paginar_y_solo_cuenta_visibles(con_valoraciones):
+    assert await _titulos(con_valoraciones, min_rating=5, limit=1) == ["Cocina peruana"]
+    assert await _titulos(con_valoraciones, min_rating=4.5) == ["Marketing digital", "Cocina peruana"]
+    assert await _titulos(con_valoraciones, min_rating=4.6) == ["Cocina peruana"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("orden,esperado", [
+    ("rating", ["Cocina peruana", "Marketing digital", "Fundamentos"]),
+    ("reviews", ["Marketing digital", "Cocina peruana", "Fundamentos"]),
+    ("recent", ["Fundamentos", "Marketing digital", "Cocina peruana"]),
+])
+async def test_ordenar_antes_de_paginar_sin_duplicar_cursos(con_valoraciones, orden, esperado):
+    assert await _titulos(con_valoraciones, sort=orden) == esperado
+    paginas = []
+    for offset in range(3):
+        paginas += await _titulos(con_valoraciones, sort=orden, limit=1, offset=offset)
+    assert paginas == esperado
+
+
+@pytest.mark.asyncio
+async def test_combinar_texto_nivel_idioma_nota_y_fecha(con_valoraciones):
+    assert await _titulos(
+        con_valoraciones, q="cocina", level="advanced", language="es",
+        min_rating=4, sort="rating", published_from="2026-08-29T00:00:00Z",
+        published_before="2026-08-30T00:00:00Z",
+    ) == ["Cocina peruana"]
+    assert await _titulos(con_valoraciones, q="marketing", min_rating=5) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("params", [
+    {"min_rating": 0}, {"min_rating": 5.1}, {"min_rating": "nan"},
+    {"sort": "inventado"}, {"published_from": "ayer"},
+    {"published_from": "2026-09-02", "published_before": "2026-09-01"},
+    {"published_from": "2026-09-01", "published_before": "2026-09-01"},
+])
+async def test_rechaza_filtros_invalidos(http, params):
+    respuesta = await http.get(f"{CATALOGO}/courses", params=params)
+    assert respuesta.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_sin_tabla_de_valoraciones_solo_fallan_los_filtros_que_la_necesitan(http):
+    async for db in app.dependency_overrides[get_db]():
+        await db.execute(text("drop table course_reviews"))
+        await db.commit()
+        break
+    esquema_de_catalogo.olvidar()
+    assert len(await _titulos(http, sort="recent")) == 3
+    for params in ({"min_rating": 4}, {"sort": "rating"}, {"sort": "reviews"}):
+        respuesta = await http.get(f"{CATALOGO}/courses", params=params)
+        assert respuesta.status_code == 503
+        assert respuesta.json()["error"]["code"] == "course_reviews_not_available"
+
+
+@pytest.mark.asyncio
+async def test_las_fechas_incluyen_el_dia_completo_en_la_zona_del_usuario(http):
+    async for db in app.dependency_overrides[get_db]():
+        # 23:59:59.999999 del 29 en Perú; el siguiente ya es del día 30.
+        for i, momento in enumerate((
+            datetime(2026, 8, 30, 4, 59, 59, 999999, tzinfo=timezone.utc),
+            datetime(2026, 8, 30, 5, tzinfo=timezone.utc),
+            datetime(2026, 8, 29, 4, 59, 59, tzinfo=timezone.utc),
+        )):
+            curso = await db.get(Course, CURSOS[i][0])
+            curso.created_at = momento
+        await db.commit()
+        break
+    assert await _titulos(
+        http, published_from="2026-08-29T00:00:00-05:00",
+        published_before="2026-08-30T00:00:00-05:00", limit=1,
+    ) == ["Cocina peruana"]
+
+
+@pytest.mark.asyncio
+async def test_recientes_y_fechas_usan_publicacion_real_y_no_backfill(http):
+    async for db in app.dependency_overrides[get_db]():
+        db.add(CourseVersion(
+            course_id=CURSOS[0][0], version=1, status="superseded",
+            content_hash="a" * 64, published_at=AHORA - timedelta(days=3), origin="publish",
+        ))
+        db.add(CourseVersion(
+            course_id=CURSOS[0][0], version=2, status="published",
+            content_hash="b" * 64, published_at=AHORA, origin="publish",
+        ))
+        db.add(CourseVersion(
+            course_id=CURSOS[1][0], version=1, status="published",
+            content_hash="c" * 64, published_at=AHORA + timedelta(days=1), origin="backfill",
+        ))
+        await db.commit()
+        break
+    assert await _titulos(http, sort="recent") == ["Cocina peruana", "Fundamentos", "Marketing digital"]
+    assert await _titulos(http, published_from="2026-09-01T00:00:00Z") == ["Cocina peruana"]
+
+
+@pytest.mark.asyncio
+async def test_fecha_y_recientes_funcionan_sin_versionado(http):
+    async for db in app.dependency_overrides[get_db]():
+        await db.execute(text("drop table course_versions"))
+        await db.commit()
+        break
+    esquema_gobernanza.olvidar()
+    assert await _titulos(http, published_from="2026-08-31T00:00:00Z") == ["Fundamentos"]
