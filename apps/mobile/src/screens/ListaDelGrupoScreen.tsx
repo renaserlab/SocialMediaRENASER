@@ -475,9 +475,6 @@ export function ListaDelGrupoScreen() {
             <Text weight="800" accessibilityRole="header" style={styles.bloque}>
               {t('groupTopics.topics')}
             </Text>
-            <Text color={colors.textMuted} style={styles.ayuda}>
-              {t('groupTopics.topicsHelp')}
-            </Text>
             {listaDeTemas.map((tema) => {
               const detalle = tema.ultimo ? vistaPrevia(tema.ultimo) : t('groupTopics.emptyPreview');
               return (
@@ -507,9 +504,6 @@ export function ListaDelGrupoScreen() {
           <View>
             <Text weight="800" accessibilityRole="header" style={styles.bloque}>
               {t('groupCommunities.title')}
-            </Text>
-            <Text color={colors.textMuted} style={styles.ayuda}>
-              {t('groupCommunities.help')}
             </Text>
             {listaDeComunidades.map((comunidad) => (
               <FilaDeComunidad
@@ -1067,7 +1061,6 @@ const styles = StyleSheet.create({
   hora: { fontSize: 14, lineHeight: 19 },
   meta: { fontSize: 13, lineHeight: 18 },
   bloque: { fontSize: 13, marginTop: 18, marginBottom: 2 },
-  ayuda: { fontSize: 12, lineHeight: 17, marginBottom: spacing.xs },
   fallo: { gap: spacing.sm, marginVertical: spacing.sm },
   hoja: { gap: spacing.md, paddingBottom: spacing.sm },
   hojaTitulo: { fontSize: 20, lineHeight: 24 },
