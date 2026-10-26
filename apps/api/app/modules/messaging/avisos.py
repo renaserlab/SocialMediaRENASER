@@ -21,6 +21,12 @@ existía, así que esa persona puede seguir escribiendo en ella. Lo que no puede
 es hacer sonar el teléfono de quien la bloqueó: sin esto, el push sería la
 puerta trasera para seguir llegando a alguien que dijo que no. Se corta en los
 dos sentidos, igual que el resto del contenido.
+
+LOS TEMAS DE UN GRUPO (D14, 26/10/2026). Lo que la administración escribe en
+un tema va al chat propio del tema, cuyos miembros son los del grupo: avisa a
+todos ellos MENOS a quien tenga silenciado el GRUPO, además de a quien tenga
+silenciado el propio chat. Quien silencia un grupo no sabe que sus temas son
+otras conversaciones, ni tiene por qué saberlo: silenció el grupo entero.
 """
 
 from __future__ import annotations
@@ -83,6 +89,9 @@ async def destinatarios(
     los que haya un bloqueo, en cualquiera de los dos sentidos, y menos quien
     tenga la conversación SILENCIADA: el mensaje le llega igual y le cuenta
     como no leído; lo que no le llega es el aviso.
+
+    Si la conversación es el chat de un tema, también menos quien tenga
+    silenciado el GRUPO del tema (D14, ver el docstring del módulo).
     """
     miembros = list(
         await db.scalars(
@@ -113,7 +122,21 @@ async def destinatarios(
     }
     avisables = [miembro for miembro in miembros if miembro not in fuera]
     en_silencio = await preferencias.quienes_silencian(db, conversation_id, avisables)
+    grupo_del_tema = await _grupo_del_tema(db, conversation_id)
+    if grupo_del_tema is not None:
+        en_silencio |= await preferencias.quienes_silencian(db, grupo_del_tema, avisables)
     return [miembro for miembro in avisables if miembro not in en_silencio]
+
+
+async def _grupo_del_tema(db: AsyncSession, conversation_id: str) -> str | None:
+    """El grupo, si la conversación es el chat de un tema. Sin la 0108, `None`.
+
+    `grupos.py` se importa aquí dentro porque importa este fichero.
+    """
+    from app.modules.messaging import grupos
+
+    tema = await grupos.tema_del_chat(db, conversation_id)
+    return str(tema[0]) if tema is not None else None
 
 
 def nombre_para_el_aviso(perfil: Profile | None) -> str | None:

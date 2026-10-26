@@ -31,6 +31,18 @@ la herramienta para molestar a cien personas a la vez.
 QUITAR A ALGUIEN NO BORRA NADA DE LO QUE ESCRIBIO. Sus mensajes siguen en el
 grupo; lo que pierde es el acceso, en el mismo instante: toda ruta de
 mensajeria empieza comprobando que quien pregunta es miembro.
+
+TEMAS Y COMUNIDADES (26/10/2026, `docs/CONTRATOS_TEMAS_Y_COMUNIDADES.md`). Un
+grupo puede tener temas (`temas.py`) y comunidades (`subgrupos.py`), y los dos
+son tambien conversaciones de `kind = 'group'`. Lo que eso cambia aqui:
+
+  · los miembros del grupo y los de los chats de sus temas son LOS MISMOS, asi
+    que entrar o salir del grupo los sincroniza en la misma transaccion; y
+    salir del grupo saca tambien de sus comunidades (D10);
+  · a una comunidad solo se puede añadir a quien ya es del grupo;
+  · el chat de un tema no se toca desde aqui: ni nombre, ni miembros. Sus
+    miembros los pone el grupo y su nombre, el tema. 409
+    `not_a_top_level_group`.
 """
 
 from __future__ import annotations
@@ -139,6 +151,22 @@ class MiembroLeido(BaseModel):
     is_admin: bool = False
 
 
+class PadreDeLaComunidad(BaseModel):
+    """El grupo del que cuelga una comunidad."""
+
+    id: str
+    title: str | None = None
+
+
+class TemaDelChat(BaseModel):
+    """El tema al que pertenece un chat. Sirve para que un aviso abra el tema
+    y no un chat suelto que la bandeja ni enseña."""
+
+    group_id: str
+    topic_id: str
+    name: str = ""
+
+
 class InfoDeConversacion(BaseModel):
     """Que es esta conversacion y quien esta en ella.
 
@@ -168,6 +196,10 @@ class InfoDeConversacion(BaseModel):
     pending_requests: int = 0
     #: Quien pregunta la tiene silenciada. Es suyo: no dice nada de los demas.
     muted: bool = False
+    #: Si es una comunidad, su grupo. `None` en cualquier otro caso o sin la 0109.
+    parent: PadreDeLaComunidad | None = None
+    #: Si es el chat de un tema, cual. `None` en cualquier otro caso o sin la 0108.
+    topic: TemaDelChat | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -214,6 +246,116 @@ async def exigir_grupo_administrado(
             "Solo quien administra el grupo puede hacer esto.",
             code="group_admin_required",
         )
+
+
+async def tema_del_chat(db: AsyncSession, conversation_id: str) -> tuple[str, str] | None:
+    """`(group_id, topic_id)` si es el chat de un tema vivo. Sin la 0108, `None`.
+
+    Se pregunta por la tabla ANTES de llamar a `temas.py`: sin la 0108 no hay
+    temas y ni siquiera hace falta preguntar. El modulo se importa aqui dentro,
+    y no arriba, para que este fichero no dependa de en que orden se cargan los
+    dos: `temas.py` importa media mensajeria, y el dia que importe este
+    fichero, arriba seria una importacion circular.
+    """
+    if not await esquema.hay_temas(db):
+        return None
+    from app.modules.messaging import temas
+
+    return await temas.tema_de_chat(db, conversation_id)
+
+
+async def sincronizar_temas(
+    db: AsyncSession, group_id: str, user_ids: list[str], *, dentro: bool
+) -> None:
+    """Mete o saca a esas personas de los chats de los temas del grupo. SIN COMMIT.
+
+    Los miembros de un tema son los del grupo (contrato, § 1): cualquier cambio
+    de miembros del grupo pasa por aqui, en SU transaccion. En una comunidad o
+    en el chat de un tema no hay temas que sincronizar y `temas.py` no hace
+    nada.
+    """
+    if not user_ids or not await esquema.hay_temas(db):
+        return
+    from app.modules.messaging import temas
+
+    await temas.sincronizar_miembros(db, group_id, user_ids, dentro)
+
+
+async def exigir_primer_nivel(
+    db: AsyncSession, conversation_id: str, *, comunidad_vale: bool = False
+) -> None:
+    """Que no sea el chat de un tema y, salvo `comunidad_vale`, ni una comunidad.
+
+    UN SOLO NIVEL: no hay temas ni comunidades dentro de una comunidad ni del
+    chat de un tema, ni filtros, ni enlace. Y el chat de un tema no admite
+    nada «de grupo»: su nombre es el del tema y sus miembros, los del grupo; si
+    se cambiaran por aqui dejarian de coincidir. 409 y no 403: no es que no se
+    pueda por quien eres, es que esta conversacion no admite eso.
+    """
+    if not comunidad_vale:
+        from app.modules.messaging import subgrupos
+
+        if await subgrupos.fila_de(db, conversation_id) is not None:
+            raise ConflictError(
+                "Esto no se puede hacer dentro de una comunidad.",
+                code="not_a_top_level_group",
+            )
+    if await tema_del_chat(db, conversation_id) is not None:
+        raise ConflictError(
+            "Esto no se puede hacer en el chat de un tema.",
+            code="not_a_top_level_group",
+        )
+
+
+async def exigir_que_sean_del_padre(
+    db: AsyncSession, parent_id: str, ids: list[str]
+) -> None:
+    """A una comunidad solo se añade a quien ya es del grupo. Una consulta.
+
+    Con el MISMO error que `exigir_que_se_puedan_anadir`: decir «esa persona no
+    esta en el grupo» seria contar quien esta y quien no a quien no lo pregunto.
+    """
+    if not ids:
+        return
+    dentro = {
+        str(persona)
+        for persona in (
+            await db.scalars(
+                select(ConversationMember.user_id).where(
+                    ConversationMember.conversation_id == parent_id,
+                    ConversationMember.user_id.in_(ids),
+                )
+            )
+        )
+    }
+    if any(str(persona) not in dentro for persona in ids):
+        raise ValidationAppError(_NO_SE_PUEDE_ANADIR, code="group_member_not_allowed")
+
+
+async def creados_en_la_ultima_hora(db: AsyncSession, uid: str) -> int:
+    """Cuantos grupos —comunidades incluidas— ha creado esta persona en una hora.
+
+    LOS CHATS DE LOS TEMAS NO CUENTAN. Son tambien `kind = 'group'` y los crea
+    quien administra, pero no son grupos que haya decidido crear: los pone
+    `temas.py` al crear un tema, que tiene su propio tope. Contarlos dejaria a
+    quien organiza su grupo en temas sin poder crear un grupo durante una hora.
+    """
+    hace_una_hora = datetime.now(timezone.utc) - timedelta(hours=1)
+    condiciones = [
+        Conversation.created_by == uid,
+        Conversation.kind == "group",
+        Conversation.created_at >= hace_una_hora,
+    ]
+    if await esquema.hay_temas(db):
+        from app.modules.messaging import temas
+
+        condiciones.append(temas.condicion_no_es_chat_de_tema(Conversation.id))
+    return int(
+        await db.scalar(
+            select(func.count()).select_from(Conversation).where(*condiciones)
+        )
+        or 0
+    )
 
 
 async def nombre_de(db: AsyncSession, uid: str) -> str | None:
@@ -282,17 +424,7 @@ async def crear_grupo(
             f"Un grupo admite hasta {MAX_MIEMBROS} personas.", code="group_is_full"
         )
 
-    hace_una_hora = datetime.now(timezone.utc) - timedelta(hours=1)
-    recientes = await db.scalar(
-        select(func.count())
-        .select_from(Conversation)
-        .where(
-            Conversation.created_by == uid,
-            Conversation.kind == "group",
-            Conversation.created_at >= hace_una_hora,
-        )
-    )
-    if (recientes or 0) >= GRUPOS_POR_HORA:
+    if await creados_en_la_ultima_hora(db, uid) >= GRUPOS_POR_HORA:
         raise ConflictError(
             "Creaste muchos grupos seguidos. Inténtalo más tarde.",
             code="group_rate_limited",
@@ -342,6 +474,10 @@ async def info_de_la_conversacion(
     Los miembros van TODOS en la respuesta: el tope del grupo es
     `MAX_MIEMBROS`, asi que la lista entera cabe y paginarla seria complicar
     la pantalla para nada. Un numero fijo de consultas, sean cuantos sean.
+
+    `parent` y `topic` dicen donde vive la conversacion: una comunidad cuelga
+    de un grupo y el chat de un tema es de un tema. Con eso, un aviso que
+    llega de un chat de tema abre el tema y no un chat suelto.
     """
     kind, creador = await conversacion_de(db, conversation_id, current_user.id)
     titulo = await db.scalar(
@@ -370,7 +506,24 @@ async def info_de_la_conversacion(
     # Quien administra, el primero: es a quien se busca en esa lista.
     miembros.sort(key=lambda miembro: not miembro.is_admin)
     puede = administra(kind, creador, current_user.id)
-    hay_extras = es_grupo and await esquema.hay_puertas_de_grupo(db)
+    padre: PadreDeLaComunidad | None = None
+    tema: TemaDelChat | None = None
+    if es_grupo:
+        from app.modules.messaging import subgrupos
+
+        del_padre = await subgrupos.padre_con_titulo(db, conversation_id)
+        if del_padre is not None:
+            padre = PadreDeLaComunidad(id=str(del_padre.parent_id), title=del_padre.title)
+        del_tema = await tema_del_chat(db, conversation_id)
+        if del_tema is not None:
+            # El nombre del tema es el titulo de su chat: `temas.py` los cambia
+            # a la vez.
+            tema = TemaDelChat(
+                group_id=str(del_tema[0]), topic_id=str(del_tema[1]), name=titulo or ""
+            )
+    # En el chat de un tema no hay foto, enlace ni solicitudes (todo responde
+    # 409): anunciarlos seria ofrecer botones que no hacen nada.
+    hay_extras = es_grupo and tema is None and await esquema.hay_puertas_de_grupo(db)
     ajustes = await ajustes_de_grupo.fila_de(db, conversation_id) if hay_extras else None
     return InfoDeConversacion(
         id=conversation_id,
@@ -391,6 +544,8 @@ async def info_de_la_conversacion(
         muted=(
             await preferencias.de_la_conversacion(db, conversation_id, current_user.id)
         ).muted,
+        parent=padre,
+        topic=tema,
     )
 
 
@@ -405,6 +560,8 @@ async def renombrar_grupo(
     subir el grupo a lo alto de la bandeja de todos por un cambio de nombre
     seria avisar de algo que no ha pasado."""
     await exigir_grupo_administrado(db, conversation_id, current_user.id)
+    # El nombre del chat de un tema es el del tema: se cambia desde el tema.
+    await exigir_primer_nivel(db, conversation_id, comunidad_vale=True)
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id, Conversation.kind == "group")
@@ -424,9 +581,18 @@ async def anadir_miembros(
     """Añade personas al grupo. Quien ya estaba, se queda como estaba.
 
     Ven el historial entero: la conversacion es del grupo, no de cada uno.
+
+    EN UN GRUPO CON TEMAS, entrar al grupo es entrar a los chats de sus temas,
+    en la misma transaccion. EN UNA COMUNIDAD, cada persona tiene que ser ya
+    del grupo padre. En el chat de un tema no se añade a nadie: sus miembros
+    los pone el grupo.
     """
     uid = current_user.id
     await exigir_grupo_administrado(db, conversation_id, uid)
+    await exigir_primer_nivel(db, conversation_id, comunidad_vale=True)
+    from app.modules.messaging import subgrupos
+
+    padre = await subgrupos.padre_de(db, conversation_id)
 
     ya_dentro = set(
         (
@@ -443,10 +609,14 @@ async def anadir_miembros(
             f"Un grupo admite hasta {MAX_MIEMBROS} personas.", code="group_is_full"
         )
     await exigir_que_se_puedan_anadir(db, uid, nuevos)
+    if padre is not None:
+        await exigir_que_sean_del_padre(db, padre, nuevos)
 
     if nuevos:
         for persona in nuevos:
             db.add(ConversationMember(conversation_id=conversation_id, user_id=persona))
+        # En la misma transaccion: o entran al grupo y a sus temas, o a nada.
+        await sincronizar_temas(db, conversation_id, nuevos, dentro=True)
         try:
             await db.commit()
         except IntegrityError:
@@ -486,12 +656,18 @@ async def quitar_miembro(
     Traspasar la administracion no esta hecho; es 409, no 403.
 
     Los mensajes de quien sale se quedan: son del grupo.
+
+    D10: SALIR DEL GRUPO ES SALIR DE TODO LO SUYO, en la misma transaccion: de
+    sus comunidades y de los chats de sus temas. Lo contrario dejaria a quien
+    sacaron leyendo una comunidad del grupo del que lo sacaron. Del chat de un
+    tema no se sale por separado (409): se sale del grupo.
     """
     uid = current_user.id
     ensure_uuid(user_id, "Persona no encontrada.")
     kind, creador = await conversacion_de(db, conversation_id, uid)
     if kind != "group":
         raise ConflictError("Esta conversación no es un grupo.", code="not_a_group")
+    await exigir_primer_nivel(db, conversation_id, comunidad_vale=True)
 
     objetivo = str(UUID(user_id))
     se_va_sola = objetivo == str(uid)
@@ -514,4 +690,10 @@ async def quitar_miembro(
     )
     if not borradas.rowcount:
         raise NotFoundError("Esa persona no está en el grupo.", code="group_member_not_found")
+    # D10. En una comunidad no hay hijas ni temas, y las dos llamadas no hacen
+    # nada; en un grupo, salen de todo en el mismo `commit`.
+    from app.modules.messaging import subgrupos
+
+    await subgrupos.sacar_de_todas(db, conversation_id, objetivo)
+    await sincronizar_temas(db, conversation_id, [objetivo], dentro=False)
     await db.commit()

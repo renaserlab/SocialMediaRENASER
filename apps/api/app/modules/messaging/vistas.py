@@ -449,16 +449,19 @@ async def conversacion_de(
 
 
 def administra(kind: str, created_by: str, uid: str) -> bool:
-    """Si esta persona administra los filtros de la conversacion.
+    """Si esta persona administra la conversacion: sus filtros, sus miembros y,
+    desde el 26/10/2026 (D4), borrar mensajes de otros en ella.
 
     HOY: QUIEN CREO EL GRUPO. Es el unico dato de autoridad que la base tiene
     sobre una conversacion: `conversation_members` no guarda ningun rol. Los
     filtros solo existen en los grupos; en un chat de dos personas no hay
     «administrador» y las categorias automaticas ya cubren lo que hace falta.
+    Una comunidad y el chat de un tema los crea quien administra el grupo, asi
+    que esta misma regla le da tambien su administracion.
 
     Es UNA funcion a proposito: el dia que los miembros de un grupo tengan rol,
-    se cambia aqui y lo aprenden a la vez la lectura (`can_manage`) y las
-    cuatro escrituras.
+    se cambia aqui y lo aprenden a la vez la lectura (`can_manage`) y todas
+    las escrituras.
     """
     return kind == "group" and str(created_by) == str(uid)
 
@@ -466,13 +469,23 @@ def administra(kind: str, created_by: str, uid: str) -> bool:
 async def _exigir_administrar(
     db: AsyncSession, conversation_id: str, uid: str
 ) -> None:
-    """Pertenecer, que sea un grupo, que la 0102 este, y poder administrar."""
+    """Pertenecer, que sea un grupo, que la 0102 este, y poder administrar.
+
+    Y que sea un grupo DE PRIMER NIVEL: ni una comunidad ni el chat de un tema
+    tienen filtros propios (contrato de temas y comunidades, «un solo nivel»).
+    Sus categorias automaticas si funcionan, porque no se guardan en ningun
+    sitio.
+    """
     kind, creador = await conversacion_de(db, conversation_id, uid)
     if kind != "group":
         raise ConflictError(
             "Los filtros personalizados son de los grupos.",
             code="filters_only_in_groups",
         )
+    # Aqui dentro: `grupos.py` importa este fichero.
+    from app.modules.messaging import grupos
+
+    await grupos.exigir_primer_nivel(db, conversation_id)
     if not await esquema.hay_filtros_de_conversacion(db):
         raise ServiceUnavailableError(
             "Los filtros personalizados todavía no están disponibles.",

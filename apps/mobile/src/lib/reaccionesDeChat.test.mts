@@ -247,10 +247,18 @@ test('sin la migración, la aplicación no ofrece reaccionar ni responder', () =
   assert.match(repositorio, /catch \{\s*return SIN_FUNCIONES;/);
   assert.match(repositorio, /SIN_FUNCIONES: FuncionesDelChat = \{[^}]*reacciones: false,/);
   const pantalla = leer('../screens/ChatScreen.tsx');
-  // El menú de un mensaje ajeno solo existe para reaccionar o responder.
-  assert.match(pantalla, /const conAcciones = !item\.estado && \(mine \|\| funciones\.reacciones\)/);
-  // Y eliminar sigue siendo solo de quien lo escribió.
-  assert.match(pantalla, /accionesDe\?\.sender === 'me' \? \(\s*<ListRow\s+title=\{t\('common\.delete'\)\}/);
+  // El menú de un mensaje ajeno existe para reaccionar o responder y, desde
+  // temas y comunidades (D4, 26/10/2026), para quien administra el grupo.
+  assert.match(
+    pantalla,
+    /const conAcciones = !item\.estado && \(mine \|\| funciones\.reacciones \|\| puedoBorrarAjenos\)/,
+  );
+  // Y eliminar es de quien lo escribió o de quien administra el grupo (D4).
+  assert.match(
+    pantalla,
+    /accionesDe\?\.sender === 'me' \|\| \(accionesDe && puedoBorrarAjenos\) \? \(\s*<ListRow\s+title=\{t\('common\.delete'\)\}/,
+  );
+  assert.match(pantalla, /const puedoBorrarAjenos = esGrupo && infoDeConversacion\?\.puedoAdministrar === true;/);
 });
 
 test('el aviso de que alguien reaccionó no transporta nada', () => {

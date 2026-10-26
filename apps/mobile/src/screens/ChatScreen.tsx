@@ -35,6 +35,7 @@ import { MarcaDeEntrega } from '@/components/chat/MarcaDeEntrega';
 import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
 import { DeslizarParaResponder } from '@/components/chat/DeslizarParaResponder';
 import { HojaDeStickers } from '@/components/chat/HojaDeStickers';
+import { HojaDeTemas } from '@/components/chat/HojaDeTemas';
 import { MedioDeChat } from '@/components/chat/MedioDeChat';
 import { VisorDeAdjunto, type AccionDeVisor } from '@/components/chat/VisorDeAdjunto';
 import { ListRow } from '@/components/ListRow';
@@ -45,6 +46,7 @@ import { StateView } from '@/components/StateView';
 import { useGrabadoraDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useEscribiendo } from '@/hooks/useEscribiendo';
 import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
+import { useDisponibilidadDeTemas } from '@/hooks/useDisponibilidadDeTemas';
 import { useLecturasDelChat } from '@/hooks/useLecturasDelChat';
 import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { type TranslationKey } from '@/i18n';
@@ -267,6 +269,33 @@ export function ChatScreen() {
     supabaseEnabled && !!params.id,
   );
   const esGrupo = infoDeConversacion?.esGrupo === true;
+  /*
+    TEMAS Y COMUNIDADES (26/10/2026). Una comunidad cuelga de un grupo
+    (`padre`); el chat de un tema no se lee aquí, sino en su tema. Quien
+    administra un grupo borra también mensajes ajenos (D4) y, en uno de
+    primer nivel con temas en el servidor, los agrega a un tema.
+  */
+  const padre = infoDeConversacion?.padre ?? null;
+  const temaDelChat = infoDeConversacion?.tema ?? null;
+  const puedoBorrarAjenos = esGrupo && infoDeConversacion?.puedoAdministrar === true;
+  const disponibilidadDeTemas = useDisponibilidadDeTemas(supabaseEnabled && esGrupo);
+  const esGrupoDePrimerNivel = esGrupo && !padre && !temaDelChat;
+  const puedoAgregarATemas =
+    puedoBorrarAjenos && esGrupoDePrimerNivel && disponibilidadDeTemas.temas;
+  /** El mensaje de General que se está agregando a un tema (`HojaDeTemas`). */
+  const [temasPara, setTemasPara] = useState<Message | null>(null);
+  /*
+    EL CHAT DE UN TEMA SE LEE EN SU TEMA. Se llega aquí por un aviso, que
+    abre la conversación suelta: se sustituye por el tema, con sus
+    referencias y su barra de quién escribe.
+  */
+  useEffect(() => {
+    if (!temaDelChat) return;
+    router.replace({
+      pathname: '/chat/tema/[id]' as never,
+      params: { id: temaDelChat.grupoId, tema: temaDelChat.temaId, name: temaDelChat.nombre },
+    });
+  }, [temaDelChat?.grupoId, temaDelChat?.temaId]);
   /** El mensaje al que se llegó desde «Contenido», mientras dura el resalte. */
   const [resaltado, setResaltado] = useState<string | null>(null);
   /** El mensaje al que hay que ir, recogido de `saltoDeChat`. */
@@ -1544,6 +1573,16 @@ export function ChatScreen() {
     setFondoAbierto(true);
   };
 
+  /** La lista del grupo: General, sus temas y sus comunidades. */
+  const abrirListaDelGrupo = async () => {
+    if (!params.id) return;
+    await trasElMenu();
+    router.push({
+      pathname: '/chat/lista/[id]' as never,
+      params: { id: params.id, name: nombreDelChat },
+    });
+  };
+
   const alternarSilencio = async () => {
     if (!params.id || haciendoOpcion) return;
     const quiere = !estaSilenciada;
@@ -1597,17 +1636,23 @@ export function ChatScreen() {
   const salirDelGrupo = async () => {
     if (!params.id || !currentUserId || haciendoOpcion) return;
     await trasElMenu();
+    // De una comunidad se sale sin salir del grupo: se dice así.
     const seguro = await confirm({
-      title: t('groups.leaveTitle'),
-      message: t('groups.leaveBody'),
-      confirmLabel: t('groups.leave'),
+      title: t(padre ? 'groupCommunities.leaveTitle' : 'groups.leaveTitle'),
+      message: t(padre ? 'groupCommunities.leaveBody' : 'groups.leaveBody'),
+      confirmLabel: t(padre ? 'groupCommunities.leave' : 'groups.leave'),
       destructive: true,
     });
     if (!seguro) return;
     setHaciendoOpcion(true);
     try {
       await GroupRepository.quitar(params.id, currentUserId);
-      // Ya no se pertenece: a este chat no se puede volver.
+      // Ya no se pertenece: a este chat no se puede volver. De una comunidad
+      // se vuelve a la lista de su grupo, donde se sigue estando.
+      if (padre) {
+        router.dismissTo({ pathname: '/chat/lista/[id]' as never, params: { id: padre.id } });
+        return;
+      }
       router.replace('/messages' as never);
     } catch {
       notify(t('chatMenu.failedTitle'), t('common.tryAgainSoon'));
@@ -1706,12 +1751,14 @@ export function ChatScreen() {
    */
   const eliminarMensaje = useCallback(
     async (mensaje: Message) => {
-      if (!params.id || mensaje.sender !== 'me' || mensaje.estado || mensaje.eliminado) {
+      // Lo ajeno, solo quien administra el grupo (D4); el servidor lo comprueba.
+      const ajeno = mensaje.sender !== 'me';
+      if (!params.id || (ajeno && !puedoBorrarAjenos) || mensaje.estado || mensaje.eliminado) {
         return;
       }
       const ok = await confirm({
         title: t('chat.deleteTitle'),
-        message: t('chat.deleteBody'),
+        message: t(ajeno ? 'groupTopics.adminDeleteBody' : 'chat.deleteBody'),
         confirmLabel: t('common.delete'),
         cancelLabel: t('common.cancel'),
         destructive: true,
@@ -1744,7 +1791,7 @@ export function ChatScreen() {
         );
       }
     },
-    [params.id, aplicar],
+    [params.id, aplicar, puedoBorrarAjenos],
   );
 
   /**
@@ -1758,12 +1805,22 @@ export function ChatScreen() {
     (mensaje: Message) => {
       if (mensaje.estado || mensaje.eliminado) return;
       // Sobre lo propio siempre hay algo (borrar). Sobre lo ajeno solo hay
-      // reaccionar y responder: sin ellas la hoja se abriría vacía.
-      if (mensaje.sender !== 'me' && !funciones.reacciones) return;
+      // reaccionar y responder —y, para quien administra el grupo, borrar y
+      // agregar a un tema—: sin nada de eso la hoja se abriría vacía.
+      if (mensaje.sender !== 'me' && !funciones.reacciones && !puedoBorrarAjenos) return;
       setAccionesDe(mensaje);
     },
-    [funciones.reacciones],
+    [funciones.reacciones, puedoBorrarAjenos],
   );
+
+  /** «Agregar a un tema»: cierra esta hoja y, cuando ya no está, abre la de temas (iOS). */
+  const agregarATemaDesdeElMenu = useCallback(async () => {
+    const mensaje = accionesDe;
+    setAccionesDe(null);
+    if (!mensaje) return;
+    await afterSheetClose();
+    setTemasPara(mensaje);
+  }, [accionesDe]);
 
   /**
    * Borrar DESDE la hoja. El `afterSheetClose` no es opcional.
@@ -2294,7 +2351,7 @@ export function ChatScreen() {
               (borrar); sobre lo ajeno solo si se puede reaccionar o
               responder: sin eso la hoja saldría vacía.
             */
-            const conAcciones = !item.estado && (mine || funciones.reacciones);
+            const conAcciones = !item.estado && (mine || funciones.reacciones || puedoBorrarAjenos);
             const comoSticker =
               !item.eliminado &&
               !item.attachments?.length &&
@@ -3043,9 +3100,23 @@ export function ChatScreen() {
             onPress={() => void vaciarElChat()}
           />
         ) : null}
+        {/*
+          LA LISTA DEL GRUPO, para quien lo administra: es por donde se crea
+          la primera comunidad, cuando todavía no hay nada que haga que la
+          bandeja abra la lista.
+        */}
+        {puedoBorrarAjenos &&
+        esGrupoDePrimerNivel &&
+        (disponibilidadDeTemas.temas || disponibilidadDeTemas.comunidades) ? (
+          <ListRow
+            title={t('groupTopics.manage')}
+            leftIcon="layers"
+            onPress={() => void abrirListaDelGrupo()}
+          />
+        ) : null}
         {esGrupo && infoDeConversacion && !infoDeConversacion.puedoAdministrar ? (
           <ListRow
-            title={t('groups.leave')}
+            title={t(padre ? 'groupCommunities.leave' : 'groups.leave')}
             leftIcon="log-out"
             destructive
             onPress={() => void salirDelGrupo()}
@@ -3149,7 +3220,15 @@ export function ChatScreen() {
             }}
           />
         ) : null}
-        {accionesDe?.sender === 'me' ? (
+        {/* Solo quien administra, en un grupo de primer nivel con temas. */}
+        {accionesDe && puedoAgregarATemas && !accionesDe.sesion ? (
+          <ListRow
+            title={t('groupTopics.addToTopic')}
+            leftIcon="folder-plus"
+            onPress={() => void agregarATemaDesdeElMenu()}
+          />
+        ) : null}
+        {accionesDe?.sender === 'me' || (accionesDe && puedoBorrarAjenos) ? (
           <ListRow
             title={t('common.delete')}
             leftIcon="trash-2"
@@ -3158,6 +3237,12 @@ export function ChatScreen() {
           />
         ) : null}
       </BottomSheet>
+
+      <HojaDeTemas
+        grupoId={params.id ?? ''}
+        mensajeId={temasPara?.id ?? null}
+        onClose={() => setTemasPara(null)}
+      />
 
       <DetallesDeMensaje
         conversacionId={params.id ?? ''}

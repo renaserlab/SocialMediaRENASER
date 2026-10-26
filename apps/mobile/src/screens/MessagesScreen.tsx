@@ -27,6 +27,7 @@ import {
   type ConsultaDeBandeja,
   type FiltroDeBandeja,
 } from '@/lib/bandeja';
+import { abreLaLista } from '@/lib/temasDeGrupo';
 import {
   CONVERSACIONES_POR_PAGINA,
   MessageRepository,
@@ -420,6 +421,25 @@ export function MessagesScreen() {
 
   const abrirChat = useCallback(
     (conversacion: Conversation) => {
+      /*
+        UN GRUPO CON TEMAS O COMUNIDADES SE ABRE POR SU LISTA, como en
+        Telegram: General, los temas y las comunidades, cada uno con lo suyo.
+        Lo que ya se sabe de General viaja para que la primera fila no salga
+        en blanco mientras la lista pregunta lo demás.
+      */
+      if (abreLaLista(conversacion)) {
+        router.push({
+          pathname: '/chat/lista/[id]' as never,
+          params: {
+            id: conversacion.id,
+            name: conversacion.name,
+            resumen: conversacion.subtitle,
+            hora: conversacion.time ?? '',
+            sinLeer: String(conversacion.unread || 0),
+          },
+        });
+        return;
+      }
       router.push({
         pathname: '/chat/[id]',
         params: { id: conversacion.id, name: conversacion.name },

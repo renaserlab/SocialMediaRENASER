@@ -154,20 +154,24 @@ export function AjustesDeGrupoScreen() {
         */}
         <PuertasDelGrupo info={info} alCambiar={refrescar} />
 
-        <View style={[styles.tarjeta, { borderColor: colors.border }]}>
-          <ListRow
-            title={t('groupFilters.title')}
-            subtitle={t('groupFilters.hint')}
-            leftIcon="sliders"
-            rightIcon="chevron-right"
-            onPress={() =>
-              router.push({
-                pathname: '/chat/filtros/[id]' as never,
-                params: { id: conversationId },
-              })
-            }
-          />
-        </View>
+        {/* Los filtros son del grupo de primer nivel: en una comunidad el
+            servidor responde 409, así que no se ofrecen. */}
+        {info.padre ? null : (
+          <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+            <ListRow
+              title={t('groupFilters.title')}
+              subtitle={t('groupFilters.hint')}
+              leftIcon="sliders"
+              rightIcon="chevron-right"
+              onPress={() =>
+                router.push({
+                  pathname: '/chat/filtros/[id]' as never,
+                  params: { id: conversationId },
+                })
+              }
+            />
+          </View>
+        )}
 
         <Text color={colors.textMuted} style={styles.detalle}>
           {t('groups.adminCannotLeave')}

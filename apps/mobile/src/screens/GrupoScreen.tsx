@@ -27,6 +27,7 @@ import {
 } from '@/lib/gruposDeChat';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
+import { ComunidadesRepository } from '@/repositories/ComunidadesRepository';
 import { GroupRepository } from '@/repositories/GroupRepository';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { ApiError } from '@/services/api';
@@ -132,18 +133,25 @@ export function GrupoScreen() {
 
   const salir = useCallback(async () => {
     if (!currentUserId) return;
+    // De una comunidad se sale sin salir de su grupo, y se dice así.
+    const delPadre = info?.padre ?? null;
     const seguro = await confirm({
-      title: t('groups.leaveTitle'),
-      message: t('groups.leaveBody'),
-      confirmLabel: t('groups.leave'),
+      title: t(delPadre ? 'groupCommunities.leaveTitle' : 'groups.leaveTitle'),
+      message: t(delPadre ? 'groupCommunities.leaveBody' : 'groups.leaveBody'),
+      confirmLabel: t(delPadre ? 'groupCommunities.leave' : 'groups.leave'),
       destructive: true,
     });
     if (!seguro) return;
     if (await hacer('salir', () => GroupRepository.quitar(conversationId, currentUserId))) {
-      // Ya no se pertenece: ni al chat ni a esta pantalla se puede volver.
+      // Ya no se pertenece: ni al chat ni a esta pantalla se puede volver. De
+      // una comunidad se vuelve a la lista de su grupo, donde se sigue.
+      if (delPadre) {
+        router.dismissTo({ pathname: '/chat/lista/[id]' as never, params: { id: delPadre.id } });
+        return;
+      }
       router.replace('/messages' as never);
     }
-  }, [currentUserId, hacer, conversationId, router, t]);
+  }, [currentUserId, hacer, conversationId, router, t, info?.padre]);
 
   const alternarSilencio = useCallback(async () => {
     const quiere = !estaSilenciada;
@@ -156,6 +164,32 @@ export function GrupoScreen() {
       setSilenciada(null);
     }
   }, [estaSilenciada, hacer, conversationId, t, refrescar]);
+
+  /*
+    UNA COMUNIDAD (D5): quien administra puede eliminarla, por si se creó por
+    error. Se pregunta antes y se dice qué pasa: sale para todos y se quitan
+    sus miembros. Después se vuelve a la lista del grupo, que sigue ahí.
+  */
+  const padre = info?.padre ?? null;
+  const irALaListaDelPadre = useCallback(() => {
+    if (!padre) return;
+    router.dismissTo({ pathname: '/chat/lista/[id]' as never, params: { id: padre.id } });
+  }, [padre, router]);
+
+  const eliminarComunidad = useCallback(async () => {
+    if (!padre) return;
+    const seguro = await confirm({
+      title: t('groupCommunities.deleteTitle'),
+      message: t('groupCommunities.deleteBody'),
+      confirmLabel: t('common.delete'),
+      destructive: true,
+    });
+    if (!seguro) return;
+    if (await hacer('eliminar', () => ComunidadesRepository.eliminar(padre.id, conversationId))) {
+      toast(t('groupCommunities.deleted'));
+      irALaListaDelPadre();
+    }
+  }, [padre, t, hacer, conversationId, irALaListaDelPadre]);
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
@@ -256,6 +290,19 @@ export function GrupoScreen() {
 
       {fallo ? <InlineError message={fallo} /> : null}
 
+      {/* Una comunidad dice de qué grupo es, y lleva a su lista. */}
+      {padre ? (
+        <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+          <ListRow
+            title={t('groupCommunities.ofGroup', { nombre: padre.titulo || t('groups.infoTitle') })}
+            subtitle={t('groupCommunities.ofGroupHint')}
+            leftIcon="layers"
+            rightIcon="chevron-right"
+            onPress={irALaListaDelPadre}
+          />
+        </View>
+      ) : null}
+
       {/* A quien administra se le dice que hay alguien esperando: se responde
           en «Editar», donde están el enlace y las solicitudes. */}
       {info.puedoAdministrar && info.pendientes > 0 ? (
@@ -266,6 +313,17 @@ export function GrupoScreen() {
             leftIcon="user-plus"
             rightIcon="chevron-right"
             onPress={abrirAjustes}
+          />
+        </View>
+      ) : null}
+
+      {padre && info.puedoAdministrar ? (
+        <View style={[styles.tarjeta, { borderColor: colors.border }]}>
+          <ListRow
+            title={t('groupCommunities.delete')}
+            leftIcon="trash-2"
+            destructive
+            onPress={() => void eliminarComunidad()}
           />
         </View>
       ) : null}

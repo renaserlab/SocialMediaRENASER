@@ -202,8 +202,10 @@ test('los botones de administrar dependen de lo que dice el servidor', () => {
   assert.match(grupo, /rightIcon=\{info\.puedoAdministrar \? 'edit-2' : undefined\}/);
   // Y salir, solo quien NO administra: el servidor se lo negaría.
   assert.match(grupo, /info\.puedoAdministrar\s*\? \{ clave: 'editar',[^}]*\}\s*: \{\s*clave: 'salir',/);
-  // Sacar y salir piden confirmación.
-  assert.equal((grupo.match(/await confirm\(\{/g) ?? []).length, 2);
+  // Sacar, salir y eliminar una comunidad (D5, 26/10/2026) piden confirmación.
+  assert.equal((grupo.match(/await confirm\(\{/g) ?? []).length, 3);
+  // Eliminar una comunidad, también solo quien administra.
+  assert.match(grupo, /\{padre && info\.puedoAdministrar \? \(/);
   // Renombrar, el enlace y los filtros: la pantalla de editar no se le abre a nadie más.
   const ajustes = leer('../screens/AjustesDeGrupoScreen.tsx');
   assert.match(ajustes, /if \(!info\.puedoAdministrar\) \{\s*return \(/);

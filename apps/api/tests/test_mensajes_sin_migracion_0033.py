@@ -188,9 +188,14 @@ async def test_la_comprobacion_de_esquema_se_hace_una_vez_por_proceso(base_sin_0
     http, sesiones = base_sin_0033
     await http.post(f"{API}/{CHAT}/messages", json={"body": "hola"})
 
-    # Mandar un mensaje sin adjuntos solo mira una cosa: si alguien tiene la
-    # conversacion silenciada (0107), para no avisarle.
-    assert esquema_mensajes._cache == {"conversation_preferences": True}
+    # Mandar un mensaje sin adjuntos mira dos cosas: si es el chat de un tema
+    # (0108), donde solo escribe quien administra el grupo y el silencio del
+    # grupo tambien cuenta, y si alguien tiene la conversacion silenciada
+    # (0107), para no avisarle.
+    assert esquema_mensajes._cache == {
+        "conversation_topics": True,
+        "conversation_preferences": True,
+    }
 
     assert (await http.get(f"{API}/{CHAT}/messages")).status_code == 200
     # Se ha averiguado, y se ha guardado.
@@ -202,8 +207,9 @@ async def test_la_comprobacion_de_esquema_se_hace_una_vez_por_proceso(base_sin_0
     # esta prueba vigila no es CUANTAS se miran, sino que cada una se mire UNA
     # sola vez por proceso: el bloque de abajo es el que lo comprueba de verdad.
     # Aqui las otras cuatro salen a `True` porque esta base solo ha deshecho
-    # la 0033.
+    # la 0033. La de los temas (0108) es la que quedo de mandar el mensaje.
     assert esquema_mensajes._cache == {
+        "conversation_topics": True,
         "message_attachments": False,
         "message_story_context": True,
         "message_booking_context": True,

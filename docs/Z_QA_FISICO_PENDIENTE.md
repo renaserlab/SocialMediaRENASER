@@ -3985,3 +3985,58 @@ Solo se puede comprobar en teléfono. Conviene probar con **botones** y con
 | Publicar desde «Crear» (texto de la publicación): el campo se ve entero | | | |
 | Inicio de sesión y registro: los campos y el botón se ven con el teclado abierto | | | |
 | En un teléfono con navegación por GESTOS, todo lo anterior se ve igual de bien | | | |
+
+## Temas y Comunidades de un grupo, como en Telegram (26/10/2026)
+
+Hace falta lo siguiente:
+
+- el servidor desplegado y una compilación nueva;
+- las migraciones **0108** (temas) y **0109** (comunidades) aplicadas. Sin ellas, los grupos funcionan igual que antes y no aparece nada de esta sección;
+- **tres teléfonos con cuentas distintas**: quien administra un grupo, un miembro y alguien que todavía no está en el grupo.
+
+El diseño aprobado y las decisiones están en
+`docs/CONTRATOS_TEMAS_Y_COMUNIDADES.md`. Nada de esto se ha visto todavía en un
+teléfono.
+
+### Bandeja y lista del grupo
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra abre el menú del chat del grupo y ve «Temas y comunidades». Desde ahí crea el primer tema | | | |
+| Un grupo con temas o comunidades lleva en la bandeja el icono de capas, y su número suma General, tus comunidades y lo escrito en los temas | | | |
+| Tocarlo abre la lista: General, «Temas» y «Comunidades», cada uno con su último mensaje y su número | | | |
+| Las comunidades no salen sueltas en la bandeja | | | |
+| Con una versión anterior de la app, las comunidades sí salen sueltas, como grupos normales, y se pueden abrir | | | |
+
+### Temas
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra mantiene presionado un mensaje de General de otra persona › «Agregar a un tema», y lo marca en dos temas | | | |
+| El mensaje sigue en General y aparece en los dos temas con su autor, su hora y «Ver en General · agregado por…» | | | |
+| «Ver en General» lleva al mensaje en el chat y lo resalta | | | |
+| El miembro ve el número del tema subir, sin que le llegue aviso por agregarlo | | | |
+| Quien administra escribe dentro de «Anuncios». El mensaje sale solo ahí, con «Escrito solo en este tema», y **no** aparece en General, ni siquiera un instante | | | |
+| Ese mensaje manda aviso al miembro, salvo que tenga el grupo silenciado | | | |
+| El miembro no tiene campo de escribir en un tema. Ve la barra con el candado | | | |
+| El miembro puede reaccionar en un tema | | | |
+| Si el autor borra en General un mensaje que estaba en un tema, desaparece también del tema | | | |
+| «Quitar del tema» lo quita del tema y no de General | | | |
+| Vaciar General no vacía los temas | | | |
+| «Eliminar tema» avisa de que lo escrito solo ahí se borra. Al aceptar, el tema desaparece de la lista para todos | | | |
+| Alguien que entra al grupo ve todos los temas, con los números en cero | | | |
+| Un aviso de un mensaje escrito en un tema abre el tema, no un chat suelto | | | |
+
+### Comunidades
+
+| Qué comprobar | Bien | Mal | Notas |
+|---|---|---|---|
+| Quien administra crea una comunidad abierta y otra con solicitud | | | |
+| El miembro ve las dos en la lista sin estar dentro de ninguna | | | |
+| En la abierta, «Unirme» lo mete y ve todo el historial | | | |
+| En la de solicitud, «Pedir unirme» avisa a quien administra, que la acepta desde «N solicitudes». En «Editar» de la comunidad no aparecen ni el enlace ni «Mostrar en mi perfil» | | | |
+| «Salir de la comunidad» saca de ella y no del grupo | | | |
+| Salir del grupo saca también de todas sus comunidades | | | |
+| Quien no está en el grupo no puede entrar en sus comunidades | | | |
+| «Eliminar comunidad» pide confirmación. Al aceptar, desaparece para todos | | | |
+| Quien administra puede borrar un mensaje de otra persona en General, en una comunidad y en un tema. Un miembro no puede borrar mensajes ajenos | | | |

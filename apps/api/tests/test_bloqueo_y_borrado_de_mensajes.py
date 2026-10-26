@@ -21,8 +21,11 @@ lo borra PARA TODOS, y lo que queda es una lapida. No desaparece sin dejar
 hueco, porque entonces la conversacion mentiria: quien esta al otro lado leyo
 algo que ahora no esta y no sabria que se borro ni que hubo nada ahi.
 
-Y NADIE BORRA MENSAJES AJENOS, salvo la moderacion. Si el otro lado pudiera
-borrar lo que le dijeron, una conversacion dejaria de ser prueba de nada.
+Y EN UN CHAT DE DOS NADIE BORRA MENSAJES AJENOS, salvo la moderacion. Si el
+otro lado pudiera borrar lo que le dijeron, una conversacion dejaria de ser
+prueba de nada. En un GRUPO, desde el 26/10/2026 (D4), tambien puede quien lo
+administra; eso se prueba en `test_admin_borra_mensajes.py`, y lo de aqui —un
+miembro cualquiera no borra lo de otro— sigue valiendo alli.
 
 EL ROL SE LEE DE `profiles`, NUNCA DEL TOKEN. En el JWT de Supabase `role` vale
 siempre "authenticated": comprobarlo contra "admin" no se cumple jamas. Ese
@@ -325,11 +328,12 @@ async def test_para_quien_lo_escribio_tambien_desaparece(entorno):
 
 @pytest.mark.asyncio
 async def test_nadie_borra_el_mensaje_de_otro(entorno):
-    """LA REGLA QUE DA SENTIDO AL RESTO.
+    """LA REGLA QUE DA SENTIDO AL RESTO, en un chat de dos.
 
     Bruno esta EN la conversacion y aun asi no puede borrar lo que escribio Ana.
     Si pudiera, una conversacion dejaria de ser prueba de nada —bastaria con
     quitar lo que incomoda— y no habria forma de reportar un mensaje abusivo.
+    (En un grupo, quien lo administra si puede: D4, `test_admin_borra_mensajes.py`.)
     """
     http, _, identidad = entorno
     conv, mensaje = await _chat_con_un_mensaje(http, identidad, autor=ANA)

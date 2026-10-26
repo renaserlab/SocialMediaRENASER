@@ -85,6 +85,21 @@ class ConversationRead(BaseModel):
     #: la tabla no hay etiquetas, no hay un error que contar.
     labels: list[EtiquetaBreve] = Field(default_factory=list)
 
+    #: Si es una COMUNIDAD, el grupo del que cuelga (0109). `None` en todo lo
+    #: demás. Sin `grouped`, las comunidades salen como filas propias y esto es
+    #: lo que deja a la aplicación decir «Valorant · en Aula».
+    parent_id: str | None = None
+    #: Cuántos temas vivos tiene el grupo (0108). Solo con `?grouped=true`.
+    topics_count: int = 0
+    #: Cuántas comunidades vivas tiene el grupo (0109). Solo con `?grouped=true`.
+    subgroups_count: int = 0
+    #: El globo de la fila. Con `?grouped=true`, en un grupo suma lo no leído
+    #: de General, de sus comunidades donde está quien pregunta y de sus temas:
+    #: las comunidades no salen sueltas (D12), así que si no se sumaran aquí no
+    #: se verían en ningún sitio. Sin `grouped`, y en un chat de dos, es igual a
+    #: `unread_count`.
+    total_unread: int = 0
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -327,3 +342,7 @@ class MessagingAvailability(BaseModel):
     preferences: bool = False
     #: El servidor dice quién leyó cada mensaje (`lecturas.py`, sin migración).
     read_receipts: bool = False
+    #: Un grupo puede tener temas (0108).
+    topics: bool = False
+    #: Un grupo puede tener comunidades (0109).
+    subgroups: bool = False

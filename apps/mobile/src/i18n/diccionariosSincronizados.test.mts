@@ -73,6 +73,9 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // Temas de un grupo: «General» es el nombre del chat de todo el grupo, y
+    // en inglés se llama igual (es como lo llama Telegram).
+    'groupTopics.general',
     // Reaccionar y responder: «Audio» se escribe igual en inglés.
     'chat.replyAudio',
     // «Video» y «Videos»: en el castellano del Perú van sin tilde, y así
@@ -150,6 +153,10 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Comunidades de un grupo: «Comunidades» y «{n} comunidades» se escriben
+    // exactamente igual en portugués.
+    'groupCommunities.title',
+    'groupCommunities.countMany',
     // Reaccionar y responder: «Responder» y «Foto» se escriben igual en
     // portugués. («Vídeo» ya no: en el castellano del Perú va sin tilde.)
     'chat.reply',

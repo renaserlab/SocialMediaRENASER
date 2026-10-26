@@ -397,6 +397,10 @@ async def test_la_aplicacion_puede_preguntar_si_hay_notas_de_voz(entorno):
         # La confirmacion de lectura (12/10/2026): no depende de ninguna
         # migracion, asi que se anuncia siempre.
         "read_receipts": True,
+        # Los temas (0108) y las comunidades (0109) de un grupo (26/10/2026),
+        # que en esta base tambien estan.
+        "topics": True,
+        "subgroups": True,
     }
 
 

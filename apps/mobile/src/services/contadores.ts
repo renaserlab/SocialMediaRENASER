@@ -1,3 +1,4 @@
+import { sinLeerDeLaFila } from '@/lib/temasDeGrupo';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
 import { setBadgeCount } from '@/services/notifications';
@@ -80,7 +81,12 @@ export async function refrescarMensajes(): Promise<Conversation[] | null> {
 
 /** Para la pantalla de mensajes, que ya tiene la lista: no hace falta otra petición. */
 export function anotarMensajes(conversaciones: readonly Conversation[]): void {
-  const total = conversaciones.reduce((suma, conversacion) => suma + (conversacion.unread || 0), 0);
+  // Lo mismo que dice el globo de cada fila: en un grupo con temas o
+  // comunidades, todo lo de dentro (las comunidades ya no salen sueltas).
+  const total = conversaciones.reduce(
+    (suma, conversacion) => suma + sinLeerDeLaFila(conversacion),
+    0,
+  );
   useContadoresStore.getState().ponerMensajes(total);
   ponerInsignia();
 }

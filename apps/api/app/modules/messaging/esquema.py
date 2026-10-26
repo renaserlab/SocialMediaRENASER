@@ -388,6 +388,45 @@ async def hay_preferencias_de_conversacion(db: AsyncSession) -> bool:
     return _cache["conversation_preferences"]
 
 
+async def hay_temas(db: AsyncSession) -> bool:
+    """Si existen las tablas de los temas de un grupo (migracion 0108).
+
+    SIN LA 0108: los grupos funcionan igual, sin temas. Las lecturas de
+    `temas.py` responden vacio y las escrituras 503; la aplicacion lo pregunta
+    antes (`GET /conversations/availability`) y no ofrece nada. Las tres tablas
+    llegan en la misma migracion: se mira una.
+    """
+    if not _sabido("conversation_topics"):
+        conexion = await db.connection()
+        _cache["conversation_topics"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("conversation_topics")
+        )
+        if not _cache["conversation_topics"] and _caduca("conversation_topics"):
+            logger.warning(
+                "La migracion 0108 no esta aplicada: los grupos no tienen temas."
+            )
+    return _cache["conversation_topics"]
+
+
+async def hay_comunidades(db: AsyncSession) -> bool:
+    """Si existe `group_subgroups` (migracion 0109).
+
+    En la aplicacion se llaman «comunidades»; en el codigo, `subgroups`, para
+    no confundirlas con el modulo `communities` (los circulos de Explorar).
+    SIN LA 0109: los grupos funcionan igual, sin comunidades dentro.
+    """
+    if not _sabido("group_subgroups"):
+        conexion = await db.connection()
+        _cache["group_subgroups"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("group_subgroups")
+        )
+        if not _cache["group_subgroups"] and _caduca("group_subgroups"):
+            logger.warning(
+                "La migracion 0109 no esta aplicada: los grupos no tienen comunidades."
+            )
+    return _cache["group_subgroups"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 

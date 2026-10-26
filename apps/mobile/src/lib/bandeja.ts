@@ -265,14 +265,23 @@ export function filasVisibles<T extends { name: string; subtitle?: string }>(
 /**
  * La bandeja con una conversación recién leída: su fila, sin nada pendiente.
  *
+ * EN UN GRUPO CON TEMAS O COMUNIDADES, leer General no lo deja todo leído: su
+ * total (`totalSinLeer`) cuenta también las comunidades y los temas. Se le
+ * resta lo que era de General y el resto se queda, hasta que la siguiente
+ * lectura de la bandeja traiga la cuenta del servidor.
+ *
  * Devuelve LA MISMA lista si no hay nada que cambiar, para no repintar.
  */
-export function sinLeerEn<T extends { id: string; unread?: number }>(
+export function sinLeerEn<T extends { id: string; unread?: number; totalSinLeer?: number }>(
   lista: readonly T[],
   conversacionId: string,
 ): readonly T[] {
   if (!lista.some((c) => c.id === conversacionId && (c.unread ?? 0) > 0)) return lista;
-  return lista.map((c) => (c.id === conversacionId ? { ...c, unread: 0 } : c));
+  return lista.map((c) => {
+    if (c.id !== conversacionId) return c;
+    if (typeof c.totalSinLeer !== 'number') return { ...c, unread: 0 };
+    return { ...c, unread: 0, totalSinLeer: Math.max(0, c.totalSinLeer - (c.unread ?? 0)) };
+  });
 }
 
 /**
