@@ -145,8 +145,13 @@ async function conMiniaturasDeHistoria(mensajes: Message[]): Promise<Message[]> 
   );
 }
 
-/** Las dos cosas juntas, que es como las necesita toda pantalla de chat. */
-async function completar(mensajes: Message[]): Promise<Message[]> {
+/**
+ * Las dos cosas juntas, que es como las necesita toda pantalla de chat.
+ *
+ * Exportada para los temas de un grupo (`TemasRepository`): sus mensajes son
+ * mensajes de chat y se firman igual, todos de una vez.
+ */
+export async function completar(mensajes: Message[]): Promise<Message[]> {
   return conMiniaturasDeHistoria(await conUrlsFirmadas(mensajes));
 }
 
@@ -357,6 +362,13 @@ export const MessageRepository = {
    * Está medido que esto NO cuesta consultas de más en el servidor: la búsqueda
    * y los filtros derivados entran en la consulta que ya se hacía, y las
    * etiquetas de la página se resuelven con un `IN` sobre los identificadores.
+   *
+   * SIEMPRE AGRUPADA (`grouped=true`, temas y comunidades). Las comunidades no
+   * salen sueltas: viven dentro de su grupo, como en Telegram (D12), y cada
+   * grupo trae cuántos temas y comunidades tiene y lo que hay sin leer en
+   * todo. Va aquí y no en `parametrosDeBandeja` porque no es algo que la
+   * pantalla elija: es cómo pide la bandeja esta versión de la aplicación,
+   * también el contador común, que tiene que contar lo mismo que se ve.
    */
   async listConversations({
     limit = CONVERSACIONES_POR_PAGINA,
@@ -368,7 +380,7 @@ export const MessageRepository = {
     consulta?: ConsultaDeBandeja;
   } = {}): Promise<Conversation[]> {
     const dtos = await apiRequest<ConversationDto[]>(
-      `${API_V1}/conversations?${parametrosDeBandeja(consulta, { limit, offset })}`,
+      `${API_V1}/conversations?${parametrosDeBandeja(consulta, { limit, offset })}&grouped=true`,
     );
     return dtos.map(toConversation);
   },
@@ -488,9 +500,10 @@ export const MessageRepository = {
    * deliberado — si se esfumara sin dejar hueco, quien está al otro lado habría
    * leído algo que de pronto no está y no sabría que se ha borrado.
    *
-   * QUIÉN PUEDE lo decide el servidor: quien lo escribió y la moderación, nadie
-   * más (`message_not_yours`). Aquí solo se evita ofrecer la acción sobre un
-   * mensaje ajeno, que es comodidad y no permiso.
+   * QUIÉN PUEDE lo decide el servidor: quien lo escribió, la moderación y, en
+   * un grupo, quien lo administra (D4 de temas y comunidades); nadie más
+   * (`message_not_yours`). Aquí solo se evita ofrecer la acción sobre un
+   * mensaje ajeno a quien no administra, que es comodidad y no permiso.
    *
    * Es IDEMPOTENTE: borrar dos veces responde lo mismo y la marca conserva la
    * fecha del borrado de verdad.

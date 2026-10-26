@@ -33,7 +33,9 @@ consulta dentro de un bucle.
 
 from __future__ import annotations
 
-from sqlalchemy import and_, func, or_, select
+from collections import Counter
+
+from sqlalchemy import DateTime, Uuid, and_, column, func, or_, select, table
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.content.schemas import AuthorSummary
@@ -57,6 +59,19 @@ _RESUMEN_SIN_TEXTO = {
     "video": "Video",
     "document": "Archivo",
 }
+
+#: Las tres columnas de `conversation_topics` (0108) que necesita la bandeja
+#: agrupada, por su NOMBRE DEL CONTRATO (`docs/CONTRATOS_TEMAS_Y_COMUNIDADES.md`
+#: § 2) y no por el modelo de `temas.py`: la tabla es del modulo de temas y lo
+#: unico fijo entre los dos es el contrato. Con su TIPO, que no es adorno: en
+#: SQLite un UUID se guarda sin guiones y sin el tipo la comparacion fallaria
+#: en silencio.
+_TEMAS = table(
+    "conversation_topics",
+    column("conversation_id", Uuid(as_uuid=False)),
+    column("chat_id", Uuid(as_uuid=False)),
+    column("deleted_at", DateTime(timezone=True)),
+)
 
 
 async def otros_participantes(
@@ -287,8 +302,77 @@ async def _resumen_de_los_sin_texto(
     return salida
 
 
+async def temas_de_la_pagina(
+    db: AsyncSession, group_ids: list[str], uid: str
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Cuantos temas tiene cada grupo y cuanto hay sin leer en ellos. DOS consultas.
+
+    POR LOTES Y NO CON `temas.no_leidos_de_temas`, que es de UN grupo: llamarla
+    por fila seria el N+1 que este fichero existe para impedir. La primera
+    consulta trae los chats de los temas vivos de todos los grupos de la
+    pagina; la segunda, los no leidos de todos esos chats a la vez.
+
+    QUE CUENTA COMO NO LEIDO: lo escrito en el chat de un tema por OTRA persona
+    despues de su `last_read_at` en ese chat. Si nunca lo abrio, lo escrito
+    desde que entro (`joined_at`): quien llega nuevo al grupo empieza en cero,
+    que es el criterio de `unseen` en el contrato (§ 4.1). `>=` con `joined_at`
+    porque en SQLite la marca tiene resolucion de segundo y lo escrito justo al
+    crear el tema se perderia. El `cleared_at` de General no se aplica (D3).
+    Es la MISMA regla que `temas.no_leidos_de_temas`: si divergieran, el numero
+    del grupo en la bandeja y el de sus temas dentro no cuadrarian.
+
+    Sin la 0108, o sin grupos en la pagina, no se consulta nada.
+    """
+    if not group_ids or not await esquema.hay_temas(db):
+        return {}, {}
+    filas = (
+        await db.execute(
+            select(_TEMAS.c.conversation_id, _TEMAS.c.chat_id).where(
+                _TEMAS.c.conversation_id.in_(group_ids),
+                _TEMAS.c.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    grupo_del_chat = {str(chat): str(grupo) for grupo, chat in filas}
+    cuantos = dict(Counter(grupo_del_chat.values()))
+    if not grupo_del_chat:
+        return cuantos, {}
+
+    pendientes = (
+        await db.execute(
+            select(Message.conversation_id, func.count().label("total"))
+            .join(
+                ConversationMember,
+                and_(
+                    ConversationMember.conversation_id == Message.conversation_id,
+                    ConversationMember.user_id == uid,
+                ),
+            )
+            .where(
+                Message.conversation_id.in_(list(grupo_del_chat)),
+                Message.sender_id != uid,
+                Message.deleted_at.is_(None),
+                or_(
+                    and_(
+                        ConversationMember.last_read_at.is_(None),
+                        Message.created_at >= ConversationMember.joined_at,
+                    ),
+                    Message.created_at > ConversationMember.last_read_at,
+                ),
+            )
+            .group_by(Message.conversation_id)
+        )
+    ).all()
+    no_leidos_por_grupo: dict[str, int] = {}
+    for chat, total in pendientes:
+        grupo = grupo_del_chat.get(str(chat))
+        if grupo is not None:
+            no_leidos_por_grupo[grupo] = no_leidos_por_grupo.get(grupo, 0) + int(total or 0)
+    return cuantos, no_leidos_por_grupo
+
+
 async def leer_conversaciones(
-    db: AsyncSession, filas, uid: str
+    db: AsyncSession, filas, uid: str, *, agrupado: bool = False
 ) -> list[ConversationRead]:
     """Convierte las filas de conversacion en respuesta. Consultas CONSTANTES.
 
@@ -304,6 +388,13 @@ async def leer_conversaciones(
     fila serian veinticuatro con veinte filas, que es el N+1 que este fichero
     existe para impedir. Sin la 0045 son cuatro: `etiquetas_por_conversacion`
     devuelve `{}` sin tocar la base.
+
+    TEMAS Y COMUNIDADES, TAMBIEN POR LOTES. Si en la pagina hay grupos, una
+    consulta dice cuales son comunidades (`parent_id`). Con `agrupado` —la
+    bandeja de la aplicacion nueva, donde las comunidades viven dentro de su
+    grupo (D12)— se añaden como mucho cuatro mas, sean dos grupos o veinte:
+    las comunidades de esos grupos y sus no leidos, y sus temas y los suyos.
+    Sin grupos en la pagina, ninguna: lo normal en una bandeja de chats de dos.
     """
     if not filas:
         return []
@@ -333,6 +424,16 @@ async def leer_conversaciones(
     # cuando quiere ver cada una. Una consulta con un `IN`, como lo demas.
     propias = await preferencias.de_la_pagina(db, uid, ids)
 
+    # La jerarquia de los grupos de la pagina. `subgrupos.py` se importa aqui
+    # dentro porque importa este fichero.
+    from app.modules.messaging import subgrupos
+
+    de_grupo = [str(fila.id) for fila in filas if fila.kind == "group"]
+    comunidades = await subgrupos.de_la_pagina(db, de_grupo, uid, agrupado=agrupado)
+    temas_por_grupo, no_leidos_de_temas = (
+        await temas_de_la_pagina(db, de_grupo, uid) if agrupado else ({}, {})
+    )
+
     salida: list[ConversationRead] = []
     for fila in filas:
         propia = propias.get(str(fila.id), preferencias.SIN_PREFERENCIA)
@@ -354,6 +455,8 @@ async def leer_conversaciones(
             # pero si aparece se dice «Archivo» y no una cadena vacia, que la
             # pantalla pintaria como «Sin mensajes aun»: una mentira.
             resumen = resumenes.get(ultimo.id, "Archivo")
+        sin_leer = pendientes.get(fila.id, 0)
+        clave = str(fila.id)
         salida.append(
             ConversationRead(
                 id=fila.id,
@@ -365,10 +468,20 @@ async def leer_conversaciones(
                 avatar_path=fotos.get(fila.id),
                 last_message=resumen,
                 last_message_at=ultimo.created_at if ultimo is not None else None,
-                unread_count=pendientes.get(fila.id, 0),
+                unread_count=sin_leer,
                 muted=propia.muted,
                 updated_at=fila.updated_at,
                 labels=etiquetas.get(fila.id, []),
+                parent_id=comunidades.padres.get(clave),
+                topics_count=temas_por_grupo.get(clave, 0),
+                subgroups_count=comunidades.cuantas.get(clave, 0),
+                # Sin `agrupado` los dos diccionarios vienen vacios y el total
+                # es exactamente `unread_count`.
+                total_unread=(
+                    sin_leer
+                    + comunidades.no_leidas.get(clave, 0)
+                    + no_leidos_de_temas.get(clave, 0)
+                ),
             )
         )
     return salida

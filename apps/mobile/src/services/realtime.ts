@@ -170,6 +170,142 @@ export function avisosDeLectura(
   };
 }
 
+type CanalDeTemas = {
+  enviar: () => void;
+  /** Lo llama el último oyente al irse. */
+  soltar: () => void;
+  /** Llega un oyente nuevo: si el canal iba a cerrarse, ya no. */
+  retener: () => void;
+  oyentes: Set<() => void>;
+};
+
+/** Los canales de temas abiertos ahora mismo, uno por grupo. */
+const canalesDeTemas = new Map<string, CanalDeTemas>();
+
+/**
+ * Cuánto se deja abierto un canal sin oyentes que tiene un aviso por mandar.
+ * Es lo que tarda de sobra en unirse; pasado eso, el aviso ya no sale.
+ */
+const ESPERA_PARA_AVISAR_MS = 4_000;
+
+function abrirCanalDeTemas(
+  client: NonNullable<typeof supabase>,
+  grupoId: string,
+): CanalDeTemas {
+  const oyentes = new Set<() => void>();
+  let unido = false;
+  let debeAvisar = false;
+  let cierreDiferido: ReturnType<typeof setTimeout> | null = null;
+
+  const mandar = () => {
+    void channel.send({ type: 'broadcast', event: 'temas', payload: {} });
+  };
+  const cerrarDeVerdad = () => {
+    if (cierreDiferido) clearTimeout(cierreDiferido);
+    cierreDiferido = null;
+    // Alguien volvió mientras se esperaba: el canal sigue.
+    if (oyentes.size > 0) return;
+    // Solo si sigue siendo el vigente: otro pudo abrir uno nuevo entretanto.
+    if (canalesDeTemas.get(grupoId) === canal) canalesDeTemas.delete(grupoId);
+    void client.removeChannel(channel);
+  };
+
+  // `self: false`: quien avisa ya pintó su propio cambio.
+  const channel = client
+    .channel(`chat-temas:${grupoId}`, { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'temas' }, () => {
+      // Sobre una copia: un oyente puede darse de baja mientras se reparte.
+      for (const oyente of [...oyentes]) oyente();
+    })
+    .subscribe((estado: string) => {
+      unido = estado === 'SUBSCRIBED';
+      if (unido && debeAvisar) {
+        debeAvisar = false;
+        mandar();
+        // Era lo único que lo mantenía abierto.
+        if (cierreDiferido) cerrarDeVerdad();
+      }
+    });
+
+  const canal: CanalDeTemas = {
+    oyentes,
+    enviar: () => {
+      if (unido) mandar();
+      else debeAvisar = true;
+    },
+    soltar: () => {
+      // UN AVISO PENDIENTE NO SE TIRA AL CERRAR. La hoja de temas avisa y se
+      // cierra en el mismo gesto («Listo»); si el canal aún no estaba dentro,
+      // cerrarlo ya sería perder justo el aviso que motivó abrirlo.
+      if (debeAvisar) {
+        cierreDiferido = setTimeout(cerrarDeVerdad, ESPERA_PARA_AVISAR_MS);
+        return;
+      }
+      cerrarDeVerdad();
+    },
+    retener: () => {
+      if (cierreDiferido) clearTimeout(cierreDiferido);
+      cierreDiferido = null;
+    },
+  };
+  return canal;
+}
+
+/**
+ * «Algo cambió en los temas de este grupo: vuelve a preguntar».
+ *
+ * Agregar o quitar una referencia no crea ningún mensaje, así que el canal de
+ * mensajes no se entera. Quien lo hace manda este aviso, igual que
+ * `avisosDeReacciones`, y quien tiene abierta la lista del grupo o un tema
+ * vuelve a preguntar a la API. Lo escrito en un tema no pasa por aquí: llega
+ * por `subscribeToConversation` de su chat.
+ *
+ * EL AVISO NO LLEVA NADA, ni qué tema ni qué mensaje: un canal de difusión lo
+ * puede escuchar —y escribir— cualquiera con la aplicación. Lo peor que logra
+ * un aviso falso es una pregunta de más, y la API contesta lo que de verdad se
+ * puede ver.
+ *
+ * UN SOLO CANAL POR GRUPO, LO PIDA QUIEN LO PIDA, como `canalDeEscritura`. Lo
+ * atienden a la vez la lista del grupo, el tema abierto encima y la hoja de
+ * «Agregar a un tema» del chat. La librería devuelve EL MISMO canal a quien
+ * pide un nombre que ya existe: el primero que cerrase dejaría sordos a los
+ * demás. Así que se abre con el primero, reparte a todos y se cierra con el
+ * último.
+ *
+ * Y SE AVISA AUNQUE EL CANAL SE ESTÉ UNIENDO, como `avisosDeLectura`: la hoja
+ * de temas avisa en cuanto se agrega algo, a veces antes de estar dentro. Ese
+ * aviso espera a que el canal esté listo en vez de perderse.
+ */
+export function avisosDeTemas(
+  grupoId: string,
+  alAvisar: () => void,
+): { avisar: () => void; cerrar: () => void } {
+  const client = supabase;
+  if (!client || !grupoId) return { avisar: () => {}, cerrar: () => {} };
+
+  let abierto = canalesDeTemas.get(grupoId);
+  if (!abierto) {
+    abierto = abrirCanalDeTemas(client, grupoId);
+    canalesDeTemas.set(grupoId, abierto);
+  }
+
+  const elCanal = abierto;
+  elCanal.retener();
+  elCanal.oyentes.add(alAvisar);
+  let cerrado = false;
+  return {
+    avisar: () => {
+      if (!cerrado) elCanal.enviar();
+    },
+    cerrar: () => {
+      if (cerrado) return;
+      cerrado = true;
+      elCanal.oyentes.delete(alAvisar);
+      if (elCanal.oyentes.size === 0) elCanal.soltar();
+    },
+  };
+}
+
 type CanalAbierto = {
   enviar: (aviso: Record<string, unknown>) => void;
   cerrar: () => void;

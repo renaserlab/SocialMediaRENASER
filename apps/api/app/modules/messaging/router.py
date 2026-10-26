@@ -34,10 +34,13 @@ from app.modules.messaging import (
     audio,
     avisos,
     esquema,
+    grupos,
     historias,
     preferencias,
     reacciones,
     sesiones,
+    subgrupos,
+    temas,
 )
 from app.modules.messaging.etiquetas import condicion_de_etiqueta
 from app.modules.messaging.entrada_a_grupos import router as entrada_router
@@ -46,6 +49,8 @@ from app.modules.messaging.grupos import router as grupos_router
 from app.modules.messaging.lecturas import router as lecturas_router
 from app.modules.messaging.preferencias import router as preferencias_router
 from app.modules.messaging.reacciones import router as reacciones_router
+from app.modules.messaging.subgrupos import router as subgrupos_router
+from app.modules.messaging.temas import router as temas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
     Conversation,
@@ -66,6 +71,7 @@ from app.modules.messaging.schemas import (
     MessagingAvailability,
     StoryContextRead,
 )
+from app.modules.messaging.vistas import administra
 from app.modules.messaging.vistas import router as vistas_router
 from app.modules.notifications.push import encolar_push
 from app.modules.profiles.models import Profile
@@ -107,6 +113,11 @@ router.include_router(preferencias_router)
 
 # Quién ha leído cada mensaje: la confirmación de lectura (`lecturas.py`).
 router.include_router(lecturas_router)
+
+# Los temas de un grupo (`temas.py`) y sus comunidades (`subgrupos.py`). Sus
+# rutas cuelgan de `/{conversation_id}/topics` y `/{conversation_id}/subgroups`.
+router.include_router(temas_router)
+router.include_router(subgrupos_router)
 
 #: Columnas que necesita una fila del listado. Se piden EXPLICITAS y no con
 #: `select(Conversation)` porque un `select(Entidad)` trae todas las columnas
@@ -454,6 +465,50 @@ async def _leer_una(db: AsyncSession, conversation_id: str, uid: str) -> Convers
     return (await leer_conversaciones(db, [fila], uid))[0]
 
 
+async def _exigir_que_pueda_escribir_en_el_tema(
+    db: AsyncSession, conversation_id: str, uid: str
+) -> None:
+    """403 `topic_admin_only` si es el chat de un tema y no administra su grupo.
+
+    Se mira el GRUPO y no el `created_by` del chat, aunque hoy coincidan: quien
+    manda en un tema es quien administra el grupo, y el dia que eso cambie se
+    cambia en `vistas.administra` y lo aprende esto sin tocarlo.
+    """
+    tema = await grupos.tema_del_chat(db, conversation_id)
+    if tema is None:
+        return
+    fila = (
+        await db.execute(
+            select(Conversation.kind, Conversation.created_by).where(
+                Conversation.id == tema[0]
+            )
+        )
+    ).one_or_none()
+    if fila is None or not administra(fila.kind, fila.created_by, uid):
+        raise ForbiddenError(
+            "En un tema solo escribe quien administra el grupo.",
+            code="topic_admin_only",
+        )
+
+
+async def _administra_la_conversacion(
+    db: AsyncSession, conversation_id: str, uid: str
+) -> bool:
+    """Si `uid` administra esta conversacion (`vistas.administra`).
+
+    En una comunidad y en el chat de un tema da lo mismo que en su grupo: los
+    crea quien administra el grupo, asi que su `created_by` es esa persona.
+    """
+    fila = (
+        await db.execute(
+            select(Conversation.kind, Conversation.created_by).where(
+                Conversation.id == conversation_id
+            )
+        )
+    ).one_or_none()
+    return fila is not None and administra(fila.kind, fila.created_by, uid)
+
+
 @router.get("/availability", response_model=MessagingAvailability)
 async def messaging_availability(
     current_user: AuthUser = Depends(get_current_user),
@@ -493,6 +548,8 @@ async def messaging_availability(
         # desde la 0001. Se anuncia igual para que una aplicación nueva contra
         # un servidor anterior a esto no pinte marcas que nadie le va a dar.
         read_receipts=True,
+        topics=await esquema.hay_temas(db),
+        subgroups=await esquema.hay_comunidades(db),
     )
 
 
@@ -501,6 +558,7 @@ async def list_conversations(
     q: str | None = Query(default=None, max_length=MAX_BUSQUEDA),
     filtro: str | None = Query(default=None, pattern="^(unread|unanswered|story_replies)$"),
     label_id: str | None = Query(default=None, max_length=64),
+    grouped: bool = Query(default=False),
     page: Page = Depends(pagination_params),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -555,11 +613,28 @@ async def list_conversations(
     Y NO SE BAJA EL TAMAÑO DE PAGINA: esta medido que son cuatro consultas con
     `limit=10` y con `limit=80`, asi que bajarlo no compra nada en el servidor y
     solo obliga a paginar antes.
+
+    LOS CHATS DE LOS TEMAS NO SALEN NUNCA. Son conversaciones de verdad —para
+    que adjuntos, Realtime y avisos funcionen sin tocarlos—, pero viven dentro
+    de su grupo: en la bandeja serian un grupo fantasma por cada tema.
+
+    `grouped=true` lo manda la aplicacion nueva, que pinta las comunidades
+    DENTRO de su grupo (D12): no salen sueltas, y cada grupo trae cuantos temas
+    y comunidades tiene y un `total_unread` que suma lo de dentro. Sin
+    `grouped` —las versiones ya instaladas, que no saben abrir una comunidad
+    desde su grupo— salen como grupos normales para que nadie pierda el acceso,
+    y `total_unread` es `unread_count`. Las dos exclusiones son `NOT EXISTS`
+    dentro de la consulta de siempre: +0 consultas. Lo de dentro se lee por
+    lotes en `lectura.py`.
     """
     condiciones = [
         ConversationMember.user_id == current_user.id,
         or_(Conversation.kind != "direct", _TIENE_ALGUN_MENSAJE),
     ]
+    if await esquema.hay_temas(db):
+        condiciones.append(temas.condicion_no_es_chat_de_tema(Conversation.id))
+    if grouped and await esquema.hay_comunidades(db):
+        condiciones.append(subgrupos.condicion_no_es_comunidad(Conversation.id))
 
     # `strip()` porque un espacio suelto no es una busqueda: sin esto, tocar la
     # barra y borrar dejaria un `q=" "` que no encuentra a nadie y vacia la
@@ -597,7 +672,7 @@ async def list_conversations(
             .offset(page.offset)
         )
     ).all()
-    return await leer_conversaciones(db, filas, current_user.id)
+    return await leer_conversaciones(db, filas, current_user.id, agrupado=grouped)
 
 
 async def _buscar_directa(db: AsyncSession, uid: str, otro_id: str) -> str | None:
@@ -939,9 +1014,15 @@ async def send_message(
     arregla un fallo y la otra no—. La conversación tampoco se crea aquí: el
     móvil pasa antes por `POST /conversations/direct`, que ya es idempotente
     gracias a la 0039.
+
+    EN EL CHAT DE UN TEMA SOLO ESCRIBE QUIEN ADMINISTRA EL GRUPO (D11): los
+    miembros leen los temas pero no escriben en ellos. A los demas, 403
+    `topic_admin_only`, aunque sean miembros de ese chat —lo son, para poder
+    leerlo y recibir sus avisos—.
     """
     ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
+    await _exigir_que_pueda_escribir_en_el_tema(db, conversation_id, current_user.id)
 
     if payload.attachments:
         await _exigir_esquema_de_adjuntos(db)
@@ -1107,13 +1188,26 @@ async def borrar_mensaje(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Borra un mensaje PROPIO para todo el mundo. Borrado suave.
+    """Borra un mensaje para todo el mundo. Borrado suave.
 
-    QUIÉN PUEDE. Quien lo escribió, y la moderación. NADIE MÁS, y esa ausencia
-    es la regla entera: si el otro lado pudiera borrar lo que le dijeron, una
-    conversación dejaría de ser prueba de nada —bastaría con quitar lo que
-    incomoda— y no habría forma de reportar un mensaje abusivo, porque quien lo
-    mandó ya no aparecería como su autor de nada.
+    QUIÉN PUEDE. Quien lo escribió, la moderación y, en un grupo, quien lo
+    administra. NADIE MÁS.
+
+    En un chat de dos, esa ausencia es la regla entera: si el otro lado
+    pudiera borrar lo que le dijeron, la conversación dejaría de ser prueba de
+    nada —bastaría con quitar lo que incomoda— y no habría forma de reportar un
+    mensaje abusivo.
+
+    EN UN GRUPO, QUIEN LO ADMINISTRA TAMBIÉN (D4, decisión de producto del
+    26/10/2026), y eso incluye sus comunidades y sus temas. Un grupo es un
+    espacio que alguien abrió y del que responde: tiene que poder quitar el
+    spam, lo ofensivo o lo que está fuera de lugar sin esperar a que intervenga
+    la moderación. Y no rompe lo que protegía la regla anterior: el
+    borrado sigue siendo suave, así que la fila y su autor se quedan en la base
+    por si hay que responder de ello, y en el chat queda la lápida «Mensaje
+    eliminado», no un hueco que mienta. Un miembro normal sigue sin poder
+    borrar lo de otro, y quien administra no gana nada en un chat de dos
+    (`vistas.administra` solo reconoce grupos).
 
     El rol se lee de `profiles`, NUNCA del token: en el JWT de Supabase `role`
     vale siempre "authenticated", y comprobarlo contra "admin" no se cumple
@@ -1154,7 +1248,11 @@ async def borrar_mensaje(
         raise NotFoundError("Mensaje no encontrado.")
     remitente, ya_borrado = fila
 
-    if remitente != current_user.id and not await is_admin(db, current_user.id):
+    if (
+        remitente != current_user.id
+        and not await _administra_la_conversacion(db, conversation_id, current_user.id)
+        and not await is_admin(db, current_user.id)
+    ):
         raise ForbiddenError(
             "Solo puedes borrar los mensajes que has escrito tú.",
             code="message_not_yours",

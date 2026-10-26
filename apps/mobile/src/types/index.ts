@@ -345,6 +345,20 @@ export type Conversation = {
    * etiquetas, y una API anterior a la 0045 tampoco manda el campo.
    */
   labels?: { id: string; nombre: string }[];
+  /**
+   * Cuántos temas y comunidades tiene un grupo (con `?grouped=true`). Con
+   * alguno, la fila abre la lista del grupo y no el chat (`abreLaLista`).
+   * Opcionales: la bandeja de demostración y un servidor anterior no los traen.
+   */
+  temas?: number;
+  comunidades?: number;
+  /**
+   * Lo que hay sin leer contando General, las comunidades donde se está y los
+   * temas. `unread` sigue siendo solo lo de General. Ver `sinLeerDeLaFila`.
+   */
+  totalSinLeer?: number;
+  /** Si es una comunidad: el grupo del que cuelga. */
+  padreId?: string;
 };
 
 export type EventItem = {

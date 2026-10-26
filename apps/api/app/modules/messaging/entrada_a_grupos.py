@@ -28,6 +28,12 @@ tantas veces como se quiera.
 
 SIN LA MIGRACION 0104 nada de esto existe: las tarjetas salen vacias y las
 escrituras responden 503. Los grupos siguen funcionando igual que antes.
+
+LAS COMUNIDADES DE UN GRUPO (26/10/2026, `subgrupos.py`). A una comunidad
+`request` se entra pidiendolo por aqui, como a cualquier grupo, pero lo que da
+derecho a pedirlo es SER DEL GRUPO PADRE: una comunidad no tiene enlace ni sale
+en ningun perfil (sus ajustes responden 409 `not_a_top_level_group`). El chat
+de un tema no admite solicitudes: sus miembros son los del grupo.
 """
 
 from __future__ import annotations
@@ -150,7 +156,7 @@ async def _exigir_puertas(db: AsyncSession) -> None:
         )
 
 
-async def _hay_bloqueo(db: AsyncSession, uno: str, otro: str) -> bool:
+async def hay_bloqueo(db: AsyncSession, uno: str, otro: str) -> bool:
     """Si alguno de los dos bloqueo al otro. Consigo mismo, nunca."""
     if str(uno) == str(otro):
         return False
@@ -279,7 +285,7 @@ async def grupos_de_un_perfil(
     ensure_uuid(user_id, "Perfil no encontrado.")
     if not await esquema.hay_puertas_de_grupo(db):
         return []
-    if await _hay_bloqueo(db, current_user.id, user_id):
+    if await hay_bloqueo(db, current_user.id, user_id):
         return []
     filas = (
         await db.execute(
@@ -321,7 +327,7 @@ async def grupo_de_un_enlace(
             )
         )
     ).one_or_none()
-    if fila is None or await _hay_bloqueo(db, current_user.id, fila.created_by):
+    if fila is None or await hay_bloqueo(db, current_user.id, fila.created_by):
         raise NotFoundError(_NO_ESTA, code="group_not_found")
     tarjetas = await _tarjetas(db, [fila], current_user.id)
     if not tarjetas:
@@ -350,6 +356,11 @@ async def pedir_entrar(
     con el codigo de su enlace activo. Con cualquier otro —aunque exista y se
     conozca su identificador— responde el mismo 404 que si no existiera.
 
+    UNA COMUNIDAD es la excepcion: a ella se llega por ser miembro de su grupo
+    padre, sin enlace ni perfil. Quien no es del grupo recibe el mismo 404.
+    Se guarda con `source = 'profile'`, el camino «sin enlace»: la 0104 no
+    admite otro valor y una comunidad no justifica tocar su `CHECK`.
+
     ES IDEMPOTENTE mientras la solicitud siga viva: pedirlo otra vez devuelve
     la misma, sin avisar de nuevo.
     """
@@ -373,17 +384,34 @@ async def pedir_entrar(
     ).one_or_none()
     if fila is None or fila.kind != "group":
         raise NotFoundError(_NO_ESTA, code="group_not_found")
-
-    por_enlace = bool(
-        payload.code
-        and fila.invite_enabled
-        and fila.invite_code
-        # Comparacion de tiempo constante: el codigo es un secreto compartido.
-        and secrets.compare_digest(payload.code, fila.invite_code)
-    )
-    if not (por_enlace or fila.listed_on_profile):
+    # Al chat de un tema no se pide entrar: se entra al grupo.
+    if await grupos.tema_del_chat(db, conversation_id) is not None:
         raise NotFoundError(_NO_ESTA, code="group_not_found")
-    if await _hay_bloqueo(db, uid, fila.created_by):
+
+    from app.modules.messaging import subgrupos
+
+    comunidad = await subgrupos.fila_de(db, conversation_id)
+    if comunidad is not None:
+        if comunidad.deleted_at is not None:
+            raise NotFoundError(_NO_ESTA, code="group_not_found")
+        del_padre = await db.get(
+            ConversationMember,
+            {"conversation_id": str(comunidad.parent_id), "user_id": uid},
+        )
+        if del_padre is None:
+            raise NotFoundError(_NO_ESTA, code="group_not_found")
+        por_enlace = False
+    else:
+        por_enlace = bool(
+            payload.code
+            and fila.invite_enabled
+            and fila.invite_code
+            # Comparacion de tiempo constante: el codigo es un secreto compartido.
+            and secrets.compare_digest(payload.code, fila.invite_code)
+        )
+        if not (por_enlace or fila.listed_on_profile):
+            raise NotFoundError(_NO_ESTA, code="group_not_found")
+    if await hay_bloqueo(db, uid, fila.created_by):
         raise NotFoundError(_NO_ESTA, code="group_not_found")
 
     miembros = set(
@@ -608,7 +636,10 @@ async def aceptar_solicitud(
 
     Valen las mismas reglas que al añadir a mano: el tope del grupo y los
     bloqueos. Si entre que lo pidio y que se responde aparecio un bloqueo, no
-    entra.
+    entra. En una comunidad, ademas, tiene que seguir siendo del grupo padre.
+
+    Entrar a un grupo con temas es entrar tambien a los chats de sus temas, en
+    la misma transaccion (`grupos.sincronizar_temas`).
     """
     uid = current_user.id
     await grupos.exigir_grupo_administrado(db, conversation_id, uid)
@@ -630,7 +661,13 @@ async def aceptar_solicitud(
         if len(miembros) >= grupos.MAX_MIEMBROS:
             raise ConflictError("El grupo está completo.", code="group_is_full")
         await grupos.exigir_que_se_puedan_anadir(db, uid, [persona])
+        from app.modules.messaging import subgrupos
+
+        padre = await subgrupos.padre_de(db, conversation_id)
+        if padre is not None:
+            await grupos.exigir_que_sean_del_padre(db, padre, [persona])
         db.add(ConversationMember(conversation_id=conversation_id, user_id=persona))
+        await grupos.sincronizar_temas(db, conversation_id, [persona], dentro=True)
 
     solicitud.status = "approved"
     solicitud.resolved_at = datetime.now(timezone.utc)
@@ -697,8 +734,13 @@ async def cambiar_ajustes(
     Activar el enlace por primera vez le crea su codigo. Desactivarlo NO lo
     borra: al volver a activarlo es el mismo enlace, y para cambiarlo esta
     `…/invite/rotate`.
+
+    UNA COMUNIDAD NO TIENE ENLACE NI SALE EN EL PERFIL: a ella se llega por ser
+    del grupo, y un enlace llevaria a una solicitud que nunca se podria
+    aceptar. Tampoco el chat de un tema. Las dos, 409.
     """
     await grupos.exigir_grupo_administrado(db, conversation_id, current_user.id)
+    await grupos.exigir_primer_nivel(db, conversation_id)
     await _exigir_puertas(db)
     fila = await ajustes_de_grupo.asegurar_fila(db, conversation_id)
 
@@ -726,6 +768,7 @@ async def cambiar_enlace(
     cerrar la puerta: se comparte el nuevo con quien se quiera.
     """
     await grupos.exigir_grupo_administrado(db, conversation_id, current_user.id)
+    await grupos.exigir_primer_nivel(db, conversation_id)
     await _exigir_puertas(db)
     fila = await ajustes_de_grupo.asegurar_fila(db, conversation_id)
     fila.invite_code = ajustes_de_grupo.codigo_nuevo()
@@ -747,8 +790,12 @@ async def poner_foto(
     LA RUTA TIENE QUE ESTAR EN LA CARPETA DE QUIEN LA PONE (`<su id>/…`), que
     es donde el almacenamiento le deja escribir. Sin esta comprobacion se
     podria poner como foto del grupo el fichero de otra persona.
+
+    Una comunidad SI tiene foto; el chat de un tema no (409): lo que lo
+    representa es el icono del tema.
     """
     await grupos.exigir_grupo_administrado(db, conversation_id, current_user.id)
+    await grupos.exigir_primer_nivel(db, conversation_id, comunidad_vale=True)
     await _exigir_puertas(db)
     prefijo = f"{current_user.id}/"
     if not payload.avatar_path.startswith(prefijo) or len(payload.avatar_path) <= len(prefijo):
@@ -769,6 +816,7 @@ async def quitar_foto(
 ) -> None:
     """Quita la foto. El fichero no se borra aqui: lo limpia el almacenamiento."""
     await grupos.exigir_grupo_administrado(db, conversation_id, current_user.id)
+    await grupos.exigir_primer_nivel(db, conversation_id, comunidad_vale=True)
     await _exigir_puertas(db)
     fila = await ajustes_de_grupo.fila_de(db, conversation_id)
     if fila is not None and fila.avatar_path is not None:

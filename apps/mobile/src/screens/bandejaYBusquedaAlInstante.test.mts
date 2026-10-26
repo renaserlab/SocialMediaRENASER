@@ -194,7 +194,11 @@ describe('la fila de conversación', () => {
   it('lo no leído se marca con el peso de la letra y con el globo, no solo con color', () => {
     assert.match(FILA, /weight=\{sinLeer \? '800' : '600'\}/);
     assert.match(FILA, /weight=\{sinLeer \? '700' : '400'\}/);
-    assert.match(FILA, /<GloboDeNoLeidos cuenta=\{conversacion\.unread\} \/>/);
+    // Desde temas y comunidades (26/10/2026) el globo cuenta lo de todo el
+    // grupo, y nunca menos que General: ver `sinLeerDeLaFila`.
+    assert.match(FILA, /const cuenta = sinLeerDeLaFila\(conversacion\);/);
+    assert.match(FILA, /const sinLeer = cuenta > 0;/);
+    assert.match(FILA, /<GloboDeNoLeidos cuenta=\{cuenta\} \/>/);
   });
 
   it('un nombre largo se recorta en vez de empujar el globo', () => {

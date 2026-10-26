@@ -51,10 +51,35 @@ export type InfoDeConversacion = {
   pendientes: number;
   /** Quien mira la tiene silenciada: no recibe sus avisos. Es suyo. */
   silenciada: boolean;
+  /**
+   * Si es una COMUNIDAD de un grupo: el grupo del que cuelga. `null` en un
+   * grupo normal y con un servidor anterior a la 0109.
+   */
+  padre: { id: string; titulo: string } | null;
+  /**
+   * Si es el chat de un TEMA: de qué grupo y qué tema. Sirve para que un aviso
+   * que abre la conversación suelta lleve al tema, que es donde se lee.
+   */
+  tema: { grupoId: string; temaId: string; nombre: string } | null;
 };
 
 const esObjeto = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** El `parent` de `/info`. A medias no sirve: sin identificador no se puede ir a él. */
+function leerPadre(bruto: unknown): InfoDeConversacion['padre'] {
+  if (!esObjeto(bruto) || typeof bruto.id !== 'string' || !bruto.id) return null;
+  return { id: bruto.id, titulo: typeof bruto.title === 'string' ? bruto.title.trim() : '' };
+}
+
+/** El `topic` de `/info`. Sin el grupo o sin el tema no hay a dónde llevar. */
+function leerTemaDelChat(bruto: unknown): InfoDeConversacion['tema'] {
+  if (!esObjeto(bruto)) return null;
+  const grupoId = typeof bruto.group_id === 'string' ? bruto.group_id : '';
+  const temaId = typeof bruto.topic_id === 'string' ? bruto.topic_id : '';
+  if (!grupoId || !temaId) return null;
+  return { grupoId, temaId, nombre: typeof bruto.name === 'string' ? bruto.name.trim() : '' };
+}
 
 function leerMiembro(bruto: unknown): MiembroDeGrupo | null {
   if (!esObjeto(bruto) || typeof bruto.id !== 'string' || !bruto.id) return null;
@@ -122,6 +147,9 @@ export function leerInfo(bruto: unknown): InfoDeConversacion | null {
         ? bruto.max_members
         : MAX_MIEMBROS_DE_GRUPO,
     silenciada: bruto.muted === true,
+    // Solo un grupo puede ser comunidad de otro o chat de un tema.
+    padre: esGrupo ? leerPadre(bruto.parent) : null,
+    tema: esGrupo ? leerTemaDelChat(bruto.topic) : null,
   };
 }
 

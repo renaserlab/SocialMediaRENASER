@@ -10,6 +10,7 @@ import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { useQuienEscribeEn } from '@/hooks/useEscribiendoEnBandeja';
 import { haptics } from '@/lib/haptics';
+import { abreLaLista, sinLeerDeLaFila } from '@/lib/temasDeGrupo';
 import { useTranslation } from '@/i18n/useTranslation';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -86,7 +87,15 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
   }, [alEtiquetar, conversacion]);
 
   const etiquetas = conversacion.labels ?? [];
-  const sinLeer = conversacion.unread > 0;
+  /*
+    UN GRUPO CON TEMAS O COMUNIDADES abre su lista, y su globo cuenta todo lo
+    que hay dentro: General, las comunidades donde se está y lo escrito en los
+    temas. Las comunidades ya no salen sueltas en la bandeja, así que si no
+    sumaran aquí no sumarían en ningún sitio. Los demás chats, como siempre.
+  */
+  const conLista = abreLaLista(conversacion);
+  const cuenta = sinLeerDeLaFila(conversacion);
+  const sinLeer = cuenta > 0;
   const hora = conversacion.time ?? conversacion.messages.at(-1)?.createdAt;
 
   /*
@@ -119,10 +128,12 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
       escala={0.985}
       atenuar={0.72}
       accessibilityRole="button"
-      accessibilityLabel={t('messages.chatWith', {
+      // La fila entera es UN elemento para el lector de pantalla: lo que
+      // dicen las capas tiene que ir en su etiqueta, o no se oiría nunca.
+      accessibilityLabel={`${t('messages.chatWith', {
         nombre: conversacion.name,
         detalle: escribiendo ?? conversacion.subtitle,
-      })}
+      })}${conLista ? ` ${t('groupTopics.badge')}.` : ''}`}
       style={styles.fila}
     >
       {/*
@@ -155,6 +166,18 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
           >
             {conversacion.name}
           </Text>
+          {/*
+            Las capas dicen que tocar abre una lista y no un chat. Con su
+            nombre para el lector de pantalla: el icono solo no lo explica.
+          */}
+          {conLista ? (
+            <Feather
+              name="layers"
+              size={13}
+              color={colors.textMuted}
+              accessibilityLabel={t('groupTopics.badge')}
+            />
+          ) : null}
           {/* Silenciado: no avisa porque así se pidió, no porque falle. */}
           {conversacion.silenciada ? (
             <Feather
@@ -225,7 +248,7 @@ export const FilaDeConversacion = React.memo(function FilaDeConversacion({
         El globo aparece creciendo y salta cuando llega otro mensaje: es el
         mismo de la barra inferior (`GloboDeNoLeidos`).
       */}
-      <GloboDeNoLeidos cuenta={conversacion.unread} />
+      <GloboDeNoLeidos cuenta={cuenta} />
     </Pulsable>
   );
 });

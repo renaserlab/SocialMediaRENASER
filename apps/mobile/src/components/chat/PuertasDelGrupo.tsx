@@ -51,6 +51,9 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
   const grupoId = info.id;
   const ajustes = info.ajustes;
   const pendientes = info.pendientes;
+  // Una comunidad no tiene perfil ni enlace propios: se entra desde su grupo
+  // (el servidor responde 409 a esos dos). Aquí solo le quedan sus solicitudes.
+  const esComunidad = info.padre !== null;
 
   // Las solicitudes se leen al entrar y cada vez que cambia cuántas hay.
   useEffect(() => {
@@ -150,7 +153,13 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
                     {solicitud.persona.nombre}
                   </Text>
                   <Text color={colors.textMuted} style={styles.detalle} numberOfLines={1}>
-                    {t(solicitud.origen === 'enlace' ? 'groupJoin.viaLink' : 'groupJoin.viaProfile')}
+                    {t(
+                      esComunidad
+                        ? 'groupJoin.viaParentGroup'
+                        : solicitud.origen === 'enlace'
+                          ? 'groupJoin.viaLink'
+                          : 'groupJoin.viaProfile',
+                    )}
                   </Text>
                 </View>
               </View>
@@ -175,7 +184,8 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
         </View>
       ) : null}
 
-      {/* ---------- Cómo se entra ---------- */}
+      {/* ---------- Cómo se entra (una comunidad no tiene perfil ni enlace) ---------- */}
+      {esComunidad ? null : (
       <View style={styles.seccion}>
         <Text weight="700">{t('groupJoin.doorsTitle')}</Text>
         <Text color={colors.textMuted} style={styles.detalle}>
@@ -241,6 +251,7 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
           )
         ) : null}
       </View>
+      )}
     </View>
   );
 }

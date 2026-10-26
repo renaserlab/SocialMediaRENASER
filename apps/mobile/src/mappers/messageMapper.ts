@@ -1,4 +1,5 @@
 import { leerCita, leerReacciones } from '@/lib/reaccionesDeChat';
+import { leerCuenta } from '@/lib/temasDeGrupo';
 import { profileImageUrl } from '@/services/storage';
 import type {
   Conversation,
@@ -36,6 +37,17 @@ export type ConversationDto = {
   labels?: { id: string; nombre: string }[];
   /** La foto de un GRUPO. En un chat de dos viene a nulo: la foto es la de `other`. */
   avatar_path?: string | null;
+  /**
+   * Temas y comunidades (contrato del 26/10/2026), con `?grouped=true`.
+   *
+   * Opcionales por lo mismo que `labels`: un servidor anterior no los manda, y
+   * entonces la fila se abre como siempre, directa al chat.
+   */
+  parent_id?: string | null;
+  topics_count?: number;
+  subgroups_count?: number;
+  /** General, más las comunidades donde se está, más lo escrito en los temas. */
+  total_unread?: number;
 };
 
 export type AttachmentDto = {
@@ -168,6 +180,12 @@ export function toConversation(dto: ConversationDto): Conversation {
     // `?? []` y no `dto.labels`: la fila pinta `labels.length` sin comprobar
     // nada, y una API vieja que no mande el campo no puede reventar la bandeja.
     labels: dto.labels ?? [],
+    // Leídas sin fiarse: una cuenta rara vale cero, y con cero la fila se
+    // abre como siempre. Ver `abreLaLista`.
+    temas: leerCuenta(dto.topics_count),
+    comunidades: leerCuenta(dto.subgroups_count),
+    totalSinLeer: leerCuenta(dto.total_unread),
+    padreId: dto.parent_id ?? undefined,
   };
 }
 

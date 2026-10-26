@@ -475,9 +475,18 @@ describe('eliminar un mensaje', () => {
 
       El servidor lo comprueba otra vez (`message_not_yours`): esto solo evita
       ofrecer lo que no se puede hacer.
+
+      DESDE TEMAS Y COMUNIDADES (D4, 26/10/2026), QUIEN ADMINISTRA UN GRUPO
+      BORRA TAMBIÉN LO AJENO de ese grupo. Las cuatro guardas siguen, con esa
+      única puerta más: `puedoBorrarAjenos`, que solo vale en un grupo y para
+      quien lo administra. A cualquier otra persona lo ajeno le sigue cerrado.
     */
     assert.ok(
-      /const conAcciones = !item\.estado && \(mine \|\| funciones\.reacciones\);/.test(CHAT) &&
+      /const puedoBorrarAjenos = esGrupo && infoDeConversacion\?\.puedoAdministrar === true;/.test(CHAT),
+      'Borrar lo ajeno es solo de quien administra un grupo (D4).',
+    );
+    assert.ok(
+      /const conAcciones = !item\.estado && \(mine \|\| funciones\.reacciones \|\| puedoBorrarAjenos\);/.test(CHAT) &&
         /onLongPress=\{\s*\n?\s*conAcciones \? \(\) => abrirAcciones\(item\) : undefined\s*\n?\s*\}/.test(
           CHAT,
         ),
@@ -490,17 +499,20 @@ describe('eliminar un mensaje', () => {
     );
     assert.ok(
       /if \(mensaje\.estado \|\| mensaje\.eliminado\) return;/.test(abrir) &&
-        /if \(mensaje\.sender !== 'me' && !funciones\.reacciones\) return;/.test(abrir),
+        /if \(mensaje\.sender !== 'me' && !funciones\.reacciones && !puedoBorrarAjenos\) return;/.test(abrir),
       'El menu de acciones tiene que volver a comprobar de quien es el mensaje: ' +
         'una guarda que solo vive en el JSX se pierde en cuanto alguien llama a ' +
         'la funcion desde otro sitio.',
     );
     assert.ok(
-      /\{accionesDe\?\.sender === 'me' \? \(\s*<ListRow\s+title=\{t\('common\.delete'\)\}/.test(CHAT),
-      '«Eliminar» solo puede aparecer en el menu de un mensaje propio.',
+      /\{accionesDe\?\.sender === 'me' \|\| \(accionesDe && puedoBorrarAjenos\) \? \(\s*<ListRow\s+title=\{t\('common\.delete'\)\}/.test(
+        CHAT,
+      ),
+      '«Eliminar» solo puede aparecer en el menu de un mensaje propio, o en el de ' +
+        'quien administra el grupo (D4).',
     );
     assert.ok(
-      /if \(!params\.id \|\| mensaje\.sender !== 'me' \|\| mensaje\.estado \|\| mensaje\.eliminado\) \{/.test(
+      /const ajeno = mensaje\.sender !== 'me';\s*\n\s*if \(!params\.id \|\| \(ajeno && !puedoBorrarAjenos\) \|\| mensaje\.estado \|\| mensaje\.eliminado\) \{/.test(
         CHAT,
       ),
       'Y el borrado en si conserva su propia guarda.',
