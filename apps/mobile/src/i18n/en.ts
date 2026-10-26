@@ -6869,7 +6869,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'groupTopics.countOne': '1 topic',
   'groupTopics.countMany': '{n} topics',
   'groupTopics.topics': 'Topics',
-  'groupTopics.topicsHelp': 'All members can see them without joining. The admins fill them with messages from General; nobody else writes here.',
+  'groupTopics.topicsHelp': 'All members can see them without joining. The admins fill them with messages from General or by writing in them; everyone else just reads.',
   'groupTopics.readOnly': 'Read only',
   'groupTopics.emptyPreview': 'Empty · the admins fill it',
   'groupTopics.topicLabel': 'Topic {nombre}, read only. {detalle}',

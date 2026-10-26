@@ -6874,7 +6874,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'groupTopics.countOne': '1 tópico',
   'groupTopics.countMany': '{n} tópicos',
   'groupTopics.topics': 'Tópicos',
-  'groupTopics.topicsHelp': 'Todos os membros os veem, sem entrar. A administração os preenche com mensagens de Geral; aqui ninguém mais escreve.',
+  'groupTopics.topicsHelp': 'Todos os membros os veem, sem entrar. A administração os preenche com mensagens de Geral ou escrevendo neles; os demais só leem.',
   'groupTopics.readOnly': 'Somente leitura',
   'groupTopics.emptyPreview': 'Vazio · a administração o preenche',
   'groupTopics.topicLabel': 'Tópico {nombre}, somente leitura. {detalle}',

@@ -6958,7 +6958,7 @@ export const es = {
   'groupTopics.countOne': '1 tema',
   'groupTopics.countMany': '{n} temas',
   'groupTopics.topics': 'Temas',
-  'groupTopics.topicsHelp': 'Todos los miembros los ven, sin unirse. Los llena la administración con mensajes de General; aquí no se escribe.',
+  'groupTopics.topicsHelp': 'Todos los miembros los ven, sin unirse. La administración los llena con mensajes de General o escribiendo en ellos; los demás solo leen.',
   'groupTopics.readOnly': 'Solo lectura',
   'groupTopics.emptyPreview': 'Vacío · lo llena la administración',
   'groupTopics.topicLabel': 'Tema {nombre}, solo lectura. {detalle}',
