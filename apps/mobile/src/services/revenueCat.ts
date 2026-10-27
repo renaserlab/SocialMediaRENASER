@@ -25,6 +25,7 @@ import { Platform } from 'react-native';
 
 import { claveDeRevenueCat, modoDeCompra } from '@/services/comprasConfig';
 import type { Plataforma } from '@/services/comprasConfig';
+import { requerirSdkDeCompras } from '@/services/sdkDeCompras';
 
 /** La plataforma real. Vive aqui porque aqui SI se puede importar React Native. */
 function plataformaActual(): Plataforma {
@@ -95,8 +96,7 @@ function cargar(): PurchasesModule | null {
     return modulo;
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('react-native-purchases') as { default?: unknown };
+    const mod = requerirSdkDeCompras() as { default?: unknown } | null;
     const candidato = (mod?.default ?? mod) as Partial<PurchasesModule>;
     if (
       typeof candidato?.configure === 'function' &&

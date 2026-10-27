@@ -385,7 +385,7 @@ describe('el perfil', () => {
     // Y sin instalar nada: la familia sale del paquete que ya estaba.
     assert.match(
       PERFIL,
-      /import \{ Feather, MaterialCommunityIcons \} from '@expo\/vector-icons';/,
+      /import MaterialCommunityIcons from '@expo\/vector-icons\/MaterialCommunityIcons';/,
     );
     // Los otros tres accesos siguen en Feather: el cambio es de UN icono.
     for (const nombre of ['headphones', 'book', 'calendar']) {

@@ -13,7 +13,7 @@ import type { CameraMode, CameraType, FlashMode } from 'expo-camera';
 import { Image as ExpoImage } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import Svg, { Circle } from 'react-native-svg';
 
 

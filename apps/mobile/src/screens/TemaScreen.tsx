@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { AppHeader } from '@/components/AppHeader';
 import { BotonDeEnviar } from '@/components/BotonDeEnviar';

@@ -1,4 +1,4 @@
-import type { Feather } from '@expo/vector-icons';
+import type Feather from '@expo/vector-icons/Feather';
 
 import type { TipoDeAviso } from './colaDeAvisos';
 

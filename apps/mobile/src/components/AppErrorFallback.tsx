@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { detalleDelFallo } from '@/lib/dondeFallo';
 import { palette, radius, spacing } from '@/theme/tokens';

@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { formatearDuracion } from '@/lib/notaDeVoz';

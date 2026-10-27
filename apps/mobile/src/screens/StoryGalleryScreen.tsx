@@ -3,7 +3,7 @@ import { ActivityIndicator, Dimensions, Pressable, StyleSheet, View } from 'reac
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Button } from '@/components/Button';
 import { useEspacioInferior } from '@/components/espacioInferior';

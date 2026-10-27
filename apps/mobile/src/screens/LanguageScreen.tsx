@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { LANGUAGE_NAMES, type Language } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';

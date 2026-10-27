@@ -9,7 +9,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import Svg, { Path } from 'react-native-svg';
 
 import { seAnimaElPaso, type EstadoDeEntrega } from '@/lib/lecturaDeMensajes';

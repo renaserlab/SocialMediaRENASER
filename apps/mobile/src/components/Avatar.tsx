@@ -1,7 +1,7 @@
 import React from 'react';
 import { ImageSourcePropType, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';

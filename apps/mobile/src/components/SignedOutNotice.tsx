@@ -1,6 +1,6 @@
 import React from 'react';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { StateView } from '@/components/StateView';
 import { useTranslation } from '@/i18n/useTranslation';

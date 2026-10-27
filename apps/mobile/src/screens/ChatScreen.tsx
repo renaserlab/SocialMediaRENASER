@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { useMargenInferior } from '@/components/teclado';

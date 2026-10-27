@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { sobreMedio, SuperficieSobreMedio } from '@/components/CapaDeContraste';
 import { Pulsable } from '@/components/Pulsable';

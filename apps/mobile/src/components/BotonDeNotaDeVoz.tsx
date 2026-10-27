@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { OndaDeVoz } from '@/components/OndaDeVoz';
