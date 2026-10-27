@@ -59,6 +59,13 @@ infra/aws/evidencias/
 infra/aws/secretos*.json
 !infra/aws/secretos.ejemplo.json
 
+# Graphify: grafo local del codigo para Claude; se regenera con `graphify . --code-only`.
+graphify-out/
+
+# Carpeta de trabajo del Supabase local (scripts/supabase_local.sh): contenedores,
+# migraciones copiadas y estado de la CLI. Se regenera sola.
+.supabase-local/
+
 # ---- Lo que git ignora por otras vias --------------------------------------
 # apps/mobile/.gitignore (generado por expo-cli)
 apps/mobile/expo-env.d.ts
