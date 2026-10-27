@@ -4,6 +4,15 @@ App React Native / Expo Router (SDK 54) en `apps/mobile`, dentro de un monorepo
 npm. Backend en Supabase (PostgREST + RLS + Storage privado) y una API FastAPI
 en `apps/api`.
 
+## Navegar el codigo: Graphify
+
+El repo es grande; antes de leer archivo por archivo, consulta el grafo:
+`graphify query "<pregunta>"` (usa `--budget` o una pregunta mas concreta si
+avisa de que trunca). Si falta `graphify-out/graph.json` o esta desactualizado,
+regeneralo con `graphify . --code-only` (local, sin API, ~1 min). El grafo es
+cache local y no se versiona. Las migraciones SQL de `supabase/` no entran en
+el grafo: buscalas directamente.
+
 ## Ramas
 
 - `andy` — rama de trabajo de Andy.

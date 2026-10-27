@@ -45,3 +45,6 @@ ec2-arranque.txt
 infra/aws/evidencias/
 infra/aws/secretos*.json
 !infra/aws/secretos.ejemplo.json
+
+# Graphify: grafo local del codigo para Claude; se regenera con `graphify . --code-only`.
+graphify-out/
