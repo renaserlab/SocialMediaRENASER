@@ -15,7 +15,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItem } from '@shopify/flash-list';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Avatar } from '@/components/Avatar';
 import { sobreMedio } from '@/components/CapaDeContraste';

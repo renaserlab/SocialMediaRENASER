@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { InlineError } from '@/components/InlineError';

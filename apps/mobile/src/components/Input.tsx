@@ -15,7 +15,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Text } from '@/components/Text';
 import { AMPLITUD_DE_SACUDIDA, DURACION } from '@/lib/movimiento';

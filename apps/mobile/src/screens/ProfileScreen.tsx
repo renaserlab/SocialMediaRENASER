@@ -8,7 +8,8 @@ import { perfilVisto } from '@/services/senales';
 
 import { haptics } from '@/lib/haptics';
 import { toast } from '@/lib/toast';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { AppHeader } from '@/components/AppHeader';
 import { AudioDePresentacion } from '@/components/AudioDePresentacion';

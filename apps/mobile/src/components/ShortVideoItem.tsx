@@ -3,7 +3,8 @@ import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { ContadorAnimado } from '@/components/ContadorAnimado';
 import { IconoQueSeEnciende } from '@/components/IconoQueSeEnciende';

@@ -6,15 +6,17 @@ import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-c
 import { Stack, usePathname, type ErrorBoundaryProps } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import {
-  useFonts,
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  Inter_800ExtraBold,
-  Inter_900Black,
-} from '@expo-google-fonts/inter';
+// Cada peso por su propia ruta y no desde '@expo-google-fonts/inter': el índice
+// del paquete hace `require` de los 18 pesos, y Metro mete en el APK y en la web
+// los 18 ficheros aunque solo se carguen seis (4,15 MB de fuentes muertas,
+// medido el 27/10/2026).
+import { useFonts } from '@expo-google-fonts/inter/useFonts';
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
+import { Inter_800ExtraBold } from '@expo-google-fonts/inter/800ExtraBold';
+import { Inter_900Black } from '@expo-google-fonts/inter/900Black';
 
 import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { AvisoDeDirectoSeguido } from '@/components/AvisoDeDirectoSeguido';

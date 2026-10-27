@@ -7,7 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button } from '@/components/Button';

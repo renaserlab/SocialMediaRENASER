@@ -1,6 +1,12 @@
 /**
- * Lo único que este fichero añade a `app.json`: el fichero de Firebase que hace
- * falta para el push en Android, SI ESTÁ.
+ * Lo único que este fichero añade a `app.json`: dos cosas que dependen de DÓNDE
+ * se compila y que por eso no pueden escribirse fijas allí.
+ *
+ * 1. El fichero de Firebase que hace falta para el push en Android, SI ESTÁ.
+ * 2. Las arquitecturas de Android, recortadas en las compilaciones que van a
+ *    teléfonos.
+ *
+ * ## 1. Firebase
  *
  * POR QUÉ EXISTE. En Android un aviso con la aplicación cerrada llega por
  * Firebase (FCM), aunque quien lo mande sea Expo. Sin `google-services.json`
@@ -26,6 +32,22 @@
  * que SÍ lo es, la de la cuenta de servicio, no pasa por aquí: se sube a EAS
  * con `eas credentials`. Los pasos, en `docs/PUBLICAR_EN_GOOGLE_PLAY.md`.
  *
+ * ## 2. Arquitecturas de Android
+ *
+ * POR QUÉ. Sin decir nada, el APK lleva el código nativo compilado para cuatro
+ * procesadores. Medido en el APK 1.2.3 (EAS `c80d09e4`, 27/10/2026): pesaba
+ * 219 MB, y 82,5 MB eran de `x86` y `x86_64`, que solo usan los emuladores.
+ * Ningún teléfono los carga. Los teléfonos son `arm64-v8a` (todos los de los
+ * últimos años) y `armeabi-v7a` (los de 32 bits que aún circulan).
+ *
+ * POR QUÉ SOLO EN `preview` Y `production`. El emulador de desarrollo es
+ * `x86_64`: una compilación de `development` sin esa arquitectura no se
+ * instalaría en él. EAS pone el nombre del perfil en `EAS_BUILD_PROFILE` al
+ * compilar; sin esa variable (en local, en las pruebas) no se toca nada.
+ *
+ * En Google Play el recorte apenas se nota: el AAB ya se reparte partido por
+ * arquitectura. Donde se nota es en el APK que se reparte a mano.
+ *
  * Todo lo demás sigue en `app.json`. No se añade nada más aquí.
  */
 const fs = require('node:fs');
@@ -38,10 +60,40 @@ function ficheroDeFirebase(entorno = process.env, carpeta = __dirname) {
   return fs.existsSync(path.join(carpeta, 'google-services.json')) ? './google-services.json' : null;
 }
 
+/** Los perfiles de EAS cuyo binario se instala en teléfonos de verdad. */
+const PERFILES_PARA_TELEFONOS = ['preview', 'production'];
+
+/** Las arquitecturas de los teléfonos Android. */
+const ARQUITECTURAS_DE_TELEFONO = ['arm64-v8a', 'armeabi-v7a'];
+
+/** Las arquitecturas que lleva esta compilación, o `null` para no tocar nada. */
+function arquitecturasDeAndroid(entorno = process.env) {
+  return PERFILES_PARA_TELEFONOS.includes(entorno.EAS_BUILD_PROFILE)
+    ? ARQUITECTURAS_DE_TELEFONO
+    : null;
+}
+
+/** Los plugins con `buildArchs` puesto en `expo-build-properties`. */
+function conArquitecturas(plugins, arquitecturas) {
+  return plugins.map((plugin) => {
+    if (!Array.isArray(plugin) || plugin[0] !== 'expo-build-properties') return plugin;
+    const [nombre, opciones = {}] = plugin;
+    return [nombre, { ...opciones, android: { ...opciones.android, buildArchs: arquitecturas } }];
+  });
+}
+
 module.exports = ({ config }) => {
+  let salida = config;
   const fichero = ficheroDeFirebase();
-  if (!fichero) return config;
-  return { ...config, android: { ...config.android, googleServicesFile: fichero } };
+  if (fichero) {
+    salida = { ...salida, android: { ...salida.android, googleServicesFile: fichero } };
+  }
+  const arquitecturas = arquitecturasDeAndroid();
+  if (arquitecturas) {
+    salida = { ...salida, plugins: conArquitecturas(salida.plugins ?? [], arquitecturas) };
+  }
+  return salida;
 };
 
 module.exports.ficheroDeFirebase = ficheroDeFirebase;
+module.exports.arquitecturasDeAndroid = arquitecturasDeAndroid;

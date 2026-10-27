@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { LayoutChangeEvent, PanResponder, Pressable, StyleSheet, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Button } from '@/components/Button';
 import { ScrimDeMedio, SuperficieSobreMedio, sobreMedio } from '@/components/CapaDeContraste';

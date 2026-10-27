@@ -136,7 +136,7 @@ describe('los accesos circulares del perfil', () => {
         'estrella.',
     );
     assert.ok(
-      /from '@expo\/vector-icons'/.test(PERFIL) &&
+      /from '@expo\/vector-icons\/\w+'/.test(PERFIL) &&
         !/from 'react-native-vector-icons|\.png'/.test(PERFIL),
       'Ningun icono del perfil puede traer una dependencia nueva ni un PNG.',
     );

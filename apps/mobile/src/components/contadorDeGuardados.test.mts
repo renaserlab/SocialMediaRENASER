@@ -79,7 +79,7 @@ test('el color sigue estando, pero acompañando', () => {
 });
 
 test('la familia rellena sale del paquete de iconos que ya estaba', () => {
-  assert.match(ACCION, /import \{ Feather, MaterialCommunityIcons \} from '@expo\/vector-icons'/);
+  assert.match(ACCION, /import MaterialCommunityIcons from '@expo\/vector-icons\/MaterialCommunityIcons'/);
   // Nada de una libreria de iconos nueva por un marcador relleno.
   assert.ok(
     !/react-native-vector-icons|lucide|@iconify|phosphor/i.test(PAQUETE),

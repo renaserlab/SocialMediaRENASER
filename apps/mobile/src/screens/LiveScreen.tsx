@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { rellenoDePeligro, ScrimDeMedio } from '@/components/CapaDeContraste';
 import { Pulsable } from '@/components/Pulsable';

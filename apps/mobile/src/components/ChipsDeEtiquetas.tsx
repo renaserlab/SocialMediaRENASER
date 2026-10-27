@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Pulsable } from '@/components/Pulsable';
 import { Chip } from '@/components/Chip';

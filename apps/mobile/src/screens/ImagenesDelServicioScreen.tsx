@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import { useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';

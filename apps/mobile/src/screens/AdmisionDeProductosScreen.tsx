@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';

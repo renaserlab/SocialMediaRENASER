@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Pulsable } from '@/components/Pulsable';
 import { SectionTitle } from '@/components/SectionTitle';

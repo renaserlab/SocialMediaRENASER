@@ -8,7 +8,7 @@ import {
   useAudioRecorder,
 } from 'expo-audio';
 import { useFocusEffect } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Text } from '@/components/Text';
 import { permitirGrabar, useBackgroundAudio } from '@/hooks/useBackgroundAudio';

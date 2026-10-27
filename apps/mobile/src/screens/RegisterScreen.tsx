@@ -4,7 +4,7 @@ import { notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
 
 import { rutaTrasAutenticar } from '@/lib/postAuthRoute';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Aparecer } from '@/components/Aparecer';

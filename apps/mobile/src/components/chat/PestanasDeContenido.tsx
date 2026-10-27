@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { Avatar } from '@/components/Avatar';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
