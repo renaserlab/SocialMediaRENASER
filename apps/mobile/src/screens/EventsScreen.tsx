@@ -24,6 +24,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { aspectoDeCategoria, aspectoDeTarjeta } from '@/theme/aspecto';
 import type { EventItem } from '@/types';
 
 /** Las modalidades que el servidor acepta, y «todas». Ni una más. */
@@ -162,6 +163,16 @@ export function EventsScreen() {
     : 'content';
 
   /** Una fila de evento. `finalizado` quita la reserva y lo dice. */
+  /*
+    Los botones redondos (reservar, ver el directo) son la acción de la fila:
+    salen de `accion`; con una variante de categoría, del color de «eventos».
+  */
+  const eventos = aspectoDeCategoria(colors, 'eventos', { activo: true });
+  const botonRedondo = {
+    fondo: (eventos.circulo?.backgroundColor as string | undefined) ?? colors.accion,
+    tinta: eventos.icono ?? colors.sobreAccion,
+  };
+
   const fila = (event: EventItem, finalizado: boolean) => {
     const isReserved = reservedIds.includes(event.id);
     return (
@@ -170,6 +181,7 @@ export function EventsScreen() {
         style={[
           styles.rowCard,
           { backgroundColor: colors.surface, borderColor: colors.border },
+          aspectoDeTarjeta(colors),
           // Un evento terminado se lee, pero no compite con lo vigente.
           finalizado ? styles.terminado : null,
         ]}
@@ -226,7 +238,7 @@ export function EventsScreen() {
             escala={ESCALA_AL_PULSAR.icono}
             haptica="ligera"
             hitSlop={6}
-            style={[styles.reserve, { backgroundColor: colors.primary }]}
+            style={[styles.reserve, { backgroundColor: botonRedondo.fondo }]}
             accessibilityLabel={
               isReserved
                 ? t('event.reserved')
@@ -239,7 +251,7 @@ export function EventsScreen() {
             <Feather
               name={isReserved ? 'check' : event.type === 'live' ? 'video' : 'plus'}
               size={18}
-              color={colors.onPrimary}
+              color={botonRedondo.tinta}
             />
           </Pulsable>
         )}

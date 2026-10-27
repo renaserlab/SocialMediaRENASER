@@ -152,6 +152,6 @@ describe('cómo se ve', () => {
 
   it('el chat lo usa en el texto de cada mensaje', () => {
     const chat = sinComentarios(fuente('screens/ChatScreen.tsx'));
-    assert.match(chat, /<TextoConEnlaces\s*texto=\{item\.text\}\s*colorDelTexto=\{mine \? colors\.onPrimary : colors\.text\}/);
+    assert.match(chat, /<TextoConEnlaces\s*texto=\{item\.text\}\s*colorDelTexto=\{mine \? colors\.sobreBurbujaPropia : colors\.text\}/);
   });
 });

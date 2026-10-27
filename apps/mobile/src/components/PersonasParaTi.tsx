@@ -33,6 +33,7 @@ import { profileImageUrl } from '@/services/storage';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { aspectoDeTarjeta } from '@/theme/aspecto';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -335,7 +336,11 @@ export function PersonasParaTi() {
           ? [0, 1, 2].map((i) => (
               <View
                 key={i}
-                style={[styles.tarjeta, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                style={[
+                  styles.tarjeta,
+                  { borderColor: colors.border, backgroundColor: colors.surface },
+                  aspectoDeTarjeta(colors),
+                ]}
               >
                 <Skeleton width={64} height={64} circle />
                 <Skeleton width={110} height={14} />

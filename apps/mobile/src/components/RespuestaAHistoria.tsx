@@ -39,7 +39,7 @@ type Props = {
 export function RespuestaAHistoria({ contexto, mio = false }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
-  const color = mio ? colors.onPrimary : colors.text;
+  const color = mio ? colors.sobreBurbujaPropia : colors.text;
 
   return (
     <View

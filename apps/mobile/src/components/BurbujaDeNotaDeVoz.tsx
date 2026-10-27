@@ -56,7 +56,7 @@ const BARRAS = [0.35, 0.6, 0.85, 0.5, 0.95, 0.7, 0.4, 0.8, 0.55, 0.9, 0.45, 0.65
 
 export function BurbujaDeNotaDeVoz({ adjunto, mio, activo, alPulsar, alTerminar }: Props) {
   const { colors } = useAppTheme();
-  const color = mio ? colors.onPrimary : colors.text;
+  const color = mio ? colors.sobreBurbujaPropia : colors.text;
 
   if (activo && adjunto.url) {
     return (

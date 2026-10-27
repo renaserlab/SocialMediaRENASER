@@ -83,6 +83,10 @@ export function PostImage({
   const [proporcion, setProporcion] = useState(() => {
     if (width && height) return limitar(width / height);
     if (uri || !source) return PROPORCION_INICIAL;
+    // react-native-web no trae `resolveAssetSource`: en web, con las fotos
+    // locales de la demo, llamarlo tumbaba el muro entero. Sin el, la
+    // proporcion la corrige `onLoad`, como con las fotos antiguas sin medidas.
+    if (typeof RNImage.resolveAssetSource !== 'function') return PROPORCION_INICIAL;
     const resuelta = RNImage.resolveAssetSource(source as never);
     return resuelta?.width && resuelta?.height
       ? limitar(resuelta.width / resuelta.height)

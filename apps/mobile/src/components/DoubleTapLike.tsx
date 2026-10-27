@@ -55,7 +55,7 @@ function HeartBurst({ reduceMotion }: { reduceMotion: boolean }) {
 
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.center, animatedStyle]}>
-      <Feather name="heart" size={96} color={media.text} />
+      <Feather name="heart" size={96} color={media.corazonDobleToque ?? media.text} />
     </Animated.View>
   );
 }

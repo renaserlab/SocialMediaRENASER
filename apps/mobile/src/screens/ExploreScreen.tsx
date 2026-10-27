@@ -36,8 +36,9 @@ import { CommunityRepository, type CircleDetail } from '@/repositories/Community
 import { LearningRepository } from '@/repositories/LearningRepository';
 import { NotificationRepository } from '@/repositories/NotificationRepository';
 import { useAppStore } from '@/store/useAppStore';
-import { radius, spacing } from '@/theme/tokens';
+import { estilo, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { aspectoDeCategoria, aspectoDeTarjeta, type AspectoDeCategoria } from '@/theme/aspecto';
 import type { Course, EventItem } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { pedirDestacados } from '@/services/cachePerfil';
@@ -408,6 +409,11 @@ export function ExploreScreen() {
     render dejaría estas listas siempre distintas y el `useMemo` no serviría de
     nada.
   */
+  // Variantes de los temas (ver `theme/aspecto`). En «actual» no cambian nada.
+  const aspectoComunidad = aspectoDeCategoria(colors, 'comunidad');
+  const aspectoPodcast = aspectoDeCategoria(colors, 'podcast');
+  const colorDeVerMas = estilo.titulosDeSeccion === 'conAcento' ? colors.acento : colors.text;
+
   const cabecera = useMemo(
     () => (
     <View>
@@ -424,7 +430,11 @@ export function ExploreScreen() {
 
         <Pressable
           onPress={() => router.navigate('/(tabs)/create')}
-          style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          style={[
+            styles.composer,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+            aspectoDeTarjeta(colors),
+          ]}
           accessibilityLabel={t('explore.newPost')}
           accessibilityRole="button"
         >
@@ -441,7 +451,7 @@ export function ExploreScreen() {
                 fijo del demo y se le mostraba a cualquier usuario. */}
             {firstName ? t('home.composerNamed', { name: firstName }) : t('home.composer')}
           </Text>
-          <Feather name="plus-circle" size={24} color={colors.text} />
+          <Feather name="plus-circle" size={24} color={colors.crear ?? colors.text} />
         </Pressable>
 
         {/*
@@ -465,14 +475,18 @@ export function ExploreScreen() {
             style={[
               styles.quickCard,
               { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+              aspectoDeTarjeta(colors),
+              aspectoComunidad.tarjeta,
             ]}
             accessibilityRole="button"
             accessibilityLabel={t('home.yourCircle')}
           >
-            <Feather name="users" size={24} color={colors.text} />
-            <Text style={[styles.quickTitle, { color: colors.text }]}>{t('home.yourCircle')}</Text>
+            <IconoDeTarjeta nombre="users" aspecto={aspectoComunidad} color={colors.text} />
+            <Text style={[styles.quickTitle, { color: aspectoComunidad.texto ?? colors.text }]}>
+              {t('home.yourCircle')}
+            </Text>
             {/* Contador real; antes era "423 personas" escrito a mano. */}
-            <Text style={[styles.quickBody, { color: colors.textMuted }]}>
+            <Text style={[styles.quickBody, { color: aspectoComunidad.texto ?? colors.textMuted }]}>
               {featuredCircle
                 ? t('home.circleMembers', { count: featuredCircle.members })
                 : t('home.joinCommunity')}
@@ -483,6 +497,8 @@ export function ExploreScreen() {
             style={[
               styles.quickCard,
               { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+              aspectoDeTarjeta(colors),
+              aspectoPodcast.tarjeta,
             ]}
           >
             {/* Igual que en Eventos: la zona pulsable va detras para no anidar
@@ -496,7 +512,7 @@ export function ExploreScreen() {
             />
             <View style={styles.quickHeader} pointerEvents="box-none">
               <View pointerEvents="none">
-                <Feather name="headphones" size={24} color={colors.text} />
+                <IconoDeTarjeta nombre="headphones" aspecto={aspectoPodcast} color={colors.text} />
               </View>
               {isAdmin ? (
                 <Pressable
@@ -504,13 +520,16 @@ export function ExploreScreen() {
                   hitSlop={10}
                   accessibilityRole="button"
                   accessibilityLabel={t('home.addAudio')}
-                  style={[styles.addBadge, { backgroundColor: colors.text }]}
+                  style={[styles.addBadge, { backgroundColor: colors.crear ?? colors.text }]}
                 >
-                  <Feather name="plus" size={14} color={colors.background} />
+                  <Feather name="plus" size={14} color={colors.sobreCrear ?? colors.background} />
                 </Pressable>
               ) : null}
             </View>
-            <Text style={[styles.quickTitle, { color: colors.text }]} pointerEvents="none">
+            <Text
+              style={[styles.quickTitle, { color: aspectoPodcast.texto ?? colors.text }]}
+              pointerEvents="none"
+            >
               {t('home.podcast')}
             </Text>
             {isAdmin ? (
@@ -523,7 +542,10 @@ export function ExploreScreen() {
                 <Text style={[styles.addChipText, { color: colors.text }]}>{t('home.addAudio')}</Text>
               </Pressable>
             ) : (
-              <Text style={[styles.quickBody, { color: colors.textMuted }]} pointerEvents="none">
+              <Text
+                style={[styles.quickBody, { color: aspectoPodcast.texto ?? colors.textMuted }]}
+                pointerEvents="none"
+              >
                 {t('home.podcastBody')}
               </Text>
             )}
@@ -543,8 +565,8 @@ export function ExploreScreen() {
             { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
           ]}
         >
-          <Text style={[styles.seeMoreText, { color: colors.text }]}>{t('home.seeMore')}</Text>
-          <Feather name="chevron-right" size={15} color={colors.text} />
+          <Text style={[styles.seeMoreText, { color: colorDeVerMas }]}>{t('home.seeMore')}</Text>
+          <Feather name="chevron-right" size={15} color={colorDeVerMas} />
         </Pressable>
       </View>
 
@@ -897,6 +919,24 @@ export function ExploreScreen() {
   );
 }
 
+/**
+ * El icono de una tarjeta de acceso. Con una variante de categoría que lleva
+ * círculo, va dentro de uno; si no, suelto como siempre.
+ */
+function IconoDeTarjeta({
+  nombre,
+  aspecto,
+  color,
+}: {
+  nombre: keyof typeof Feather.glyphMap;
+  aspecto: AspectoDeCategoria;
+  color: string;
+}) {
+  const icono = <Feather name={nombre} size={24} color={aspecto.icono ?? color} />;
+  if (!aspecto.circulo) return icono;
+  return <View style={[styles.iconoDeTarjeta, aspecto.circulo]}>{icono}</View>;
+}
+
 const styles = StyleSheet.create({
   lleno: { flex: 1 },
   container: { paddingHorizontal: spacing.lg },
@@ -921,12 +961,15 @@ const styles = StyleSheet.create({
   composerText: { flex: 1, fontSize: 13 },
   quickRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
   quickCard: { flex: 1, minHeight: 136, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'space-between' },
+  iconoDeTarjeta: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   quickHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   addBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   addChip: { borderWidth: 1, borderRadius: radius.pill, paddingVertical: 5, paddingHorizontal: 10, alignSelf: 'flex-start' },
   addChipText: { fontSize: 10, fontWeight: '700' },
   quickTitle: { fontSize: 15, fontWeight: '900', marginTop: spacing.md },
-  quickBody: { fontSize: 11, lineHeight: 16, opacity: 0.82 },
+  // Sin opacidad: el gris apagado al 82 % sobre la tarjeta gris se quedaba en
+  // 3,4:1, por debajo del 4,5:1 que pide un texto de 11 px.
+  quickBody: { fontSize: 11, lineHeight: 16 },
   seeMoreText: { fontSize: 13, fontWeight: '700' },
   seeMore: {
     flexDirection: 'row',

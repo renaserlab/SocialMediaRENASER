@@ -67,7 +67,7 @@ export function GloboDeNoLeidos({ cuenta, tamano = 20, soloPunto = false, style 
       minWidth: lado,
       height: lado,
       borderRadius: lado / 2,
-      backgroundColor: colors.primary,
+      backgroundColor: colors.aviso,
       paddingHorizontal: soloPunto ? 0 : 5,
     },
     style,
@@ -76,7 +76,7 @@ export function GloboDeNoLeidos({ cuenta, tamano = 20, soloPunto = false, style 
     <Text
       variant="caption"
       weight="700"
-      color={colors.onPrimary}
+      color={colors.sobreAviso}
       style={{ fontSize: Math.max(9, Math.round(tamano * 0.5)), fontVariant: ['tabular-nums'] }}
     >
       {textoDelGlobo(cuenta)}

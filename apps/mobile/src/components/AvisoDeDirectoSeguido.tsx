@@ -5,7 +5,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
-import { rellenoDePeligro } from '@/components/CapaDeContraste';
+import { rellenoDeEnVivo } from '@/components/CapaDeContraste';
 import { Text } from '@/components/Text';
 import { FEATURE_LIVE } from '@/config/features';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -137,13 +137,13 @@ export function AvisoDeDirectoSeguido() {
         accessibilityLabel={t('live.noticeA11y', { actor: emision.anfitrionNombre })}
         style={({ pressed }) => [styles.cuerpo, { opacity: pressed ? 0.9 : 1 }]}
       >
-        <View style={[styles.aro, { borderColor: media.danger }]}>
+        <View style={[styles.aro, { borderColor: media.aroEnvivo ?? media.danger }]}>
           <Avatar size={40} image={emision.anfitrionAvatarUrl} name={emision.anfitrionNombre} />
-          <View style={[styles.etiqueta, { backgroundColor: rellenoDePeligro.fondo }]}>
+          <View style={[styles.etiqueta, { backgroundColor: rellenoDeEnVivo.fondo }]}>
             <Text
               variant="caption"
               weight="800"
-              color={rellenoDePeligro.texto}
+              color={rellenoDeEnVivo.texto}
               style={styles.etiquetaTexto}
             >
               {t('live.badgeLive')}

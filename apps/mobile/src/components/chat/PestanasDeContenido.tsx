@@ -37,7 +37,7 @@ import {
   type Tesela,
 } from '@/lib/contenidoDeChat';
 import { rutaInternaDe } from '@/lib/enlaces';
-import { colorDelEnlace, partirEnEnlaces } from '@/lib/enlacesEnTexto';
+import { partirEnEnlaces } from '@/lib/enlacesEnTexto';
 import { pedirSalto } from '@/lib/saltoDeChat';
 import { medioQueEs } from '@/lib/mediosDeChat';
 import {
@@ -365,7 +365,7 @@ export function PestanasDeContenido({
                 key={direccion}
                 numberOfLines={1}
                 onPress={() => abrirEnlace(direccion)}
-                style={[styles.direccion, { color: colorDelEnlace(colors.text) }]}
+                style={[styles.direccion, { color: colors.enlace }]}
               >
                 {direccion}
               </Text>

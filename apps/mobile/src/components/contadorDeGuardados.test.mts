@@ -75,7 +75,7 @@ test('la tarjeta pide el marcador relleno al guardar', () => {
 
 test('el color sigue estando, pero acompañando', () => {
   // No se quita `colorActivo`: la forma dice el estado y el color lo refuerza.
-  assert.match(POST_CARD, /icono="bookmark"[\s\S]{0,600}?colorActivo=\{colors\.primary\}/);
+  assert.match(POST_CARD, /icono="bookmark"[\s\S]{0,600}?colorActivo=\{colors\.guardado\}/);
 });
 
 test('la familia rellena sale del paquete de iconos que ya estaba', () => {

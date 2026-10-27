@@ -20,6 +20,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { useMargenInferior } from '@/components/teclado';
 import { TextoConEnlaces } from '@/components/TextoConEnlaces';
+import { colorDeLeidoSobre } from '@/lib/colorSobreBurbuja';
 import { Aparecer } from '@/components/Aparecer';
 import { BotonDeEnviar } from '@/components/BotonDeEnviar';
 import { BotonDeNotaDeVoz } from '@/components/BotonDeNotaDeVoz';
@@ -2534,14 +2535,14 @@ export function ChatScreen() {
                         backgroundColor: sinFondo
                           ? 'transparent'
                           : mine
-                            ? colors.primary
+                            ? colors.burbujaPropia
                             : colors.surfaceAlt,
                         borderColor: fallido
                           ? colors.danger
                           : sinFondo
                             ? 'transparent'
                             : mine
-                              ? colors.primary
+                              ? colors.burbujaPropia
                               : colors.border,
                         opacity: item.estado === 'enviando' ? 0.75 : 1,
                       },
@@ -2585,7 +2586,7 @@ export function ChatScreen() {
                           numberOfLines={1}
                           style={[
                             styles.citaAutor,
-                            { color: mine && !comoSticker ? colors.onPrimary : colors.text },
+                            { color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.text },
                           ]}
                         >
                           {item.respuestaA.autorId === currentUserId
@@ -2596,7 +2597,7 @@ export function ChatScreen() {
                           numberOfLines={2}
                           style={[
                             styles.citaTexto,
-                            { color: mine && !comoSticker ? colors.onPrimary : colors.textMuted },
+                            { color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.textMuted },
                           ]}
                         >
                           {textoDeLaCita(item.respuestaA)}
@@ -2717,8 +2718,9 @@ export function ChatScreen() {
                       ) : item.text ? (
                         <TextoConEnlaces
                           texto={item.text}
-                          colorDelTexto={mine ? colors.onPrimary : colors.text}
-                          style={{ color: mine ? colors.onPrimary : colors.text, fontSize: 15, lineHeight: 22 }}
+                          colorDelTexto={mine ? colors.sobreBurbujaPropia : colors.text}
+                          colorDelFondo={mine ? colors.burbujaPropia : undefined}
+                          style={{ color: mine ? colors.sobreBurbujaPropia : colors.text, fontSize: 15, lineHeight: 22 }}
                         />
                       ) : null}
 
@@ -2730,7 +2732,7 @@ export function ChatScreen() {
                               {
                                 // Sin burbuja, la barra va sobre el fondo del chat.
                                 backgroundColor:
-                                  mine && !sinMarco ? colors.onPrimary : colors.primary,
+                                  mine && !sinMarco ? colors.sobreBurbujaPropia : colors.primary,
                                 width: `${Math.round(item.progreso * 100)}%`,
                               },
                             ]}
@@ -2751,7 +2753,7 @@ export function ChatScreen() {
                           <Text
                             style={{
                               // Sin burbuja detrás, la hora va sobre el fondo del chat.
-                              color: mine && !comoSticker ? colors.onPrimary : colors.textMuted,
+                              color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.textMuted,
                               fontSize: 11,
                               opacity: 0.8,
                             }}
@@ -2765,14 +2767,21 @@ export function ChatScreen() {
                           {mine ? (
                             <MarcaDeEntrega
                               estado={entrega}
-                              color={comoSticker ? colors.textMuted : colors.onPrimary}
+                              color={comoSticker ? colors.textMuted : colors.sobreBurbujaPropia}
                               // La burbuja propia es del color principal: oscura en
                               // el tema claro y clara en el oscuro. Un sticker no
                               // lleva burbuja y va sobre el fondo del tema, al revés.
                               colorDeLeido={
-                                (mode === 'dark') === comoSticker
+                                // Por contraste con lo que hay DETRÁS (la burbuja
+                                // propia, o el fondo si es un sticker), no por el
+                                // modo: con una burbuja de color, «leído» se veía mal.
+                                colorDeLeidoSobre(
+                                  comoSticker ? colors.background : colors.burbujaPropia,
+                                  comoSticker ? colors.textMuted : colors.sobreBurbujaPropia,
+                                ) ??
+                                ((mode === 'dark') === comoSticker
                                   ? COLOR_DE_LEIDO.sobreOscuro
-                                  : COLOR_DE_LEIDO.sobreClaro
+                                  : COLOR_DE_LEIDO.sobreClaro)
                               }
                               style={styles.iconoDeEstado}
                             />
@@ -2863,7 +2872,7 @@ export function ChatScreen() {
             <Feather name="chevron-down" size={22} color={colors.text} />
             {hayNuevosAbajo ? (
               <View
-                style={[styles.irAlFinalPunto, { backgroundColor: colors.primary, borderColor: colors.surface }]}
+                style={[styles.irAlFinalPunto, { backgroundColor: colors.aviso, borderColor: colors.surface }]}
               />
             ) : null}
           </Pulsable>

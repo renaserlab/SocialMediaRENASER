@@ -46,6 +46,17 @@ export const rellenoDePeligro = {
   texto: palette('light').onPrimary,
 } as const;
 
+/**
+ * La píldora «EN VIVO». Sus colores son tokens de RESALTE (`envivo`,
+ * `sobreEnvivo`) y se leen de la paleta oscura porque siempre va encima de un
+ * video, como todo lo de este fichero. Por defecto son los de
+ * `rellenoDePeligro`; «Terminar» sigue siendo peligro, no directo.
+ */
+export const rellenoDeEnVivo = {
+  fondo: sobreMedio.envivo,
+  texto: sobreMedio.sobreEnvivo,
+} as const;
+
 /*
   Los degradados salen de los tokens: `overlay` es el mismo velo que usan los
   fondos de la aplicacion. Aqui no se escribe ningun color a mano.

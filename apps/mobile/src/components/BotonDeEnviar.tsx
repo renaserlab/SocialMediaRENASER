@@ -53,6 +53,13 @@ export function BotonDeEnviar({
 
   const animado = useAnimatedStyle(() => ({ transform: [{ scale: presencia.value }] }));
   const apagado = !listo || enviando;
+  /*
+    APAGADO CON COLOR. El apagado era el mismo botón al 35 %: en negro daba un
+    gris, pero con el rosa de `accion` sale un rosa lavado que parece otro
+    estado. Por eso el apagado es `enviarApagado` (el gris `disabled`), opaco.
+    Sin ese token, el botón al 35 % de siempre.
+  */
+  const grisApagado = !listo && colors.enviarApagado ? colors.enviarApagado : null;
 
   return (
     <Animated.View style={animado}>
@@ -61,20 +68,29 @@ export function BotonDeEnviar({
         disabled={apagado}
         escala={ESCALA_AL_PULSAR.icono}
         haptica="ligera"
-        opacidad={listo ? 1 : 0.35}
+        opacidad={listo || grisApagado ? 1 : 0.35}
         hitSlop={6}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         accessibilityState={{ disabled: apagado, busy: enviando }}
         style={[
           styles.boton,
-          { width: tamano, height: tamano, borderRadius: tamano / 2, backgroundColor: colors.primary },
+          {
+            width: tamano,
+            height: tamano,
+            borderRadius: tamano / 2,
+            backgroundColor: grisApagado ?? colors.accion,
+          },
         ]}
       >
         {enviando ? (
-          <ActivityIndicator size="small" color={colors.onPrimary} />
+          <ActivityIndicator size="small" color={colors.sobreAccion} />
         ) : (
-          <Feather name={icono} size={Math.round(tamano * 0.5)} color={colors.onPrimary} />
+          <Feather
+            name={icono}
+            size={Math.round(tamano * 0.5)}
+            color={grisApagado ? (colors.sobreEnviarApagado ?? colors.sobreAccion) : colors.sobreAccion}
+          />
         )}
       </Pulsable>
     </Animated.View>

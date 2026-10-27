@@ -53,7 +53,7 @@ export function TextoDePublicacion({ cuerpo, menciones, numberOfLines }: Props) 
                 key={indice}
                 variant="body"
                 weight="700"
-                color={colors.primary}
+                color={colors.mencion}
                 accessibilityRole="link"
                 accessibilityLabel={`Ver publicaciones de #${trozo.valor}`}
                 onPress={() => router.push(`/hashtag/${encodeURIComponent(trozo.valor)}` as never)}
@@ -73,7 +73,7 @@ export function TextoDePublicacion({ cuerpo, menciones, numberOfLines }: Props) 
               <Text
                 variant="secondary"
                 weight="700"
-                color={colors.primary}
+                color={colors.mencion}
                 accessibilityRole="link"
                 accessibilityLabel={`Ver el perfil de ${persona.nombre}`}
                 /*

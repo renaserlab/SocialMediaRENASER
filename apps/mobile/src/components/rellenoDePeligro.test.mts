@@ -57,6 +57,8 @@ test('el par de antes no llegaba: por eso se cambio', () => {
 });
 
 test('nadie rellena con el rojo claro de la paleta oscura', () => {
+  // «EN VIVO» va con `rellenoDeEnVivo` (tokens de resalte `envivo`); «Terminar»
+  // sigue con `rellenoDePeligro`. Los dos son rellenos opacos con su letra.
   for (const ruta of [
     '../screens/LiveScreen.tsx',
     './SeccionLive.tsx',
@@ -64,7 +66,13 @@ test('nadie rellena con el rojo claro de la paleta oscura', () => {
   ]) {
     const fuente = leer(ruta);
     assert.doesNotMatch(fuente, /backgroundColor: media\.danger/, ruta);
-    assert.match(fuente, /backgroundColor: rellenoDePeligro\.fondo/, ruta);
-    assert.match(fuente, /rellenoDePeligro\.texto/, ruta);
+    assert.match(fuente, /backgroundColor: rellenoDe(Peligro|EnVivo)\.fondo/, ruta);
+    assert.match(fuente, /rellenoDe(Peligro|EnVivo)\.texto/, ruta);
   }
+});
+
+test('«EN VIVO» sale de su token de resalte, no del rojo de peligro', () => {
+  const capa = leer('./CapaDeContraste.tsx');
+  assert.match(capa, /rellenoDeEnVivo = \{\s*fondo: sobreMedio\.envivo,\s*texto: sobreMedio\.sobreEnvivo,\s*\} as const/);
+  // Su contraste (letra blanca sobre el rosa) lo mide `theme/resaltes.test.mts`.
 });

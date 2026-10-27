@@ -19,6 +19,7 @@ import { notificacionesLeidas } from '@/services/contadores';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { aspectoDeCirculoSuelto, categoriaDeIcono } from '@/theme/aspecto';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import { destinoDelAviso } from '@/lib/avisosNuevos';
 import { retrasoEnCascada } from '@/lib/movimiento';
@@ -218,6 +219,9 @@ const FilaDeAviso = React.memo(function FilaDeAviso({
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const nuevo = !aviso.read;
+  // Con una variante de categoría, el icono toma el color de su tipo; lo nuevo
+  // sigue relleno (y en negrita, y con su punto), como hasta ahora.
+  const aspecto = aspectoDeCirculoSuelto(colors, categoriaDeIcono(aviso.icon), { activo: nuevo });
 
   return (
     // Las primeras entran en cascada; el resto, al desplazar, ya está en su
@@ -237,9 +241,14 @@ const FilaDeAviso = React.memo(function FilaDeAviso({
             nuevo
               ? { backgroundColor: colors.primary, borderColor: colors.primary }
               : { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+            aspecto.circulo,
           ]}
         >
-          <Feather name={aviso.icon} size={18} color={nuevo ? colors.onPrimary : colors.text} />
+          <Feather
+            name={aviso.icon}
+            size={18}
+            color={aspecto.icono ?? (nuevo ? colors.onPrimary : colors.text)}
+          />
         </View>
         <View style={styles.textos}>
           <Text numberOfLines={1} weight={nuevo ? '800' : '600'} style={styles.titulo}>

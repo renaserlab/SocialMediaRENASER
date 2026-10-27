@@ -5,7 +5,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
-import { radius, spacing } from '@/theme/tokens';
+import { estilo, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type ChipProps = {
@@ -48,6 +48,21 @@ export function Chip({
 }: ChipProps) {
   const { colors } = useAppTheme();
 
+  /*
+    VARIANTES DE LOS TEMAS (`estilo.chips`) para el chip ELEGIDO. «actual» es
+    relleno `primary`. En todas, lo elegido se distingue también por su forma
+    (relleno o borde marcado), no solo por el tono.
+  */
+  const variante = estilo.chips;
+  const elegido =
+    variante === 'acento'
+      ? { fondo: colors.acento, borde: colors.acento, tinta: colors.sobreAcento }
+      : variante === 'pildoraSuave'
+        ? { fondo: colors.acentoSuave, borde: colors.acentoSuave, tinta: colors.acento }
+        : variante === 'contorno'
+          ? { fondo: colors.background, borde: colors.acento, tinta: colors.acento }
+          : { fondo: colors.primary, borde: colors.primary, tinta: colors.onPrimary };
+
   return (
     <Pulsable
       onPress={disabled ? undefined : onPress}
@@ -62,9 +77,10 @@ export function Chip({
       style={[
         styles.base,
         {
-          backgroundColor: selected ? colors.primary : colors.background,
-          borderColor: selected ? colors.primary : colors.border,
+          backgroundColor: selected ? elegido.fondo : colors.background,
+          borderColor: selected ? elegido.borde : colors.border,
         },
+        selected && variante === 'contorno' ? styles.contornoElegido : null,
         style,
       ]}
     >
@@ -72,11 +88,11 @@ export function Chip({
         <Feather
           name={icon}
           size={14}
-          color={selected ? colors.onPrimary : colors.text}
+          color={selected ? elegido.tinta : colors.text}
           style={styles.icon}
         />
       )}
-      <Text style={[styles.label, { color: selected ? colors.onPrimary : colors.text }]}>
+      <Text style={[styles.label, { color: selected ? elegido.tinta : colors.text }]}>
         {label}
       </Text>
     </Pulsable>
@@ -94,6 +110,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
+  // Contorno: el borde marcado es lo que dice «elegido». Mismo hueco: se
+  // compensa el grosor extra con menos relleno.
+  contornoElegido: { borderWidth: 2, paddingHorizontal: spacing.md - 1 },
   label: {
     fontSize: 13,
     fontWeight: '600',

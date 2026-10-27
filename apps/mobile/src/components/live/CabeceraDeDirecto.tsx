@@ -159,8 +159,8 @@ export function SeguirAlAnfitrion({
       accessibilityLabel={t('live.followHost', { nombre: emision.anfitrionNombre })}
       style={estilos.seguir}
     >
-      <Feather name="plus" size={12} color={sobreMedio.background} />
-      <Text variant="caption" weight="800" color={sobreMedio.background}>
+      <Feather name="plus" size={12} color={sobreMedio.sobreAccion} />
+      <Text variant="caption" weight="800" color={sobreMedio.sobreAccion}>
         {t('profile.follow')}
       </Text>
     </Pulsable>
@@ -193,7 +193,8 @@ const estilos = StyleSheet.create({
     minHeight: 22,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.sm,
-    backgroundColor: sobreMedio.text,
+    // `accion` de la paleta oscura: por defecto el mismo blanco de antes.
+    backgroundColor: sobreMedio.accion,
   },
   audiencia: {
     flexDirection: 'row',

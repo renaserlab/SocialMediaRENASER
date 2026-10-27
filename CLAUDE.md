@@ -31,9 +31,12 @@ la misma URL (`social-media-renaser.vercel.app`).
    provoca "Invalid hook call". `metro.config.js` fuerza la resolucion a una
    unica copia — no deshacer eso.
 4. **Tokens de tema, nunca hex crudo.** Consumir `@/theme/tokens` y
-   `useAppTheme()`. El sistema visual es blanco y negro estricto, iconos Feather.
-   El color nunca puede ser el unico portador de informacion: acompanar con
-   icono, texto o borde.
+   `useAppTheme()`. La base es blanco, negro y grises, iconos Feather. El color
+   entra SOLO por los tokens de resalte de `tokens.ts` (anillo de historias,
+   globos de aviso, EN VIVO, corazon, «+» de crear y boton principal), al estilo
+   TikTok; el acabado comun (tarjetas, categorias, botones) sale de `estilo` y
+   `theme/aspecto.ts`. El color nunca puede ser el unico portador de
+   informacion: acompanar con icono, texto o borde.
 5. **`.env` esta en `.gitignore` y contiene claves. No commitearlo jamas.**
    Sin el, la app arranca en modo demo con datos inventados y parece que
    funciona. Los valores de desarrollo estan en `apps/mobile/eas.json`
