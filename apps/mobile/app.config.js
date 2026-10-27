@@ -36,17 +36,24 @@
  *
  * POR QUÉ. Sin decir nada, el APK lleva el código nativo compilado para cuatro
  * procesadores. Medido en el APK 1.2.3 (EAS `c80d09e4`, 27/10/2026): pesaba
- * 219 MB, y 82,5 MB eran de `x86` y `x86_64`, que solo usan los emuladores.
- * Ningún teléfono los carga. Los teléfonos son `arm64-v8a` (todos los de los
- * últimos años) y `armeabi-v7a` (los de 32 bits que aún circulan).
+ * 219 MB, y 82,5 MB eran de `x86` y `x86_64`. Los teléfonos son `arm64-v8a`
+ * (todos los de los últimos años) y `armeabi-v7a` (los de 32 bits que aún
+ * circulan). Con el recorte, el APK 1.2.3 (67) pesa 132,6 MB y sus 62
+ * librerías ARM son idénticas byte a byte a las del APK anterior.
  *
- * POR QUÉ SOLO EN `preview` Y `production`. El emulador de desarrollo es
- * `x86_64`: una compilación de `development` sin esa arquitectura no se
- * instalaría en él. EAS pone el nombre del perfil en `EAS_BUILD_PROFILE` al
- * compilar; sin esa variable (en local, en las pruebas) no se toca nada.
+ * SOLO EN `preview`, el APK que se reparte a mano a teléfonos.
  *
- * En Google Play el recorte apenas se nota: el AAB ya se reparte partido por
- * arquitectura. Donde se nota es en el APK que se reparte a mano.
+ * - NO en `production`. Es un AAB y Google Play ya lo reparte partido por
+ *   arquitectura: quitarle `x86_64` no ahorra nada a nadie. Y rompe los
+ *   aparatos `x86_64` que ejecutan ARM traduciéndolo (Chromebooks con Intel,
+ *   el emulador): Android instala la parte ARM, pero SoLoader busca las
+ *   librerías en `lib/x86_64` y la aplicación se cierra al abrir
+ *   («couldn't find DSO to load: libreactnative.so»). Medido en el emulador
+ *   con el APK 67 el 27/10/2026.
+ * - NO en `development`, por lo mismo: el emulador es `x86_64`.
+ *
+ * EAS pone el nombre del perfil en `EAS_BUILD_PROFILE` al compilar; sin esa
+ * variable (en local, en las pruebas) no se toca nada.
  *
  * Todo lo demás sigue en `app.json`. No se añade nada más aquí.
  */
@@ -60,8 +67,8 @@ function ficheroDeFirebase(entorno = process.env, carpeta = __dirname) {
   return fs.existsSync(path.join(carpeta, 'google-services.json')) ? './google-services.json' : null;
 }
 
-/** Los perfiles de EAS cuyo binario se instala en teléfonos de verdad. */
-const PERFILES_PARA_TELEFONOS = ['preview', 'production'];
+/** Los perfiles de EAS cuyo APK se reparte a mano a teléfonos. */
+const PERFILES_PARA_TELEFONOS = ['preview'];
 
 /** Las arquitecturas de los teléfonos Android. */
 const ARQUITECTURAS_DE_TELEFONO = ['arm64-v8a', 'armeabi-v7a'];

@@ -7,11 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 /*
   EL APK PESABA 219 MB (1.2.3, 27/10/2026), y 82,5 MB eran código nativo para
-  `x86` y `x86_64`, procesadores que solo tienen los emuladores. Lo que se fija
-  aquí:
+  `x86` y `x86_64`. Lo que se fija aquí:
 
-  - que los binarios que van a teléfonos (`preview`, `production`) lleven solo
-    las arquitecturas de teléfono;
+  - que el APK que se reparte a mano (`preview`) lleve solo las arquitecturas
+    de teléfono;
+  - que `production` NO se recorte: es un AAB que Google Play ya parte por
+    arquitectura, y sin `x86_64` se cierra al abrir en los aparatos que
+    traducen ARM (Chromebooks con Intel, el emulador). Medido el 27/10/2026;
   - que `development` y cualquier compilación fuera de EAS sigan como estaban,
     porque el emulador de desarrollo es `x86_64`;
   - que el recorte no pise nada de lo que ya decía `expo-build-properties`.
@@ -54,13 +56,16 @@ function opcionesDeBuildProperties(plugins: Plugin[]) {
 }
 
 describe('qué arquitecturas lleva cada perfil', () => {
-  it('preview y production: solo las de teléfono', () => {
-    for (const perfil of ['preview', 'production']) {
-      assert.deepEqual(configurar.arquitecturasDeAndroid({ EAS_BUILD_PROFILE: perfil }), [
-        'arm64-v8a',
-        'armeabi-v7a',
-      ]);
-    }
+  it('preview: solo las de teléfono', () => {
+    assert.deepEqual(configurar.arquitecturasDeAndroid({ EAS_BUILD_PROFILE: 'preview' }), [
+      'arm64-v8a',
+      'armeabi-v7a',
+    ]);
+  });
+
+  it('production NO se recorta: Play ya parte el AAB y sin x86_64 se cierra en los Chromebook con Intel', () => {
+    assert.equal(configurar.arquitecturasDeAndroid({ EAS_BUILD_PROFILE: 'production' }), null);
+    assert.equal(conPerfil('production').plugins, app.expo.plugins);
   });
 
   it('development, otro perfil o fuera de EAS: no se toca nada', () => {
@@ -70,7 +75,7 @@ describe('qué arquitecturas lleva cada perfil', () => {
   });
 
   it('ninguna de las de teléfono falta: sin arm64-v8a no se instala en casi ninguno', () => {
-    const arquitecturas = configurar.arquitecturasDeAndroid({ EAS_BUILD_PROFILE: 'production' }) ?? [];
+    const arquitecturas = configurar.arquitecturasDeAndroid({ EAS_BUILD_PROFILE: 'preview' }) ?? [];
     assert.ok(arquitecturas.includes('arm64-v8a'));
     assert.ok(arquitecturas.includes('armeabi-v7a'));
   });
@@ -90,7 +95,7 @@ describe('cómo queda la configuración', () => {
   });
 
   it('los demás plugins salen igual y en el mismo orden', () => {
-    const despues = conPerfil('production').plugins;
+    const despues = conPerfil('preview').plugins;
     assert.equal(despues.length, app.expo.plugins.length);
     despues.forEach((plugin, i) => {
       const original = app.expo.plugins[i];
