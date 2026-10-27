@@ -5,7 +5,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { tocarConCerrojo } from '@/lib/toqueConCerrojo';
-import { radius, spacing } from '@/theme/tokens';
+import { estilo, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost';
@@ -53,7 +53,7 @@ export function Button({
   );
 
   const ocupado = loading || pendiente;
-  const tinta = primary ? colors.onPrimary : colors.text;
+  const tinta = primary ? colors.sobreAccion : colors.text;
 
   const pulsar = () => {
     // El fallo de la acción sigue siendo de quien la escribió: la promesa que
@@ -77,10 +77,12 @@ export function Button({
       style={[
         styles.base,
         {
-          backgroundColor: primary ? colors.primary : ghost ? 'transparent' : colors.background,
-          borderColor: primary ? colors.primary : colors.border,
+          backgroundColor: primary ? colors.accion : ghost ? 'transparent' : colors.background,
+          borderColor: primary ? colors.accion : colors.border,
           borderWidth: ghost ? 0 : 1,
         },
+        // Variante de los temas: botones en píldora (mismo alto, otra forma).
+        estilo.estiloBotones === 'pildora' ? styles.pildora : null,
         style,
       ]}
     >
@@ -111,6 +113,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
+  pildora: { borderRadius: radius.pill },
   contenido: {
     flexDirection: 'row',
     alignItems: 'center',

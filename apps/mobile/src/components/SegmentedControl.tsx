@@ -10,7 +10,7 @@ import Animated, {
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { ESCALA_AL_PULSAR, MUELLE_DE_PANEL } from '@/lib/movimiento';
-import { radius, spacing } from '@/theme/tokens';
+import { estilo, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 type SegmentedControlProps = {
@@ -57,12 +57,35 @@ export function SegmentedControl({
   // El interior: lo que queda dentro del relleno del contenedor.
   const medir = (evento: LayoutChangeEvent) => setAncho(evento.nativeEvent.layout.width);
 
+  /*
+    VARIANTES DE LOS TEMAS (`estilo.segmentado`). «actual» es lo de siempre:
+    pastilla `primary` con letra `onPrimary`. Lo elegido sigue yendo en
+    negrita en todas, así que no lo dice solo el color.
+  */
+  const variante = estilo.segmentado;
+  const fondoDePastilla =
+    variante === 'acento' || variante === 'subrayado'
+      ? colors.acento
+      : variante === 'pildoraSuave'
+        ? colors.acentoSuave
+        : colors.primary;
+  const tintaElegida =
+    variante === 'acento'
+      ? colors.sobreAcento
+      : variante === 'subrayado'
+        ? colors.text
+        : variante === 'pildoraSuave'
+          ? colors.acento
+          : colors.onPrimary;
+
   return (
     <View
       accessibilityRole="tablist"
       style={[
         styles.container,
         { backgroundColor: colors.backgroundAlt, borderColor: colors.border },
+        variante === 'subrayado' ? styles.containerSubrayado : null,
+        variante === 'subrayado' ? { borderBottomColor: colors.border } : null,
         style,
       ]}
     >
@@ -70,7 +93,11 @@ export function SegmentedControl({
         {paso > 0 ? (
           <Animated.View
             pointerEvents="none"
-            style={[styles.pastilla, { width: paso, backgroundColor: colors.primary }, pastilla]}
+            style={[
+              variante === 'subrayado' ? styles.pastillaSubrayado : styles.pastilla,
+              { width: paso, backgroundColor: fondoDePastilla },
+              pastilla,
+            ]}
           />
         ) : null}
         {options.map((option, index) => {
@@ -91,7 +118,7 @@ export function SegmentedControl({
                 style={[
                   styles.label,
                   {
-                    color: selected ? colors.onPrimary : colors.textMuted,
+                    color: selected ? tintaElegida : colors.textMuted,
                     fontWeight: selected ? '700' : '500',
                   },
                 ]}
@@ -117,6 +144,20 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'stretch',
+  },
+  // Subrayado: sin caja; una línea fina debajo y la marca de lo elegido encima.
+  containerSubrayado: {
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
+  },
+  pastillaSubrayado: {
+    position: 'absolute',
+    left: 0,
+    bottom: -spacing.xs,
+    height: 3,
+    borderRadius: 2,
   },
   pastilla: {
     position: 'absolute',

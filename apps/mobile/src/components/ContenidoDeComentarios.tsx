@@ -134,7 +134,7 @@ export function ContenidoDeComentarios({
               */}
               <IconoQueSeEnciende activo={item.viewerReacted}>
                 {item.viewerReacted ? (
-                  <MaterialCommunityIcons name="heart" size={16} color={colors.danger} />
+                  <MaterialCommunityIcons name="heart" size={16} color={colors.meGusta} />
                 ) : (
                   <Feather name="heart" size={15} color={colors.textMuted} />
                 )}

@@ -1,7 +1,7 @@
 /**
  * Renaser Social Media — Design Tokens
- * Fuente de verdad del sistema visual (blanco y negro estricto).
- * Valores alineados al prompt maestro (§4 Dirección visual inalterable).
+ * Fuente de verdad del sistema visual: blanco, negro y grises, con color
+ * solo en los RESALTES (ver más abajo), como Instagram o TikTok.
  *
  * Ubicación sugerida en tu monorepo:
  *   apps/mobile/src/theme/tokens.ts   (reemplaza el actual)
@@ -74,7 +74,7 @@ export const breakpoints = {
 
 /* =========================================================
    PALETA SEMÁNTICA — Light / Dark
-   Blanco, negro y escala de grises. Sin colores decorativos.
+   Blanco, negro y escala de grises. El color va en RESALTES.
    Los estados funcionales (error/success) mantienen accesibilidad,
    pero NUNCA deben depender solo del color: acompañar con
    icono, texto, borde o patrón.
@@ -134,8 +134,225 @@ const dark = {
   glassShadow: '#000000',
 } as const;
 
-export const palette = (mode: ThemeMode) => (mode === 'dark' ? dark : light);
+/* =========================================================
+   RESALTES — el único sitio donde entra color.
+
+   La base sigue en blanco, negro y grises. El color se reserva
+   para lo que «se enciende», como en TikTok: el anillo de una
+   historia nueva, el globo de no leídos, «EN VIVO», el corazón,
+   el «+» de crear y el botón principal (Seguir, Reservar, enviar).
+   Un solo rosa —más oscuro en claro para que la letra blanca
+   encima pase de 4,5:1— y el degradado cian → violeta → rosa del
+   anillo. Elegido el 27/10/2026 entre seis niveles de color sobre
+   capturas de la app real (el «N4»).
+
+   El color nunca es lo único que informa: cada elemento ya lleva
+   forma, texto o icono (corazón relleno, cifra del globo, «EN VIVO»,
+   subrayado del enlace, negrita de la etiqueta, rótulo de la pestaña).
+   `resaltes.test.mts` mide los contrastes.
+   ========================================================= */
+
+/** Un color, o varios para un degradado (solo `anillo`). */
+export type ColorODegradado = string | readonly string[];
+
+/** Las categorías de contenido (accesos de Explorar, círculos del perfil, avisos…). */
+export const CATEGORIAS = [
+  'escuela',
+  'eventos',
+  'servicios',
+  'productos',
+  'podcast',
+  'comunidad',
+  'publicaciones',
+  'resenas',
+  'mensajes',
+] as const;
+export type Categoria = (typeof CATEGORIAS)[number];
+
+/** `color`: icono/relleno. `suave`: tinte de fondo. `sobre`: tinta encima de `color`. */
+export type ColorDeCategoria = { color: string; suave: string; sobre: string };
+
+type Resaltes = {
+  /** Botón principal (`Button` primary): Seguir, Reservar, Publicar… y el de enviar del chat. */
+  accion: string;
+  /** Texto e icono sobre `accion`. */
+  sobreAccion: string;
+  /** Corazón ENCENDIDO: publicación, comentario y reel. */
+  meGusta: string;
+  /** Marcador ENCENDIDO (guardar publicación). */
+  guardado: string;
+  /** Flechas ENCENDIDAS (republicar). */
+  republicado: string;
+  /** Globo y punto de no leídos (barra, bandeja, avisos, «ir al final» del chat). */
+  aviso: string;
+  /** Cifra sobre `aviso`. */
+  sobreAviso: string;
+  /** Anillo de historia SIN VER. Admite una lista de colores: degradado. */
+  anillo: ColorODegradado;
+  /** Enlaces (URL) escritos en un mensaje sobre el fondo del tema. Van subrayados. */
+  enlace: string;
+  /** #etiquetas y @menciones del texto de una publicación. Van en negrita. */
+  mencion: string;
+  /** Píldora «EN VIVO». Va siempre sobre vídeo: se lee de la paleta OSCURA. */
+  envivo: string;
+  /** Texto y punto sobre `envivo`. También se lee de la paleta OSCURA. */
+  sobreEnvivo: string;
+  /** Relleno de `BarraDeProgreso` (cursos, evaluación). */
+  progreso: string;
+  /** Icono y rótulo de la pestaña activa de la barra flotante. */
+  pestanaActiva: string;
+  /** Cápsula detrás de la pestaña activa. */
+  pildoraActiva: string;
+  /** Fondo de la burbuja PROPIA del chat (también en temas). */
+  burbujaPropia: string;
+  /** Texto, hora y marcas dentro de la burbuja propia. */
+  sobreBurbujaPropia: string;
+  /** Acento de detalle: subrayado del segmentado, chips, títulos de sección. */
+  acento: string;
+  /** Tinta sobre `acento`. */
+  sobreAcento: string;
+  /** Tinte suave del acento. */
+  acentoSuave: string;
+  /** Fondo de las tarjetas (`aspectoDeTarjeta`): gris, sin borde. */
+  tarjetaRelleno: string;
+  /** Colores por categoría. Hoy todas en gris: el tipo lo dice el icono y el rótulo. */
+  categorias: Record<Categoria, ColorDeCategoria>;
+  /*
+    OPCIONALES: elementos que NO salen de `primary`. Sin valor, cada uno
+    conserva su color neutro (el componente lleva el respaldo).
+  */
+  /** `+` de «Tu historia», `+` del compositor y pestaña «Crear». */
+  crear?: string;
+  /** Tinta sobre `crear` (el `+` de las insignias). */
+  sobreCrear?: string;
+  /** Lápiz de editar perfil. */
+  editarPerfil?: string;
+  sobreEditarPerfil?: string;
+  /** Aro del aviso «X está en directo». Paleta OSCURA. */
+  aroEnvivo?: string;
+  /** Corazón grande del doble toque (sobre la foto). Paleta OSCURA. */
+  corazonDobleToque?: string;
+  /** Botón de enviar APAGADO: gris, para que no parezca listo con el rosa lavado. */
+  enviarApagado?: string;
+  sobreEnviarApagado?: string;
+};
+
+const todasLasCategorias = (c: ColorDeCategoria) =>
+  Object.fromEntries(CATEGORIAS.map((nombre) => [nombre, c])) as Record<Categoria, ColorDeCategoria>;
+
+const resaltesClaros: Resaltes = {
+  accion: '#CF1155',
+  sobreAccion: '#FFFFFF',
+  meGusta: '#CF1155',
+  guardado: light.primary,
+  republicado: light.primary,
+  aviso: '#CF1155',
+  sobreAviso: '#FFFFFF',
+  anillo: ['#0096BC', '#0096BC', '#7442E8', '#CF1155', '#CF1155'],
+  enlace: light.text,
+  mencion: light.text,
+  envivo: '#E3165A',
+  sobreEnvivo: '#FFFFFF',
+  progreso: light.text,
+  pestanaActiva: light.primary,
+  pildoraActiva: light.glassActive,
+  burbujaPropia: light.primary,
+  sobreBurbujaPropia: light.onPrimary,
+  acento: light.text,
+  sobreAcento: '#FFFFFF',
+  acentoSuave: 'rgba(0,0,0,0.08)',
+  tarjetaRelleno: '#F3F3F3',
+  categorias: todasLasCategorias({ color: light.text, suave: '#E6E6E6', sobre: '#FFFFFF' }),
+  crear: '#CF1155',
+  sobreCrear: '#FFFFFF',
+  editarPerfil: '#CF1155',
+  sobreEditarPerfil: '#FFFFFF',
+  aroEnvivo: '#E3165A',
+  corazonDobleToque: '#FF4785',
+  enviarApagado: light.disabled,
+  sobreEnviarApagado: '#000000',
+};
+
+const resaltesOscuros: Resaltes = {
+  accion: '#E3165A',
+  sobreAccion: '#FFFFFF',
+  meGusta: '#FF4785',
+  guardado: dark.primary,
+  republicado: dark.primary,
+  aviso: '#E3165A',
+  sobreAviso: '#FFFFFF',
+  anillo: ['#3EE0F2', '#3EE0F2', '#9B6BFF', '#FF4785', '#FF4785'],
+  enlace: dark.text,
+  mencion: dark.text,
+  envivo: '#E3165A',
+  sobreEnvivo: '#FFFFFF',
+  progreso: dark.text,
+  pestanaActiva: dark.primary,
+  pildoraActiva: dark.glassActive,
+  burbujaPropia: dark.primary,
+  sobreBurbujaPropia: dark.onPrimary,
+  acento: dark.text,
+  sobreAcento: '#000000',
+  acentoSuave: 'rgba(255,255,255,0.14)',
+  tarjetaRelleno: '#161616',
+  categorias: todasLasCategorias({ color: dark.text, suave: '#2A2A2A', sobre: '#000000' }),
+  crear: '#FF4785',
+  sobreCrear: '#FFFFFF',
+  editarPerfil: '#E3165A',
+  sobreEditarPerfil: '#FFFFFF',
+  aroEnvivo: '#E3165A',
+  corazonDobleToque: '#FF4785',
+  enviarApagado: dark.disabled,
+  sobreEnviarApagado: '#FFFFFF',
+};
+
+const claro = { ...light, ...resaltesClaros };
+const oscuro = { ...dark, ...resaltesOscuros };
+
+export const palette = (mode: ThemeMode) => (mode === 'dark' ? oscuro : claro);
 export type AppPalette = ReturnType<typeof palette>;
+
+/* =========================================================
+   ACABADO. Las piezas comunes leen de aquí su variante, así que
+   el acabado se ajusta en un solo sitio (ver `aspecto.ts`).
+   La elegida: categorías en círculo gris, tarjetas grises sin
+   borde y radio 16, «Para ti» subrayado, botones en píldora y
+   anillo de historias de 3 px. «actual» es el aspecto anterior
+   al 27/10/2026.
+   ========================================================= */
+export const OPCIONES_DE_ESTILO = {
+  /** Cómo se distinguen las categorías (accesos, círculos, avisos…). */
+  estiloCategorias: ['actual', 'icono', 'tinte', 'tarjetaTinte', 'solido'],
+  /** Acabado de las tarjetas: borde de 1 px, relleno suave o sombra. */
+  estiloTarjetas: ['actual', 'relleno', 'sombra'],
+  /** Segmentado «Para ti / Siguiendo» y similares. */
+  segmentado: ['actual', 'acento', 'subrayado', 'pildoraSuave'],
+  /** Chips de filtro seleccionados. */
+  chips: ['actual', 'acento', 'pildoraSuave', 'contorno'],
+  /** Títulos de sección y «Ver más/Ver todo». */
+  titulosDeSeccion: ['actual', 'conAcento'],
+  /** Forma de los botones (`Button`). */
+  estiloBotones: ['actual', 'pildora'],
+} as const;
+
+type Opciones = typeof OPCIONES_DE_ESTILO;
+export type Estilo = { [K in keyof Opciones]: Opciones[K][number] } & {
+  /** Grosor del anillo de historias en px (1–4). `null`: el de antes (2). */
+  grosorAnillo: number | null;
+  /** Radio de las tarjetas en px (0–32). `null`: el propio de cada tarjeta. */
+  radioTarjetas: number | null;
+};
+
+export const estilo: Estilo = {
+  estiloCategorias: 'tinte',
+  estiloTarjetas: 'relleno',
+  segmentado: 'subrayado',
+  chips: 'acento',
+  titulosDeSeccion: 'conAcento',
+  estiloBotones: 'pildora',
+  grosorAnillo: 3,
+  radioTarjetas: 16,
+};
 
 /* ---------- Alias semánticos (opcional, estilo Figma prompt) ---------- */
 export const tokenNames = {

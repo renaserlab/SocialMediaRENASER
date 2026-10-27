@@ -70,11 +70,17 @@ export function CabeceraDeInicio({ activa, alCambiar, alCrear }: Props) {
           hitSlop={10}
           escala={ESCALA_AL_PULSAR.icono}
           haptica="ligera"
-          style={[styles.crear, { borderColor: media.border, backgroundColor: media.overlay }]}
+          style={[
+            styles.crear,
+            // `crear` de los temas (paleta oscura: va sobre el vídeo). Sin él, el de hoy.
+            media.crear
+              ? { borderColor: media.crear, backgroundColor: media.crear }
+              : { borderColor: media.border, backgroundColor: media.overlay },
+          ]}
           accessibilityRole="button"
           accessibilityLabel={t('home.createContent')}
         >
-          <Feather name="plus" size={22} color={media.text} />
+          <Feather name="plus" size={22} color={media.crear ? (media.sobreCrear ?? media.text) : media.text} />
         </Pulsable>
 
         <View style={styles.pestanas} pointerEvents="box-none">

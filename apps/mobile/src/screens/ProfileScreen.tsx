@@ -55,8 +55,9 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { GRID_COLUMNS, GRID_GAP, gridItemSize } from '@/lib/gridLayout';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { radius, spacing } from '@/theme/tokens';
+import { radius, spacing, type Categoria } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { aspectoDeCirculoSuelto } from '@/theme/aspecto';
 import type { UserProfile } from '@/types';
 
 /**
@@ -851,13 +852,13 @@ export function ProfileScreen() {
                   style={({ pressed }) => [
                     styles.avatarEditBtn,
                     {
-                      backgroundColor: colors.text,
+                      backgroundColor: colors.editarPerfil ?? colors.text,
                       borderColor: colors.background,
                       opacity: pressed ? 0.8 : 1,
                     },
                   ]}
                 >
-                  <Feather name="edit-2" size={14} color={colors.background} />
+                  <Feather name="edit-2" size={14} color={colors.sobreEditarPerfil ?? colors.background} />
                 </Pressable>
               )}
             </View>
@@ -1086,18 +1087,21 @@ export function ProfileScreen() {
             */}
             <Shortcut
               icono={{ familia: 'feather', nombre: 'grid' }}
+              categoria="publicaciones"
               label={t('profile.postsTab')}
               active={activeSection === null}
               onPress={() => setActiveSection(null)}
             />
             <Shortcut
               icono={{ familia: 'feather', nombre: 'headphones' }}
+              categoria="podcast"
               label={t('profile.podcast')}
               active={activeSection === 'podcast'}
               onPress={() => setActiveSection('podcast')}
             />
             <Shortcut
               icono={{ familia: 'feather', nombre: 'book' }}
+              categoria="escuela"
               label={t('profile.courses')}
               active={activeSection === 'cursos'}
               onPress={() => setActiveSection('cursos')}
@@ -1120,6 +1124,7 @@ export function ProfileScreen() {
             */}
             <Shortcut
               icono={{ familia: 'material', nombre: 'format-quote-close' }}
+              categoria="resenas"
               label={t('profile.testimonials')}
               active={activeSection === 'testimonios'}
               onPress={() => setActiveSection('testimonios')}
@@ -1140,6 +1145,7 @@ export function ProfileScreen() {
             */}
             <Shortcut
               icono={{ familia: 'feather', nombre: 'calendar' }}
+              categoria="eventos"
               label={t('profile.bookSession')}
               active={isPublic && bookingVisible}
               // Lleva a otra pantalla (o abre una hoja): es un boton, no una
@@ -1531,8 +1537,11 @@ function Shortcut({
   onPress,
   active = false,
   rol = 'tab',
+  categoria,
 }: {
   icono: IconoDeAcceso;
+  /** Su color en los temas (solo si `estiloCategorias` no es «actual»). */
+  categoria?: Categoria;
   label: string;
   onPress: () => void;
   active?: boolean;
@@ -1540,6 +1549,7 @@ function Shortcut({
   rol?: 'tab' | 'button';
 }) {
   const { colors } = useAppTheme();
+  const aspecto = aspectoDeCirculoSuelto(colors, categoria, { activo: active });
   return (
     <Pulsable
       onPress={onPress}
@@ -1559,13 +1569,14 @@ function Shortcut({
             backgroundColor: active ? colors.primary : colors.surfaceAlt,
             borderColor: active ? colors.primary : colors.border,
           },
+          aspecto.circulo,
         ]}
       >
         {icono.familia === 'feather' ? (
           <Feather
             name={icono.nombre}
             size={20}
-            color={active ? colors.onPrimary : colors.text}
+            color={aspecto.icono ?? (active ? colors.onPrimary : colors.text)}
           />
         ) : (
           <MaterialCommunityIcons
@@ -1577,7 +1588,7 @@ function Shortcut({
               círculo.
             */
             size={22}
-            color={active ? colors.onPrimary : colors.text}
+            color={aspecto.icono ?? (active ? colors.onPrimary : colors.text)}
           />
         )}
       </IconoQueSeEnciende>

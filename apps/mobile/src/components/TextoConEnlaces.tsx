@@ -5,8 +5,10 @@ import { useRouter } from 'expo-router';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
 import { rutaInternaDe } from '@/lib/enlaces';
+import { colorDelEnlaceSobre } from '@/lib/colorSobreBurbuja';
 import { colorDelEnlace, partirEnEnlaces } from '@/lib/enlacesEnTexto';
 import { toast } from '@/lib/toast';
+import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
  * Un texto en el que los enlaces se ven como enlaces y se abren con un toque.
@@ -29,10 +31,16 @@ type Props = {
   style?: StyleProp<TextStyle>;
   /** El color de la letra, para elegir el del enlace sin tener que leer el estilo. */
   colorDelTexto: string;
+  /**
+   * El fondo sobre el que va, si no es el del tema (la burbuja propia). Con él
+   * el color del enlace se elige por CONTRASTE con ese fondo.
+   */
+  colorDelFondo?: string;
 };
 
-export function TextoConEnlaces({ texto, style, colorDelTexto }: Props) {
+export function TextoConEnlaces({ texto, style, colorDelTexto, colorDelFondo }: Props) {
   const { t } = useTranslation();
+  const { colors } = useAppTheme();
   const router = useRouter();
   const trozos = useMemo(() => partirEnEnlaces(texto), [texto]);
   const hayEnlaces = trozos.some((trozo) => trozo.tipo === 'enlace');
@@ -53,7 +61,11 @@ export function TextoConEnlaces({ texto, style, colorDelTexto }: Props) {
 
   if (!hayEnlaces) return <Text style={style}>{texto}</Text>;
 
-  const colorDeEnlace = colorDelEnlace(colorDelTexto);
+  // Sobre otra superficie (la burbuja propia), por contraste con ESE fondo.
+  // Sobre el fondo del tema, el token `enlace`. Y si no, como antes: por la letra.
+  const colorDeEnlace =
+    (colorDelFondo ? colorDelEnlaceSobre(colorDelFondo, colorDelTexto) : null) ??
+    (colorDelTexto === colors.text ? colors.enlace : colorDelEnlace(colorDelTexto));
 
   return (
     <Text style={style}>

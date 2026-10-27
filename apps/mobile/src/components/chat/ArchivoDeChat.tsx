@@ -86,7 +86,7 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
   const disponible = !!adjunto.url && adjunto.url.startsWith('http');
   const nombre = adjunto.fileName ?? t('chat.file');
   const aspecto = aspectoDeArchivo(adjunto.mimeType, adjunto.fileName);
-  const colorTexto = mio ? colors.onPrimary : colors.text;
+  const colorTexto = mio ? colors.sobreBurbujaPropia : colors.text;
 
   const descargar = useCallback(async () => {
     if (!disponible || !adjunto.url || enCurso.current) return;

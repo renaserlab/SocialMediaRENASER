@@ -358,7 +358,7 @@ function ShortVideoItemBase({
                 contorno rojo sobre un video rojizo no se distingue del blanco.
               */}
               {liked ? (
-                <MaterialCommunityIcons name="heart" size={30} color={media.danger} />
+                <MaterialCommunityIcons name="heart" size={30} color={media.meGusta} />
               ) : (
                 <Feather name="heart" size={28} color={media.text} />
               )}

@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 
-import { rellenoDePeligro, ScrimDeMedio } from '@/components/CapaDeContraste';
+import { rellenoDeEnVivo, rellenoDePeligro, ScrimDeMedio } from '@/components/CapaDeContraste';
 import { Pulsable } from '@/components/Pulsable';
 import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { Text } from '@/components/Text';
@@ -1151,9 +1151,9 @@ function Insignia({ estado }: { estado: EstadoDeEmision }) {
   const { t } = useTranslation();
   if (estado === 'live') {
     return (
-      <View style={[estilos.insignia, { backgroundColor: rellenoDePeligro.fondo }]}>
-        <View style={[estilos.punto, { backgroundColor: rellenoDePeligro.texto }]} />
-        <Text variant="caption" weight="900" color={rellenoDePeligro.texto}>
+      <View style={[estilos.insignia, { backgroundColor: rellenoDeEnVivo.fondo }]}>
+        <View style={[estilos.punto, { backgroundColor: rellenoDeEnVivo.texto }]} />
+        <Text variant="caption" weight="900" color={rellenoDeEnVivo.texto}>
           {t('live.badgeLive')}
         </Text>
       </View>

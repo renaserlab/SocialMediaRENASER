@@ -154,7 +154,12 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeB
             const opciones = descriptors[route.key]?.options;
             const etiqueta =
               typeof opciones?.title === 'string' ? opciones.title : route.name;
-            const color = focused ? colors.primary : colors.textMuted;
+            // `crear` (de los temas) enciende la pestaña Crear aunque no esté elegida.
+            const color = focused
+              ? colors.pestanaActiva
+              : route.name === 'create' && colors.crear
+                ? colors.crear
+                : colors.textMuted;
             const globo = route.name === 'messages' && unread > 0;
 
             const onPress = () => {
@@ -185,7 +190,7 @@ export function FloatingGlassTabBar({ state, descriptors, navigation }: PropsDeB
                   globo ? `${etiqueta}. ${t('notif.unreadTab', { cuenta: unread })}` : etiqueta
                 }
               >
-                <PildoraActiva activa={focused} color={colors.glassActive} style={styles.pill} />
+                <PildoraActiva activa={focused} color={colors.pildoraActiva} style={styles.pill} />
                 <View>
                   <Feather name={icono} size={22} color={color} />
                   {/*

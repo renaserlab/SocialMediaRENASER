@@ -31,6 +31,7 @@ import { ReportRepository } from '@/repositories/ReportRepository';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import { aspectoDeTarjeta } from '@/theme/aspecto';
 import { Post } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -424,7 +425,13 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
   };
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: colors.surface, borderColor: colors.border },
+        aspectoDeTarjeta(colors),
+      ]}
+    >
       {/*
         QUIEN LA COMPARTE VA ENCIMA; QUIEN LA ESCRIBIO SIGUE DEBAJO.
 
@@ -683,7 +690,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           etiqueta={t('post.actionLike')}
           contador={post.likes}
           activo={liked}
-          colorActivo={colors.danger}
+          colorActivo={colors.meGusta}
           onPress={() =>
             void requireAuth('auth.reasonLike', () => {
               toggleLike(post.id);
@@ -713,7 +720,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           // Sin republicaciones no se enseña un cero: el nombre ya explica el boton.
           contador={repostsCount > 0 ? repostsCount : undefined}
           activo={republicado}
-          colorActivo={colors.primary}
+          colorActivo={colors.republicado}
           onPress={() => void alternarRepost()}
           // No se apaga mientras espera: se atenua y sigue respondiendo.
           pendiente={republicando}
@@ -742,7 +749,7 @@ function PostCardBase({ post, onRemoved, visible, videoActive, videoPreload }: P
           contador={savesCount > 0 ? savesCount : undefined}
           // El color acompaña; el que dice el estado es el dibujo.
           activo={saved}
-          colorActivo={colors.primary}
+          colorActivo={colors.guardado}
           onPress={() => void alternarGuardado()}
           pendiente={guardando}
           accessibilityLabel={saved ? t('post.unsave') : t('common.save')}

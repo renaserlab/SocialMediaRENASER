@@ -33,7 +33,7 @@ export function BarraDeProgreso({
       accessibilityValue={{ min: 0, max: 100, now: valor }}
     >
       <View
-        style={[styles.relleno, { width: `${valor}%`, backgroundColor: colors.text }]}
+        style={[styles.relleno, { width: `${valor}%`, backgroundColor: colors.progreso }]}
       />
     </View>
   );

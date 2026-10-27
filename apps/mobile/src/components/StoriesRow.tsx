@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 
@@ -8,7 +9,7 @@ import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { haptics } from '@/lib/haptics';
 import { useAppStore } from '@/store/useAppStore';
-import { radius, spacing } from '@/theme/tokens';
+import { estilo, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { StoryGroup } from '@/types';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
@@ -172,13 +173,13 @@ export function StoriesRow({ grupos, estado, alAbrir }: Props = {}) {
               style={({ pressed }) => [
                 styles.badge,
                 {
-                  backgroundColor: colors.text,
+                  backgroundColor: colors.crear ?? colors.text,
                   borderColor: colors.background,
                   opacity: pressed ? 0.75 : 1,
                 },
               ]}
             >
-              <Feather name="plus" size={13} color={colors.background} />
+              <Feather name="plus" size={13} color={colors.sobreCrear ?? colors.background} />
             </Pressable>
           </View>
           <Text numberOfLines={1} style={styles.label} color={colors.text}>
@@ -213,14 +214,48 @@ function Ring({
   children: React.ReactNode;
 }) {
   const { colors } = useAppTheme();
+  const anillo = colors.anillo;
+  // `grosorAnillo` de los temas; la caja exterior no cambia, solo el aro.
+  const grosor = estilo.grosorAnillo ?? 2;
+
+  /*
+    SIN VER Y CON VARIOS COLORES: degradado, como el de Instagram. Misma caja y
+    mismo grosor que el borde de abajo: el degradado ocupa el circulo entero y
+    un hueco del color del fondo deja a la vista solo los 2 px del aro (y los
+    2 px de aire entre el aro y la foto). Con un solo color se pinta el borde
+    de siempre, sin montar nada mas.
+  */
+  if (hasStory && !seen && typeof anillo !== 'string' && anillo.length > 1) {
+    return (
+      <View style={styles.ring}>
+        <LinearGradient
+          colors={anillo as unknown as readonly [string, string, ...string[]]}
+          start={{ x: 0, y: 1 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.ringDegradado}
+        />
+        <View
+          style={[
+            styles.ringHueco,
+            { backgroundColor: colors.background },
+            grosor === 2 ? null : { width: BUBBLE + 8 - grosor * 2, height: BUBBLE + 8 - grosor * 2, borderRadius: (BUBBLE + 8 - grosor * 2) / 2 },
+          ]}
+        >
+          {children}
+        </View>
+      </View>
+    );
+  }
+
+  const sinVer = typeof anillo === 'string' ? anillo : anillo[0] ?? colors.text;
   return (
     <View
       style={[
         styles.ring,
         {
           // Sin historias no hay anillo; visto = gris apagado; sin ver = solido.
-          borderColor: !hasStory ? 'transparent' : seen ? colors.border : colors.text,
-          borderWidth: hasStory ? 2 : 0,
+          borderColor: !hasStory ? 'transparent' : seen ? colors.border : sinVer,
+          borderWidth: hasStory ? grosor : 0,
         },
       ]}
     >
@@ -260,6 +295,18 @@ const styles = StyleSheet.create({
     width: BUBBLE + 8,
     height: BUBBLE + 8,
     borderRadius: (BUBBLE + 8) / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringDegradado: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: (BUBBLE + 8) / 2,
+  },
+  // El interior que deja el borde de 2 px del anillo normal.
+  ringHueco: {
+    width: BUBBLE + 4,
+    height: BUBBLE + 4,
+    borderRadius: (BUBBLE + 4) / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },

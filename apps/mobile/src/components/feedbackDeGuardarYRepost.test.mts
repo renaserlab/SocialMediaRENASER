@@ -147,7 +147,7 @@ test('si el servidor rechaza, se dice; no se anuncia exito', () => {
 });
 
 test('el icono guardado usa un color de estado del tema, no un amarillo fijo', () => {
-  assert.match(POST_CARD, /icono="bookmark"[\s\S]{0,600}?colorActivo=\{colors\.primary\}/);
+  assert.match(POST_CARD, /icono="bookmark"[\s\S]{0,600}?colorActivo=\{colors\.guardado\}/);
   assert.ok(
     !/#[Ff][Ff][A-Fa-f0-9]{4}|'yellow'|'gold'|'#FFD700'/.test(POST_CARD),
     'nada de amarillos escritos a mano: el tema tiene claro y oscuro',

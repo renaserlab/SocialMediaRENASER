@@ -102,7 +102,7 @@ export function BurbujaDeTema({
   const nombre =
     nombreDelAutor(info, mensaje.autorId, mensaje.autorNombre) || t('groups.someone');
   const conAutor = !mio && !agrupado;
-  const colorDelTexto = mio ? colors.onPrimary : colors.text;
+  const colorDelTexto = mio ? colors.sobreBurbujaPropia : colors.text;
   const mantener = alMantener ? () => alMantener(mensaje) : undefined;
 
   const quienLoAgrego = !mensaje.anadidoPor
@@ -196,8 +196,8 @@ export function BurbujaDeTema({
               mio ? styles.mia : styles.suya,
               agrupado && (mio ? styles.miaSeguida : styles.suyaSeguida),
               {
-                backgroundColor: mensaje.eliminado ? 'transparent' : mio ? colors.primary : colors.surfaceAlt,
-                borderColor: mio && !mensaje.eliminado ? colors.primary : colors.border,
+                backgroundColor: mensaje.eliminado ? 'transparent' : mio ? colors.burbujaPropia : colors.surfaceAlt,
+                borderColor: mio && !mensaje.eliminado ? colors.burbujaPropia : colors.border,
               },
             ]}
           >
@@ -234,7 +234,7 @@ export function BurbujaDeTema({
                     </Text>
                     <Text
                       numberOfLines={2}
-                      style={[styles.citaTexto, { color: mio ? colors.onPrimary : colors.textMuted }]}
+                      style={[styles.citaTexto, { color: mio ? colors.sobreBurbujaPropia : colors.textMuted }]}
                     >
                       {(() => {
                         const lo = textoDeCita(mensaje.respuestaA);
@@ -263,11 +263,12 @@ export function BurbujaDeTema({
                     <TextoConEnlaces
                       texto={mensaje.text}
                       colorDelTexto={colorDelTexto}
+                      colorDelFondo={mio ? colors.burbujaPropia : undefined}
                       style={{ color: colorDelTexto, fontSize: 15, lineHeight: 22 }}
                     />
                   ) : null}
                   <View style={[styles.pie, mio && styles.pieMio]}>
-                    <Text style={[styles.hora, { color: mio ? colors.onPrimary : colors.textMuted }]}>
+                    <Text style={[styles.hora, { color: mio ? colors.sobreBurbujaPropia : colors.textMuted }]}>
                       {mensaje.createdAt}
                     </Text>
                   </View>

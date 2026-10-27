@@ -8,7 +8,8 @@ import { Text } from '@/components/Text';
 import { useServiciosEncendido } from '@/hooks/useServiciosEncendido';
 import { useTranslation } from '@/i18n/useTranslation';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
-import { radius, spacing } from '@/theme/tokens';
+import { aspectoDeCategoria, aspectoDeTarjeta } from '@/theme/aspecto';
+import { radius, spacing, type Categoria } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
@@ -43,6 +44,14 @@ type Vertical = {
   ruta: '/cursos' | '/events' | '/servicios' | '/productos' | null;
   /** Solo lleva a su ruta con `FEATURE_SERVICES` encendida en el servidor. */
   conBandera?: true;
+};
+
+/** Su color en los temas (solo si `estiloCategorias` no es «actual»). */
+const CATEGORIA_DE: Record<Vertical['clave'], Categoria> = {
+  cursos: 'escuela',
+  eventos: 'eventos',
+  servicios: 'servicios',
+  productos: 'productos',
 };
 
 const VERTICALES: readonly Vertical[] = [
@@ -90,6 +99,8 @@ export function AccesosAVerticales({
       {VERTICALES.map((vertical) => {
         const nombre = t(`verticales.${vertical.clave}`);
         const disponible = vertical.ruta !== null && (!vertical.conBandera || serviciosEncendido);
+        // Lo que no está disponible sigue apagado, sin color: no invita a tocar.
+        const aspecto = disponible ? aspectoDeCategoria(colors, CATEGORIA_DE[vertical.clave]) : {};
         return (
           <Pulsable
             key={vertical.clave}
@@ -109,6 +120,8 @@ export function AccesosAVerticales({
             style={[
               styles.acceso,
               { borderColor: colors.border, backgroundColor: colors.surface },
+              aspectoDeTarjeta(colors),
+              aspecto.tarjeta,
             ]}
             accessibilityRole="button"
             accessibilityLabel={
@@ -119,17 +132,17 @@ export function AccesosAVerticales({
               El icono va en un circulo suave: suelto sobre blanco parecia una
               casilla vacia; con su fondo es una entrada a una seccion.
             */}
-            <View style={[styles.circulo, { backgroundColor: colors.backgroundAlt }]}>
+            <View style={[styles.circulo, { backgroundColor: colors.backgroundAlt }, aspecto.circulo]}>
               <Feather
                 name={vertical.icono}
                 size={20}
-                color={disponible ? colors.text : colors.textMuted}
+                color={aspecto.icono ?? (disponible ? colors.text : colors.textMuted)}
               />
             </View>
             <Text
               style={[
                 styles.etiqueta,
-                { color: disponible ? colors.text : colors.textMuted },
+                { color: aspecto.texto ?? (disponible ? colors.text : colors.textMuted) },
               ]}
             >
               {nombre}
