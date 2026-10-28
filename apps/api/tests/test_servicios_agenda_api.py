@@ -323,17 +323,20 @@ async def test_cambiar_la_zona_se_confirma_y_no_mueve_los_bloqueos(mundo) -> Non
     r = await _pedir(app, "PUT", _agenda(servicio), perfil, {"timezone": "America/Bogota", "buffer_after_minutes": 15})
     assert r.status_code == 409 and _codigo(r) == "service_schedule_timezone_unconfirmed"
     assert r.json()["error"]["details"] == {"from": "America/Lima", "to": "America/Bogota"}
+    # São Paulo y no Nueva York: Nueva York está en UTC-5 de noviembre a marzo,
+    # igual que Lima, y entonces la hora local NO cambia y la prueba fallaba
+    # según el calendario. São Paulo está en UTC-3 todo el año desde 2019.
     r = await _pedir(app, "PUT", _agenda(servicio), perfil,
-                     {"timezone": "America/New_York", "buffer_after_minutes": 15, "confirm_timezone_change": True})
+                     {"timezone": "America/Sao_Paulo", "buffer_after_minutes": 15, "confirm_timezone_change": True})
     assert r.status_code == 200, r.text
     despues = r.json()["blocks"][0]
     # El mismo instante; otra hora local.
     assert datetime.fromisoformat(despues["starts_at"]) == datetime.fromisoformat(antes["starts_at"])
     assert despues["start_time"] != antes["start_time"]
     (evento,) = [d for a, d in await _eventos(motor, servicio) if a == "schedule_updated"]
-    assert json.loads(evento)["changes"]["timezone"] == ["America/Lima", "America/New_York"]
+    assert json.loads(evento)["changes"]["timezone"] == ["America/Lima", "America/Sao_Paulo"]
     publica = (await _pedir(app, "GET", _publica(servicio), None)).json()
-    assert publica["timezone"] == "America/New_York"
+    assert publica["timezone"] == "America/Sao_Paulo"
 
 
 # =========================================================================== #
