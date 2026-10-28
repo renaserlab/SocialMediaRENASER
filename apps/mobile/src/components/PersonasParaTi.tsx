@@ -21,6 +21,7 @@ import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { haptics } from '@/lib/haptics';
 import { frasePrincipal, frasesDeMotivos } from '@/lib/motivoDeRecomendacion';
 import { toast } from '@/lib/toast';
+import { useSeccionActiva } from '@/navigation/foco';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
 import {
@@ -88,6 +89,12 @@ export function PersonasParaTi() {
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
   const requireAuth = useRequireAuth();
+  /*
+    Las impresiones solo cuentan mientras se esta mirando; la lista se sigue
+    pidiendo al montarse. Mismo motivo que en `CursosParaTi`: montada no es
+    vista.
+  */
+  const activa = useSeccionActiva();
 
   const [datos, setDatos] = useState<PeopleRecommendations | null>(null);
   const [estado, setEstado] = useState<'cargando' | 'error' | 'listo'>('cargando');
@@ -180,6 +187,8 @@ export function PersonasParaTi() {
 
   const medirVisibles = useCallback(
     (desplazamiento: number) => {
+      // Fuera de la vista no se ha visto a nadie.
+      if (!activa) return;
       const lista = datos?.items;
       if (!lista || lista.length === 0 || anchoVisible.current === 0) return;
 
@@ -203,7 +212,7 @@ export function PersonasParaTi() {
         });
       });
     },
-    [datos],
+    [activa, datos],
   );
 
   const alMedirAncho = useCallback(

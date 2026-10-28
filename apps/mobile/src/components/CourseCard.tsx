@@ -38,9 +38,17 @@ export function CourseCard({ course, onPress, onEdit }: Props) {
         accessibilityLabel={`Ver ${course.title}`}
       />
 
-      {/* Portada del curso; el asset local solo mientras no tenga una propia. */}
+      {/*
+        Portada del curso; el asset local solo mientras no tenga una propia. La
+        cache va por la RUTA: la URL cambia cada vez que se renueva la firma y,
+        con ella como clave, la misma portada se volvia a descargar.
+      */}
       <ExpoImage
-        source={course.coverUrl ? { uri: course.coverUrl } : assets.course}
+        source={
+          course.coverUrl
+            ? { uri: course.coverUrl, cacheKey: course.coverPath ?? undefined }
+            : assets.course
+        }
         style={styles.cover}
         contentFit="cover"
         transition={150}

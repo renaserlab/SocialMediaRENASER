@@ -160,7 +160,13 @@ const FilaDeChat = React.memo(function FilaDeChat({
 }: PropsDeFila) {
   const contenido = (
     <>
-      <Avatar size={24} image={mensaje.usuarioAvatarUrl} name={mensaje.usuarioNombre} />
+      {/* Fila reciclada por la FlashList: la clave evita la cara del mensaje anterior. */}
+      <Avatar
+        size={24}
+        image={mensaje.usuarioAvatarUrl}
+        name={mensaje.usuarioNombre}
+        recyclingKey={mensaje.usuarioId}
+      />
       <View style={estilos.globo}>
         <Text variant="secondary" color={sobreMedio.text}>
           <Text variant="secondary" weight="800" color={sobreMedio.textMuted}>

@@ -370,8 +370,16 @@ export function CursosScreen() {
                     String(curso.progressPercent),
                   )}`}
                 >
+                  {/*
+                    Las portadas de esta pantalla van con la RUTA como clave de
+                    cache: la URL cambia cada vez que se renueva la firma y,
+                    con ella como clave, cada portada se volvia a descargar.
+                  */}
                   {curso.coverUrl ? (
-                    <ExpoImage source={{ uri: curso.coverUrl }} style={styles.miniatura} />
+                    <ExpoImage
+                      source={{ uri: curso.coverUrl, cacheKey: curso.coverPath ?? undefined }}
+                      style={styles.miniatura}
+                    />
                   ) : (
                     <PortadaVacia icono="book-open" tamano={18} style={styles.miniatura} />
                   )}
@@ -415,7 +423,10 @@ export function CursosScreen() {
                       accessibilityLabel={curso.title}
                     >
                       {curso.coverUrl ? (
-                        <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                        <ExpoImage
+                          source={{ uri: curso.coverUrl, cacheKey: curso.coverPath ?? undefined }}
+                          style={styles.portada}
+                        />
                       ) : (
                         <PortadaVacia icono="book-open" style={styles.portada} />
                       )}
@@ -460,7 +471,10 @@ export function CursosScreen() {
                         accessibilityLabel={curso.title}
                       >
                         {curso.coverUrl ? (
-                          <ExpoImage source={{ uri: curso.coverUrl }} style={styles.portada} />
+                          <ExpoImage
+                            source={{ uri: curso.coverUrl, cacheKey: curso.coverPath ?? undefined }}
+                            style={styles.portada}
+                          />
                         ) : (
                           <PortadaVacia icono="book-open" style={styles.portada} />
                         )}
