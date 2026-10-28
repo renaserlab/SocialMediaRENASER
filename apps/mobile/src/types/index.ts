@@ -359,6 +359,20 @@ export type Conversation = {
   totalSinLeer?: number;
   /** Si es una comunidad: el grupo del que cuelga. */
   padreId?: string;
+  /**
+   * Instante (ISO del servidor) del último mensaje que la fila ya cuenta.
+   *
+   * Es lo que deja aplicar en el teléfono el mensaje que llega por tiempo
+   * real sin contarlo dos veces: solo suma lo POSTERIOR a esto
+   * (`lib/bandejaEnVivo.ts`). `time` no sirve: es la hora ya escrita.
+   */
+  ultimoMensajeEn?: string | null;
+  /**
+   * Cuántas personas hay en un GRUPO (`members_count`). Sin valor en un chat
+   * de dos y con un servidor anterior. La bandeja lo usa para no atender
+   * «está escribiendo» en los grupos grandes (`lib/escribiendo.ts`).
+   */
+  miembros?: number;
 };
 
 export type EventItem = {

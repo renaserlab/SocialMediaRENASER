@@ -283,7 +283,9 @@ describe('«Escribiendo…» en la bandeja (12/10/2026)', () => {
 
   it('la bandeja abre los canales de sus primeras conversaciones, y solo los que cambian', () => {
     assert.match(BANDEJA, /useEscribiendoEnBandeja\(conversations, yo, supabaseEnabled && signedIn\);/);
-    assert.match(EN_BANDEJA, /activo \? lasQueSeAtienden\(conversaciones\.map\(\(c\) => c\.id\)\) : \[\]/);
+    // De las primeras, solo los chats de dos y los grupos pequeños (28/10/2026,
+    // ver `MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA`).
+    assert.match(EN_BANDEJA, /activo \? lasQueSeAtiendenEnBandeja\(conversaciones\) : \[\]/);
     assert.match(EN_BANDEJA, /cambioDeAtendidas\(\[\.\.\.abiertos\.current\.keys\(\)\], atendidas\)/);
     assert.match(EN_BANDEJA, /\}, \[huella\]\);/);
     // Al irse la pantalla no queda ningún canal ni nadie «escribiendo».

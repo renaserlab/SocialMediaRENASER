@@ -39,7 +39,12 @@ import {
 import { useAppStore } from '@/store/useAppStore';
 import { useEscribiendoEnBandeja } from '@/hooks/useEscribiendoEnBandeja';
 import { useAuthStore } from '@/store/useAuthStore';
-import { alLeerUnaConversacion, alLlegarLaBandeja, anotarMensajes } from '@/services/contadores';
+import {
+  alCambiarLaBandeja,
+  alLeerUnaConversacion,
+  alLlegarLaBandeja,
+  anotarMensajes,
+} from '@/services/contadores';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Conversation } from '@/types';
@@ -195,18 +200,22 @@ export function MessagesScreen() {
       // consulta vigente puede ser ya otra, y lo servido es esto.
       const pedida = consultaRef.current;
       if (!silencioso || conversacionesRef.current.length === 0) setStatus('loading');
+      // Cuándo salió la pregunta: lo que entre en vivo mientras va y viene se
+      // vuelve a poner encima de la respuesta (`anotarMensajes`).
+      const pedidaEn = Date.now();
       return MessageRepository.listConversations({ consulta: pedida })
         .then((data) => {
           if (!esVigente(mio, sello.current)) return;
-          setRemote(data);
+          // La bandeja sin filtrar es la fuente del globo de la barra: ya
+          // está aquí, no hace falta otra petición para contarla. Con una
+          // búsqueda o un filtro puestos NO se anota: sería contar un trozo.
+          // Lo que se pinta es lo que devuelve, con lo llegado en vivo encima.
+          const portada = hayConsulta(consultaRef.current) ? data : anotarMensajes(data, pedidaEn);
+          setRemote(portada);
           setServido(pedida.texto);
           setHayMas(data.length >= CONVERSACIONES_POR_PAGINA);
           setStatus('idle');
           ultimaCarga.current = Date.now();
-          // La bandeja sin filtrar es la fuente del globo de la barra: ya
-          // está aquí, no hace falta otra petición para contarla. Con una
-          // búsqueda o un filtro puestos NO se anota: sería contar un trozo.
-          if (!hayConsulta(consultaRef.current)) anotarMensajes(data);
         })
         .catch(() => {
           if (!esVigente(mio, sello.current)) return;
@@ -244,9 +253,21 @@ export function MessagesScreen() {
       // Lo fresco es la portada entera: cuenta como recién cargada.
       if (portada) ultimaCarga.current = Date.now();
     });
+    /*
+      UN MENSAJE QUE ACABA DE LLEGAR, ya colocado (28/10/2026): la fila sube,
+      cambia su resumen y su globo, sin pedir nada (`lib/bandejaEnVivo.ts`).
+      Se fusiona igual que una lectura fresca, pero NO cuenta como recién
+      cargada: no lo ha dicho el servidor, y al enfocar la pantalla con datos
+      de más de treinta segundos se le sigue preguntando.
+    */
+    const dejarLosCambios = alCambiarLaBandeja((portadaEnVivo) => {
+      const portada = !hayConsulta(consultaRef.current);
+      setRemote((actuales) => bandejaAlDia(actuales, portadaEnVivo, portada) as Conversation[]);
+    });
     return () => {
       dejarLasLeidas();
       dejarLaBandeja();
+      dejarLosCambios();
     };
   }, []);
 

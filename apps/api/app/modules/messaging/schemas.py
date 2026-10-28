@@ -99,6 +99,17 @@ class ConversationRead(BaseModel):
     #: se verían en ningún sitio. Sin `grouped`, y en un chat de dos, es igual a
     #: `unread_count`.
     total_unread: int = 0
+    #: Cuántas personas hay en un GRUPO, contando a quien pregunta. `None` en
+    #: un chat de dos, que siempre son dos.
+    #:
+    #: EXISTE PARA QUE EL TELÉFONO NO PREGUNTE NADA MÁS. La bandeja solo atiende
+    #: «está escribiendo» en los grupos pequeños: en uno grande, cada aviso de
+    #: escritura se multiplica por todos los que lo tienen en su bandeja, y
+    #: Supabase cobra cada entrega contra el tope de mensajes por segundo del
+    #: plan (auditoría del 28/10, §10). Sin este número el teléfono tendría que
+    #: pedir la ficha de cada grupo para saber su tamaño. Es UNA consulta con un
+    #: `GROUP BY` sobre los grupos de la página, y ninguna si no hay grupos.
+    members_count: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

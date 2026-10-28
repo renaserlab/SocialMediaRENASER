@@ -5,6 +5,7 @@ import {
   CADA_CUANTO_AVISAR_MS,
   CADUCA_A_LOS_MS,
   CONVERSACIONES_ATENDIDAS,
+  MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA,
   NADIE,
   NADIE_EN_NINGUNA,
   PAUSA_DEL_TONO_MS,
@@ -18,6 +19,7 @@ import {
   faltaParaCaducarAlguna,
   fraseDeEscritura,
   lasQueSeAtienden,
+  lasQueSeAtiendenEnBandeja,
   leerAviso,
   limpiar,
   limpiarTodas,
@@ -25,6 +27,7 @@ import {
   quienesEscriben,
   quitar,
   quitarDe,
+  seAtiendeEnBandeja,
   soloDe,
   suenaElTono,
   tocaAvisar,
@@ -246,4 +249,58 @@ test('en la fila cabe el nombre de pila, no el nombre entero', () => {
   assert.equal(nombreDePila('  Luis  '), 'Luis');
   assert.equal(nombreDePila(''), '');
   assert.equal(nombreDePila(undefined), '');
+});
+
+/* ------------------------------------------------------------------------- */
+/* EN LA BANDEJA, SOLO DONDE NO EXPLOTA (28/10/2026)                         */
+/* ------------------------------------------------------------------------- */
+
+/*
+  Auditoría del 28/10, §10: un aviso de escritura cuesta en Supabase 1 + cada
+  teléfono que lo recibe. Con la bandeja atendiendo todos sus grupos, en uno de
+  trescientos cuatro personas tecleando llegan al tope de 500/s del plan. La
+  bandeja deja de atender los grupos grandes; el chat abierto no cambia.
+*/
+
+test('el umbral es el orientativo de la auditoría y deja el coste acotado', () => {
+  assert.equal(MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA, 25);
+  // Lo que cuesta como mucho quien teclea en un grupo atendido, en mensajes
+  // por segundo: el aviso más todas sus entregas, cada `CADA_CUANTO_AVISAR_MS`.
+  const porSegundo = MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA / (CADA_CUANTO_AVISAR_MS / 1000);
+  assert.equal(porSegundo, 10);
+  // Hacen falta 50 personas tecleando a la vez para llegar a 500/s.
+  assert.equal(Math.ceil(500 / porSegundo), 50);
+});
+
+test('un chat de dos se atiende siempre; un grupo, solo si se sabe que es pequeño', () => {
+  assert.ok(seAtiendeEnBandeja({ esGrupo: false }));
+  assert.ok(seAtiendeEnBandeja({}));
+  assert.ok(seAtiendeEnBandeja({ esGrupo: true, miembros: 3 }));
+  assert.ok(seAtiendeEnBandeja({ esGrupo: true, miembros: MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA }));
+  assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA + 1 }));
+  assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: 300 }));
+  // Sin el tamaño (un servidor anterior) se trata como grande: un
+  // «escribiendo» de menos es mucho más barato que tumbar el tiempo real.
+  assert.ok(!seAtiendeEnBandeja({ esGrupo: true }));
+  assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: 0 }));
+  assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: Number.NaN }));
+});
+
+test('de las primeras veinte, se quitan los grupos grandes y no se baja a buscar más', () => {
+  const grande = (i: number) => ({ id: `g${i}`, esGrupo: true, miembros: 300 });
+  const pequeno = (i: number) => ({ id: `p${i}`, esGrupo: true, miembros: 8 });
+  const directo = (i: number) => ({ id: `d${i}` });
+  const bandeja = [
+    grande(0), directo(0), grande(1), pequeno(0), directo(1),
+    grande(2), directo(2), grande(3), directo(3), grande(4), directo(4),
+    ...Array.from({ length: 9 }, (_, i) => directo(10 + i)),
+    // De la 21 en adelante no se atiende nada, aunque sea pequeño.
+    directo(99), pequeno(99),
+  ];
+  const atendidas = lasQueSeAtiendenEnBandeja(bandeja);
+  assert.ok(atendidas.every((id) => !id.startsWith('g')), 'se atiende un grupo grande');
+  assert.equal(atendidas.length, CONVERSACIONES_ATENDIDAS - 5);
+  assert.ok(!atendidas.includes('d99') && !atendidas.includes('p99'));
+  // En el mismo orden de la bandeja.
+  assert.deepEqual(atendidas.slice(0, 3), ['d0', 'p0', 'd1']);
 });

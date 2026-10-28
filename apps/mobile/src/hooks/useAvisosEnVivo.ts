@@ -5,6 +5,14 @@ import { useRouter } from 'expo-router';
 import { traduceEnElIdiomaActual } from '@/i18n';
 import { rutaDelAviso } from '@/lib/avisosAlCreador';
 import {
+  anotarConTope,
+  esperaDeLaRecargaDeSeguridad,
+  hayQueAsegurar,
+  leerMensajeEnVivo,
+  puedeTraerUnAviso,
+  queHacerTrasElMensaje,
+} from '@/lib/bandejaEnVivo';
+import {
   SILENCIO_TRAS_UN_AVISO_DE_SESION_MS,
   actoresDeSesionNuevos,
   conversacionesPendientes,
@@ -24,6 +32,10 @@ import { NotificationRepository } from '@/repositories/NotificationRepository';
 import {
   alLeerLasNotificaciones,
   alLlegarLaBandeja,
+  alQuedarDudasEnLaBandeja,
+  aplicarMensajeEnVivo,
+  cuandoSePidioLaPortada,
+  olvidarLaBandeja,
   refrescarMensajes,
   refrescarNotificaciones,
 } from '@/services/contadores';
@@ -55,6 +67,8 @@ const CADA_MS = 30_000;
 const RESPIRO_DE_MENSAJES_MS = 500;
 /** Cuántos mensajes ya anunciados se recuerdan para no repetirlos. */
 const MENSAJES_RECORDADOS = 200;
+/** Cuántas conversaciones «buscadas y que no estaban» se recuerdan. */
+const AUSENTES_RECORDADAS = 500;
 
 /**
  * Cómo se mira la bandeja.
@@ -74,20 +88,26 @@ type FilaDeMensaje = {
   sender_id?: string;
   /** El texto, cuando lo hay: una nota de voz o una foto llegan sin él. */
   body?: string | null;
+  /** Cuándo se guardó. Es lo que deja colocarlo en la bandeja sin preguntar. */
+  created_at?: string;
 };
 
 /**
  * El puente con el oyente del push (`useAvisosDelPush`), que vive en otro
  * fichero porque solo existe en el teléfono.
  *
- * - `ponerseAlDia`: llegó un push con la aplicación abierta y ya se enseñó. La
- *   lectura periódica no tiene que anunciarlo otra vez.
+ * - `avisosDelPush`: llegó un push que NO es de un mensaje con la aplicación
+ *   abierta y ya se enseñó. La lectura periódica no tiene que anunciarlo otra
+ *   vez.
+ * - `ponerseAlDia`: lo mismo, y además la bandeja de mensajes. Solo para lo
+ *   que cambia una conversación sin mandar un mensaje (silenciarla).
  * - `mensajeDelPush`: llegó el push DE UN MENSAJE. No se enseña allí: se trae
  *   aquí, al mismo camino que el mensaje en tiempo real, para que los dos
  *   —que son el mismo mensaje— den UN aviso.
  *
  * Son `null` cuando el hook no está escuchando (sin sesión).
  */
+let avisosDelPush: (() => void) | null = null;
 let ponerseAlDia: (() => void) | null = null;
 let mensajeDelPush:
   | ((
@@ -100,8 +120,18 @@ let mensajeDelPush:
 
 let sesionDelPush: (() => void) | null = null;
 
+/**
+ * Llegó un push que no es de un mensaje y ya se enseñó: los avisos se ponen
+ * al día sin anunciarlo otra vez.
+ *
+ * LA BANDEJA DE MENSAJES NO SE VUELVE A PEDIR AQUÍ (28/10/2026). Lo hacía, y
+ * con el chat abierto este camino recibía el push de CADA mensaje: dos
+ * peticiones por mensaje en cada teléfono que tuviera delante esa
+ * conversación. Un push que no es de un mensaje no cambia la bandeja, y el de
+ * un mensaje va por `alRecibirUnMensajePorPush`.
+ */
 export function alRecibirUnPush(): void {
-  ponerseAlDia?.();
+  avisosDelPush?.();
 }
 
 /**
@@ -153,9 +183,11 @@ export function alRecibirUnMensajePorPush(
  *
  *   - MENSAJES, AL MOMENTO. Se suscribe a los mensajes nuevos de las
  *     conversaciones de esta persona (la tabla ya se publicaba en tiempo real
- *     y el servidor solo entrega las filas que puede leer). Al llegar uno de
- *     otra persona se refresca el contador y sale el aviso flotante, salvo que
- *     sea de la conversación que tiene delante.
+ *     y el servidor solo entrega las filas que puede leer). Al llegar uno se
+ *     coloca en la bandeja y en el contador SIN PREGUNTAR AL SERVIDOR (ver
+ *     «La bandeja no se pide por cada mensaje», más abajo) y, si es de otra
+ *     persona, sale el aviso flotante, salvo que sea de la conversación que
+ *     tiene delante.
  *   - LO DEMÁS, CADA MINUTO: se pregunta cuántos avisos hay sin leer y, si han
  *     subido, se piden los últimos y se anuncian los nuevos. No hay un segundo
  *     sistema: es la misma bandeja y el mismo aviso flotante (`avisar`).
@@ -317,13 +349,55 @@ export function useAvisosEnVivo(): void {
 
     /* --------------------------------------------------------- mensajes */
     let respiro: ReturnType<typeof setTimeout> | null = null;
-    /** Conversación → lo último que llegó y si ya se anunció. */
-    const pendientes = new Map<
-      string,
-      { remitente: string | null; texto: string | null; anunciado: boolean }
-    >();
+    /**
+     * Conversaciones que todavía no se conocen → lo último que llegó de ellas.
+     * Se anuncian cuando vuelva la lista, que es la que sabe su nombre.
+     */
+    const pendientes = new Map<string, { remitente: string | null; texto: string | null }>();
     /** Los mensajes ya anunciados, por identificador. Con tope. */
     const anunciados = new Set<string>();
+
+    /*
+      LA BANDEJA NO SE PIDE POR CADA MENSAJE (28/10/2026).
+
+      Antes, cada mensaje —de quien fuera, en la conversación que fuera—
+      acababa, medio segundo después, en una lectura entera de la bandeja y
+      otra del contador de avisos. Con N miembros de un grupo conectados, cada
+      mensaje eran 2N peticiones, y con doscientos la API tardaba unos diez
+      segundos en atenderlo (auditoría del 28/10, §10).
+
+      Ahora el mensaje se coloca en la bandeja aquí mismo
+      (`aplicarMensajeEnVivo`) y al servidor solo se le pregunta:
+
+        - por la BANDEJA, si el mensaje es de una conversación que no está en
+          ella (nueva, o de más abajo), si no se pudo colocar, o si el push
+          trae un mensaje que el tiempo real no trajo (el canal puede estar
+          caído). Y como red de seguridad, como mucho una vez cada veinte
+          segundos mientras sigan llegando mensajes
+          (`RECARGA_DE_SEGURIDAD_MS`, con su porqué);
+        - por los AVISOS, solo si el mensaje es de un chat de dos: es el único
+          que puede venir con un aviso de sesión (`puedeTraerUnAviso`).
+
+      Al reengancharse el canal, al volver del segundo plano y al enfocar
+      Mensajes con datos de más de treinta segundos se sigue leyendo todo,
+      como antes.
+    */
+    /** Lo que el próximo respiro tiene que pedir, además de anunciar. */
+    let leerLaLista = false;
+    let mirarLosAvisos = false;
+    /** Conversaciones que no estaban en la bandeja → cuándo llegó su mensaje. */
+    const porBuscar = new Map<string, number>();
+    /**
+     * Las que se buscaron en una lectura posterior a su mensaje y no estaban:
+     * el chat de un tema, una comunidad (viven dentro de su grupo). No se
+     * vuelven a buscar mensaje a mensaje.
+     */
+    const ausentes = new Set<string>();
+    /** Los mensajes que ya trajo el tiempo real: su push no pregunta nada. */
+    const vistosEnVivo = new Set<string>();
+    /** Cuándo se supo por última vez de un mensaje que la bandeja puede no tener. */
+    let ultimoMensajeEn: number | null = null;
+    let seguridad: ReturnType<typeof setTimeout> | null = null;
     /**
      * Lo último que se supo de cada conversación —su nombre, su foto—. Con esto
      * el aviso de un mensaje no espera a la red: se pinta con lo que ya se sabe.
@@ -342,6 +416,7 @@ export function useAvisosEnVivo(): void {
     const alDiaConLaLista = (lista: readonly Conversation[] | null, entrando: boolean) => {
       if (!vivo || !lista) return;
       recordar(lista);
+      apartarLasQueNoEstan(lista);
       // Lo silenciado no se anuncia al entrar: sigue contando en la bandeja.
       const { pendientes: sinLeer, total } = conversacionesPendientes(
         lista.filter((conversacion) => !conversacion.silenciada),
@@ -411,20 +486,83 @@ export function useAvisosEnVivo(): void {
       }
     };
 
-    /** Tras el respiro: contadores, bandeja y lo que no se pudo anunciar antes. */
+    /**
+     * Lo que se hace con cada lectura de la bandeja, además de recordarla:
+     * las conversaciones que se estaban buscando y no vinieron se apartan.
+     *
+     * SOLO SI LA LECTURA SALIÓ DESPUÉS DE SU MENSAJE: una que salió antes no
+     * lo podía traer, y apartar por eso una conversación nueva callaría sus
+     * avisos.
+     */
+    const apartarLasQueNoEstan = (lista: readonly Conversation[]) => {
+      const pedidaEn = cuandoSePidioLaPortada();
+      const estan = new Set(lista.map((conversacion) => conversacion.id));
+      for (const id of estan) ausentes.delete(id);
+      if (pedidaEn === null) return;
+      for (const [id, llegadoEn] of porBuscar) {
+        if (llegadoEn > pedidaEn) continue;
+        porBuscar.delete(id);
+        if (!estan.has(id)) anotarConTope(ausentes, id, AUSENTES_RECORDADAS);
+      }
+    };
+
+    /** Abre el respiro, si no lo estaba: lo que llegue junto se pide junto. */
+    const abrirElRespiro = () => {
+      if (respiro === null && (leerLaLista || mirarLosAvisos)) {
+        respiro = setTimeout(() => void ponerAlDiaLosMensajes(), RESPIRO_DE_MENSAJES_MS);
+      }
+    };
+
+    /** Que el próximo respiro lea la bandeja. */
+    const pedirLaLista = (conversacionId?: string) => {
+      ultimoMensajeEn = Date.now();
+      if (conversacionId && !porBuscar.has(conversacionId)) {
+        porBuscar.set(conversacionId, ultimoMensajeEn);
+      }
+      leerLaLista = true;
+      abrirElRespiro();
+    };
+
+    /**
+     * La red de seguridad: UNA lectura de la bandeja entre veinte y treinta
+     * segundos después del primer mensaje de la tanda, por mucho que sigan
+     * llegando. Y ninguna si mientras tanto ya se leyó por otro motivo.
+     */
+    const programarLaRecargaDeSeguridad = () => {
+      if (seguridad !== null) return;
+      seguridad = setTimeout(() => {
+        seguridad = null;
+        // En segundo plano no se pregunta: al volver, `entrar` lo lee todo.
+        if (AppState.currentState !== 'active') return;
+        if (!hayQueAsegurar(ultimoMensajeEn, cuandoSePidioLaPortada())) return;
+        void refrescarMensajes().then((lista) => alDiaConLaLista(lista, false));
+      }, esperaDeLaRecargaDeSeguridad(Math.random()));
+    };
+
+    /** Tras el respiro: lo que este lote de mensajes necesita del servidor, y nada más. */
     const ponerAlDiaLosMensajes = async () => {
       respiro = null;
       const deQuien = Array.from(pendientes);
       pendientes.clear();
+      const conAvisos = mirarLosAvisos;
+      const conLista = leerLaLista;
+      mirarLosAvisos = false;
+      leerLaLista = false;
       // Los avisos de la bandeja, A LA VEZ y sin que nadie los espere: un
-      // mensaje puede ser el registro de una sesión y su aviso ya está allí.
-      void mirarAvisos();
+      // mensaje de un chat de dos puede ser el registro de una sesión y su
+      // aviso ya está allí. De un grupo, nunca (`puedeTraerUnAviso`).
+      if (conAvisos) void mirarAvisos();
+      if (!conLista) return;
       const conversaciones = await refrescarMensajes();
-      if (!vivo || !conversaciones) return;
+      if (!vivo) return;
+      if (!conversaciones) {
+        // Sin red: lo intentará la recarga de seguridad.
+        programarLaRecargaDeSeguridad();
+        return;
+      }
       // Sin decir nada: cada uno de estos mensajes ya dio su aviso al llegar.
       alDiaConLaLista(conversaciones, false);
       for (const [id, pendiente] of deQuien) {
-        if (pendiente.anunciado) continue;
         // Mientras se pedía la lista pudo abrir esa conversación.
         if (seEstaViendoLaConversacion(id)) continue;
         const conversacion = conversaciones.find((c) => c.id === id);
@@ -456,6 +594,9 @@ export function useAvisosEnVivo(): void {
           if (primero !== undefined) anunciados.delete(primero);
         }
       }
+      // UN PUSH QUE EL TIEMPO REAL NO TRAJO —su canal puede estar caído—: la
+      // bandeja no tiene ese mensaje, y solo el servidor puede dárselo.
+      if (!mensajeId || !vistosEnVivo.has(mensajeId)) pedirLaLista(conversacionId);
 
       const ahora = Date.now();
       const conocida = conocidas.get(conversacionId);
@@ -472,19 +613,53 @@ export function useAvisosEnVivo(): void {
         anunciarMensaje(conversacionId, conocida, texto, remitenteId, false);
       }
 
-      const previo = pendientes.get(conversacionId);
-      pendientes.set(conversacionId, {
-        remitente: remitenteId ?? previo?.remitente ?? null,
-        texto: texto ?? previo?.texto ?? null,
-        anunciado: decision !== 'esperar-a-la-lista' || (previo?.anunciado ?? false),
-      });
-      // Varios mensajes seguidos son UNA puesta al día de contadores y bandeja.
-      if (respiro === null) {
-        respiro = setTimeout(() => void ponerAlDiaLosMensajes(), RESPIRO_DE_MENSAJES_MS);
+      // Una conversación que no se conoce se anuncia cuando vuelva la lista,
+      // con su nombre. Salvo si ya se buscó y no estaba (el chat de un tema,
+      // una comunidad): la lista no la va a traer.
+      const ausente = ausentes.has(conversacionId);
+      if (decision === 'esperar-a-la-lista' && !ausente) {
+        const previo = pendientes.get(conversacionId);
+        pendientes.set(conversacionId, {
+          remitente: remitenteId ?? previo?.remitente ?? null,
+          texto: texto ?? previo?.texto ?? null,
+        });
+        pedirLaLista(conversacionId);
       }
+      // Los avisos de la campana, solo si pudo ser el registro de una sesión.
+      if (puedeTraerUnAviso(conocida, ausente)) mirarLosAvisos = true;
+      // Varios mensajes seguidos son UNA puesta al día, y solo de lo que haga falta.
+      abrirElRespiro();
+    };
+
+    /**
+     * Un mensaje del tiempo real, colocado en la bandeja. EL PROPIO TAMBIÉN
+     * —escrito aquí o en otro aparato—: sube la fila y cambia su resumen,
+     * aunque no sume a lo no leído.
+     */
+    const ponerEnLaBandeja = (fila: FilaDeMensaje) => {
+      const mensaje = leerMensajeEnVivo(fila);
+      if (!mensaje) return;
+      if (mensaje.id) anotarConTope(vistosEnVivo, mensaje.id, MENSAJES_RECORDADOS);
+      // Sin saber quién soy no se sabe si suma: que lo cuente el servidor.
+      if (yo === null) {
+        pedirLaLista(mensaje.conversacionId);
+        return;
+      }
+      ultimoMensajeEn = Date.now();
+      const efecto = aplicarMensajeEnVivo(mensaje, {
+        propio: mensaje.remitenteId === yo,
+        abierta: seEstaViendoLaConversacion(mensaje.conversacionId),
+      });
+      if (queHacerTrasElMensaje(efecto, ausentes.has(mensaje.conversacionId)) === 'preguntar-ya') {
+        pedirLaLista(mensaje.conversacionId);
+      }
+      programarLaRecargaDeSeguridad();
     };
 
     const alLlegarMensaje = (fila: FilaDeMensaje) => {
+      // La bandeja primero, con todo mensaje: así su push, si llega después,
+      // sabe que no tiene que preguntar nada.
+      ponerEnLaBandeja(fila);
       // Sin saber quién soy no se puede distinguir mi propio mensaje —enviado
       // desde este u otro aparato— del de otra persona: no se anuncia.
       if (!fila.conversation_id || yo === null || fila.sender_id === yo) return;
@@ -505,6 +680,8 @@ export function useAvisosEnVivo(): void {
     const dejarDeOirLoLeido = alLeerLasNotificaciones(() => {
       avisosDichos = 0;
     });
+    // Una lectura que volvió sin poder aclarar un globo: se pregunta otra vez.
+    const dejarDeOirLasDudas = alQuedarDudasEnLaBandeja(() => pedirLaLista());
 
     /** Mirar todo como quien acaba de llegar: contadores al día y lo pendiente, dicho. */
     const entrar = () => {
@@ -565,6 +742,9 @@ export function useAvisosEnVivo(): void {
       void asegurarRegistroDePush();
     });
 
+    avisosDelPush = () => {
+      void mirarAvisos('callado');
+    };
     ponerseAlDia = () => {
       void mirarAvisos('callado');
       void refrescarMensajes().then((lista) => alDiaConLaLista(lista, false));
@@ -581,15 +761,20 @@ export function useAvisosEnVivo(): void {
 
     return () => {
       vivo = false;
+      avisosDelPush = null;
       ponerseAlDia = null;
       mensajeDelPush = null;
       sesionDelPush = null;
       clearInterval(reloj);
       if (respiro !== null) clearTimeout(respiro);
+      if (seguridad !== null) clearTimeout(seguridad);
       alVolver.remove();
       dejarDeOirLaBandeja();
       dejarDeOirLoLeido();
+      dejarDeOirLasDudas();
       if (cliente && canal) void cliente.removeChannel(canal);
+      // La portada de esta cuenta no se queda para la siguiente.
+      olvidarLaBandeja();
     };
   }, [supabaseEnabled, conSesion]);
 }

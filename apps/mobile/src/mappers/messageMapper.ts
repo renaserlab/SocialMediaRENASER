@@ -48,6 +48,8 @@ export type ConversationDto = {
   subgroups_count?: number;
   /** General, más las comunidades donde se está, más lo escrito en los temas. */
   total_unread?: number;
+  /** Cuántos hay en un grupo; nulo en un chat de dos (28/10/2026). */
+  members_count?: number | null;
 };
 
 export type AttachmentDto = {
@@ -186,6 +188,12 @@ export function toConversation(dto: ConversationDto): Conversation {
     comunidades: leerCuenta(dto.subgroups_count),
     totalSinLeer: leerCuenta(dto.total_unread),
     padreId: dto.parent_id ?? undefined,
+    // Para colocar en el teléfono lo que llega por tiempo real sin contarlo
+    // dos veces (`lib/bandejaEnVivo.ts`).
+    ultimoMensajeEn: dto.last_message_at ?? null,
+    // Sin el campo (servidor anterior) se queda sin valor, y la bandeja trata
+    // al grupo como grande: no atiende su «escribiendo». Ver `lib/escribiendo`.
+    miembros: leerCuenta(dto.members_count) || undefined,
   };
 }
 

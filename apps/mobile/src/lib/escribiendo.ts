@@ -196,6 +196,71 @@ export function lasQueSeAtienden(
 }
 
 /**
+ * El grupo más grande cuyo «escribiendo…» se atiende DESDE LA BANDEJA.
+ *
+ * CAMBIO VISIBLE (28/10/2026): en un grupo de más de veinticinco personas, la
+ * fila de la bandeja deja de decir «Katy está escribiendo…». Dentro del chat
+ * abierto no cambia nada: ahí se sigue viendo siempre.
+ *
+ * POR QUÉ (auditoría del 28/10, §10). El aviso viaja por un canal de difusión
+ * y Supabase cuenta cada entrega: un aviso cuesta 1 + quienes lo reciben. Quien
+ * teclea manda uno cada dos segundos y medio (`CADA_CUANTO_AVISAR_MS`). Si la
+ * bandeja atendiera todos sus grupos, en uno de trescientos que todos tienen
+ * arriba cada persona tecleando costaría (1 + 299) / 2,5 = 120 mensajes por
+ * segundo, y CUATRO a la vez llegan al tope de 500/s del plan Pro: Supabase
+ * desconecta a todo el mundo, no solo a ese grupo.
+ *
+ * CON VEINTICINCO, quien teclea en un grupo atendido cuesta como mucho
+ * (1 + 24) / 2,5 = 10 mensajes por segundo: harían falta cincuenta personas
+ * tecleando a la vez en grupos pequeños para llegar al tope. Y es donde el
+ * aviso sirve: en un grupo pequeño «Ana está escribiendo» dice algo; en uno de
+ * trescientos casi siempre hay alguien escribiendo y la fila solo parpadea.
+ */
+export const MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA = 25;
+
+/**
+ * Si la bandeja atiende el «escribiendo» de esa conversación.
+ *
+ * Un chat de dos, siempre. Un grupo, solo si se sabe que es pequeño: el
+ * tamaño llega en la propia fila (`members_count`), sin pedir nada. Si no
+ * llega —un servidor anterior—, se trata como grande: un «escribiendo» de
+ * menos en una fila es mucho más barato que tumbar el tiempo real de todos.
+ */
+export function seAtiendeEnBandeja(conversacion: {
+  esGrupo?: boolean;
+  miembros?: number;
+}): boolean {
+  if (conversacion.esGrupo !== true) return true;
+  const miembros = conversacion.miembros;
+  return (
+    typeof miembros === 'number' &&
+    miembros > 0 &&
+    miembros <= MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA
+  );
+}
+
+/**
+ * Las conversaciones cuyo «escribiendo» abre canal en la bandeja.
+ *
+ * De las PRIMERAS (`lasQueSeAtienden`), las que no son un grupo grande. No se
+ * baja a buscar más para completar veinte: la bandeja atiende lo que se ve, y
+ * lo que hay por debajo no se está mirando.
+ */
+export function lasQueSeAtiendenEnBandeja(
+  conversaciones: readonly { id: string; esGrupo?: boolean; miembros?: number }[],
+  cuantas: number = CONVERSACIONES_ATENDIDAS,
+): string[] {
+  const porId = new Map(conversaciones.map((c) => [c.id, c] as const));
+  return lasQueSeAtienden(
+    conversaciones.map((c) => c.id),
+    cuantas,
+  ).filter((id) => {
+    const conversacion = porId.get(id);
+    return conversacion !== undefined && seAtiendeEnBandeja(conversacion);
+  });
+}
+
+/**
  * Qué cambia al pasar de atender unas conversaciones a atender otras.
  *
  * La bandeja se reordena cada vez que llega un mensaje: cerrar y volver a
