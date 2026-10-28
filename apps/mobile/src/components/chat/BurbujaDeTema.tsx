@@ -187,10 +187,12 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
             agrupado ? (
               <View style={styles.huecoDeAvatar} />
             ) : (
+              // Fila reciclada por la FlashList: la clave evita la cara del mensaje anterior.
               <Avatar
                 size={AVATAR}
                 image={profileImageUrl(miembroDe(info, mensaje.autorId)?.avatarPath) ?? null}
                 name={nombre}
+                recyclingKey={mensaje.autorId}
               />
             )
           ) : null}

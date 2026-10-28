@@ -3153,6 +3153,7 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           agrupado ? (
             <View style={styles.huecoDeAvatar} />
           ) : (
+            // Fila reciclada por la FlashList: la clave evita la cara del mensaje anterior.
             <Avatar
               size={28}
               image={
@@ -3160,6 +3161,7 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
                 null
               }
               name={nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre)}
+              recyclingKey={item.autorId}
             />
           )
         ) : null}
