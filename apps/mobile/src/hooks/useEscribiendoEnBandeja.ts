@@ -4,7 +4,7 @@ import {
   cambioDeAtendidas,
   esDeFiarEnBandeja,
   fraseDeEscritura,
-  lasQueSeAtienden,
+  lasQueSeAtiendenEnBandeja,
   leerAviso,
   nombreDePila,
   quienesEscriben,
@@ -28,6 +28,11 @@ type Atendida = { esGrupo: boolean; otroId?: string | null };
  * la conversación que entra entre las atendidas y se cierra el de la que sale.
  * El canal de una conversación es UNO aunque el chat también lo tenga abierto
  * (`canalDeEscritura` lo comparte).
+ *
+ * LOS GRUPOS GRANDES NO SE ATIENDEN AQUÍ (28/10/2026). Cada teléfono suscrito
+ * multiplica lo que cuesta cada aviso; en un grupo de cientos, unos pocos
+ * tecleando bastan para pasar el tope de Supabase. Ver
+ * `MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA`. Dentro del chat no cambia nada.
  */
 export function useEscribiendoEnBandeja(
   conversaciones: readonly Conversation[],
@@ -45,7 +50,8 @@ export function useEscribiendoEnBandeja(
       mapa.set(c.id, { esGrupo: c.esGrupo === true, otroId: c.otherId });
     }
     datos.current = mapa;
-    return activo ? lasQueSeAtienden(conversaciones.map((c) => c.id)) : [];
+    // De las primeras, solo los chats de dos y los grupos pequeños.
+    return activo ? lasQueSeAtiendenEnBandeja(conversaciones) : [];
   }, [conversaciones, activo]);
   // Las mismas conversaciones en el mismo orden no son un cambio.
   const huella = atendidas.join('|');

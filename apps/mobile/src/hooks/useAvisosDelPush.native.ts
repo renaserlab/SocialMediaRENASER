@@ -36,7 +36,9 @@ import { hayMensajeNuevoEn } from '@/services/contadores';
  *     nunca a una ruta que venga dentro del aviso;
  *   - si es un mensaje de la conversación que la persona tiene delante, NO se
  *     avisa: el mensaje ya está apareciendo en la conversación;
- *   - y se ponen al día los contadores.
+ *   - y se ponen al día los contadores: los avisos, si el push no es de un
+ *     mensaje; la bandeja de mensajes, solo si el tiempo real no trajo ese
+ *     mensaje (`useAvisosEnVivo`). No se relee entera por cada push.
  *
  * El aviso del sistema no se enseña en primer plano (lo decide
  * `setNotificationHandler` en `services/notifications`): serían dos avisos del
@@ -65,7 +67,16 @@ export function useAvisosDelPush(): void {
 
       // Lo que ya se está leyendo no se anuncia.
       if (seEstaViendoLaConversacion(conversacion)) {
-        alRecibirUnPush();
+        /*
+          NI SE RELEE LA BANDEJA (28/10/2026). Antes esto ponía al día los
+          contadores pidiendo la bandeja entera y los avisos: dos peticiones
+          por CADA mensaje en cada teléfono con esa conversación delante. El
+          mensaje va al mismo camino que el tiempo real, que lo reconoce por
+          su identificador y solo pregunta si el tiempo real no lo trajo.
+        */
+        if (conversacion) {
+          alRecibirUnMensajePorPush(conversacion, mensajeDelPush(data), null);
+        }
         return;
       }
 

@@ -107,6 +107,13 @@ describe('enchufado: el chat avisa y la bandeja escucha', () => {
   it('la bandeja escucha las dos cosas y deja de escuchar al desmontarse', () => {
     assert.match(BANDEJA, /alLeerUnaConversacion\(\(conversacionId\) => \{\s*setRemote\(\(actuales\) => sinLeerEn\(actuales, conversacionId\)/);
     assert.match(BANDEJA, /const portada = !hayConsulta\(consultaRef\.current\);\s*setRemote\(\(actuales\) => bandejaAlDia\(actuales, frescas, portada\)/);
-    assert.match(BANDEJA, /return \(\) => \{\s*dejarLasLeidas\(\);\s*dejarLaBandeja\(\);\s*\};/);
+    assert.match(
+      BANDEJA,
+      /return \(\) => \{\s*dejarLasLeidas\(\);\s*dejarLaBandeja\(\);\s*dejarLosCambios\(\);\s*\};/,
+    );
+    // Lo que llega en vivo se fusiona igual, pero NO cuenta como recién
+    // cargado: al enfocar con datos viejos se sigue preguntando (28/10/2026).
+    const enVivo = BANDEJA.slice(BANDEJA.indexOf('alCambiarLaBandeja((portadaEnVivo) => {'));
+    assert.match(enVivo, /^alCambiarLaBandeja\(\(portadaEnVivo\) => \{\s*const portada = !hayConsulta\(consultaRef\.current\);\s*setRemote\(\(actuales\) => bandejaAlDia\(actuales, portadaEnVivo, portada\) as Conversation\[\]\);\s*\}\);/);
   });
 });

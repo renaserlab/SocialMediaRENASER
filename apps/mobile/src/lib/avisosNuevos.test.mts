@@ -309,21 +309,25 @@ describe('un solo sistema de avisos, enchufado', () => {
       bastante lento». El aviso esperaba medio segundo, luego a la lista de
       conversaciones y hasta dos segundos y medio más a la bandeja.
     */
-    const anotar = VIVO.slice(VIVO.indexOf('const anotarMensaje'), VIVO.indexOf('const alLlegarMensaje'));
+    const anotar = VIVO.slice(VIVO.indexOf('const anotarMensaje'), VIVO.indexOf('const ponerEnLaBandeja'));
     const decide = anotar.indexOf('const decision = queHacerConUnMensaje({');
     const anuncia = anotar.indexOf("if (decision === 'anunciar-ya' && conocida) {");
-    const respiro = anotar.indexOf('respiro = setTimeout(');
+    // El respiro (si hace falta alguno) se abre DESPUÉS de anunciar.
+    const respiro = anotar.indexOf('abrirElRespiro();');
     assert.ok(decide !== -1 && anuncia > decide, 'no se decide al llegar');
     assert.ok(respiro > anuncia, 'el aviso vuelve a ir detrás del respiro');
+    assert.match(VIVO, /respiro = setTimeout\(\(\) => void ponerAlDiaLosMensajes\(\), RESPIRO_DE_MENSAJES_MS\);/);
     // Con lo que ya se sabe de la conversación: sin pedir nada.
     assert.match(anotar, /const conocida = conocidas\.get\(conversacionId\);/);
     assert.ok(!/await /.test(anotar), 'anunciar vuelve a esperar a algo');
     // Ni rastro de la espera a la bandeja.
     assert.ok(!/ESPERA_POR_LOS_AVISOS_MS|Promise\.race/.test(VIVO));
-    // La lista se recuerda cada vez que se lee, que es lo que lo hace posible.
+    // La lista se recuerda cada vez que se lee, que es lo que lo hace posible:
+    // al entrar, al ponerse al día, con el push de una sesión y en la recarga
+    // de seguridad de la bandeja (28/10/2026).
     assert.equal(
       VIVO.match(/refrescarMensajes\(\)\.then\(\(lista\) => alDiaConLaLista\(lista, (true|false)\)\)/g)?.length,
-      3,
+      4,
     );
     assert.match(VIVO, /alDiaConLaLista\(conversaciones, false\);/);
     assert.match(VIVO, /if \(!vivo \|\| !lista\) return;\s*recordar\(lista\);/);
@@ -333,13 +337,19 @@ describe('un solo sistema de avisos, enchufado', () => {
 
   it('una conversación nueva, que no se conoce, se anuncia al volver la lista', () => {
     const alDia = VIVO.slice(VIVO.indexOf('const ponerAlDiaLosMensajes'), VIVO.indexOf('const anotarMensaje'));
-    assert.match(alDia, /if \(pendiente\.anunciado\) continue;/);
     assert.match(alDia, /if \(seEstaViendoLaConversacion\(id\)\) continue;/);
     assert.match(alDia, /anunciarMensaje\(id, conversacion, pendiente\.texto, pendiente\.remitente, true\);/);
-    // La bandeja de avisos se mira a la vez, sin que el mensaje la espere.
+    // Solo quedan pendientes las que esperan a la lista: las conocidas ya se
+    // anunciaron al llegar (28/10/2026).
+    const anotar = VIVO.slice(VIVO.indexOf('const anotarMensaje'), VIVO.indexOf('const ponerEnLaBandeja'));
+    assert.match(anotar, /if \(decision === 'esperar-a-la-lista' && !ausente\) \{[^}]*pendientes\.set\(/);
+    // La bandeja de avisos se mira a la vez, sin que el mensaje la espere…
     const avisos = alDia.indexOf('void mirarAvisos();');
     const lista = alDia.indexOf('await refrescarMensajes();');
     assert.ok(avisos !== -1 && lista > avisos);
+    // …pero solo si algún mensaje pudo ser el registro de una sesión, y la
+    // bandeja solo si algo la necesita: ya no es una lectura por mensaje.
+    assert.match(alDia, /if \(conAvisos\) void mirarAvisos\(\);\s*if \(!conLista\) return;/);
   });
 
   it('un hecho, un aviso, llegue antes quien llegue: el segundo calla, y calla UNO', () => {
@@ -461,9 +471,11 @@ describe('los contadores de no leídos', () => {
   });
 
   it('la bandeja de mensajes anota lo no leído sin otra petición, y solo sin filtros', () => {
+    // Y lo que se pinta es lo que devuelve: la portada con lo llegado en vivo
+    // mientras la pregunta iba y venía (28/10/2026).
     assert.match(
       sinComentarios(fuente('screens/MessagesScreen.tsx')),
-      /if \(!hayConsulta\(consultaRef\.current\)\) anotarMensajes\(data\);/,
+      /const portada = hayConsulta\(consultaRef\.current\) \? data : anotarMensajes\(data, pedidaEn\);\s*setRemote\(portada\);/,
     );
   });
 

@@ -220,6 +220,29 @@ async def no_leidos(
     return {conv_id: int(total or 0) for conv_id, total in filas}
 
 
+async def miembros_por_grupo(db: AsyncSession, group_ids: list[str]) -> dict[str, int]:
+    """Cuántas personas hay en cada grupo de la página, en UNA consulta.
+
+    Un `GROUP BY` sobre la clave primaria de `conversation_members`
+    (`conversation_id`, `user_id`): se cuenta sobre el índice, sin leer
+    perfiles. Lo usa la bandeja del teléfono para decidir si atiende «está
+    escribiendo» en la fila de un grupo (ver `ConversationRead.members_count`).
+
+    Sin grupos en la página no se consulta nada: la trampa de `in_([])` de
+    siempre, y además lo normal en una bandeja de chats de dos.
+    """
+    if not group_ids:
+        return {}
+    filas = (
+        await db.execute(
+            select(ConversationMember.conversation_id, func.count())
+            .where(ConversationMember.conversation_id.in_(group_ids))
+            .group_by(ConversationMember.conversation_id)
+        )
+    ).all()
+    return {str(conversacion): int(total or 0) for conversacion, total in filas}
+
+
 async def adjuntos_por_mensaje(
     db: AsyncSession, message_ids: list[str]
 ) -> dict[str, list[AttachmentRead]]:
@@ -430,6 +453,9 @@ async def leer_conversaciones(
 
     de_grupo = [str(fila.id) for fila in filas if fila.kind == "group"]
     comunidades = await subgrupos.de_la_pagina(db, de_grupo, uid, agrupado=agrupado)
+    # El tamaño de cada grupo: el teléfono decide con él si atiende «está
+    # escribiendo» en su fila sin pedir la ficha del grupo. Ver el esquema.
+    tamanos = await miembros_por_grupo(db, de_grupo)
     temas_por_grupo, no_leidos_de_temas = (
         await temas_de_la_pagina(db, de_grupo, uid) if agrupado else ({}, {})
     )
@@ -482,6 +508,7 @@ async def leer_conversaciones(
                     + comunidades.no_leidas.get(clave, 0)
                     + no_leidos_de_temas.get(clave, 0)
                 ),
+                members_count=tamanos.get(clave) if fila.kind == "group" else None,
             )
         )
     return salida

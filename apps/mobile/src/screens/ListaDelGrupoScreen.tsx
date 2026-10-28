@@ -45,6 +45,7 @@ import { GroupRepository } from '@/repositories/GroupRepository';
 import { TemasRepository } from '@/repositories/TemasRepository';
 import { ApiError } from '@/services/api';
 import {
+  alCambiarLaBandeja,
   alLeerUnaConversacion,
   alLlegarLaBandeja,
   refrescarMensajes,
@@ -55,6 +56,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { Conversation } from '@/types';
 
 /** Lo que se sabe de General: lo mismo que su fila de la bandeja. */
 type ResumenDeGeneral = { resumen: string; hora: string; sinLeer: number };
@@ -170,15 +172,20 @@ export function ListaDelGrupoScreen() {
     deja su globo a cero en el acto.
   */
   useEffect(() => {
-    const dejarLaBandeja = alLlegarLaBandeja((frescas) => {
+    const ponerGeneral = (frescas: readonly Conversation[]) => {
       const fila = frescas.find((c) => c.id === grupoId);
       if (fila) setGeneral({ resumen: fila.subtitle, hora: fila.time ?? '', sinLeer: fila.unread || 0 });
-    });
+    };
+    const dejarLaBandeja = alLlegarLaBandeja(ponerGeneral);
+    // Un mensaje en General ya no hace releer la bandeja entera (28/10/2026):
+    // llega colocado por aquí, sin preguntar.
+    const dejarLosCambios = alCambiarLaBandeja(ponerGeneral);
     const dejarLasLeidas = alLeerUnaConversacion((conversacionId) => {
       if (conversacionId === grupoId) setGeneral((g) => (g ? { ...g, sinLeer: 0 } : g));
     });
     return () => {
       dejarLaBandeja();
+      dejarLosCambios();
       dejarLasLeidas();
     };
   }, [grupoId]);
