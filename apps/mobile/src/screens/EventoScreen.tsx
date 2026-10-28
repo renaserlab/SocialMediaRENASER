@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import Feather from '@expo/vector-icons/Feather';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -12,6 +13,7 @@ import { assets } from '@/data/assets';
 import { confirm, notify } from '@/lib/confirm';
 import { importeConMoneda } from '@/lib/dinero';
 import { vendeEntradas } from '@/lib/entradasDeEvento';
+import { FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE } from '@/lib/fundidoDeImagen';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
 import {
@@ -162,10 +164,20 @@ export function EventoScreen() {
     <AppScreen contentStyle={styles.contenido}>
       <AppHeader title={t('evento.titulo')} onBack={volver} />
 
-      <Image
-        source={evento.coverUrl ? { uri: evento.coverUrl } : assets.event}
+      {/*
+        `expo-image` con la RUTA como clave de cache: la URL cambia cada vez que
+        se renueva la firma y el `Image` de React Native, que guarda por URL, la
+        volvia a bajar.
+      */}
+      <ExpoImage
+        source={
+          evento.coverUrl
+            ? { uri: evento.coverUrl, cacheKey: evento.coverPath ?? undefined }
+            : assets.event
+        }
         style={styles.portada}
-        resizeMode="cover"
+        contentFit="cover"
+        transition={FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE}
         accessibilityIgnoresInvertColors
       />
 

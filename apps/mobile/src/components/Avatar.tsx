@@ -12,9 +12,14 @@ type Props = {
   label?: string;
   image?: keyof typeof assets | ImageSourcePropType | null;
   name?: string;
+  /**
+   * De QUIEN es la foto (su id), solo en filas que una lista RECICLA
+   * (FlashList). Ver el comentario donde se usa.
+   */
+  recyclingKey?: string;
 };
 
-export function Avatar({ size = 44, label, image, name }: Props) {
+export function Avatar({ size = 44, label, image, name, recyclingKey }: Props) {
   const { colors } = useAppTheme();
 
   // Fuente de la imagen. Se aceptan tres formas y conviene distinguirlas:
@@ -72,6 +77,20 @@ export function Avatar({ size = 44, label, image, name }: Props) {
           cachePolicy="memory-disk"
           // Sin transicion el cambio es brusco; con una larga se nota lento.
           transition={120}
+          /*
+            EN UNA FILA RECICLADA, LA CARA DE LA FILA DE ANTES. FlashList no
+            crea una fila nueva al desplazarse: reutiliza la que salio por
+            arriba con los datos de la que entra. Sin `recyclingKey`, la foto
+            anterior se quedaba puesta hasta que llegaba la nueva, y durante ese
+            instante un mensaje salia con la cara de otra persona. Con la clave,
+            al cambiar de persona se vacia primero.
+
+            Solo si quien llama la pasa, y no por defecto con la URL: fuera de
+            las listas, cambiar de foto —la vista previa recien elegida que pasa
+            a ser la subida, en Editar perfil— vaciaria el circulo un instante
+            en vez de fundir una foto con la otra, como hace ahora.
+          */
+          recyclingKey={recyclingKey}
         />
       ) : (
         <View

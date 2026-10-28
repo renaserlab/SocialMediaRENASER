@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { notify } from '@/lib/confirm';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
@@ -13,6 +14,7 @@ import { Pulsable } from '@/components/Pulsable';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StateView } from '@/components/StateView';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
+import { FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE } from '@/lib/fundidoDeImagen';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { assets } from '@/data/assets';
 import { events as mockEvents } from '@/data/mockData';
@@ -186,10 +188,21 @@ export function EventsScreen() {
           finalizado ? styles.terminado : null,
         ]}
       >
-        {/* La portada REAL del evento; el asset local solo si no tiene. */}
-        <Image
-          source={event.coverUrl ? { uri: event.coverUrl } : assets.event}
+        {/*
+          La portada REAL del evento; el asset local solo si no tiene.
+          `expo-image` con la RUTA como clave de cache, aqui y en el destacado:
+          la URL cambia cada vez que se renueva la firma (dura una hora) y el
+          `Image` de React Native, que guarda por URL, la descargaba otra vez.
+        */}
+        <ExpoImage
+          source={
+            event.coverUrl
+              ? { uri: event.coverUrl, cacheKey: event.coverPath ?? undefined }
+              : assets.event
+          }
           style={[styles.thumb, { borderColor: colors.border }]}
+          contentFit="cover"
+          transition={FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE}
         />
         <Pulsable
           style={styles.cuerpoDeFila}
@@ -264,10 +277,15 @@ export function EventsScreen() {
     const isReserved = reservedIds.includes(event.id);
     return (
       <View key={event.id} style={styles.mainCard}>
-        <Image
-          source={event.coverUrl ? { uri: event.coverUrl } : assets.event}
+        <ExpoImage
+          source={
+            event.coverUrl
+              ? { uri: event.coverUrl, cacheKey: event.coverPath ?? undefined }
+              : assets.event
+          }
           style={StyleSheet.absoluteFill}
-          resizeMode="cover"
+          contentFit="cover"
+          transition={FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE}
         />
         <View style={[styles.overlay, { backgroundColor: colors.overlay }]} />
         <View style={styles.mainContent}>

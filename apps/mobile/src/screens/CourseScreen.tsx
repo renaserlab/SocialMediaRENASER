@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 
@@ -21,6 +22,7 @@ import type { AvisoDeRecompra } from '@/repositories/PaymentRepository';
 import { confirm, notify } from '@/lib/confirm';
 import * as WebBrowser from 'expo-web-browser';
 import { etiquetaDePrecio } from '@/lib/dinero';
+import { FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE } from '@/lib/fundidoDeImagen';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { toast } from '@/lib/toast';
 import { LearningRepository } from '@/repositories/LearningRepository';
@@ -503,12 +505,23 @@ export function CourseScreen() {
           lector de pantalla. Sin marcar, en cambio, se anunciaba como una
           imagen sin nombre: ruido en medio de la ficha.
         */}
-        <Image
+        <ExpoImage
           accessible={false}
           accessibilityElementsHidden
           importantForAccessibility="no"
-          source={course.coverUrl ? { uri: course.coverUrl } : assets.course}
+          /*
+            Con la RUTA como clave de cache: la URL cambia cada vez que se
+            renueva la firma y el `Image` de React Native, que guarda por URL,
+            volvia a bajar la portada.
+          */
+          source={
+            course.coverUrl
+              ? { uri: course.coverUrl, cacheKey: course.coverPath ?? undefined }
+              : assets.course
+          }
           style={[styles.hero, { borderColor: colors.border }]}
+          contentFit="cover"
+          transition={FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE}
         />
         <View style={styles.container}>
           {/*

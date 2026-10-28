@@ -19,6 +19,7 @@ import { assets } from '@/data/assets';
 import { etiquetaDePrecio } from '@/lib/dinero';
 import { haptics } from '@/lib/haptics';
 import { frasePrincipalDeCurso, type NombresDeTema } from '@/lib/motivoDeCurso';
+import { useSeccionActiva } from '@/navigation/foco';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import {
   RecommendationRepository,
@@ -113,6 +114,17 @@ export function CursosParaTi() {
   const router = useRouter();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
+  /*
+    MONTADA NO ES VISTA. Explorar se monta al lado de Inicio para que el
+    arrastre sea fluido, y esta seccion CONTABA IMPRESIONES desde alli, con la
+    pantalla fuera de la vista. Como cada impresion lleva clave y no se repite
+    en la sesion, la de verdad —cuando la persona llegaba a mirar— ya no se
+    apuntaba: la senal decia «se vio» antes de que nadie la viera.
+
+    La lista se sigue pidiendo al montarse, a proposito: asi Explorar ya esta
+    lleno cuando se llega. Lo que espera a que se mire es solo la impresion.
+  */
+  const activa = useSeccionActiva();
 
   const [datos, setDatos] = useState<CourseRecommendations | null>(null);
   const [estado, setEstado] = useState<'cargando' | 'error' | 'listo'>('cargando');
@@ -212,6 +224,8 @@ export function CursosParaTi() {
 
   const medirVisibles = useCallback(
     (desplazamiento: number) => {
+      // Fuera de la vista no se ha visto nada, este donde este el carrusel.
+      if (!activa) return;
       if (visibles.length === 0 || anchoVisible.current === 0) return;
 
       const paso = ANCHO_TARJETA + spacing.md;
@@ -234,7 +248,7 @@ export function CursosParaTi() {
         });
       });
     },
-    [visibles, datos],
+    [activa, visibles, datos],
   );
 
   const alMedirAncho = useCallback(
@@ -264,6 +278,10 @@ export function CursosParaTi() {
   /*
     Y al llegar una lista nueva. `onLayout` no se vuelve a disparar si el ancho
     no cambia, asi que sin esto la segunda carga no contaria ninguna impresion.
+
+    Tambien al VOLVER a la seccion: `medirVisibles` cambia con `activa`, asi que
+    lo que estaba delante al irse se cuenta en cuanto se vuelve a mirar (lo ya
+    contado no se repite: cada impresion lleva su clave).
   */
   useEffect(() => {
     if (estado === 'listo') medirVisibles(desplazamiento.current);
@@ -375,9 +393,18 @@ export function CursosParaTi() {
                       accessibilityLabel={`Ver el curso ${curso.title}`}
                     />
 
-                    {/* La imagen local solo mientras el curso no tenga portada propia. */}
+                    {/*
+                      La imagen local solo mientras el curso no tenga portada
+                      propia. La cache va por la RUTA: la URL cambia cada vez
+                      que se renueva la firma y, con ella como clave, la misma
+                      portada se volvia a descargar.
+                    */}
                     <ExpoImage
-                      source={curso.coverUrl ? { uri: curso.coverUrl } : assets.course}
+                      source={
+                        curso.coverUrl
+                          ? { uri: curso.coverUrl, cacheKey: curso.coverPath ?? undefined }
+                          : assets.course
+                      }
                       style={styles.portada}
                       contentFit="cover"
                       transition={150}

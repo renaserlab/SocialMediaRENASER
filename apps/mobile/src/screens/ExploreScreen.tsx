@@ -41,6 +41,7 @@ import { useAppTheme } from '@/theme/useAppTheme';
 import { aspectoDeCategoria, aspectoDeTarjeta, type AspectoDeCategoria } from '@/theme/aspecto';
 import type { Course, EventItem } from '@/types';
 import { irAlPerfil } from '@/lib/irAlPerfil';
+import { FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE } from '@/lib/fundidoDeImagen';
 import { pedirDestacados } from '@/services/cachePerfil';
 import { SearchRepository } from '@/repositories/SearchRepository';
 import {
@@ -698,10 +699,21 @@ export function ExploreScreen() {
               title={event.title}
               subtitle={`${event.date} • ${event.location}`}
               leftComponent={
-                /* La portada real del evento; el asset local solo si no tiene. */
-                <Image
-                  source={event.coverUrl ? { uri: event.coverUrl } : assets.event}
+                /*
+                  La portada real del evento; el asset local solo si no tiene.
+                  `expo-image` con la RUTA como clave de cache: la URL cambia
+                  cada vez que se renueva la firma (dura una hora) y el `Image`
+                  de React Native, que guarda por URL, la volvia a descargar.
+                */
+                <ExpoImage
+                  source={
+                    event.coverUrl
+                      ? { uri: event.coverUrl, cacheKey: event.coverPath ?? undefined }
+                      : assets.event
+                  }
                   style={styles.eventImage}
+                  contentFit="cover"
+                  transition={FUNDIDO_DEL_IMAGE_DE_REACT_NATIVE}
                 />
               }
               rightIcon="chevron-right"
