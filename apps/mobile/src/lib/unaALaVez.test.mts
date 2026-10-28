@@ -130,13 +130,18 @@ describe('el chat abierto pregunta lo que le falta', () => {
   it('el push de un mensaje se lo dice al chat de esa conversación', () => {
     // Antes de decidir si se anuncia: con el chat delante no se anuncia, y es
     // justo cuando hace falta que el chat se entere.
-    const avisa = PUSH.indexOf('if (conversacion) hayMensajeNuevoEn(conversacion);');
+    const avisa = PUSH.indexOf('if (conversacion) hayMensajeNuevoEn(conversacion, mensajeDelPush(data));');
     const calla = PUSH.indexOf('if (seEstaViendoLaConversacion(conversacion)) {');
     assert.ok(avisa !== -1 && calla !== -1 && avisa < calla);
-    assert.match(CONTADORES, /export function hayMensajeNuevoEn\(conversacionId: string\): void \{\s*for \(const oyente of oyentesDeMensaje\) oyente\(conversacionId\);/);
+    assert.match(
+      CONTADORES,
+      /export function hayMensajeNuevoEn\(conversacionId: string, mensajeId: string \| null = null\): void \{\s*for \(const oyente of oyentesDeMensaje\) oyente\(conversacionId, mensajeId\);/,
+    );
+    // Si el mensaje ya está (llegó antes por el canal) no se pregunta; si no,
+    // sí: es lo que lo hace útil con el canal caído (28/10/2026).
     assert.match(
       CHAT,
-      /alSaberDeUnMensaje\(\(conversacion\) => \{\s*if \(conversacion === conversationId\) void ponerAlDia\(\);\s*\}\);/,
+      /alSaberDeUnMensaje\(\(conversacion, mensajeId\) => \{\s*if \(conversacion !== conversationId\) return;\s*if \(mensajeId && mensajesRef\.current\.some\(\(m\) => m\.id === mensajeId\)\) return;\s*void ponerAlDia\(\);\s*\}\);/,
     );
   });
 
@@ -165,10 +170,13 @@ describe('el chat abierto pregunta lo que le falta', () => {
     */
     assert.match(
       CHAT,
-      /const leerSiSeVe = \(\) => \{\s*if \(aLaVista\.current && AppState\.currentState === 'active'\) \{\s*void marcarConversacionLeida\(conversationId\)\.then\(avisarSiSeAnoto\);/,
+      /const leerSiSeVe = \(\) => \{\s*if \(aLaVista\.current && AppState\.currentState === 'active'\) \{\s*leer\(\);/,
     );
     // Lo único que marca sin mirar es entrar: el montaje.
-    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\)/g)?.length, 2);
+    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\)/g)?.length, 1);
+    assert.equal(CHAT.match(/\bleer\(\);/g)?.length, 2);
+    // Lo propio que trae el canal no se marca: no cuenta como no leído.
+    assert.match(CHAT, /if \(row\.sender_id !== currentUserId\) leerSiSeVe\(\);/);
     assert.match(CHAT, /aLaVista\.current = true;\s*marcarConversacionALaVista\(conversacionALaVista\);/);
     assert.match(CHAT, /return \(\) => \{\s*aLaVista\.current = false;/);
   });

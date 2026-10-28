@@ -267,7 +267,16 @@ describe('lo que encontró la revisión independiente, enchufado', () => {
   it('al volver al chat las sesiones se releen: aceptar en la agenda no deja «Aceptar» aquí', () => {
     assert.match(
       CHAT,
-      /useFocusEffect\(\s*useCallback\(\(\) => \{[^}]*if \(enfocadaAntes\.current\) leerSesiones\(\);/,
+      /useFocusEffect\(\s*useCallback\(\(\) => \{[^}]*if \(enfocadaAntes\.current && !esGrupoAhora\.current\) leerSesiones\(\);/,
+    );
+  });
+
+  it('en un grupo no se releen con cada mensaje: allí no hay sesiones (28/10/2026)', () => {
+    // La del montaje sigue: al montar todavía no se sabe si es un grupo.
+    assert.match(CHAT, /useEffect\(\(\) => \{\s*setSesionesDelChat\(\[\]\);\s*leerSesiones\(\);/);
+    assert.match(
+      CHAT,
+      /ajenoYaVisto\.current = ultimoAjeno;\s*if \(esGrupoAhora\.current\) return;\s*if \(respiroDeSesiones\.current\)/,
     );
   });
 

@@ -7,6 +7,7 @@ import {
   toMessage,
 } from '@/mappers/messageMapper';
 import { rutaDePortada } from '@/lib/mediosDeChat';
+import { respuestaCompartida } from '@/lib/respuestaCompartida';
 import { firmarAdjuntos, type AdjuntoSubido } from '@/services/messageMedia';
 import { profileImageUrl, signMediaUrls } from '@/services/storage';
 import {
@@ -193,6 +194,24 @@ export type FuncionesDelChat = {
   lecturas: boolean;
 };
 
+/*
+  `/conversations/availability`, UNA PREGUNTA CADA POCO (28/10/2026).
+
+  Lo preguntaban por separado `funciones()` y `TemasRepository.disponibilidad()`
+  —abrir un grupo eran dos peticiones iguales— y lo volvía a preguntar cada
+  chat, tema o grupo al abrirse (auditoría del 27/10, §6.4). Describe la
+  instalación, no a quien mira, y solo cambia con un despliegue: la pregunta
+  se comparte y la respuesta vale diez minutos, que bastan para enterarse de
+  una función nueva sin reiniciar la aplicación. Un fallo no se recuerda.
+*/
+const DISPONIBILIDAD_DURA_MS = 10 * 60_000;
+
+/** Lo que dice el servidor de las funciones del chat, compartido (ver arriba). */
+export const leerDisponibilidadDelChat = respuestaCompartida(
+  () => apiRequest<Record<string, unknown> | null>(`${API_V1}/conversations/availability`),
+  DISPONIBILIDAD_DURA_MS,
+);
+
 /** Lo que se da por hecho mientras el servidor no contesta: nada. */
 export const SIN_FUNCIONES: FuncionesDelChat = {
   notasDeVoz: false,
@@ -218,13 +237,13 @@ export const MessageRepository = {
    */
   async funciones(): Promise<FuncionesDelChat> {
     try {
-      const dto = await apiRequest<{
+      const dto = ((await leerDisponibilidadDelChat()) ?? {}) as {
         voice_notes?: boolean;
         story_replies?: boolean;
         reactions?: boolean;
         preferences?: boolean;
         read_receipts?: boolean;
-      }>(`${API_V1}/conversations/availability`);
+      };
       return {
         notasDeVoz: dto.voice_notes === true,
         respuestasAHistorias: dto.story_replies === true,

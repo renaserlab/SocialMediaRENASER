@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 
@@ -72,8 +72,13 @@ function diaDe(mensaje?: MensajeDeTema): string | null {
  *
  * NINGÚN PULSABLE DENTRO DE OTRO. En la web cada uno es un `<button>`: los
  * adjuntos, el texto, las reacciones y el enlace de abajo son HERMANOS.
+ *
+ * MEMORIZADA (28/10/2026): solo se pinta cuando cambia algo de lo que recibe.
+ * Sin esto, cada tecla en el campo del tema repintaba todas las burbujas a la
+ * vista. Quien la pinta le da referencias estables y, de la nota que suena,
+ * solo la suya (ver `renderItem` en `TemaScreen`).
  */
-export function BurbujaDeTema({
+export const BurbujaDeTema = memo(function BurbujaDeTema({
   mensaje,
   anterior,
   info,
@@ -336,7 +341,7 @@ export function BurbujaDeTema({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   dia: { alignItems: 'center', marginVertical: spacing.md },

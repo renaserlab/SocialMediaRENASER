@@ -63,7 +63,7 @@ export function useAvisosDelPush(): void {
       // El chat de esa conversación, si está abierto, pregunta lo que le falta:
       // su canal de tiempo real puede estar caído y este push es el único que
       // sabe que ha entrado algo (`services/contadores`).
-      if (conversacion) hayMensajeNuevoEn(conversacion);
+      if (conversacion) hayMensajeNuevoEn(conversacion, mensajeDelPush(data));
 
       // Lo que ya se está leyendo no se anuncia.
       if (seEstaViendoLaConversacion(conversacion)) {

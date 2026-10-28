@@ -410,6 +410,48 @@ export function instanteMasAntiguoDeTema(lista: readonly Ordenable[]): string | 
 }
 
 // ---------------------------------------------------------------------------
+// El aviso de temas
+// ---------------------------------------------------------------------------
+
+/**
+ * Lo único que puede decir un aviso de `chat-temas:{grupo}`: «se ha escrito un
+ * mensaje en tal tema» (28/10/2026).
+ *
+ * POR QUÉ. El aviso no llevaba nada, así que cada mensaje escrito en un tema
+ * hacía que TODO tema abierto del grupo volviera a pedir la lista de temas, su
+ * página y su «visto», aunque el mensaje fuera de otro. Con la pista, el tema
+ * de ese mensaje pide solo su página y los demás no piden nada.
+ *
+ * ES UNA PISTA, NO UNA VERDAD: el canal lo puede escribir cualquiera. Lo peor
+ * que consigue una falsa es que un tema no recargue por ELLA; los cambios de
+ * verdad mandan su propio aviso. Y un aviso sin pista —el de una versión
+ * anterior, o el de un cambio que no es un mensaje— es `null`: «algo cambió,
+ * vuelve a preguntarlo todo», como siempre.
+ */
+export type PistaDeTemas = { tipo: 'mensaje'; tema: string };
+
+/** La pista de un aviso, o `null` si no trae una que se entienda. */
+export function leerPistaDeTemas(bruto: unknown): PistaDeTemas | null {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const { tipo, tema } = bruto as Record<string, unknown>;
+  if (tipo !== 'mensaje' || typeof tema !== 'string' || !tema) return null;
+  return { tipo, tema };
+}
+
+/**
+ * Dos avisos que esperan a que el canal se una se mandan como uno. Si dicen lo
+ * mismo, con su pista; si no, sin ella: «algo cambió» cubre los dos.
+ */
+export function juntarPistas(
+  previa: PistaDeTemas | null | undefined,
+  nueva: PistaDeTemas | null,
+): PistaDeTemas | null {
+  if (previa === undefined) return nueva;
+  if (previa && nueva && previa.tema === nueva.tema) return nueva;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // La bandeja
 // ---------------------------------------------------------------------------
 

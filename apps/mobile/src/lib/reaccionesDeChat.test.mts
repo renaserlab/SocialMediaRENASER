@@ -309,10 +309,11 @@ test('la respuesta se manda con el mensaje y deja de estar puesta al enviarlo', 
   assert.match(pantalla, /envio\.respondeA \?\? null,/);
   // La burbuja provisional ya enseña la cita, sin esperar al servidor.
   assert.match(pantalla, /respuestaA: envio\.cita,/);
-  const desde = pantalla.indexOf('const submit = async () => {');
+  const desde = pantalla.indexOf('const enviarLoEscrito = (body: string): boolean => {');
+  assert.ok(desde > 0);
   const envio = pantalla.slice(desde, pantalla.indexOf('const reintentar', desde));
   assert.match(envio, /respondeA: respondiendoA\?\.id,/);
-  assert.ok(envio.indexOf('setRespondiendoA(null)') < envio.indexOf('await mandar(envio)'));
+  assert.ok(envio.indexOf('setRespondiendoA(null)') < envio.indexOf('void mandar(envio)'));
   // Tocar la cita lleva al mensaje original.
   assert.match(pantalla, /onPress=\{\(\) => setMensajeBuscado\(item\.respuestaA\?\.id \?\? null\)\}/);
   // Y a uno mismo no se le dice «Respondiendo a Tú».

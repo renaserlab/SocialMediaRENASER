@@ -1,4 +1,5 @@
 import { supabase } from '@/services/supabase';
+import { juntarPistas, leerPistaDeTemas, type PistaDeTemas } from '@/lib/temasDeGrupo';
 import type { MessageRow } from '@/mappers/messageMapper';
 
 // Contador para nombres de canal únicos: evita reusar un canal ya suscrito
@@ -170,13 +171,16 @@ export function avisosDeLectura(
   };
 }
 
+/** Quien escucha los avisos de temas: con la pista, si el aviso traía una. */
+type OyenteDeTemas = (pista: PistaDeTemas | null) => void;
+
 type CanalDeTemas = {
-  enviar: () => void;
+  enviar: (pista: PistaDeTemas | null) => void;
   /** Lo llama el último oyente al irse. */
   soltar: () => void;
   /** Llega un oyente nuevo: si el canal iba a cerrarse, ya no. */
   retener: () => void;
-  oyentes: Set<() => void>;
+  oyentes: Set<OyenteDeTemas>;
 };
 
 /** Los canales de temas abiertos ahora mismo, uno por grupo. */
@@ -192,13 +196,18 @@ function abrirCanalDeTemas(
   client: NonNullable<typeof supabase>,
   grupoId: string,
 ): CanalDeTemas {
-  const oyentes = new Set<() => void>();
+  const oyentes = new Set<OyenteDeTemas>();
   let unido = false;
-  let debeAvisar = false;
+  /**
+   * El aviso que espera a que el canal se una, con su pista. `undefined`:
+   * ninguno. Varios se juntan en uno (`juntarPistas`).
+   */
+  let porMandar: PistaDeTemas | null | undefined;
   let cierreDiferido: ReturnType<typeof setTimeout> | null = null;
 
-  const mandar = () => {
-    void channel.send({ type: 'broadcast', event: 'temas', payload: {} });
+  // Sin pista viaja vacío, como siempre: lo entiende cualquier versión.
+  const mandar = (pista: PistaDeTemas | null) => {
+    void channel.send({ type: 'broadcast', event: 'temas', payload: pista ?? {} });
   };
   const cerrarDeVerdad = () => {
     if (cierreDiferido) clearTimeout(cierreDiferido);
@@ -213,15 +222,17 @@ function abrirCanalDeTemas(
   // `self: false`: quien avisa ya pintó su propio cambio.
   const channel = client
     .channel(`chat-temas:${grupoId}`, { config: { broadcast: { self: false } } })
-    .on('broadcast', { event: 'temas' }, () => {
+    .on('broadcast', { event: 'temas' }, (mensaje: { payload?: unknown }) => {
+      const pista = leerPistaDeTemas(mensaje?.payload);
       // Sobre una copia: un oyente puede darse de baja mientras se reparte.
-      for (const oyente of [...oyentes]) oyente();
+      for (const oyente of [...oyentes]) oyente(pista);
     })
     .subscribe((estado: string) => {
       unido = estado === 'SUBSCRIBED';
-      if (unido && debeAvisar) {
-        debeAvisar = false;
-        mandar();
+      if (unido && porMandar !== undefined) {
+        const pista = porMandar;
+        porMandar = undefined;
+        mandar(pista);
         // Era lo único que lo mantenía abierto.
         if (cierreDiferido) cerrarDeVerdad();
       }
@@ -229,15 +240,15 @@ function abrirCanalDeTemas(
 
   const canal: CanalDeTemas = {
     oyentes,
-    enviar: () => {
-      if (unido) mandar();
-      else debeAvisar = true;
+    enviar: (pista) => {
+      if (unido) mandar(pista);
+      else porMandar = juntarPistas(porMandar, pista);
     },
     soltar: () => {
       // UN AVISO PENDIENTE NO SE TIRA AL CERRAR. La hoja de temas avisa y se
       // cierra en el mismo gesto («Listo»); si el canal aún no estaba dentro,
       // cerrarlo ya sería perder justo el aviso que motivó abrirlo.
-      if (debeAvisar) {
+      if (porMandar !== undefined) {
         cierreDiferido = setTimeout(cerrarDeVerdad, ESPERA_PARA_AVISAR_MS);
         return;
       }
@@ -263,7 +274,9 @@ function abrirCanalDeTemas(
  * EL AVISO NO LLEVA NADA, ni qué tema ni qué mensaje: un canal de difusión lo
  * puede escuchar —y escribir— cualquiera con la aplicación. Lo peor que logra
  * un aviso falso es una pregunta de más, y la API contesta lo que de verdad se
- * puede ver.
+ * puede ver. La única excepción es una PISTA (28/10/2026): quien escribe en un
+ * tema dice en cuál, para que los demás temas abiertos no lo recarguen todo
+ * (ver `PistaDeTemas`). Quien no la entiende, o no la recibe, pregunta todo.
  *
  * UN SOLO CANAL POR GRUPO, LO PIDA QUIEN LO PIDA, como `canalDeEscritura`. Lo
  * atienden a la vez la lista del grupo, el tema abierto encima y la hoja de
@@ -278,8 +291,8 @@ function abrirCanalDeTemas(
  */
 export function avisosDeTemas(
   grupoId: string,
-  alAvisar: () => void,
-): { avisar: () => void; cerrar: () => void } {
+  alAvisar: OyenteDeTemas,
+): { avisar: (pista?: PistaDeTemas) => void; cerrar: () => void } {
   const client = supabase;
   if (!client || !grupoId) return { avisar: () => {}, cerrar: () => {} };
 
@@ -294,8 +307,8 @@ export function avisosDeTemas(
   elCanal.oyentes.add(alAvisar);
   let cerrado = false;
   return {
-    avisar: () => {
-      if (!cerrado) elCanal.enviar();
+    avisar: (pista) => {
+      if (!cerrado) elCanal.enviar(pista ?? null);
     },
     cerrar: () => {
       if (cerrado) return;

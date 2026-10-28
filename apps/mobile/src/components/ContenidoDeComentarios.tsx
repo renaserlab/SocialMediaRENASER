@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { memo, useCallback, useMemo, useRef } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
@@ -14,7 +14,7 @@ import { StateView } from '@/components/StateView';
 import { enHilos } from '@/lib/comentarios';
 import { ESCALA_AL_PULSAR, retrasoEnCascada } from '@/lib/movimiento';
 import { useHaceFaltaCuenta, useRequireAuth } from '@/hooks/useRequireAuth';
-import type { useComentarios } from '@/hooks/useComentarios';
+import type { Respondiendo, useComentarios } from '@/hooks/useComentarios';
 import type { ComentarioConAvatar } from '@/repositories/PostRepository';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -68,11 +68,152 @@ export function ContenidoDeComentarios({
     reaccionar,
   } = comentarios;
 
-  const hilos = useMemo(() => enHilos(estado.lista), [estado.lista]);
+  const pedirCuenta = () => void requireAuth('auth.reasonComment', () => {});
+
+  /*
+    LA LISTA NO SE ENTERA DE LO QUE SE ESCRIBE (28/10/2026). El texto del
+    campo vive en `useComentarios`, en quien monta esto, así que cada tecla
+    vuelve a pintar este componente; y una `FlatList` que se vuelve a pintar
+    repinta todas sus filas (auditoría del 27/10, §6.1). La lista va aparte,
+    memorizada, y recibe lo que pinta y acciones estables que llaman a las de
+    ahora: una tecla ya no la toca.
+  */
+  const accionesAhora = useRef({ load, cargarMas, reaccionar, setRespondiendo, onPersonPress });
+  accionesAhora.current = { load, cargarMas, reaccionar, setRespondiendo, onPersonPress };
+  const recargar = useCallback(() => accionesAhora.current.load(), []);
+  const pedirMas = useCallback(() => accionesAhora.current.cargarMas(), []);
+  const reaccionarAhora = useCallback(
+    (comentarioId: string) => accionesAhora.current.reaccionar(comentarioId),
+    [],
+  );
+  const responderA = useCallback(
+    (destino: Respondiendo) => accionesAhora.current.setRespondiendo(destino),
+    [],
+  );
+  const abrirPersona = useCallback(
+    (persona: { id: string }) => accionesAhora.current.onPersonPress?.(persona),
+    [],
+  );
+
+  return (
+    <View style={styles.contenedor}>
+      <ListaDeComentarios
+        lista={estado.lista}
+        uiState={uiState}
+        cargandoMas={cargandoMas}
+        load={recargar}
+        cargarMas={pedirMas}
+        reaccionar={reaccionarAhora}
+        setRespondiendo={responderA}
+        onPersonPress={onPersonPress ? abrirPersona : undefined}
+      />
+
+      {respondiendo ? (
+        <Aparecer
+          desde={6}
+          style={[
+            styles.respondiendo,
+            { borderTopColor: colors.border, backgroundColor: colors.backgroundAlt },
+          ]}
+        >
+          <Feather name="corner-down-right" size={14} color={colors.textMuted} />
+          <Text style={[styles.respondiendoTexto, { color: colors.textMuted }]} numberOfLines={1}>
+            {t('post.replyingTo', { nombre: respondiendo.author })}
+          </Text>
+          <Pulsable
+            onPress={() => setRespondiendo(null)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            escala={ESCALA_AL_PULSAR.icono}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.cancel')}
+          >
+            <Feather name="x" size={16} color={colors.text} />
+          </Pulsable>
+        </Aparecer>
+      ) : null}
+
+      <View
+        style={[
+          styles.barra,
+          {
+            borderTopColor: colors.border,
+            backgroundColor: colors.background,
+            paddingBottom: spacing.md + paddingInferior,
+          },
+        ]}
+      >
+        <Input
+          placeholder={respondiendo ? t('post.writeReply') : t('post.writeComment')}
+          value={inputText}
+          onChangeText={setInputText}
+          containerStyle={styles.campo}
+          // Sin cuenta el teclado no llega a abrirse: el aviso sale al tocar.
+          editable={!haceFaltaCuenta}
+          // Si el envio falla el texto se queda aqui: lo conserva el hook.
+          multiline
+        />
+        {/*
+          Un boton redondo y siempre en su sitio, en vez de la palabra «Enviar»
+          en gris: crece cuando hay algo que mandar y enseña la espera dentro.
+        */}
+        <BotonDeEnviar
+          onPress={() => void requireAuth('auth.reasonComment', enviar)}
+          listo={Boolean(inputText.trim())}
+          enviando={sending}
+          accessibilityLabel={t('common.send')}
+        />
+        {/*
+          Una capa por encima de la barra entera, y no un campo desactivado a
+          secas: desactivado, tocar el campo no haria NADA y pareceria que la
+          aplicacion se ha colgado. Asi el primer toque ya explica que hace
+          falta una cuenta. Va absoluta, de modo que no altera la fila.
+        */}
+        {haceFaltaCuenta ? (
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={pedirCuenta}
+            accessibilityRole="button"
+            accessibilityLabel={t('post.writeComment')}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Los hilos de comentarios, con su estado (cargando, error, vacío).
+ *
+ * MEMORIZADA (28/10/2026): solo se pinta cuando cambia lo que recibe. Quien la
+ * monta le da acciones estables (ver `ContenidoDeComentarios`), así que el
+ * texto que se escribe debajo no la repinta.
+ */
+const ListaDeComentarios = memo(function ListaDeComentarios({
+  lista,
+  uiState,
+  cargandoMas,
+  load,
+  cargarMas,
+  reaccionar,
+  setRespondiendo,
+  onPersonPress,
+}: {
+  lista: Comentarios['estado']['lista'];
+  uiState: Comentarios['uiState'];
+  cargandoMas: boolean;
+  load: () => void;
+  cargarMas: () => Promise<void>;
+  reaccionar: (comentarioId: string) => Promise<void>;
+  setRespondiendo: (destino: Respondiendo) => void;
+  onPersonPress?: (persona: { id: string }) => void;
+}) {
+  const { t } = useTranslation();
+  const { colors } = useAppTheme();
+  const requireAuth = useRequireAuth();
+
+  const hilos = useMemo(() => enHilos(lista), [lista]);
   /** Los hilos que ya hicieron su entrada. */
   const yaEntraron = useRef(new Set<string>());
-
-  const pedirCuenta = () => void requireAuth('auth.reasonComment', () => {});
 
   const fila = (item: ComentarioConAvatar, esRespuesta: boolean) => {
     const puedeAbrirPerfil = Boolean(item.authorId && onPersonPress);
@@ -169,120 +310,48 @@ export function ContenidoDeComentarios({
   };
 
   return (
-    <View style={styles.contenedor}>
-      <StateView
-        state={uiState}
-        onRetry={load}
-        title={uiState === 'empty' ? t('post.beFirstToComment') : undefined}
-        description={uiState === 'empty' ? t('post.noCommentsYet') : undefined}
-        // Un globo de conversacion, no la bandeja generica: dice de que va.
-        icon={uiState === 'empty' ? 'message-circle' : undefined}
-      >
-        <FlatList
-          data={hilos}
-          keyExtractor={(hilo) => hilo.raiz.id}
-          contentContainerStyle={styles.lista}
-          onEndReached={() => void cargarMas()}
-          onEndReachedThreshold={0.4}
-          keyboardShouldPersistTaps="handled"
-          ListFooterComponent={
-            cargandoMas ? (
-              <ActivityIndicator style={styles.masAbajo} color={colors.textMuted} />
-            ) : null
-          }
-          renderItem={({ item, index }) => {
-            /*
-              Cada hilo entra subiendo unos puntos, en cascada los primeros.
-              Un comentario recien enviado entra igual: se ve llegar.
+    <StateView
+      state={uiState}
+      onRetry={load}
+      title={uiState === 'empty' ? t('post.beFirstToComment') : undefined}
+      description={uiState === 'empty' ? t('post.noCommentsYet') : undefined}
+      // Un globo de conversacion, no la bandeja generica: dice de que va.
+      icon={uiState === 'empty' ? 'message-circle' : undefined}
+    >
+      <FlatList
+        data={hilos}
+        keyExtractor={(hilo) => hilo.raiz.id}
+        contentContainerStyle={styles.lista}
+        onEndReached={() => void cargarMas()}
+        onEndReachedThreshold={0.4}
+        keyboardShouldPersistTaps="handled"
+        ListFooterComponent={
+          cargandoMas ? (
+            <ActivityIndicator style={styles.masAbajo} color={colors.textMuted} />
+          ) : null
+        }
+        renderItem={({ item, index }) => {
+          /*
+            Cada hilo entra subiendo unos puntos, en cascada los primeros.
+            Un comentario recien enviado entra igual: se ve llegar.
 
-              UNA VEZ. La lista desmonta las filas que quedan lejos y las
-              vuelve a montar al regresar: sin apuntar las que ya entraron,
-              volver arriba las animaba otra vez.
-            */
-            const yaEntro = yaEntraron.current.has(item.raiz.id);
-            yaEntraron.current.add(item.raiz.id);
-            return (
-              <Aparecer inmediato={yaEntro} retraso={index < 6 ? retrasoEnCascada(index) : 0}>
-                {fila(item.raiz, false)}
-                {item.respuestas.map((respuesta) => fila(respuesta, true))}
-              </Aparecer>
-            );
-          }}
-        />
-      </StateView>
-
-      {respondiendo ? (
-        <Aparecer
-          desde={6}
-          style={[
-            styles.respondiendo,
-            { borderTopColor: colors.border, backgroundColor: colors.backgroundAlt },
-          ]}
-        >
-          <Feather name="corner-down-right" size={14} color={colors.textMuted} />
-          <Text style={[styles.respondiendoTexto, { color: colors.textMuted }]} numberOfLines={1}>
-            {t('post.replyingTo', { nombre: respondiendo.author })}
-          </Text>
-          <Pulsable
-            onPress={() => setRespondiendo(null)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            escala={ESCALA_AL_PULSAR.icono}
-            accessibilityRole="button"
-            accessibilityLabel={t('common.cancel')}
-          >
-            <Feather name="x" size={16} color={colors.text} />
-          </Pulsable>
-        </Aparecer>
-      ) : null}
-
-      <View
-        style={[
-          styles.barra,
-          {
-            borderTopColor: colors.border,
-            backgroundColor: colors.background,
-            paddingBottom: spacing.md + paddingInferior,
-          },
-        ]}
-      >
-        <Input
-          placeholder={respondiendo ? t('post.writeReply') : t('post.writeComment')}
-          value={inputText}
-          onChangeText={setInputText}
-          containerStyle={styles.campo}
-          // Sin cuenta el teclado no llega a abrirse: el aviso sale al tocar.
-          editable={!haceFaltaCuenta}
-          // Si el envio falla el texto se queda aqui: lo conserva el hook.
-          multiline
-        />
-        {/*
-          Un boton redondo y siempre en su sitio, en vez de la palabra «Enviar»
-          en gris: crece cuando hay algo que mandar y enseña la espera dentro.
-        */}
-        <BotonDeEnviar
-          onPress={() => void requireAuth('auth.reasonComment', enviar)}
-          listo={Boolean(inputText.trim())}
-          enviando={sending}
-          accessibilityLabel={t('common.send')}
-        />
-        {/*
-          Una capa por encima de la barra entera, y no un campo desactivado a
-          secas: desactivado, tocar el campo no haria NADA y pareceria que la
-          aplicacion se ha colgado. Asi el primer toque ya explica que hace
-          falta una cuenta. Va absoluta, de modo que no altera la fila.
-        */}
-        {haceFaltaCuenta ? (
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={pedirCuenta}
-            accessibilityRole="button"
-            accessibilityLabel={t('post.writeComment')}
-          />
-        ) : null}
-      </View>
-    </View>
+            UNA VEZ. La lista desmonta las filas que quedan lejos y las
+            vuelve a montar al regresar: sin apuntar las que ya entraron,
+            volver arriba las animaba otra vez.
+          */
+          const yaEntro = yaEntraron.current.has(item.raiz.id);
+          yaEntraron.current.add(item.raiz.id);
+          return (
+            <Aparecer inmediato={yaEntro} retraso={index < 6 ? retrasoEnCascada(index) : 0}>
+              {fila(item.raiz, false)}
+              {item.respuestas.map((respuesta) => fila(respuesta, true))}
+            </Aparecer>
+          );
+        }}
+      />
+    </StateView>
   );
-}
+});
 
 const styles = StyleSheet.create({
   contenedor: { flex: 1, justifyContent: 'space-between' },
