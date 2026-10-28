@@ -105,11 +105,19 @@ async def lifespan(_: FastAPI):
     # lance tareas por detrás.
     from app.modules.notifications import despacho
 
+    # UN cliente HTTP para todo el proceso (`shared/cliente_http.py`): firmar
+    # en Storage, enviar a Expo y servir la playlist HLS abrían uno por llamada.
+    # Se abre antes de despachar para que la primera pasada ya lo encuentre, y
+    # se cierra después de apagar el despacho por lo mismo.
+    from app.shared import cliente_http
+
+    await cliente_http.abrir()
     despacho.encender()
     try:
         yield
     finally:
         despacho.apagar()
+        await cliente_http.cerrar()
 
 
 def create_app() -> FastAPI:

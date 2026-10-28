@@ -27,6 +27,10 @@ from collections.abc import Sequence
 import httpx
 
 from app.core.config import get_settings
+# Cada firma, subida o borrado abría su propio cliente HTTP (contexto TLS
+# nuevo, conexión nueva). Ahora usan el del proceso; fuera del arranque de la
+# aplicación —pruebas, guiones— siguen abriendo uno propio como antes.
+from app.shared.cliente_http import cliente_http
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +220,7 @@ async def delete_user_files(
 
     borrados = 0
     fallidos: list[str] = []
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with cliente_http(_TIMEOUT) as client:
         # PRIMERO SE LISTA TODO, y a la vez. Si un depósito no contesta, no se
         # borra nada: la cuenta sigue entera, con todos sus archivos.
         turnos = asyncio.Semaphore(LISTADOS_A_LA_VEZ)
@@ -273,7 +277,7 @@ async def borrar_conversaciones(conversaciones: Sequence[str]) -> list[str]:
     if not conversaciones:
         return []
     _exigir_configurado()
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with cliente_http(_TIMEOUT) as client:
         turnos = asyncio.Semaphore(LISTADOS_A_LA_VEZ)
 
         async def una(conversacion: str) -> None:
@@ -293,7 +297,7 @@ async def borrar_carpeta(bucket: str, prefijo: str) -> int:
     terminó después de que se borrara la cuenta o la publicación.
     """
     _exigir_configurado()
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with cliente_http(_TIMEOUT) as client:
         rutas = await _list_prefix(client, bucket, prefijo)
         return await _borrar_nombres(client, bucket, rutas)
 
@@ -342,7 +346,7 @@ async def subir_objeto(
     cabeceras = {**_headers(), "Content-Type": content_type}
     if sobrescribir:
         cabeceras["x-upsert"] = "true"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with cliente_http(_TIMEOUT) as client:
         respuesta = await client.post(url, headers=cabeceras, content=datos)
     if respuesta.status_code >= 400:
         raise StorageFallo(f"Storage devolvio {respuesta.status_code} al subir")
@@ -363,7 +367,7 @@ async def firmar_objetos(
     _exigir_configurado()
     base = get_settings().supabase_url
     unicas = list(dict.fromkeys(rutas))
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with cliente_http(_TIMEOUT) as client:
         respuesta = await client.post(
             f"{base}/storage/v1/object/sign/{bucket}",
             headers=_headers(),
@@ -383,7 +387,7 @@ async def firmar_objetos(
 async def borrar_objeto(bucket: str, ruta: str) -> bool:
     """Borra `bucket/ruta`. Devuelve si Storage dijo que si."""
     _exigir_configurado()
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with cliente_http(_TIMEOUT) as client:
         respuesta = await client.request(
             "DELETE",
             f"{get_settings().supabase_url}/storage/v1/object/{bucket}",

@@ -10,7 +10,6 @@ mas el estado propio (liked_by_me / saved_by_me) cuando hay sesion.
 import re
 from datetime import datetime
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy import Text as SAText, delete, func, literal, select, update
 from sqlalchemy.orm import aliased
@@ -52,6 +51,7 @@ from app.modules.recommendations import esquema as esquema_recomendaciones
 from app.modules.recommendations import temas_de_contenido
 from app.modules.social_graph.models import Follow
 from app.modules.social_graph.service import blocked_either_way
+from app.shared.cliente_http import cliente_http
 from app.shared.database import get_db
 from app.shared.identifiers import ensure_uuid
 from app.shared.permissions import is_admin as is_admin_user
@@ -957,7 +957,10 @@ async def media_hls_playlist(
     if not _mp.processing_configured():
         raise NotFoundError("Streaming no configurado en este servidor.")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # El cliente del proceso (`shared/cliente_http.py`): cada video que
+    # arranca pide esta playlist, y abrir un cliente por peticion costaba un
+    # contexto TLS nuevo con el bucle parado y dos saludos TLS a Storage.
+    async with cliente_http(30.0) as client:
         firmada = await _mp._signed_url(client, f"{media.stream_path}/{playlist}")
         respuesta = await client.get(firmada)
         if respuesta.status_code != 200:

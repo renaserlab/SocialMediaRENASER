@@ -31,4 +31,11 @@ COPY app ./app
 EXPOSE 8000
 # Usa el puerto que asigne la plataforma (Render/Railway definen $PORT);
 # fallback 8000 para ejecución local con docker.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+#
+# `--timeout-keep-alive 75`: el balanceador de AWS reutiliza cada conexión con
+# la API hasta 60 s sin tráfico, y uvicorn la cerraba a los 5 s (su valor de
+# fábrica). Si el balanceador mandaba una petición justo cuando uvicorn
+# cerraba, la conexión moría a medias y la app recibía un 502 suelto que no
+# se reproducía nunca. La regla es que quien está DETRÁS espere más que quien
+# está delante: 75 s > 60 s.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-keep-alive 75"]

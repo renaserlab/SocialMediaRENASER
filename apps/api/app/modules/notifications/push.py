@@ -14,17 +14,27 @@ from __future__ import annotations
 
 import logging
 
-import httpx
+# Ya no se construye aquí ningún cliente (ver `ESPERA_DE_EXPO`), pero el módulo
+# se queda importado: las pruebas sustituyen `push.httpx.AsyncClient` por uno
+# de mentira, y es el que usa `cliente_http` cuando no hay compartido.
+import httpx  # noqa: F401
 from fastapi import BackgroundTasks
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.notifications.device_tokens import DeviceToken
+from app.shared.cliente_http import cliente_http
 from app.shared.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+#: Lo que se espera a Expo por lote, el mismo plazo de siempre. El cliente ya
+#: no se abre por lote —cada mensaje de chat manda un aviso, y abrir uno costaba
+#: unos 18 ms de CPU con el bucle parado—: es el del proceso
+#: (`shared/cliente_http.py`), y este plazo viaja en cada petición.
+ESPERA_DE_EXPO = 10
 
 #: Expo acepta como máximo 100 mensajes por petición.
 BATCH_SIZE = 100
@@ -310,7 +320,7 @@ async def _enviar_a(
     for start in range(0, len(messages), BATCH_SIZE):
         batch = messages[start : start + BATCH_SIZE]
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with cliente_http(ESPERA_DE_EXPO) as client:
                 response = await client.post(EXPO_PUSH_URL, json=batch)
                 response.raise_for_status()
                 cuerpo = _cuerpo(response)
@@ -568,7 +578,7 @@ async def enviar_de_la_cola(
     # «mejor esfuerzo»— y aqui hace falta lo contrario. Si esto no lanza, la
     # entrega se marca enviada sin haber salido.
     for inicio in range(0, len(mensajes), BATCH_SIZE):
-        async with httpx.AsyncClient(timeout=10) as cliente:
+        async with cliente_http(ESPERA_DE_EXPO) as cliente:
             respuesta = await cliente.post(
                 EXPO_PUSH_URL, json=mensajes[inicio : inicio + BATCH_SIZE]
             )

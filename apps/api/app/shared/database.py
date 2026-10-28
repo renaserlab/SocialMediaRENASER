@@ -7,6 +7,7 @@ modelos ORM solo mapean tablas existentes para consultarlas.
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -61,6 +62,86 @@ engine = create_async_engine(
     **_opciones_del_pool,
 )
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# --------------------------------------------------------------------------- #
+# TOPE POR SENTENCIA (`statement_timeout`)
+#
+# QUE PASABA SIN EL. La API entra como `postgres`, y ese rol no tiene tope (los
+# de PostgREST si: 3 s `anon`, 8 s `authenticated`). Una consulta que se tuerce
+# —un plan malo, un cerrojo que no se suelta— seguia corriendo despues de que
+# CloudFront cortara a los 60 s y la app mostrara el error: nadie esperaba ya la
+# respuesta, pero la sentencia seguia gastando CPU de la base y, sobre todo,
+# tenia cogida una de las diez conexiones del pool. Unas pocas asi a la vez y
+# se para la API entera, no la pantalla que las pidio.
+#
+# POR QUE ESTE VALOR. Tiene que caber DEBAJO de los 60 s de CloudFront y del
+# balanceador con margen para el resto de la peticion (esperar turno en el
+# pool, otras sentencias, contestar), y muy POR ENCIMA de lo mas largo que la
+# API hace a proposito. Lo mas largo que se encontro (auditoria 28/10/2026) es
+# la baja de una cuenta, que borra en cascada todo lo suyo: con la base de la
+# prueba de carga (1000 personas, 180 000 mensajes), el `DELETE` del perfil de
+# quien creo un grupo de 100 000 mensajes tarda 3,4 s; el de una persona
+# normal, 54 ms. Treinta segundos dejan casi diez veces ese margen y aun asi
+# cortan antes que CloudFront. Las pasadas de la cola de avisos, los barridos
+# de Servicios (por lotes, y EventBridge corta a los 5 s) y
+# `scripts/reprocesar_miniaturas.py` son consultas de milisegundos. Los guiones
+# de la raiz (`scripts/procesar_media.py`) no usan este motor: hablan con la
+# API REST de Supabase. Las migraciones tampoco: van por su propia conexion.
+#
+# ES POR SENTENCIA, NO POR PETICION: una peticion con tres consultas de 20 s
+# no se corta. Para eso estan CloudFront y el balanceador.
+#
+# COMO SE APLICA: con un `SET` al abrir CADA conexion, no con
+# `connect_args={"server_settings": ...}`. Los dos dejan el ajuste en la
+# sesion, pero `server_settings` viaja en el paquete de arranque y quien lo
+# recibe en produccion es el pooler de Supabase (Supavisor, modo sesion, puerto
+# 5432), que monta su propia conexion con la base: un parametro de arranque que
+# no reenvie se perderia en silencio, y uno que no entienda tumbaria todas las
+# conexiones. Un `SET` es una sentencia mas y en modo sesion llega tal cual a
+# la conexion que queda reservada para nosotros. NO valdria en modo
+# transaccion (6543), donde cada transaccion puede caer en otra conexion: si
+# algun dia se cambia de puerto, esto hay que pasarlo a `SET LOCAL`.
+#
+# Va FUERA de toda transaccion (`run_async` con la conexion de asyncpg, que
+# sin transaccion abierta confirma cada sentencia): un `SET` dentro de una
+# transaccion que despues se deshace se deshace con ella, y el `ROLLBACK` con
+# el que el pool limpia cada conexion al devolverla se lo llevaria.
+#
+# Solo PostgreSQL: SQLite no tiene `statement_timeout` y el `SET` fallaria.
+# --------------------------------------------------------------------------- #
+def tope_por_sentencia_ms(ajustes=None) -> int | None:  # noqa: ANN001
+    """Milisegundos del tope, o `None` si no se aplica (SQLite, o cero)."""
+    ajustes = ajustes or settings
+    if ajustes.uses_sqlite:
+        return None
+    ms = int(ajustes.database_statement_timeout_ms or 0)
+    return ms if ms > 0 else None
+
+
+def instalar_tope_por_sentencia(motor, ms: int | None):  # noqa: ANN001, ANN201
+    """Engancha el `SET statement_timeout` a cada conexion NUEVA de `motor`.
+
+    Devuelve el escucha enganchado (para poder comprobarlo o quitarlo), o
+    `None` si no engancho nada: con `ms` a `None`, que es el caso de SQLite y
+    el de quien lo apaga con cero.
+
+    Una vez por conexion y no por peticion: el pool las reutiliza y el ajuste
+    vive lo que vive la sesion, asi que no cuesta ningun viaje mas a la base
+    salvo al abrir una conexion nueva (cada media hora, por `pool_recycle`).
+    """
+    if ms is None:
+        return None
+    sentencia = f"set statement_timeout = {int(ms)}"
+
+    def _al_conectar(conexion_dbapi, _registro) -> None:  # noqa: ANN001
+        conexion_dbapi.run_async(lambda conexion: conexion.execute(sentencia))
+
+    event.listen(motor.sync_engine, "connect", _al_conectar)
+    return _al_conectar
+
+
+instalar_tope_por_sentencia(engine, tope_por_sentencia_ms())
 
 
 class Base(DeclarativeBase):
