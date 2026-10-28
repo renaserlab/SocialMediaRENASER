@@ -22,7 +22,8 @@ import {
 } from '@/lib/historias';
 import { toast } from '@/lib/toast';
 import { readVideoMetadata } from '@/services/mediaCompressor';
-import { uploadPostMedia, type PickedMedia } from '@/services/storage';
+import { prepararFotoParaSubir } from '@/services/reducirFoto';
+import { uploadPostMedia, type PickedMedia, type UploadedMedia } from '@/services/storage';
 import { useAppStore } from '@/store/useAppStore';
 import { spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -155,7 +156,21 @@ export function ModoHistoria({ pie, alSalir, activo = true }: Props) {
         tramo. La alternativa era una dependencia nativa nueva y una compilacion
         nueva; la otra alternativa, fingir un recorte que no existe.
       */
-      const subido = await uploadPostMedia(elegido, avance);
+      /*
+        LA FOTO SE REDUCE ANTES DE SUBIRLA SI NADIE LO VA A HACER. Una historia
+        no pasa por los derivados del servidor: cada espectador descarga lo que
+        se suba. La aplicacion instalada ya la comprime dentro de
+        `uploadPostMedia`; en la web no hay compresor y viajaba el original de
+        la camara (3–6 MB). Esto la deja en lo mismo que sube la aplicacion. En
+        el movil no hace nada, y con video tampoco.
+      */
+      const foto = await prepararFotoParaSubir(elegido, avance);
+      let subido: UploadedMedia;
+      try {
+        subido = await uploadPostMedia(foto.media, avance);
+      } finally {
+        foto.liberar();
+      }
       // Se comprueba justo antes de crear la historia: si se cancelo mientras
       // subia, el archivo queda huerfano pero NO aparece ninguna historia.
       if (cancelado()) throw new PublicacionCancelada();
