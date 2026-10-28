@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  corteParaCompletar,
   descartarEnvio,
   esTemporal,
   fusionar,
@@ -227,5 +228,45 @@ describe('los extremos del historial', () => {
     assert.equal(instanteMasReciente([]), undefined);
     assert.equal(instanteMasAntiguo([]), undefined);
     assert.equal(instanteMasReciente([mio('tmp-1', 'x')]), undefined);
+  });
+});
+
+describe('completar lo que trajo el tiempo real', () => {
+  it('una fila sola se completa desde lo anterior a ella, como antes', () => {
+    const lista = [
+      suyo('a', 'a', '2026-10-28T10:00:01Z'),
+      suyo('b', 'b', '2026-10-28T10:00:05Z'),
+      suyo('c', 'c', '2026-10-28T10:00:09Z'),
+    ];
+    assert.equal(corteParaCompletar(lista, new Set(['c'])), '2026-10-28T10:00:05Z');
+  });
+
+  it('una rafaga es UNA peticion: el corte va antes de la mas antigua de las que faltan', () => {
+    const lista = [
+      suyo('a', 'a', '2026-10-28T10:00:01Z'),
+      suyo('b', 'b', '2026-10-28T10:00:05Z'),
+      suyo('c', 'c', '2026-10-28T10:00:06Z'),
+      suyo('d', 'd', '2026-10-28T10:00:07Z'),
+    ];
+    assert.equal(corteParaCompletar(lista, new Set(['b', 'c', 'd'])), '2026-10-28T10:00:01Z');
+  });
+
+  it('una fila desordenada, detras de otra ya completa, no se queda fuera', () => {
+    // «Lo mas reciente que no falta» seria `b`, posterior a la fila `x`: la
+    // peticion no la traeria y se quedaria sin su adjunto.
+    const lista = [
+      suyo('a', 'a', '2026-10-28T10:00:01Z'),
+      suyo('x', 'x', '2026-10-28T10:00:03Z'),
+      suyo('b', 'b', '2026-10-28T10:00:05Z'),
+    ];
+    assert.equal(corteParaCompletar(lista, new Set(['x'])), '2026-10-28T10:00:01Z');
+  });
+
+  it('sin nada anterior se pide la primera pagina, y sin filas pendientes, nada', () => {
+    const lista = [suyo('a', 'a', '2026-10-28T10:00:01Z'), mio('tmp-1', 'pendiente')];
+    assert.equal(corteParaCompletar(lista, new Set(['a'])), undefined);
+    // La fila ya no esta (se vacio el chat): no hay nada que completar.
+    assert.equal(corteParaCompletar(lista, new Set(['zz'])), null);
+    assert.equal(corteParaCompletar([], new Set()), null);
   });
 });

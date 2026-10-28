@@ -16,10 +16,12 @@ import {
   instanteMasAntiguoDeTema,
   juzgarNombreDeTema,
   juzgarTituloDeComunidad,
+  juntarPistas,
   leerComunidades,
   leerCuenta,
   leerDatosDeTema,
   leerPaginaDeTema,
+  leerPistaDeTemas,
   leerTemas,
   leerUltimo,
   limpiarNombre,
@@ -442,5 +444,35 @@ describe('la información de una conversación', () => {
     assert.equal(directo?.tema, null);
     // Un servidor anterior no manda nada de esto.
     assert.equal(leerInfo(GRUPO)?.padre, null);
+  });
+});
+
+describe('el aviso de temas', () => {
+  test('solo se entiende «un mensaje en tal tema»; lo demás es «algo cambió»', () => {
+    assert.deepEqual(leerPistaDeTemas({ tipo: 'mensaje', tema: 't1' }), { tipo: 'mensaje', tema: 't1' });
+    // El aviso de una versión anterior, o de un cambio que no es un mensaje.
+    assert.equal(leerPistaDeTemas({}), null);
+    assert.equal(leerPistaDeTemas(undefined), null);
+    assert.equal(leerPistaDeTemas('mensaje'), null);
+    assert.equal(leerPistaDeTemas({ tipo: 'mensaje' }), null);
+    assert.equal(leerPistaDeTemas({ tipo: 'mensaje', tema: '' }), null);
+    assert.equal(leerPistaDeTemas({ tipo: 'renombrar', tema: 't1' }), null);
+    // Nada más viaja: lo que no es la pista se descarta.
+    assert.deepEqual(leerPistaDeTemas({ tipo: 'mensaje', tema: 't1', texto: 'hola' }), {
+      tipo: 'mensaje',
+      tema: 't1',
+    });
+  });
+
+  test('dos avisos en espera se juntan sin perder lo que dice cada uno', () => {
+    const t1 = { tipo: 'mensaje' as const, tema: 't1' };
+    const t2 = { tipo: 'mensaje' as const, tema: 't2' };
+    assert.deepEqual(juntarPistas(undefined, t1), t1);
+    assert.equal(juntarPistas(undefined, null), null);
+    assert.deepEqual(juntarPistas(t1, { ...t1 }), t1);
+    // Dos temas distintos, o un mensaje y otro cambio: «algo cambió».
+    assert.equal(juntarPistas(t1, t2), null);
+    assert.equal(juntarPistas(t1, null), null);
+    assert.equal(juntarPistas(null, t1), null);
   });
 });

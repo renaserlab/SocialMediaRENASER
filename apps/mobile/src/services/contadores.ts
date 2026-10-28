@@ -309,7 +309,11 @@ export function alLeerUnaConversacion(oyente: OyenteDeLeida): () => void {
   05/10/2026). Ahora el push de un mensaje se lo dice también al chat, que
   pregunta al servidor lo que le falta.
 */
-type OyenteDeMensaje = (conversacionId: string) => void;
+/**
+ * `mensajeId` es el del push, si lo trae: el chat que YA tiene ese mensaje
+ * (llegó antes por su canal, que es lo normal) no pregunta nada.
+ */
+type OyenteDeMensaje = (conversacionId: string, mensajeId: string | null) => void;
 
 const oyentesDeMensaje = new Set<OyenteDeMensaje>();
 
@@ -322,8 +326,8 @@ export function alSaberDeUnMensaje(oyente: OyenteDeMensaje): () => void {
 }
 
 /** Ha entrado un mensaje en esa conversación: que quien la tenga abierta se ponga al día. */
-export function hayMensajeNuevoEn(conversacionId: string): void {
-  for (const oyente of oyentesDeMensaje) oyente(conversacionId);
+export function hayMensajeNuevoEn(conversacionId: string, mensajeId: string | null = null): void {
+  for (const oyente of oyentesDeMensaje) oyente(conversacionId, mensajeId);
 }
 
 /**

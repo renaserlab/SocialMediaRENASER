@@ -189,6 +189,41 @@ export function instanteMasReciente(lista: readonly MensajeFusionable[]): string
 }
 
 /**
+ * Desde donde pedir para COMPLETAR las filas que trajo Realtime.
+ *
+ * La fila cruda no trae adjuntos, cita ni historia: se piden despues, con
+ * `after`, en UNA peticion para toda la rafaga (28/10/2026; antes era una por
+ * fila). Por eso el corte tiene que ser ANTERIOR a la mas antigua de las que
+ * faltan: es lo mas reciente de lo que ya esta completo y llego antes que
+ * ella. Mirar solo «lo mas reciente que no falta» dejaria fuera una fila que
+ * llego desordenada, detras de otra ya completa.
+ *
+ * Devuelve `null` si ninguna de esas filas sigue en la lista —se vacio el
+ * chat—: no hay nada que completar. Y `undefined` si no hay nada anterior: el
+ * primer mensaje de una conversacion recien abierta, que se completa pidiendo
+ * la primera pagina, como hasta ahora.
+ */
+export function corteParaCompletar(
+  lista: readonly MensajeFusionable[],
+  pendientes: ReadonlySet<string>,
+): string | undefined | null {
+  let masAntigua: string | undefined;
+  for (const mensaje of lista) {
+    if (!pendientes.has(mensaje.id) || !mensaje.createdAtIso) continue;
+    if (!masAntigua || mensaje.createdAtIso < masAntigua) masAntigua = mensaje.createdAtIso;
+  }
+  if (!masAntigua) return null;
+  let corte: string | undefined;
+  for (const mensaje of lista) {
+    if (pendientes.has(mensaje.id) || !mensaje.createdAtIso) continue;
+    if (mensaje.createdAtIso < masAntigua && (!corte || mensaje.createdAtIso > corte)) {
+      corte = mensaje.createdAtIso;
+    }
+  }
+  return corte;
+}
+
+/**
  * El instante del mensaje mas antiguo. Es lo que se manda como `before` para
  * subir por el historial.
  */

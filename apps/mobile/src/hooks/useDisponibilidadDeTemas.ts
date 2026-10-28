@@ -19,7 +19,7 @@ let sabida: DisponibilidadDeTemas | null = null;
  * no ofrece «Agregar a un tema» hasta que el servidor confirma que existe. Se
  * vuelve a preguntar al montar —el servidor puede haberse actualizado—, pero lo
  * ya sabido se enseña sin esperar a la red. Mismo criterio que
- * `useFuncionesDelChat`.
+ * `useFuncionesDelChat`, y la misma respuesta, que el repositorio comparte.
  */
 export function useDisponibilidadDeTemas(activo: boolean): DisponibilidadDeTemas {
   const [disponibilidad, setDisponibilidad] = useState<DisponibilidadDeTemas>(

@@ -360,13 +360,26 @@ test('el chat sube por el historial hasta el mensaje, con tope, y avisa si no ll
   // Deja de seguir el final antes de moverse, o la lista volvería abajo sola.
   assert.match(chat, /pegadoAlFinal\.current = false;\s*setLejosDelFinal\(true\);\s*setResaltado\(buscado\);/);
   assert.match(chat, /notify\(t\('chat\.jumpNotFoundTitle'\), t\('chat\.jumpNotFoundBody'\)\)/);
-  // La lista recicla celdas: tiene que enterarse del resalte y del grupo.
-  // Y de las marcas de lectura, que cambian la marca de las burbujas propias.
-  // Y de quién escribe, que cambia la frase de la burbuja del final.
-  assert.match(
-    chat,
-    /\(\{\s*estadosDeSesion,\s*sesionOcupada,\s*infoDeConversacion,\s*resaltado,\s*marcas: lecturas\.marcas,\s*(?:\/\/[^\n]*\n\s*)?claveDeEscritura,\s*\}\)/,
-  );
+  // La lista recicla celdas y solo vuelve a pintar una si cambia
+  // `renderItem` (28/10/2026): tiene que depender del resalte, de las
+  // sesiones, de las marcas de lectura —la marca de las burbujas propias— y
+  // de quién escribe —la frase de la burbuja del final—. Y del grupo, que
+  // viaja en lo que las burbujas reciben de la conversación.
+  const dependencias =
+    /const renderItem = useCallback\([\s\S]*?\n    \[([\s\S]*?)\],\n  \);/.exec(chat)?.[1] ?? '';
+  for (const dependencia of [
+    'messages',
+    'lecturas.marcas',
+    'resaltado',
+    'audioSonando',
+    'estadosDeSesion',
+    'sesionOcupada',
+    'fraseDeQuienEscribe',
+    'chatDeLasBurbujas',
+  ]) {
+    assert.ok(dependencias.split(/[\s,]+/).includes(dependencia), `renderItem no depende de ${dependencia}`);
+  }
+  assert.match(chat, /const chatDeLasBurbujas = useMemo<LoDelChat>\([\s\S]*?\[\s*esGrupo,\s*infoDeConversacion,/);
 });
 
 test('desde Contenido y desde Buscar se vuelve al chat abierto, no se apila otro', () => {

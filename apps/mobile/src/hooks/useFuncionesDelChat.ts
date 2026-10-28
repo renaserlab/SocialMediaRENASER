@@ -18,7 +18,9 @@ let sabidas: FuncionesDelChat | null = null;
  * NUNCA UN BOTÓN MUERTO. Mientras no se sabe, se da por hecho que ninguna: es
  * preferible no ofrecer algo un instante a ofrecerlo y que falle. Se vuelve a
  * preguntar cada vez que se monta —el servidor puede haberse actualizado—,
- * pero lo ya sabido se enseña sin esperar a la red.
+ * pero lo ya sabido se enseña sin esperar a la red. El repositorio comparte
+ * la respuesta unos minutos (`leerDisponibilidadDelChat`): montar varias
+ * pantallas seguidas no son varias peticiones.
  */
 export function useFuncionesDelChat(activo: boolean): FuncionesDelChat {
   const [funciones, setFunciones] = useState<FuncionesDelChat>(sabidas ?? SIN_FUNCIONES);

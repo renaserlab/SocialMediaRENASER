@@ -72,14 +72,17 @@ describe('enchufado: el chat avisa y la bandeja escucha', () => {
 
   it('el chat marca leído por la puerta que también avisa a la bandeja', () => {
     assert.ok(!/MessageRepository\.markRead\(/.test(CHAT), 'vuelve a marcar leído sin avisar');
-    // Al abrir y con cada mensaje que llega con el chat delante. Las dos
-    // veces, cuando el servidor ya lo anotó, se avisa a los demás de que se
-    // leyó (la confirmación de lectura, 12/10/2026).
+    // Al abrir y con cada mensaje que llega con el chat delante, por una sola
+    // puerta (28/10/2026). Cuando el servidor ya lo anotó, se avisa a los
+    // demás de que se leyó (la confirmación de lectura, 12/10/2026).
     assert.equal(
-      CHAT.match(/void marcarConversacionLeida\(conversationId\)\.then\(avisarSiSeAnoto\);/g)?.length,
-      2,
+      CHAT.match(/avisarSiSeAnoto\(await marcarConversacionLeida\(conversationId\)\);/g)?.length,
+      1,
     );
-    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\)/g)?.length, 2);
+    assert.equal(CHAT.match(/marcarConversacionLeida\(conversationId\)/g)?.length, 1);
+    // Entrar lee siempre; lo que llega, solo si se está mirando.
+    assert.match(CHAT, /\/\/ Entrar es leer[^\n]*\n\s*leer\(\);/);
+    assert.match(CHAT, /const leerSiSeVe = \(\) => \{\s*if \(aLaVista\.current && AppState\.currentState === 'active'\) \{\s*leer\(\);/);
   });
 
   it('marcar leído avisa en el acto, sin esperar al servidor', () => {

@@ -107,10 +107,13 @@ describe('La confirmación de lectura', () => {
       CHAT,
       /const avisarSiSeAnoto = \(anotado: boolean\) => \{\s*if \(anotado\) lecturas\.avisarQueLei\(\);\s*\};/,
     );
-    assert.equal(
-      [...CHAT.matchAll(/marcarConversacionLeida\(conversationId\)\.then\(avisarSiSeAnoto\)/g)].length,
-      2,
+    // Por UNA puerta, al abrir y con lo que llega (28/10/2026): una lectura
+    // en vuelo y la última detrás, y cada una avisa con lo que contestó.
+    assert.match(
+      CHAT,
+      /const anotarLectura = unaALaVez\(async \(\) => \{\s*avisarSiSeAnoto\(await marcarConversacionLeida\(conversationId\)\);\s*\}\);/,
     );
+    assert.equal([...CHAT.matchAll(/marcarConversacionLeida\(conversationId\)/g)].length, 1);
   });
 
   it('el aviso de lectura no lleva nada, y espera a que el canal esté listo', () => {
@@ -132,8 +135,9 @@ describe('La confirmación de lectura', () => {
     assert.match(LECTURAS, /if \(estado === 'active'\) preguntar\(\);/);
     // Y al salir se deja todo recogido.
     assert.match(LECTURAS, /alVolver\.remove\(\);\s*canal\.current = null;\s*abierto\.cerrar\(\);/);
-    // La lista de mensajes se entera cuando cambian.
-    assert.match(CHAT, /marcas: lecturas\.marcas,/);
+    // La lista de mensajes se entera cuando cambian: `renderItem` depende de
+    // ellas y cada burbuja recibe su marca ya calculada (28/10/2026).
+    assert.match(CHAT, /const renderItem = useCallback\([\s\S]*?\[\s*messages,\s*lecturas\.marcas,/);
   });
 
   it('los detalles se ofrecen solo de lo propio y solo si el servidor los da', () => {
@@ -164,7 +168,10 @@ describe('La confirmación de lectura', () => {
 describe('«Está escribiendo»', () => {
   it('se avisa mientras se teclea y se para al enviar y al salir', () => {
     assert.match(CHAT, /onChangeText=\{\(texto\) => \{\s*setText\(texto\);[\s\S]{0,120}escritura\.alEscribir\(texto\);/);
-    assert.match(CHAT, /setText\(''\);[\s\S]{0,80}escritura\.alParar\(\);\s*setElegidos\(\[\]\);/);
+    // Al enviar se para para los demás, y el redactor vacía su campo cuando
+    // la pantalla se lo lleva (el texto vive en él desde el 28/10/2026).
+    assert.match(CHAT, /escritura\.alParar\(\);\s*setElegidos\(\[\]\);[\s\S]{0,120}return true;/);
+    assert.match(CHAT, /if \(alEnviar\(text\.trim\(\)\)\) setText\(''\);/);
     // Quien sale del chat a medio escribir deja de escribir para los demás.
     assert.match(
       ESCRIBIENDO,

@@ -272,7 +272,7 @@ describe('los tonos del chat', () => {
   it('el aviso flotante y los contadores no se enteran de un tono', () => {
     const oyente = sinComentarios(fuente('hooks/useAvisosDelPush.native.ts'));
     assert.ok(oyente.indexOf('if (esUnTono(data)) return;') > 0);
-    assert.ok(oyente.indexOf('if (esUnTono(data)) return;') < oyente.indexOf('hayMensajeNuevoEn(conversacion)'));
+    assert.ok(oyente.indexOf('if (esUnTono(data)) return;') < oyente.indexOf('hayMensajeNuevoEn(conversacion,'));
   });
 
   it('«enviado» suena cuando el servidor lo ha guardado, no al tocar', () => {

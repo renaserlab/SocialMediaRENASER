@@ -47,6 +47,7 @@ import {
   juzgarNombreDeTema,
   limpiarNombre,
   refrescarLoReciente,
+  type PistaDeTemas,
   type TemaDeGrupo,
 } from '@/lib/temasDeGrupo';
 import { retirarAvisosDe, toast } from '@/lib/toast';
@@ -114,7 +115,6 @@ export function TemaScreen() {
   const [estado, setEstado] = useState<Estado>(activo ? 'cargando' : 'error');
   const [hayMasAtras, setHayMasAtras] = useState(false);
   const [cargandoAtras, setCargandoAtras] = useState(false);
-  const [borrador, setBorrador] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [accionesDe, setAccionesDe] = useState<MensajeDeTema | null>(null);
   const [reaccionandoA, setReaccionandoA] = useState<MensajeDeTema | null>(null);
@@ -147,7 +147,7 @@ export function TemaScreen() {
   /** Si esta pantalla es la que se está mirando: solo entonces se da por visto. */
   const aLaVista = useRef(true);
   const cargadoUnaVez = useRef(false);
-  const canal = useRef<{ avisar: () => void; cerrar: () => void } | null>(null);
+  const canal = useRef<{ avisar: (pista?: PistaDeTemas) => void; cerrar: () => void } | null>(null);
 
   /** «Ya lo vi». Si falla, el numerito se queda: no es motivo para avisar a nadie. */
   const marcarVisto = useCallback(() => {
@@ -162,24 +162,46 @@ export function TemaScreen() {
     de antes se conserva (`refrescarLoReciente`).
 
     Nunca dos a la vez (`unaALaVez`): los avisos llegan en ráfagas.
+
+    UN MENSAJE NUEVO NO PIDE LA LISTA DE TEMAS (28/10/2026). Cada mensaje
+    escrito en el tema la volvía a pedir, con la página y el «visto» (auditoría
+    del 27/10, §6.2). Un mensaje no cambia el nombre, el icono ni quién
+    administra: de la lista solo cambiaría la cuenta de lo escrito, que se
+    lleva aquí. La lista se sigue pidiendo al abrir, al volver, al reengancharse
+    y con cualquier otro aviso del grupo (`conLaLista`).
   */
+  /** Si la próxima vuelta pide también la lista de temas. */
+  const conLaLista = useRef(true);
   const recargar = useMemo(
     () =>
       unaALaVez(async () => {
         if (!activo) return;
+        // La primera vez siempre: de ella sale el tema.
+        const conLista = conLaLista.current || !cargadoUnaVez.current;
+        conLaLista.current = false;
         try {
           const [lista, pagina] = await Promise.all([
-            TemasRepository.listar(grupoId),
+            conLista ? TemasRepository.listar(grupoId) : Promise.resolve(null),
             TemasRepository.mensajes(grupoId, temaId, currentUserId),
           ]);
           if (!montada.current) return;
-          const encontrado = lista.disponible ? lista.temas.find((x) => x.id === temaId) ?? null : null;
-          if (!encontrado) {
-            setEstado('no_existe');
-            return;
+          if (lista) {
+            const encontrado = lista.disponible ? lista.temas.find((x) => x.id === temaId) ?? null : null;
+            if (!encontrado) {
+              setEstado('no_existe');
+              return;
+            }
+            setTema(encontrado);
+            setAdministraLosTemas(lista.puedoAdministrar);
+          } else {
+            // Sin la lista, lo escrito que acaba de llegar se suma a la cuenta,
+            // como hace `enviar` con lo propio. La próxima lista la corrige.
+            const conocidos = new Set(mensajesRef.current.map((m) => m.id));
+            const escritos = pagina.mensajes.filter((m) => m.propio && !conocidos.has(m.id)).length;
+            if (escritos > 0) {
+              setTema((actual) => (actual ? { ...actual, propios: actual.propios + escritos } : actual));
+            }
           }
-          setTema(encontrado);
-          setAdministraLosTemas(lista.puedoAdministrar);
           aplicar(refrescarLoReciente(mensajesRef.current, pagina.mensajes, pagina.hayMas));
           if (!cargadoUnaVez.current) setHayMasAtras(pagina.hayMas);
           else if (!pagina.hayMas) setHayMasAtras(false);
@@ -187,6 +209,8 @@ export function TemaScreen() {
           setEstado('listo');
           marcarVisto();
         } catch (error) {
+          // La lista que no llegó la pide la vuelta siguiente.
+          if (conLista) conLaLista.current = true;
           if (!montada.current) return;
           if (error instanceof ApiError && error.status === 404) {
             setEstado('no_existe');
@@ -200,14 +224,19 @@ export function TemaScreen() {
   );
 
   useEffect(() => {
+    conLaLista.current = true;
     void recargar();
   }, [recargar]);
 
-  /** Vuelve a preguntar dentro de un momento: una ráfaga de avisos es una sola pregunta. */
-  const programar = useRef<() => void>(() => {});
+  /**
+   * Vuelve a preguntar dentro de un momento: una ráfaga de avisos es una sola
+   * pregunta. Con la lista de temas si alguno de la ráfaga la necesita.
+   */
+  const programar = useRef<(conLista: boolean) => void>(() => {});
   useEffect(() => {
     let pendiente: ReturnType<typeof setTimeout> | null = null;
-    programar.current = () => {
+    programar.current = (conLista) => {
+      if (conLista) conLaLista.current = true;
       if (pendiente) return;
       pendiente = setTimeout(() => {
         pendiente = null;
@@ -225,30 +254,45 @@ export function TemaScreen() {
     renombrar), por la difusión del grupo. Y al engancharse el canal, o al
     volver la aplicación, se pregunta lo que pudo pasar mientras tanto.
   */
+  const yo = useRef(currentUserId);
+  yo.current = currentUserId;
   useEffect(() => {
     if (!activo || !chatId) return undefined;
     return subscribeToConversation(
       chatId,
-      () => programar.current(),
+      (fila) => {
+        // Lo que esta pantalla acaba de mandar ya está pintado, y ya avisó.
+        if (fila.sender_id === yo.current && mensajesRef.current.some((m) => m.id === fila.id)) return;
+        // Un mensaje: su página y el «visto», sin la lista.
+        programar.current(false);
+      },
       (enganchado) => {
-        if (enganchado) programar.current();
+        if (enganchado) programar.current(true);
       },
     );
   }, [activo, chatId]);
 
   useEffect(() => {
     if (!activo) return undefined;
-    const abierto = avisosDeTemas(grupoId, () => programar.current());
+    const abierto = avisosDeTemas(grupoId, (pista) => {
+      /*
+        Un aviso con pista dice en qué tema se escribió (ver `PistaDeTemas`):
+        si es en otro, aquí no cambia nada; si es en este, basta su página.
+        Sin pista —otro cambio, u otra versión de la aplicación— todo.
+      */
+      if (pista && pista.tema !== temaId) return;
+      programar.current(!pista);
+    });
     canal.current = abierto;
     return () => {
       canal.current = null;
       abierto.cerrar();
     };
-  }, [activo, grupoId]);
+  }, [activo, grupoId, temaId]);
 
   useEffect(() => {
     const suscripcion = AppState.addEventListener('change', (estadoDeLaApp) => {
-      if (estadoDeLaApp === 'active' && aLaVista.current) programar.current();
+      if (estadoDeLaApp === 'active' && aLaVista.current) programar.current(true);
     });
     return () => suscripcion.remove();
   }, []);
@@ -270,7 +314,10 @@ export function TemaScreen() {
   useFocusEffect(
     useCallback(() => {
       aLaVista.current = true;
-      if (yaTuvoElFoco.current) void recargar();
+      if (yaTuvoElFoco.current) {
+        conLaLista.current = true;
+        void recargar();
+      }
       yaTuvoElFoco.current = true;
       return () => {
         aLaVista.current = false;
@@ -325,10 +372,12 @@ export function TemaScreen() {
   /**
    * Escribir en el tema: SOLO TEXTO en esta versión, y solo la administración.
    * Va al chat del tema, así que no sale en General ni en su tiempo real.
+   *
+   * Lo escrito lo lleva el redactor (`RedactorDelTema`). Devuelve si salió:
+   * solo entonces se vacía el campo; si falla, el texto se queda.
    */
-  const enviar = async () => {
-    const texto = borrador.trim();
-    if (!texto || enviando || !chatId) return;
+  const enviar = async (texto: string): Promise<boolean> => {
+    if (!texto || enviando || !chatId) return false;
     setEnviando(true);
     try {
       const enviado = await MessageRepository.sendMessage(chatId, texto, currentUserId);
@@ -342,10 +391,12 @@ export function TemaScreen() {
       };
       aplicar(fusionarMensajesDeTema(mensajesRef.current, [nuevo]));
       setTema((actual) => (actual ? { ...actual, propios: actual.propios + 1 } : actual));
-      setBorrador('');
-      avisarALosDemas();
+      // Con la pista de en qué tema: los demás temas abiertos no recargan.
+      canal.current?.avisar({ tipo: 'mensaje', tema: temaId });
+      return true;
     } catch (error) {
       notify(t('chat.sendFailed'), textoDelFallo(error));
+      return false;
     } finally {
       if (montada.current) setEnviando(false);
     }
@@ -382,15 +433,21 @@ export function TemaScreen() {
   };
 
   /** Lo escrito en el tema lo borra quien lo escribió o quien administra (D4). */
-  const puedeBorrar = (mensaje: MensajeDeTema) =>
-    mensaje.propio && !mensaje.eliminado && (mensaje.sender === 'me' || puedoAdministrar);
+  const puedeBorrar = useCallback(
+    (mensaje: MensajeDeTema) =>
+      mensaje.propio && !mensaje.eliminado && (mensaje.sender === 'me' || puedoAdministrar),
+    [puedoAdministrar],
+  );
 
   /**
    * Si mantener presionado abre algo. Un menú que se abre para enseñar que no
    * hay nada que hacer es peor que no abrirse.
    */
-  const tieneAcciones = (mensaje: MensajeDeTema) =>
-    !mensaje.eliminado && (funciones.reacciones || !mensaje.propio || puedeBorrar(mensaje));
+  const tieneAcciones = useCallback(
+    (mensaje: MensajeDeTema) =>
+      !mensaje.eliminado && (funciones.reacciones || !mensaje.propio || puedeBorrar(mensaje)),
+    [funciones.reacciones, puedeBorrar],
+  );
 
   /** Cierra la hoja y espera: nada se abre encima de una que se va (iOS). */
   const cerrarAcciones = async (): Promise<MensajeDeTema | null> => {
@@ -515,6 +572,61 @@ export function TemaScreen() {
     });
   }
 
+  /*
+    CADA BURBUJA SE PINTA CUANDO CAMBIA LO SUYO (28/10/2026), como en el chat
+    (ver `renderItem` en `ChatScreen`). FlashList 2 solo se salta una celda si
+    `renderItem` es la misma función; escrita en línea, con el campo como
+    estado de esta pantalla, cada tecla repintaba todas las burbujas. Ahora el
+    campo lleva su texto (`RedactorDelTema`), esta función solo cambia con lo
+    que se pinta en una burbuja y `BurbujaDeTema` está memorizada.
+
+    Lo que hace una burbuja va por referencias estables que llaman a lo de
+    ahora; y la nota que suena se le da solo a la burbuja que la tiene.
+  */
+  const accionesAhora = useRef({ reaccionar, verEnGeneral });
+  accionesAhora.current = { reaccionar, verEnGeneral };
+  const reaccionarDesdeLaBurbuja = useCallback((mensaje: MensajeDeTema, emoji: string | null) => {
+    void accionesAhora.current.reaccionar(mensaje, emoji);
+  }, []);
+  const verEnGeneralDesdeLaBurbuja = useCallback((mensaje: MensajeDeTema) => {
+    accionesAhora.current.verEnGeneral(mensaje);
+  }, []);
+  const pararElAudio = useCallback(() => setAudioSonando(null), []);
+  const renderItem = useCallback(
+    ({ item, index }: { item: MensajeDeTema; index: number }) => (
+      <BurbujaDeTema
+        mensaje={item}
+        anterior={mensajes[index - 1]}
+        info={info}
+        currentUserId={currentUserId}
+        anchoDeMedio={anchoDeMedio}
+        audioSonando={
+          audioSonando !== null && item.attachments?.some((adjunto) => adjunto.id === audioSonando)
+            ? audioSonando
+            : null
+        }
+        alSonar={setAudioSonando}
+        alParar={pararElAudio}
+        alVerAdjunto={setFotoAmpliada}
+        alMantener={tieneAcciones(item) ? setAccionesDe : undefined}
+        alReaccionar={funciones.reacciones ? reaccionarDesdeLaBurbuja : undefined}
+        alVerEnGeneral={verEnGeneralDesdeLaBurbuja}
+      />
+    ),
+    [
+      mensajes,
+      info,
+      currentUserId,
+      anchoDeMedio,
+      audioSonando,
+      pararElAudio,
+      tieneAcciones,
+      funciones.reacciones,
+      reaccionarDesdeLaBurbuja,
+      verEnGeneralDesdeLaBurbuja,
+    ],
+  );
+
   const cabecera = (
     <AppHeader
       onBack={volver}
@@ -564,7 +676,6 @@ export function TemaScreen() {
         <View style={[styles.zona, { borderTopColor: colors.border }]}>
           <FlashList
             data={mensajes}
-            extraData={`${audioSonando ?? ''}|${puedoAdministrar}|${funciones.reacciones}|${info?.miembros.length ?? 0}`}
             keyExtractor={(item: MensajeDeTema) => item.id}
             contentContainerStyle={styles.lista}
             showsVerticalScrollIndicator={false}
@@ -610,22 +721,7 @@ export function TemaScreen() {
                 />
               )
             }
-            renderItem={({ item, index }: { item: MensajeDeTema; index: number }) => (
-              <BurbujaDeTema
-                mensaje={item}
-                anterior={mensajes[index - 1]}
-                info={info}
-                currentUserId={currentUserId}
-                anchoDeMedio={anchoDeMedio}
-                audioSonando={audioSonando}
-                alSonar={setAudioSonando}
-                alParar={() => setAudioSonando(null)}
-                alVerAdjunto={setFotoAmpliada}
-                alMantener={tieneAcciones(item) ? setAccionesDe : undefined}
-                alReaccionar={funciones.reacciones ? (m, emoji) => void reaccionar(m, emoji) : undefined}
-                alVerEnGeneral={verEnGeneral}
-              />
-            )}
+            renderItem={renderItem}
           />
         </View>
 
@@ -642,36 +738,12 @@ export function TemaScreen() {
                 {t('groupTopics.adminComposerHint')}
               </Text>
             </View>
-            <View
-              style={[
-                styles.barra,
-                {
-                  borderTopColor: colors.border,
-                  backgroundColor: colors.background,
-                  paddingBottom: spacing.lg + margenInferior,
-                },
-              ]}
-            >
-              <Input
-                value={borrador}
-                onChangeText={setBorrador}
-                onSubmitEditing={() => void enviar()}
-                placeholder={t('groupTopics.placeholder', { nombre: nombreDelTema })}
-                placeholderTextColor={colors.textMuted}
-                returnKeyType="send"
-                containerStyle={styles.campo}
-                forma="pastilla"
-                style={{ minHeight: 40 }}
-              />
-              <View style={styles.enviar}>
-                <BotonDeEnviar
-                  onPress={() => void enviar()}
-                  listo={!!borrador.trim()}
-                  enviando={enviando}
-                  accessibilityLabel={t('chat.sendMessage')}
-                />
-              </View>
-            </View>
+            <RedactorDelTema
+              nombreDelTema={nombreDelTema}
+              enviando={enviando}
+              margenInferior={margenInferior}
+              alEnviar={enviar}
+            />
           </>
         ) : tema ? (
           <View
@@ -824,6 +896,67 @@ export function TemaScreen() {
         acciones={accionesDelVisor}
         onClose={() => setFotoAmpliada(null)}
       />
+    </View>
+  );
+}
+
+/**
+ * El campo de la administración, con su botón de enviar.
+ *
+ * LLEVA SU PROPIO TEXTO (28/10/2026). Cuando era estado de la pantalla, cada
+ * tecla repintaba el tema entero, todas sus burbujas incluidas (auditoría del
+ * 27/10, §6.1). Ahora una tecla repinta esto y nada más.
+ */
+function RedactorDelTema({
+  nombreDelTema,
+  enviando,
+  margenInferior,
+  alEnviar,
+}: {
+  nombreDelTema: string;
+  enviando: boolean;
+  margenInferior: number;
+  /** Manda lo escrito. Devuelve si salió: solo entonces se vacía el campo. */
+  alEnviar: (texto: string) => Promise<boolean>;
+}) {
+  const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  const [borrador, setBorrador] = useState('');
+
+  const enviar = async () => {
+    if (await alEnviar(borrador.trim())) setBorrador('');
+  };
+
+  return (
+    <View
+      style={[
+        styles.barra,
+        {
+          borderTopColor: colors.border,
+          backgroundColor: colors.background,
+          paddingBottom: spacing.lg + margenInferior,
+        },
+      ]}
+    >
+      <Input
+        value={borrador}
+        onChangeText={setBorrador}
+        onSubmitEditing={() => void enviar()}
+        placeholder={t('groupTopics.placeholder', { nombre: nombreDelTema })}
+        placeholderTextColor={colors.textMuted}
+        returnKeyType="send"
+        containerStyle={styles.campo}
+        forma="pastilla"
+        style={{ minHeight: 40 }}
+      />
+      <View style={styles.enviar}>
+        <BotonDeEnviar
+          onPress={() => void enviar()}
+          listo={!!borrador.trim()}
+          enviando={enviando}
+          accessibilityLabel={t('chat.sendMessage')}
+        />
+      </View>
     </View>
   );
 }

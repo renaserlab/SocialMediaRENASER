@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -52,7 +52,12 @@ import { useLecturasDelChat } from '@/hooks/useLecturasDelChat';
 import { useResponderSesion } from '@/hooks/useResponderSesion';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
-import { colorDeAutor, miembroDe, nombreDelAutor } from '@/lib/gruposDeChat';
+import {
+  colorDeAutor,
+  miembroDe,
+  nombreDelAutor,
+  type InfoDeConversacion,
+} from '@/lib/gruposDeChat';
 import {
   MAX_CONSULTA_DE_REACCIONES,
   alReaccionar,
@@ -75,6 +80,7 @@ import {
 } from '@/lib/saltoDeChat';
 import { alCambiarElSilencioDeUnChat } from '@/hooks/useAvisosEnVivo';
 import { afterSheetClose } from '@/lib/afterSheetClose';
+import type { AccionDeSesion } from '@/lib/accionesDeSesion';
 import { fraseDeEscritura, suenaElTono } from '@/lib/escribiendo';
 import { colorDeFondo, fondoDe, veloSobreLaFoto } from '@/lib/fondoDeChat';
 import {
@@ -82,6 +88,7 @@ import {
   estadoDeEntrega,
   llevaFranjaDeHora,
   tieneDetalles,
+  type EstadoDeEntrega,
 } from '@/lib/lecturaDeMensajes';
 import { dejarDeVerConversacion, marcarConversacionALaVista } from '@/lib/loQueSeVe';
 import { claveDeConversacion } from '@/lib/rutaDelPush';
@@ -98,6 +105,7 @@ import { suenaLoQueLlega } from '@/lib/tonosDelChat';
 import { sonarTono } from '@/services/notifications';
 import { confirm, notify } from '@/lib/confirm';
 import {
+  corteParaCompletar,
   descartarEnvio,
   fusionar,
   instanteMasAntiguo,
@@ -110,6 +118,7 @@ import {
   estadosVigentes,
   loQueSigueHaciendoFalta,
   sesionesSinTarjeta,
+  type EstadoDeSesionEnChat,
   type LoSabidoDeUnaSesion,
 } from '@/lib/sesionesDelChat';
 import { formatTime, toMessageFromRow } from '@/mappers/messageMapper';
@@ -138,7 +147,7 @@ import { PermisoDenegadoError } from '@/services/storage';
 import { avisosDeReacciones, subscribeToConversation } from '@/services/realtime';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { radius, spacing } from '@/theme/tokens';
+import { radius, spacing, type AppPalette, type ThemeMode } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 import type { Message, MessageAttachment } from '@/types';
 
@@ -250,8 +259,6 @@ export function ChatScreen() {
   const { colors, mode } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
-  // El de la barra de gestos; con el teclado abierto, cero: ya está encima.
-  const margenInferior = useMargenInferior();
   const params = useLocalSearchParams<{ id: string; name?: string }>();
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const currentUserId = useAppStore((state) => state.user?.id);
@@ -317,7 +324,6 @@ export function ChatScreen() {
   );
 
   const [remoteMessages, setRemoteMessages] = useState<Message[]>([]);
-  const [text, setText] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   /*
     La PRIMERA carga de la conversación, mientras dura.
@@ -461,6 +467,11 @@ export function ChatScreen() {
   const aLaVista = useRef(true);
   /** «Ponte al día», para el efecto del foco. `null` sin conversación cargando. */
   const ponerseAlDia = useRef<(() => void) | null>(null);
+  /**
+   * La lectura que está anotando el servidor, con la que espera detrás. Al
+   * salir, la bandeja se pide cuando termina: ver el efecto del foco.
+   */
+  const lecturaEnCurso = useRef<Promise<void>>(Promise.resolve());
 
   // Carga inicial + suscripción Realtime a los mensajes de la conversación.
   useEffect(() => {
@@ -475,10 +486,28 @@ export function ChatScreen() {
       if (anotado) lecturas.avisarQueLei();
     };
 
+    /*
+      UNA LECTURA EN VUELO, Y LA ÚLTIMA DETRÁS (28/10/2026).
+
+      Cada mensaje que llegaba con el chat delante era un `POST /read` y, al
+      contestar, un aviso de lectura que hace preguntar a todos los demás
+      (auditoría del 27/10, §6.2): una ráfaga de diez eran diez de cada. El
+      servidor anota «leído hasta ahora» (`last_read_at = now()`), así que
+      basta con UNA petición en vuelo y, si mientras tanto llega algo, UNA más
+      al terminar (`unaALaVez`), que es la que lo deja todo leído. La primera
+      sale en el acto, como antes: el doble check del otro lado no espera más.
+    */
+    const anotarLectura = unaALaVez(async () => {
+      avisarSiSeAnoto(await marcarConversacionLeida(conversationId));
+    });
+    const leer = () => {
+      lecturaEnCurso.current = anotarLectura();
+    };
+
     /** Leído solo si de verdad se está mirando. */
     const leerSiSeVe = () => {
       if (aLaVista.current && AppState.currentState === 'active') {
-        void marcarConversacionLeida(conversationId).then(avisarSiSeAnoto);
+        leer();
       }
     };
 
@@ -503,7 +532,8 @@ export function ChatScreen() {
       .finally(() => {
         if (montado) setCargandoMensajes(false);
       });
-    void marcarConversacionLeida(conversationId).then(avisarSiSeAnoto);
+    // Entrar es leer, se mire como se mire: es lo único que no pregunta.
+    leer();
 
     /*
       PONERSE AL DÍA: pedir lo que haya entrado desde lo último que se tiene.
@@ -550,6 +580,55 @@ export function ChatScreen() {
     /** Si el canal de tiempo real de esta conversación está enganchado ahora. */
     let canalEnganchado = false;
 
+    /*
+      LAS FILAS DE TIEMPO REAL QUE FALTA COMPLETAR. La fila cruda de `messages`
+      no sabe nada de los archivos que cuelgan de ella —ni de la cita, ni de la
+      historia a la que respondía—, así que se piden las novedades desde antes
+      de la más antigua que falta (`corteParaCompletar`).
+
+      UNA PETICIÓN POR RÁFAGA (28/10/2026). Antes cada fila lanzaba la suya:
+      diez mensajes seguidos eran diez peticiones casi iguales. Ahora va una y,
+      si mientras vuelve llegan más, otra al terminar (`unaALaVez`). Si falla,
+      las filas siguen pendientes y las completa la siguiente vuelta: antes,
+      una fila cuya petición fallaba se quedaba sin adjunto hasta reabrir.
+    */
+    const porCompletar = new Set<string>();
+    const completarLoLlegado = unaALaVez(async () => {
+      const pedidas = new Set(porCompletar);
+      let desde = corteParaCompletar(mensajesRef.current, pedidas);
+      if (desde === null) {
+        // Ninguna sigue en la lista (se vació el chat): nada que completar.
+        for (const id of pedidas) porCompletar.delete(id);
+        return;
+      }
+      /*
+        Una página por vuelta. Si vuelve llena, puede que no llegara a todas:
+        se sigue desde lo último que trajo. Con tope, por si el servidor
+        devolviera siempre lo mismo.
+      */
+      for (let vuelta = 0; vuelta < 5; vuelta += 1) {
+        /*
+          Sin nada anterior de donde colgar el corte —el primer mensaje de una
+          conversación recién abierta— se pide la primera página entera. Es una
+          petición más grande, pero pasa una vez por conversación y es la
+          diferencia entre que la primera foto que alguien manda se vea o quede
+          en un hueco vacío hasta reabrir el chat.
+        */
+        const nuevos = await (desde
+          ? MessageRepository.listMessagesSince(conversationId, desde, currentUserId)
+          : MessageRepository.listMessages(conversationId, currentUserId));
+        if (!montado) return;
+        if (nuevos.length) aplicar(fusionar(mensajesRef.current, nuevos));
+        // Lo que ya vino completo —también lo llegado mientras se pedía— no
+        // hace falta pedirlo otra vez en la vuelta de detrás.
+        for (const mensaje of nuevos) porCompletar.delete(mensaje.id);
+        const siguiente = instanteMasReciente(nuevos);
+        if (!desde || nuevos.length < MENSAJES_POR_PAGINA || !siguiente || siguiente <= desde) break;
+        desde = siguiente;
+      }
+      for (const id of pedidas) porCompletar.delete(id);
+    });
+
     const unsubscribe = subscribeToConversation(conversationId, (row) => {
       if (!montado) return;
       /*
@@ -561,38 +640,17 @@ export function ChatScreen() {
       */
       aplicar(fusionar(mensajesRef.current, [toMessageFromRow(row, currentUserId)]));
 
+      // Y después se completa, con las demás de la ráfaga.
+      porCompletar.add(row.id);
+      void completarLoLlegado();
+
       /*
-        Y después se completa. La fila cruda de `messages` no sabe nada de los
-        archivos que cuelgan de ella —ni de la historia a la que respondía—, así
-        que se piden las novedades desde el último mensaje conocido: UNA petición
-        para toda la ráfaga, no una por mensaje.
+        LO PROPIO NO SE MARCA COMO LEÍDO (28/10/2026). Lo propio no cuenta como
+        no leído, y lo que se haya leído de los demás ya lo anotó la llegada de
+        sus mensajes: marcarlo solo hacía que todos los demás volvieran a
+        preguntar quién leyó, para recibir lo mismo.
       */
-      const desde = instanteMasReciente(
-        // Sin contar la fila recién llegada: el instante tiene que ser ANTERIOR
-        // a ella para que la petición la incluya.
-        mensajesRef.current.filter((m) => m.id !== row.id),
-      );
-      /*
-        Sin nada anterior de donde colgar el corte —el primer mensaje de una
-        conversación recién abierta— se pide la primera página entera. Es una
-        petición más grande, pero pasa una vez por conversación y es la
-        diferencia entre que la primera foto que alguien manda se vea o quede en
-        un hueco vacío hasta reabrir el chat.
-      */
-      const completar = desde
-        ? MessageRepository.listMessagesSince(conversationId, desde, currentUserId)
-        : MessageRepository.listMessages(conversationId, currentUserId);
-      completar
-        .then((nuevos) => {
-          if (montado && nuevos.length) {
-            aplicar(fusionar(mensajesRef.current, nuevos));
-          }
-        })
-        .catch(() => {
-          // La burbuja de texto ya está puesta; sin esto solo faltaría el
-          // adjunto, y volverá con el siguiente mensaje o al reabrir.
-        });
-      leerSiSeVe();
+      if (row.sender_id !== currentUserId) leerSiSeVe();
     }, (enganchado) => {
       canalEnganchado = enganchado;
       // La primera vez cubre el hueco entre la carga y el enganche; las demás,
@@ -613,8 +671,16 @@ export function ChatScreen() {
       leerSiSeVe();
     });
 
-    const dejarDeOir = alSaberDeUnMensaje((conversacion) => {
-      if (conversacion === conversationId) void ponerAlDia();
+    const dejarDeOir = alSaberDeUnMensaje((conversacion, mensajeId) => {
+      if (conversacion !== conversationId) return;
+      /*
+        EL PUSH DE ALGO QUE YA ESTÁ NO PREGUNTA (28/10/2026). Con el canal sano
+        el mensaje llega antes por él, y su push solo repetía la petición. El
+        push sigue preguntando cuando trae un mensaje que aquí no está: es lo
+        que lo hace útil con el canal caído.
+      */
+      if (mensajeId && mensajesRef.current.some((m) => m.id === mensajeId)) return;
+      void ponerAlDia();
     });
 
     ponerseAlDia.current = () => {
@@ -737,6 +803,14 @@ export function ChatScreen() {
   */
   const ajenoYaVisto = useRef<string | null | undefined>(undefined);
   const respiroDeSesiones = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /*
+    EN UN GRUPO NO HAY SESIONES (28/10/2026). Una sesión es 1:1 y el servidor
+    la cuelga del chat de esas dos personas (`messaging/sesiones.py`), así que
+    en un grupo releerlas con cada mensaje era una petición que siempre volvía
+    vacía. La del montaje se queda: al montar todavía no se sabe qué es.
+  */
+  const esGrupoAhora = useRef(esGrupo);
+  esGrupoAhora.current = esGrupo;
   useEffect(() => {
     // Mientras dura la carga inicial no hay novedad que mirar. (Es la salida
     // de este efecto, no de la pantalla: el redactor sigue pintándose.)
@@ -748,6 +822,7 @@ export function ChatScreen() {
     }
     if (ajenoYaVisto.current === ultimoAjeno) return;
     ajenoYaVisto.current = ultimoAjeno;
+    if (esGrupoAhora.current) return;
     if (respiroDeSesiones.current) clearTimeout(respiroDeSesiones.current);
     respiroDeSesiones.current = setTimeout(() => {
       respiroDeSesiones.current = null;
@@ -763,8 +838,8 @@ export function ChatScreen() {
   const enfocadaAntes = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      // La primera vez ya las pide el montaje.
-      if (enfocadaAntes.current) leerSesiones();
+      // La primera vez ya las pide el montaje. En un grupo no hay ninguna.
+      if (enfocadaAntes.current && !esGrupoAhora.current) leerSesiones();
       enfocadaAntes.current = true;
     }, [leerSesiones]),
   );
@@ -861,22 +936,6 @@ export function ChatScreen() {
     */
     alDesfasar: leerSesiones,
   });
-  // Lo que la lista tiene que mirar, además de los mensajes, para repintar.
-  const extraDeSesiones = useMemo(
-    // Con `infoDeConversacion` y `resaltado`: la lista solo repinta sus
-    // celdas cuando cambia esto, y los dos cambian lo que pinta una burbuja.
-    // Y con las marcas de lectura: cambian la marca de las burbujas propias.
-    () => ({
-      estadosDeSesion,
-      sesionOcupada,
-      infoDeConversacion,
-      resaltado,
-      marcas: lecturas.marcas,
-      // Y con quién escribe: cambia la frase de la burbuja del final.
-      claveDeEscritura,
-    }),
-    [estadosDeSesion, sesionOcupada, infoDeConversacion, resaltado, lecturas.marcas, claveDeEscritura],
-  );
 
   // -------------------------------------------------------------------------
   // Seguir el final de la conversación
@@ -1300,15 +1359,20 @@ export function ChatScreen() {
     eliminado: false,
   });
 
-  const submit = async () => {
-    const body = text.trim();
-    if (!body && elegidos.length === 0) return;
-    if (enviando) return;
+  /**
+   * Manda lo escrito en el redactor, con lo elegido y la respuesta puesta.
+   *
+   * Devuelve si se lo llevó: solo entonces el redactor vacía su campo. Sin
+   * nada que mandar, o con otro envío en marcha, lo escrito se queda donde
+   * está, como antes.
+   */
+  const enviarLoEscrito = (body: string): boolean => {
+    if (!body && elegidos.length === 0) return false;
+    if (enviando) return false;
 
     if (!supabaseEnabled) {
       if (demoConversation && body) sendMessageDemo(demoConversation.id, body);
-      setText('');
-      return;
+      return true;
     }
 
     const envio: EnvioPendiente = {
@@ -1317,12 +1381,12 @@ export function ChatScreen() {
       respondeA: respondiendoA?.id,
       cita: respondiendoA ? citaDe(respondiendoA) : undefined,
     };
-    setText('');
     // Enviado: para los demás, ya no se está escribiendo.
     escritura.alParar();
     setElegidos([]);
     setRespondiendoA(null);
-    await mandar(envio);
+    void mandar(envio);
+    return true;
   };
 
   const reintentar = useCallback(
@@ -1718,7 +1782,12 @@ export function ChatScreen() {
       return () => {
         aLaVista.current = false;
         dejarDeVerConversacion(conversacionALaVista);
-        void refrescarMensajes();
+        /*
+          La bandeja, DESPUÉS de que el servidor anote la última lectura. Si se
+          pedía a la vez, podía contestar antes de anotarla y devolver el globo
+          de lo que se acababa de leer. Sin lectura en vuelo, sale en el acto.
+        */
+        void lecturaEnCurso.current.then(() => refrescarMensajes());
       };
     }, [conversacionALaVista]),
   );
@@ -1922,10 +1991,7 @@ export function ChatScreen() {
   );
 
   /** El texto de una cita: su extracto, o qué era si no tenía texto. */
-  const textoDeLaCita = (cita: CitaDeMensaje): string => {
-    const lo = textoDeCita(cita);
-    return 'texto' in lo ? lo.texto : t(lo.clave as TranslationKey);
-  };
+  const textoDeLaCita = (cita: CitaDeMensaje): string => textoDeLaCitaCon(t, cita);
 
   /** Guarda en la galería del teléfono la foto o el vídeo que se está viendo. */
   const guardarAdjunto = useCallback(
@@ -1942,22 +2008,6 @@ export function ChatScreen() {
     [t],
   );
 
-  /**
-   * Cómo va una foto o un video dentro de su mensaje.
-   *
-   * `sin_marco`: van solos, sin burbuja. `al_ras`: dentro de una burbuja con
-   * texto, con un marco fino. `normal`: mezclados con archivos o notas de
-   * voz, como una pieza más.
-   */
-  type ContextoDeAdjunto = {
-    mensaje: Message;
-    /** Si mantenerlo presionado abre el menú del mensaje. */
-    conAcciones: boolean;
-    forma: 'normal' | 'al_ras' | 'sin_marco';
-    /** Lo que se pinta encima de la imagen: de quién es, la hora. */
-    encima?: React.ReactNode;
-  };
-
   /*
     LO QUE MIDE DE ANCHO UNA FOTO O UN ARCHIVO. Una burbuja ocupa como máximo
     el 80 % de la pantalla: en un teléfono angosto, los 250 puntos de siempre
@@ -1969,120 +2019,6 @@ export function ChatScreen() {
     Math.floor(anchoDePantalla * 0.8) - 2 * RELLENO_H - 2,
   );
 
-  const pintarAdjunto = (
-    adjunto: MessageAttachment,
-    mio: boolean,
-    contexto: ContextoDeAdjunto,
-  ) => {
-    /*
-      MANTENER PRESIONADO SOBRE EL ADJUNTO ABRE EL MENÚ DEL MENSAJE. Antes
-      solo respondía la franja de la hora, debajo. Una foto sin marco ya no
-      tiene franja: sin esto no habría dónde borrar, reaccionar ni responder.
-    */
-    const alMantener = contexto.conAcciones
-      ? () => abrirAcciones(contexto.mensaje)
-      : undefined;
-
-    /*
-      LA NOTA DE VOZ NO MONTA REPRODUCTOR AQUI. Recibe si es la que está sonando
-      y un par de avisos; quien decide es la pantalla (`audioSonando`). Ver el
-      comentario de ese estado: la guarda tiene que vivir fuera de la burbuja.
-    */
-    if (adjunto.kind === 'audio') {
-      return (
-        <BurbujaDeNotaDeVoz
-          key={adjunto.id}
-          adjunto={adjunto}
-          mio={mio}
-          activo={audioSonando === adjunto.id}
-          alPulsar={() => setAudioSonando(adjunto.id)}
-          alTerminar={() => setAudioSonando(null)}
-        />
-      );
-    }
-
-    if (adjunto.kind === 'document') {
-      /*
-        UN ARCHIVO SE DESCARGA, DENTRO DE LA APLICACIÓN (12/10/2026). Antes
-        tocarlo abría su dirección en el navegador: la persona acababa fuera
-        de Z, en una pestaña de Chrome. Ahora lleva su botón de descargar y
-        se guarda en el teléfono. Ver `ArchivoDeChat`.
-
-        Si en realidad es una foto o un video mandado como archivo, tocarlo
-        lo abre en el visor, como cualquier otra foto del chat. Solo cuando
-        ya está en el servidor: mientras sube no hay nada que abrir.
-      */
-      const medio = estaEnElServidor(adjunto)
-        ? medioQueEs(adjunto.mimeType, adjunto.fileName)
-        : null;
-      return (
-        <ArchivoDeChat
-          key={adjunto.id}
-          adjunto={adjunto}
-          mio={mio}
-          alVer={medio ? () => setFotoAmpliada({ ...adjunto, kind: medio }) : undefined}
-          alMantener={alMantener}
-          style={{ width: anchoDeMedio }}
-        />
-      );
-    }
-
-    // La proporción real del archivo, cuando se sabe: sin ella la burbuja da un
-    // salto al cargar la imagen y mueve todo lo que hay debajo.
-    const proporcion =
-      adjunto.width && adjunto.height ? adjunto.width / adjunto.height : 1;
-
-    return (
-      <Pressable
-        key={adjunto.id}
-        onPress={() => {
-          /*
-            UN VÍDEO NO VA AL VISOR DE IMÁGENES. `ImageViewer` pinta una imagen:
-            con la URL de un vídeo enseñaba una pantalla negra con «pellizca
-            para ampliar». La aplicación no tiene un visor de vídeo a pantalla
-            completa, así que se abre fuera, como los documentos.
-          */
-          // EL VÍDEO SE REPRODUCE DENTRO (10/10/2026), en el mismo visor que
-          // las fotos. Antes se abría fuera, en el navegador. Mientras se
-          // está subiendo todavía no tiene dirección que reproducir.
-          if (adjunto.kind === 'video' && !estaEnElServidor(adjunto)) return;
-          if (adjunto.url) setFotoAmpliada(adjunto);
-        }}
-        onLongPress={alMantener}
-        delayLongPress={400}
-        accessibilityRole="button"
-        accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
-        accessibilityHint={alMantener ? t('chat.holdForActions') : undefined}
-        style={[
-          styles.medio,
-          contexto.forma === 'sin_marco' && styles.medioSinMarco,
-          contexto.forma === 'al_ras' && styles.medioAlRas,
-          contexto.forma === 'al_ras' ? { minWidth: anchoDeMedio } : { width: anchoDeMedio },
-          { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) },
-        ]}
-      >
-        {/*
-          LA PIEZA QUE SABE DE DÓNDE SACAR LA IMAGEN SIN ESPERAR: lo que ya
-          está en el teléfono, lo guardado en el disco, o la portada de un
-          video. Antes iba aquí un `Image` con la dirección firmada, que
-          volvía a bajar la foto en cada apertura y, con un video, pintaba
-          un cuadro negro. Ver `MedioDeChat`.
-        */}
-        <MedioDeChat adjunto={adjunto} style={StyleSheet.absoluteFill}>
-          {contexto.encima}
-        </MedioDeChat>
-      </Pressable>
-    );
-  };
-
-  /*
-    Mientras hay una nota de voz en marcha NUNCA hay «algo que enviar» por la
-    vía del texto: si no, empezar a grabar con un adjunto ya elegido cambiaría
-    el micrófono por el avión de papel y la barra de voz se quedaría sin su
-    botón, con la grabación viva y sin forma de mandarla ni de tirarla.
-  */
-  const hayQueEnviar =
-    !grabadora.ocupada && (text.trim().length > 0 || elegidos.length > 0);
 
   /*
     Arriba del todo se pide más historial; y en cada desplazamiento se anota si
@@ -2151,6 +2087,124 @@ export function ChatScreen() {
       },
     });
   }
+
+  // -------------------------------------------------------------------------
+  // Las burbujas
+  // -------------------------------------------------------------------------
+
+  /*
+    `reintentar` cambia con `enviando`: dárselo tal cual a las burbujas las
+    repintaría todas al empezar y al acabar cada envío. Reciben uno estable
+    que llama al de ahora.
+  */
+  const reintentarAhora = useRef(reintentar);
+  reintentarAhora.current = reintentar;
+  const reintentarDesdeLaBurbuja = useCallback((mensaje: Message) => {
+    void reintentarAhora.current(mensaje);
+  }, []);
+
+  /** Lo que las burbujas necesitan de la conversación (ver `LoDelChat`). */
+  const chatDeLasBurbujas = useMemo<LoDelChat>(
+    () => ({
+      esGrupo,
+      infoDeConversacion,
+      funciones,
+      puedoBorrarAjenos,
+      currentUserId,
+      headerName,
+      anchoDeMedio,
+      colors,
+      mode,
+      t,
+      abrirAcciones,
+      reaccionar,
+      reintentar: reintentarDesdeLaBurbuja,
+      descartar,
+      responderSesion,
+      setRespondiendoA,
+      setMensajeBuscado,
+      setAudioSonando,
+      setFotoAmpliada,
+    }),
+    [
+      esGrupo,
+      infoDeConversacion,
+      funciones,
+      puedoBorrarAjenos,
+      currentUserId,
+      headerName,
+      anchoDeMedio,
+      colors,
+      mode,
+      t,
+      abrirAcciones,
+      reaccionar,
+      reintentarDesdeLaBurbuja,
+      descartar,
+      responderSesion,
+    ],
+  );
+
+  /*
+    CADA BURBUJA SE PINTA CUANDO CAMBIA LO SUYO, Y SOLO ENTONCES (28/10/2026).
+
+    FlashList 2 solo se salta una celda si `renderItem` es LA MISMA función
+    que la vez anterior (`ViewHolder.tsx` de `@shopify/flash-list`): con
+    `extraData` no basta. Escrito aquí en línea, con el texto del redactor
+    como estado de esta pantalla, cada tecla repintaba todas las burbujas a la
+    vista (auditoría del 27/10, §6.1).
+
+    Ahora el redactor lleva su propio texto y esta función solo cambia cuando
+    cambia algo que se pinta en una burbuja: los mensajes (también el de al
+    lado, que decide la ráfaga y el día), las marcas de lectura, el resaltado,
+    la nota que suena, las sesiones, quién escribe o lo de la conversación.
+    Entonces cada celda a la vista vuelve a pasar por aquí, que es barato, y
+    `BurbujaDelChat`, memorizada, solo se repinta si sus props cambiaron. Por
+    eso recibe ya resuelto lo que sale de toda la lista —su marca, si está
+    resaltada, si suena SU nota— y no la lista.
+  */
+  const renderItem = useCallback(
+    ({ item, index }: { item: Message; index: number }) => {
+      // La burbuja de «está escribiendo»: no es un mensaje.
+      if (item.id === ELEMENTO_DE_ESCRITURA.id) {
+        return fraseDeQuienEscribe ? (
+          <IndicadorDeEscritura frase={fraseDeQuienEscribe} />
+        ) : null;
+      }
+      // Una marca, dos, o dos en celeste: saliendo, enviado o leído.
+      const entrega = estadoDeEntrega(item, lecturas.marcas);
+      return (
+        <BurbujaDelChat
+          item={item}
+          anterior={messages[index - 1]}
+          // Solo lo propio lleva marca: lo ajeno recibe siempre la misma y no
+          // se repinta cada vez que alguien lee.
+          entrega={item.sender === 'me' ? entrega : 'enviado'}
+          resaltado={item.id === resaltado}
+          audioSonando={
+            audioSonando !== null && item.attachments?.some((adjunto) => adjunto.id === audioSonando)
+              ? audioSonando
+              : null
+          }
+          estadoDeSesion={
+            item.sesion ? estadosDeSesion.get(item.sesion.sesionId) ?? item.sesion.estado : undefined
+          }
+          sesionOcupada={!!item.sesion && sesionOcupada === item.sesion.sesionId}
+          chat={chatDeLasBurbujas}
+        />
+      );
+    },
+    [
+      messages,
+      lecturas.marcas,
+      resaltado,
+      audioSonando,
+      estadosDeSesion,
+      sesionOcupada,
+      fraseDeQuienEscribe,
+      chatDeLasBurbujas,
+    ],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -2241,7 +2295,6 @@ export function ChatScreen() {
         <FlashList
           ref={lista}
           data={elementos}
-          extraData={extraDeSesiones}
           onContentSizeChange={alCrecerElContenido}
           keyExtractor={(item: Message) => item.id}
           contentContainerStyle={styles.messages}
@@ -2300,562 +2353,7 @@ export function ChatScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item, index }: { item: Message; index: number }) => {
-            // La burbuja de «está escribiendo»: no es un mensaje.
-            if (item.id === ELEMENTO_DE_ESCRITURA.id) {
-              return fraseDeQuienEscribe ? (
-                <IndicadorDeEscritura frase={fraseDeQuienEscribe} />
-              ) : null;
-            }
-            const mine = item.sender === 'me';
-            const fallido = item.estado === 'error';
-            const anterior = messages[index - 1];
-
-            /*
-              LA SEPARACION POR DIAS. Se calcula contra el mensaje anterior de la
-              lista y no con un contador aparte, para que insertar por Realtime o
-              paginar hacia atrás no deje las cabeceras descolocadas.
-            */
-            const dia = diaDe(item);
-            const cambioDeDia = !!dia && dia !== diaDe(anterior);
-            const agrupado = mismaRafaga(item, anterior) && !cambioDeDia;
-
-            /*
-              LA HORA, DISCRETA. Dentro de una ráfaga no se repite: «14:32» en
-              cinco burbujas seguidas no informa de nada.
-
-              PERO SI EL MENSAJE NO LLEVA TEXTO, SE PINTA SIEMPRE. La franja de
-              la hora es lo que queda para mantener pulsado en un mensaje que
-              solo tiene una foto; sin ella, esas burbujas se quedarían sin
-              ninguna zona con la que abrir el menú de acciones.
-            */
-            /*
-              Y LO PROPIO LA LLEVA SIEMPRE: en esa franja va la marca, y cada
-              mensaje que uno manda —texto, foto, emoji, archivo— enseña la
-              suya.
-            */
-            const mostrarHora = llevaFranjaDeHora({
-              agrupado,
-              tieneTexto: !!item.text,
-              tieneEstado: !!item.estado,
-              esMio: mine,
-            });
-            // Una marca, dos, o dos en celeste: saliendo, enviado o leído.
-            const entrega = estadoDeEntrega(item, lecturas.marcas);
-            /*
-              STICKER: un mensaje que es solo uno, dos o tres emoji, sin
-              adjuntos. Se pinta grande y sin burbuja. Vale igual para el que
-              se elige en el panel que para el que se escribe con el teclado.
-            */
-            /*
-              MANTENER PULSADO abre las acciones. Sobre lo propio siempre
-              (borrar); sobre lo ajeno solo si se puede reaccionar o
-              responder: sin eso la hoja saldría vacía.
-            */
-            const conAcciones = !item.estado && (mine || funciones.reacciones || puedoBorrarAjenos);
-            const comoSticker =
-              !item.eliminado &&
-              !item.attachments?.length &&
-              !item.storyContext &&
-              !item.sesion &&
-              esSticker(item.text);
-            /*
-              SIN MARCO (12/10/2026, pedido con captura): una foto o un
-              video que van solos se pintan sin burbuja. La propia era
-              negra y le hacía a la foto un marco grueso que la afeaba.
-              La hora va encima de la imagen, como en cualquier chat.
-
-              AL RAS: con texto, con una cita o respondiendo a una
-              historia la burbuja se queda —eso necesita un fondo sobre
-              el que leerse— y la foto la llena con un marco fino.
-            */
-            const sinMarco = vaSinMarco({
-              texto: item.text,
-              eliminado: item.eliminado,
-              conCita: !!item.respuestaA,
-              conHistoria: !!item.storyContext,
-              adjuntos: item.attachments,
-            });
-            const alRas =
-              !sinMarco && !item.eliminado && soloLlevaMedios(item.attachments);
-            /** Sin burbuja detrás: un sticker, o una foto sola. */
-            const sinFondo = comoSticker || sinMarco;
-            /** El nombre de quien escribe, en un grupo, en el primero de su ráfaga. */
-            const conAutor = esGrupo && !mine && !agrupado;
-            /** Si los adjuntos son lo primero que hay dentro de la burbuja. */
-            const adjuntosArriba = !conAutor && !item.respuestaA && !item.storyContext;
-
-            const cabecera = cambioDeDia ? (
-              <View style={styles.dia}>
-                <Text style={[styles.diaTexto, { color: colors.textMuted, backgroundColor: colors.surfaceAlt }]}>
-                  {new Date(item.createdAtIso as string).toLocaleDateString(undefined, {
-                    day: 'numeric',
-                    month: 'long',
-                  })}
-                </Text>
-              </View>
-            ) : null;
-
-            /*
-              LA LÁPIDA: la burbuja de un mensaje que su autor borró.
-
-              Se pinta distinta de una burbuja normal —sin relleno, con el borde
-              a la vista, en cursiva y con un icono— porque NO es un mensaje: es
-              la marca de que hubo uno. Con el mismo aspecto que los demás se
-              leería como si alguien hubiera escrito literalmente «Mensaje
-              eliminado», que es la confusión clásica de este patrón.
-
-              Y no lleva ni texto, ni adjuntos, ni contexto de historia, porque
-              el servidor no los manda: borrar para todos borra de verdad.
-            */
-            if (item.eliminado) {
-              return (
-                <View>
-                  {cabecera}
-                  <View style={mine ? styles.filaMia : styles.filaSuya}>
-                    <View
-                      style={[
-                        styles.bubble,
-                        mine ? styles.mine : styles.theirs,
-                        ESTILO_ELIMINADO,
-                        { borderColor: colors.border },
-                      ]}
-                    >
-                      <Feather name="slash" size={12} color={colors.textMuted} />
-                      <Text
-                        style={{
-                          color: colors.textMuted,
-                          fontSize: 13,
-                          fontStyle: 'italic',
-                        }}
-                      >
-                        {t('chat.deletedMessage')}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              );
-            }
-
-            /*
-              UNA SESIÓN 1:1. La solicitud es una tarjeta con los botones que le
-              tocan a quien mira; cada respuesta, una línea que la deja
-              registrada. El estado es el de HOY, no el que traía el mensaje.
-              Sin menú de acciones: el registro de una sesión no se borra.
-            */
-            if (item.sesion) {
-              const sesion = item.sesion;
-              return (
-                <View>
-                  {cabecera}
-                  <SesionEnElChat
-                    sesion={sesion}
-                    estado={estadosDeSesion.get(sesion.sesionId) ?? sesion.estado}
-                    mio={mine}
-                    nombre={headerName}
-                    hora={item.createdAt}
-                    ocupada={sesionOcupada === sesion.sesionId}
-                    alElegir={(accion) => void responderSesion(sesion.sesionId, accion)}
-                  />
-                </View>
-              );
-            }
-
-            return (
-              /*
-                EL MENSAJE QUE SE ACABA DE MANDAR ENTRA; EL HISTORIAL NO.
-
-                Una burbuja nueva sube unos puntos hasta su sitio: se ve salir
-                lo que se acaba de escribir. El historial está ya en pantalla
-                al abrir —y vuelve al desplazar, porque la lista recicla— y
-                animarlo sería ver aparecer mensajes de hace un mes.
-
-                `clave` porque la lista RECICLA celdas: sin ella la entrada no
-                se repetiría al reutilizar una celda para otro mensaje. Y cuando
-                el servidor confirma y la burbuja deja de estar «enviando», no
-                vuelve a animarse.
-              */
-              <Aparecer inmediato={item.estado !== 'enviando'} desde={12} clave={item.id}>
-                {cabecera}
-                {/*
-                  DESLIZAR PARA RESPONDER (12/10/2026). Tirar del mensaje
-                  hacia cualquiera de los dos lados lo deja citado en la
-                  barra de escribir: lo mismo que «Responder» en el menú,
-                  sin el menú. Solo donde el menú lo ofrecería: ver
-                  `sePuedeResponder`.
-                */}
-                <DeslizarParaResponder
-                  clave={item.id}
-                  activo={sePuedeResponder(
-                    { estado: item.estado, eliminado: item.eliminado },
-                    funciones.reacciones,
-                  )}
-                  alResponder={() => setRespondiendoA(item)}
-                  style={[
-                    mine ? styles.filaMia : styles.filaSuya,
-                    esGrupo && !mine && styles.filaDeGrupo,
-                    // El mensaje al que se llegó desde «Contenido», un momento.
-                    item.id === resaltado && { backgroundColor: colors.border },
-                  ]}
-                >
-                  {/*
-                    EN UN GRUPO, LA FOTO DE QUIEN ESCRIBE (10/10/2026). Va al
-                    lado del primer mensaje de cada ráfaga; en los siguientes
-                    queda su hueco, para que las burbujas no bailen. Visto en
-                    teléfono: con solo el nombre en gris no se distinguía
-                    quién mandaba cada cosa.
-                  */}
-                  {esGrupo && !mine ? (
-                    agrupado ? (
-                      <View style={styles.huecoDeAvatar} />
-                    ) : (
-                      <Avatar
-                        size={28}
-                        image={
-                          profileImageUrl(miembroDe(infoDeConversacion, item.autorId)?.avatarPath) ??
-                          null
-                        }
-                        name={nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre)}
-                      />
-                    )
-                  ) : null}
-                  <View
-                    style={[
-                      styles.bubble,
-                      mine ? styles.mine : styles.theirs,
-                      // Dentro de una ráfaga las burbujas se acercan y pierden
-                      // la esquina que apunta al lado: se leen como un bloque.
-                      agrupado && (mine ? styles.mineSeguida : styles.theirsSeguida),
-                      agrupado && styles.pegada,
-                      sinMarco && styles.bubbleSinMarco,
-                      {
-                        // La ajena se despega del fondo con un gris suave en
-                        // vez de un borde: en claro, blanco sobre blanco con
-                        // una línea parecía una casilla de formulario.
-                        backgroundColor: sinFondo
-                          ? 'transparent'
-                          : mine
-                            ? colors.burbujaPropia
-                            : colors.surfaceAlt,
-                        borderColor: fallido
-                          ? colors.danger
-                          : sinFondo
-                            ? 'transparent'
-                            : mine
-                              ? colors.burbujaPropia
-                              : colors.border,
-                        opacity: item.estado === 'enviando' ? 0.75 : 1,
-                      },
-                    ]}
-                  >
-                    {/*
-                      DE QUIÉN ES, solo en un grupo y solo en el primer
-                      mensaje de cada ráfaga ajena: repetir el nombre en
-                      cinco burbujas seguidas de la misma persona no dice
-                      nada.
-                    */}
-                    {conAutor && !sinMarco ? (
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.autorDeGrupo,
-                          // Cada persona, su color: se la reconoce antes de leerla.
-                          { color: colorDeAutor(item.autorId, mode === 'dark') },
-                        ]}
-                      >
-                        {nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre) ||
-                          t('groups.someone')}
-                      </Text>
-                    ) : null}
-                    {/*
-                      A QUÉ MENSAJE RESPONDE (10/10/2026). Tocarla lleva al
-                      original, con el mismo camino que «ver en el chat».
-                      Hermana de lo demás, nunca envolviéndolo.
-                    */}
-                    {item.respuestaA ? (
-                      <Pressable
-                        onPress={() => setMensajeBuscado(item.respuestaA?.id ?? null)}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('chat.replyGoTo')}
-                        style={[
-                          styles.cita,
-                          { borderLeftColor: colorDeAutor(item.respuestaA.autorId, mode === 'dark') },
-                        ]}
-                      >
-                        <Text
-                          numberOfLines={1}
-                          style={[
-                            styles.citaAutor,
-                            { color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.text },
-                          ]}
-                        >
-                          {item.respuestaA.autorId === currentUserId
-                            ? t('chatViews.you')
-                            : item.respuestaA.autor || t('groups.someone')}
-                        </Text>
-                        <Text
-                          numberOfLines={2}
-                          style={[
-                            styles.citaTexto,
-                            { color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.textMuted },
-                          ]}
-                        >
-                          {textoDeLaCita(item.respuestaA)}
-                        </Text>
-                      </Pressable>
-                    ) : null}
-                    {/*
-                      A QUE HISTORIA RESPONDIA, encima de todo lo demás: es el
-                      contexto que hace que se entienda lo que viene debajo.
-
-                      Va como HERMANO del texto y de los adjuntos, nunca
-                      envolviéndolos, por lo mismo que se explica más abajo con
-                      el `Pressable`: anidar zonas pulsables genera HTML inválido
-                      en web.
-                    */}
-                    {item.storyContext ? (
-                      <RespuestaAHistoria contexto={item.storyContext} mio={mine} />
-                    ) : null}
-
-                    {item.attachments?.length ? (
-                      <View
-                        style={[
-                          styles.adjuntos,
-                          sinMarco && styles.adjuntosSinMarco,
-                          alRas && styles.adjuntosAlRas,
-                          alRas && adjuntosArriba && styles.adjuntosArriba,
-                        ]}
-                      >
-                        {item.attachments.map((adjunto, indice, todos) =>
-                          pintarAdjunto(adjunto, mine, {
-                            mensaje: item,
-                            conAcciones,
-                            forma: sinMarco ? 'sin_marco' : alRas ? 'al_ras' : 'normal',
-                            /*
-                              SIN BURBUJA, LO QUE IBA DENTRO DE ELLA VA ENCIMA
-                              DE LA IMAGEN, sobre un fondo oscuro para que se
-                              lea con cualquier foto: de quién es, arriba de
-                              la primera; la hora y el estado, abajo de la
-                              última.
-                            */
-                            encima: sinMarco ? (
-                              <>
-                                {indice === 0 && conAutor ? (
-                                  <View style={[styles.sobreMedio, styles.autorSobreMedio]}>
-                                    <Text numberOfLines={1} style={styles.textoSobreMedio}>
-                                      {nombreDelAutor(
-                                        infoDeConversacion,
-                                        item.autorId,
-                                        item.autorNombre,
-                                      ) || t('groups.someone')}
-                                    </Text>
-                                  </View>
-                                ) : null}
-                                {indice === todos.length - 1 && mostrarHora ? (
-                                  <View style={[styles.sobreMedio, styles.horaSobreMedio]}>
-                                    <Text style={styles.textoSobreMedio}>
-                                      {item.estado === 'enviando'
-                                        ? t('chat.sending')
-                                        : fallido
-                                          ? t('chat.notSent')
-                                          : item.createdAt}
-                                    </Text>
-                                    {mine ? (
-                                      // Sobre la foto la franja es oscura en los dos temas.
-                                      <MarcaDeEntrega
-                                        estado={entrega}
-                                        color="#FFF"
-                                        colorDeLeido={COLOR_DE_LEIDO.sobreOscuro}
-                                      />
-                                    ) : null}
-                                  </View>
-                                ) : null}
-                              </>
-                            ) : null,
-                          }),
-                        )}
-                      </View>
-                    ) : null}
-
-                    {/*
-                      PULSACIÓN LARGA PARA EL MENÚ DE ACCIONES, y solo sobre lo
-                      propio.
-
-                      Es el gesto que ya espera cualquiera que venga de otro
-                      chat. No hay botón visible: uno por burbuja ensuciaría la
-                      conversación entera para algo que casi nunca se usa.
-
-                      POR QUÉ ENVUELVE EL TEXTO Y LA HORA, Y NO LA BURBUJA
-                      ENTERA. Porque en web cada `Pressable` es un `<button>`, y
-                      los adjuntos YA son `Pressable` (se tocan para ver la foto,
-                      para oír la nota). Un Pressable rodeando a otro genera HTML
-                      inválido y rompe la hidratación — es una trampa que este
-                      proyecto ya pagó. Aquí van como HERMANOS: los adjuntos
-                      arriba, esto debajo.
-
-                      `onLongPress` sin `onPress`: tocar la burbuja sigue sin
-                      hacer nada, como antes.
-                    */}
-                    <Pressable
-                      onLongPress={
-                        conAcciones ? () => abrirAcciones(item) : undefined
-                      }
-                      delayLongPress={400}
-                      // Una foto sin marco no tiene nada aquí debajo: el
-                      // menú se abre manteniendo presionada la propia foto.
-                      accessibilityRole={conAcciones && !sinMarco ? 'button' : undefined}
-                      accessibilityLabel={
-                        conAcciones && !sinMarco ? t('chat.holdForActions') : undefined
-                      }
-                    >
-                      {/*
-                        Los enlaces se pueden tocar (07/10/2026): el de una
-                        reunión pegado aquí se abre con un toque. Sin
-                        enlaces se pinta exactamente lo de antes.
-                      */}
-                      {item.text && comoSticker ? (
-                        <Text style={styles.sticker}>{item.text}</Text>
-                      ) : item.text ? (
-                        <TextoConEnlaces
-                          texto={item.text}
-                          colorDelTexto={mine ? colors.sobreBurbujaPropia : colors.text}
-                          colorDelFondo={mine ? colors.burbujaPropia : undefined}
-                          style={{ color: mine ? colors.sobreBurbujaPropia : colors.text, fontSize: 15, lineHeight: 22 }}
-                        />
-                      ) : null}
-
-                      {item.progreso !== undefined ? (
-                        <View style={[styles.barra, { backgroundColor: colors.border }]}>
-                          <View
-                            style={[
-                              styles.barraAvance,
-                              {
-                                // Sin burbuja, la barra va sobre el fondo del chat.
-                                backgroundColor:
-                                  mine && !sinMarco ? colors.sobreBurbujaPropia : colors.primary,
-                                width: `${Math.round(item.progreso * 100)}%`,
-                              },
-                            ]}
-                          />
-                        </View>
-                      ) : null}
-
-                      {mostrarHora && !sinMarco ? (
-                        /*
-                          LA HORA Y EL ESTADO, legibles. Eran 9 puntos al 70 %:
-                          sobre la burbuja negra no se leía. Y el estado del
-                          envío se dice con un icono además de con el texto:
-                          una marca mientras sale, dos cuando el servidor lo
-                          confirma, dos en celeste cuando lo leyeron, y un
-                          aviso si no salió. Ver `lib/lecturaDeMensajes`.
-                        */
-                        <View style={[styles.pieDeBurbuja, mine && styles.pieDeBurbujaMia]}>
-                          <Text
-                            style={{
-                              // Sin burbuja detrás, la hora va sobre el fondo del chat.
-                              color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.textMuted,
-                              fontSize: 11,
-                              opacity: 0.8,
-                            }}
-                          >
-                            {item.estado === 'enviando'
-                              ? t('chat.sending')
-                              : fallido
-                                ? t('chat.notSent')
-                                : item.createdAt}
-                          </Text>
-                          {mine ? (
-                            <MarcaDeEntrega
-                              estado={entrega}
-                              color={comoSticker ? colors.textMuted : colors.sobreBurbujaPropia}
-                              // La burbuja propia es del color principal: oscura en
-                              // el tema claro y clara en el oscuro. Un sticker no
-                              // lleva burbuja y va sobre el fondo del tema, al revés.
-                              colorDeLeido={
-                                // Por contraste con lo que hay DETRÁS (la burbuja
-                                // propia, o el fondo si es un sticker), no por el
-                                // modo: con una burbuja de color, «leído» se veía mal.
-                                colorDeLeidoSobre(
-                                  comoSticker ? colors.background : colors.burbujaPropia,
-                                  comoSticker ? colors.textMuted : colors.sobreBurbujaPropia,
-                                ) ??
-                                ((mode === 'dark') === comoSticker
-                                  ? COLOR_DE_LEIDO.sobreOscuro
-                                  : COLOR_DE_LEIDO.sobreClaro)
-                              }
-                              style={styles.iconoDeEstado}
-                            />
-                          ) : null}
-                        </View>
-                      ) : null}
-                    </Pressable>
-                    {/*
-                      LAS REACCIONES. Tocar una pone la propia o la quita.
-                      Fuera del `Pressable` de arriba: un botón dentro de
-                      otro genera HTML inválido en la web.
-                    */}
-                    {item.reacciones?.length ? (
-                      <View style={styles.reacciones}>
-                        {item.reacciones.map((reaccion) => (
-                          <Pressable
-                            key={reaccion.emoji}
-                            onPress={() =>
-                              void reaccionar(item, reaccion.mia ? null : reaccion.emoji)
-                            }
-                            accessibilityRole="button"
-                            accessibilityLabel={t('chat.reactionOf', {
-                              emoji: reaccion.emoji,
-                              n: reaccion.cuantos,
-                            })}
-                            style={[
-                              styles.reaccion,
-                              {
-                                backgroundColor: colors.background,
-                                borderColor: reaccion.mia ? colors.text : colors.border,
-                              },
-                            ]}
-                          >
-                            <Text style={[styles.reaccionTexto, { color: colors.text }]}>
-                              {reaccion.cuantos > 1
-                                ? `${reaccion.emoji} ${reaccion.cuantos}`
-                                : reaccion.emoji}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
-
-                  {fallido ? (
-                    <View style={styles.accionesFallo}>
-                      <Pulsable
-                        onPress={() => reintentar(item)}
-                        escala={ESCALA_AL_PULSAR.chip}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('chat.retrySend')}
-                        style={styles.accionFallo}
-                      >
-                        <Feather name="refresh-cw" size={13} color={colors.primary} />
-                        <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>
-                          {t('common.retry')}
-                        </Text>
-                      </Pulsable>
-                      <Pressable
-                        onPress={() => descartar(item)}
-                        accessibilityRole="button"
-                        accessibilityLabel={t('chat.discardMessage')}
-                        style={styles.accionFallo}
-                      >
-                        <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-                          {t('common.discard')}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-                </DeslizarParaResponder>
-              </Aparecer>
-            );
-          }}
+          renderItem={renderItem}
         />
         {/*
           IR A LO ÚLTIMO. Solo cuando se ha subido a leer: abajo no hay a dónde
@@ -2967,110 +2465,17 @@ export function ChatScreen() {
           </View>
         ) : null}
 
-        <View
-          style={[
-            styles.inputBar,
-            {
-              borderTopColor: colors.border,
-              backgroundColor: colors.background,
-              // Evita que el campo quede bajo la barra de gestos / home indicator.
-              paddingBottom: spacing.lg + margenInferior,
-            },
-          ]}
-        >
-          {/*
-            MIENTRAS HAY UNA NOTA DE VOZ EN MARCHA, LA FILA ES DE LA GRABADORA.
-            El `+` y el campo de texto se apartan y su sitio lo ocupa la barra
-            de la nota (`BotonDeNotaDeVoz`), con la papelera a la izquierda y
-            el envío a la derecha. Dejarlos daría dos modos a la vez —hablando
-            y escribiendo—, y la barra tendría que flotar sobre los mensajes,
-            que es donde estaba y donde no se encontraba la papelera.
-          */}
-          {grabadora.ocupada ? null : (
-            /*
-              El `+` es un botón: lleva su círculo y se hunde al tocarlo.
-              Suelto sobre el fondo parecía un signo, no algo que se pulsa.
-            */
-            <Pulsable
-              accessibilityLabel={t('chat.attach')}
-              accessibilityRole="button"
-              onPress={() => setMenuAbierto(true)}
-              disabled={!supabaseEnabled}
-              escala={ESCALA_AL_PULSAR.icono}
-              opacidad={supabaseEnabled ? 1 : 0.4}
-              style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
-            >
-              <Feather name="plus" size={22} color={colors.text} />
-            </Pulsable>
-          )}
-
-          {grabadora.ocupada || !supabaseEnabled ? null : (
-            <Pulsable
-              accessibilityLabel={t('stickers.open')}
-              accessibilityRole="button"
-              onPress={() => setStickersAbiertos(true)}
-              escala={ESCALA_AL_PULSAR.icono}
-              style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
-            >
-              <Feather name="smile" size={22} color={colors.text} />
-            </Pulsable>
-          )}
-
-          {grabadora.ocupada ? null : (
-            <Input
-              value={text}
-              onChangeText={(texto) => {
-                setText(texto);
-                // Mientras se teclea se avisa a quien tenga el chat abierto.
-                escritura.alEscribir(texto);
-              }}
-              onSubmitEditing={submit}
-              placeholder={t('profile.message')}
-              placeholderTextColor={colors.textMuted}
-              returnKeyType="send"
-              containerStyle={styles.inputContainer}
-              forma="pastilla"
-              style={{ minHeight: 40 }}
-            />
-          )}
-
-          {/*
-            EL MICROFONO SOLO EXISTE SI EL SERVIDOR PUEDE GUARDAR LA NOTA.
-
-            Mientras la 0044 no esté aplicada, `funciones.notasDeVoz` es `false`
-            y aquí no se pinta nada: NUNCA UN BOTON MUERTO. Y cuando hay algo
-            escrito o adjuntado, el micrófono deja su sitio al avión de papel —
-            los dos a la vez obligarían a elegir entre dos botones que hacen lo
-            mismo desde el punto de vista de quien mira: mandar.
-          */}
-          {funciones.notasDeVoz && !hayQueEnviar && supabaseEnabled ? (
-            <BotonDeNotaDeVoz
-              fase={grabadora.fase}
-              segundos={grabadora.segundos}
-              avance={grabadora.avance}
-              progreso={grabadora.progreso}
-              nivel={grabadora.nivel}
-              uri={grabadora.nota?.uri ?? null}
-              empezar={() => void grabadora.empezar()}
-              detener={() => void grabadora.detener()}
-              cancelar={() => void grabadora.cancelar()}
-              eliminar={() => grabadora.eliminar()}
-              enviar={() => void grabadora.enviar()}
-              deshabilitado={enviando}
-            />
-          ) : (
-            // El mismo botón redondo que en comentarios: crece cuando hay algo
-            // que mandar y enseña la espera dentro, sin cambiar de tamaño.
-            <View style={styles.sendButton}>
-              <BotonDeEnviar
-                onPress={submit}
-                listo={hayQueEnviar}
-                enviando={enviando}
-                accessibilityLabel={t('chat.sendMessage')}
-              />
-            </View>
-          )}
-        </View>
+        <RedactorDelChat
+          funciones={funciones}
+          grabadora={grabadora}
+          supabaseEnabled={supabaseEnabled}
+          hayAdjuntos={elegidos.length > 0}
+          enviando={enviando}
+          escritura={escritura}
+          alEnviar={enviarLoEscrito}
+          setMenuAbierto={setMenuAbierto}
+          setStickersAbiertos={setStickersAbiertos}
+        />
       </SinTecladoDelante>
 
       {/*
@@ -3324,6 +2729,937 @@ export function ChatScreen() {
         }
         onClose={() => setFotoAmpliada(null)}
       />
+    </View>
+  );
+}
+
+/** Traduce al idioma de quien mira (`useTranslation`). */
+type Traducir = ReturnType<typeof useTranslation>['t'];
+
+/** El texto de una cita: su extracto, o qué era si no tenía texto. */
+function textoDeLaCitaCon(t: Traducir, cita: CitaDeMensaje): string {
+  const lo = textoDeCita(cita);
+  return 'texto' in lo ? lo.texto : t(lo.clave as TranslationKey);
+}
+
+/**
+ * Cómo va una foto o un video dentro de su mensaje.
+ *
+ * `sin_marco`: van solos, sin burbuja. `al_ras`: dentro de una burbuja con
+ * texto, con un marco fino. `normal`: mezclados con archivos o notas de
+ * voz, como una pieza más.
+ */
+type ContextoDeAdjunto = {
+  mensaje: Message;
+  /** Si mantenerlo presionado abre el menú del mensaje. */
+  conAcciones: boolean;
+  forma: 'normal' | 'al_ras' | 'sin_marco';
+  /** Lo que se pinta encima de la imagen: de quién es, la hora. */
+  encima?: React.ReactNode;
+};
+
+/**
+ * Lo que una burbuja necesita de la conversación, y lo que se hace desde ella.
+ *
+ * Cambia poco —al saber si es un grupo, al cambiar el tema o el idioma— y,
+ * cuando cambia, se repintan todas, como debe ser. Las acciones son estables
+ * entre pintados (ver `renderItem` en `ChatScreen`).
+ */
+type LoDelChat = {
+  esGrupo: boolean;
+  infoDeConversacion: InfoDeConversacion | null | undefined;
+  funciones: FuncionesDelChat;
+  puedoBorrarAjenos: boolean;
+  currentUserId: string | undefined;
+  headerName: string;
+  anchoDeMedio: number;
+  colors: AppPalette;
+  mode: ThemeMode;
+  t: Traducir;
+  abrirAcciones: (mensaje: Message) => void;
+  reaccionar: (mensaje: Message, emoji: string | null) => Promise<void>;
+  reintentar: (mensaje: Message) => void;
+  descartar: (mensaje: Message) => void;
+  responderSesion: (sesionId: string, accion: AccionDeSesion) => unknown;
+  setRespondiendoA: (mensaje: Message | null) => void;
+  setMensajeBuscado: (id: string | null) => void;
+  setAudioSonando: (id: string | null) => void;
+  setFotoAmpliada: (adjunto: MessageAttachment | null) => void;
+};
+
+type PropsDeBurbuja = {
+  item: Message;
+  /** El de antes en la lista: decide la ráfaga y la separación por días. */
+  anterior: Message | undefined;
+  /** Una marca, dos, o dos en celeste, ya calculada con las marcas de lectura. */
+  entrega: EstadoDeEntrega;
+  /** El mensaje al que se llegó desde «Contenido», mientras dura el resalte. */
+  resaltado: boolean;
+  /** La nota de voz DE ESTE MENSAJE que está sonando, o `null`. */
+  audioSonando: string | null;
+  /** Solo en la tarjeta de una sesión: cómo está HOY. */
+  estadoDeSesion: EstadoDeSesionEnChat | undefined;
+  /** Solo en la tarjeta de una sesión: tiene una respuesta en curso. */
+  sesionOcupada: boolean;
+  chat: LoDelChat;
+};
+
+/**
+ * Una burbuja del chat: un mensaje, la tarjeta de una sesión o la lápida de
+ * uno borrado.
+ *
+ * MEMORIZADA (28/10/2026). Vivía escrita dentro de `renderItem` y se volvía
+ * a pintar entera con cualquier cambio de la pantalla, cada tecla incluida.
+ * Ahora se pinta cuando cambia algo de lo que recibe: su mensaje, el de antes,
+ * su marca, su resalte, su nota, su sesión o lo de la conversación.
+ */
+const BurbujaDelChat = memo(function BurbujaDelChat({
+  item,
+  anterior,
+  entrega,
+  resaltado,
+  audioSonando,
+  estadoDeSesion,
+  sesionOcupada,
+  chat,
+}: PropsDeBurbuja) {
+  const {
+    esGrupo,
+    infoDeConversacion,
+    funciones,
+    puedoBorrarAjenos,
+    currentUserId,
+    headerName,
+    anchoDeMedio,
+    colors,
+    mode,
+    t,
+    abrirAcciones,
+    reaccionar,
+    reintentar,
+    descartar,
+    responderSesion,
+    setRespondiendoA,
+    setMensajeBuscado,
+    setAudioSonando,
+    setFotoAmpliada,
+  } = chat;
+
+  /** El texto de una cita: su extracto, o qué era si no tenía texto. */
+  const textoDeLaCita = (cita: CitaDeMensaje): string => textoDeLaCitaCon(t, cita);
+
+  const pintarAdjunto = (
+    adjunto: MessageAttachment,
+    mio: boolean,
+    contexto: ContextoDeAdjunto,
+  ) => {
+    /*
+      MANTENER PRESIONADO SOBRE EL ADJUNTO ABRE EL MENÚ DEL MENSAJE. Antes
+      solo respondía la franja de la hora, debajo. Una foto sin marco ya no
+      tiene franja: sin esto no habría dónde borrar, reaccionar ni responder.
+    */
+    const alMantener = contexto.conAcciones
+      ? () => abrirAcciones(contexto.mensaje)
+      : undefined;
+
+    /*
+      LA NOTA DE VOZ NO MONTA REPRODUCTOR AQUI. Recibe si es la que está sonando
+      y un par de avisos; quien decide es la pantalla (`audioSonando`). Ver el
+      comentario de ese estado: la guarda tiene que vivir fuera de la burbuja.
+    */
+    if (adjunto.kind === 'audio') {
+      return (
+        <BurbujaDeNotaDeVoz
+          key={adjunto.id}
+          adjunto={adjunto}
+          mio={mio}
+          activo={audioSonando === adjunto.id}
+          alPulsar={() => setAudioSonando(adjunto.id)}
+          alTerminar={() => setAudioSonando(null)}
+        />
+      );
+    }
+
+    if (adjunto.kind === 'document') {
+      /*
+        UN ARCHIVO SE DESCARGA, DENTRO DE LA APLICACIÓN (12/10/2026). Antes
+        tocarlo abría su dirección en el navegador: la persona acababa fuera
+        de Z, en una pestaña de Chrome. Ahora lleva su botón de descargar y
+        se guarda en el teléfono. Ver `ArchivoDeChat`.
+
+        Si en realidad es una foto o un video mandado como archivo, tocarlo
+        lo abre en el visor, como cualquier otra foto del chat. Solo cuando
+        ya está en el servidor: mientras sube no hay nada que abrir.
+      */
+      const medio = estaEnElServidor(adjunto)
+        ? medioQueEs(adjunto.mimeType, adjunto.fileName)
+        : null;
+      return (
+        <ArchivoDeChat
+          key={adjunto.id}
+          adjunto={adjunto}
+          mio={mio}
+          alVer={medio ? () => setFotoAmpliada({ ...adjunto, kind: medio }) : undefined}
+          alMantener={alMantener}
+          style={{ width: anchoDeMedio }}
+        />
+      );
+    }
+
+    // La proporción real del archivo, cuando se sabe: sin ella la burbuja da un
+    // salto al cargar la imagen y mueve todo lo que hay debajo.
+    const proporcion =
+      adjunto.width && adjunto.height ? adjunto.width / adjunto.height : 1;
+
+    return (
+      <Pressable
+        key={adjunto.id}
+        onPress={() => {
+          /*
+            UN VÍDEO NO VA AL VISOR DE IMÁGENES. `ImageViewer` pinta una imagen:
+            con la URL de un vídeo enseñaba una pantalla negra con «pellizca
+            para ampliar». La aplicación no tiene un visor de vídeo a pantalla
+            completa, así que se abre fuera, como los documentos.
+          */
+          // EL VÍDEO SE REPRODUCE DENTRO (10/10/2026), en el mismo visor que
+          // las fotos. Antes se abría fuera, en el navegador. Mientras se
+          // está subiendo todavía no tiene dirección que reproducir.
+          if (adjunto.kind === 'video' && !estaEnElServidor(adjunto)) return;
+          if (adjunto.url) setFotoAmpliada(adjunto);
+        }}
+        onLongPress={alMantener}
+        delayLongPress={400}
+        accessibilityRole="button"
+        accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
+        accessibilityHint={alMantener ? t('chat.holdForActions') : undefined}
+        style={[
+          styles.medio,
+          contexto.forma === 'sin_marco' && styles.medioSinMarco,
+          contexto.forma === 'al_ras' && styles.medioAlRas,
+          contexto.forma === 'al_ras' ? { minWidth: anchoDeMedio } : { width: anchoDeMedio },
+          { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) },
+        ]}
+      >
+        {/*
+          LA PIEZA QUE SABE DE DÓNDE SACAR LA IMAGEN SIN ESPERAR: lo que ya
+          está en el teléfono, lo guardado en el disco, o la portada de un
+          video. Antes iba aquí un `Image` con la dirección firmada, que
+          volvía a bajar la foto en cada apertura y, con un video, pintaba
+          un cuadro negro. Ver `MedioDeChat`.
+        */}
+        <MedioDeChat adjunto={adjunto} style={StyleSheet.absoluteFill}>
+          {contexto.encima}
+        </MedioDeChat>
+      </Pressable>
+    );
+  };
+
+  const mine = item.sender === 'me';
+  const fallido = item.estado === 'error';
+
+  /*
+    LA SEPARACION POR DIAS. Se calcula contra el mensaje anterior de la
+    lista y no con un contador aparte, para que insertar por Realtime o
+    paginar hacia atrás no deje las cabeceras descolocadas.
+  */
+  const dia = diaDe(item);
+  const cambioDeDia = !!dia && dia !== diaDe(anterior);
+  const agrupado = mismaRafaga(item, anterior) && !cambioDeDia;
+
+  /*
+    LA HORA, DISCRETA. Dentro de una ráfaga no se repite: «14:32» en
+    cinco burbujas seguidas no informa de nada.
+
+    PERO SI EL MENSAJE NO LLEVA TEXTO, SE PINTA SIEMPRE. La franja de
+    la hora es lo que queda para mantener pulsado en un mensaje que
+    solo tiene una foto; sin ella, esas burbujas se quedarían sin
+    ninguna zona con la que abrir el menú de acciones.
+  */
+  /*
+    Y LO PROPIO LA LLEVA SIEMPRE: en esa franja va la marca, y cada
+    mensaje que uno manda —texto, foto, emoji, archivo— enseña la
+    suya.
+  */
+  const mostrarHora = llevaFranjaDeHora({
+    agrupado,
+    tieneTexto: !!item.text,
+    tieneEstado: !!item.estado,
+    esMio: mine,
+  });
+  /*
+    STICKER: un mensaje que es solo uno, dos o tres emoji, sin
+    adjuntos. Se pinta grande y sin burbuja. Vale igual para el que
+    se elige en el panel que para el que se escribe con el teclado.
+  */
+  /*
+    MANTENER PULSADO abre las acciones. Sobre lo propio siempre
+    (borrar); sobre lo ajeno solo si se puede reaccionar o
+    responder: sin eso la hoja saldría vacía.
+  */
+  const conAcciones = !item.estado && (mine || funciones.reacciones || puedoBorrarAjenos);
+  const comoSticker =
+    !item.eliminado &&
+    !item.attachments?.length &&
+    !item.storyContext &&
+    !item.sesion &&
+    esSticker(item.text);
+  /*
+    SIN MARCO (12/10/2026, pedido con captura): una foto o un
+    video que van solos se pintan sin burbuja. La propia era
+    negra y le hacía a la foto un marco grueso que la afeaba.
+    La hora va encima de la imagen, como en cualquier chat.
+
+    AL RAS: con texto, con una cita o respondiendo a una
+    historia la burbuja se queda —eso necesita un fondo sobre
+    el que leerse— y la foto la llena con un marco fino.
+  */
+  const sinMarco = vaSinMarco({
+    texto: item.text,
+    eliminado: item.eliminado,
+    conCita: !!item.respuestaA,
+    conHistoria: !!item.storyContext,
+    adjuntos: item.attachments,
+  });
+  const alRas =
+    !sinMarco && !item.eliminado && soloLlevaMedios(item.attachments);
+  /** Sin burbuja detrás: un sticker, o una foto sola. */
+  const sinFondo = comoSticker || sinMarco;
+  /** El nombre de quien escribe, en un grupo, en el primero de su ráfaga. */
+  const conAutor = esGrupo && !mine && !agrupado;
+  /** Si los adjuntos son lo primero que hay dentro de la burbuja. */
+  const adjuntosArriba = !conAutor && !item.respuestaA && !item.storyContext;
+
+  const cabecera = cambioDeDia ? (
+    <View style={styles.dia}>
+      <Text style={[styles.diaTexto, { color: colors.textMuted, backgroundColor: colors.surfaceAlt }]}>
+        {new Date(item.createdAtIso as string).toLocaleDateString(undefined, {
+          day: 'numeric',
+          month: 'long',
+        })}
+      </Text>
+    </View>
+  ) : null;
+
+  /*
+    LA LÁPIDA: la burbuja de un mensaje que su autor borró.
+
+    Se pinta distinta de una burbuja normal —sin relleno, con el borde
+    a la vista, en cursiva y con un icono— porque NO es un mensaje: es
+    la marca de que hubo uno. Con el mismo aspecto que los demás se
+    leería como si alguien hubiera escrito literalmente «Mensaje
+    eliminado», que es la confusión clásica de este patrón.
+
+    Y no lleva ni texto, ni adjuntos, ni contexto de historia, porque
+    el servidor no los manda: borrar para todos borra de verdad.
+  */
+  if (item.eliminado) {
+    return (
+      <View>
+        {cabecera}
+        <View style={mine ? styles.filaMia : styles.filaSuya}>
+          <View
+            style={[
+              styles.bubble,
+              mine ? styles.mine : styles.theirs,
+              ESTILO_ELIMINADO,
+              { borderColor: colors.border },
+            ]}
+          >
+            <Feather name="slash" size={12} color={colors.textMuted} />
+            <Text
+              style={{
+                color: colors.textMuted,
+                fontSize: 13,
+                fontStyle: 'italic',
+              }}
+            >
+              {t('chat.deletedMessage')}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  /*
+    UNA SESIÓN 1:1. La solicitud es una tarjeta con los botones que le
+    tocan a quien mira; cada respuesta, una línea que la deja
+    registrada. El estado es el de HOY, no el que traía el mensaje.
+    Sin menú de acciones: el registro de una sesión no se borra.
+  */
+  if (item.sesion) {
+    const sesion = item.sesion;
+    return (
+      <View>
+        {cabecera}
+        <SesionEnElChat
+          sesion={sesion}
+          estado={estadoDeSesion ?? sesion.estado}
+          mio={mine}
+          nombre={headerName}
+          hora={item.createdAt}
+          ocupada={sesionOcupada}
+          alElegir={(accion) => void responderSesion(sesion.sesionId, accion)}
+        />
+      </View>
+    );
+  }
+
+  return (
+    /*
+      EL MENSAJE QUE SE ACABA DE MANDAR ENTRA; EL HISTORIAL NO.
+
+      Una burbuja nueva sube unos puntos hasta su sitio: se ve salir
+      lo que se acaba de escribir. El historial está ya en pantalla
+      al abrir —y vuelve al desplazar, porque la lista recicla— y
+      animarlo sería ver aparecer mensajes de hace un mes.
+
+      `clave` porque la lista RECICLA celdas: sin ella la entrada no
+      se repetiría al reutilizar una celda para otro mensaje. Y cuando
+      el servidor confirma y la burbuja deja de estar «enviando», no
+      vuelve a animarse.
+    */
+    <Aparecer inmediato={item.estado !== 'enviando'} desde={12} clave={item.id}>
+      {cabecera}
+      {/*
+        DESLIZAR PARA RESPONDER (12/10/2026). Tirar del mensaje
+        hacia cualquiera de los dos lados lo deja citado en la
+        barra de escribir: lo mismo que «Responder» en el menú,
+        sin el menú. Solo donde el menú lo ofrecería: ver
+        `sePuedeResponder`.
+      */}
+      <DeslizarParaResponder
+        clave={item.id}
+        activo={sePuedeResponder(
+          { estado: item.estado, eliminado: item.eliminado },
+          funciones.reacciones,
+        )}
+        alResponder={() => setRespondiendoA(item)}
+        style={[
+          mine ? styles.filaMia : styles.filaSuya,
+          esGrupo && !mine && styles.filaDeGrupo,
+          // El mensaje al que se llegó desde «Contenido», un momento.
+          resaltado && { backgroundColor: colors.border },
+        ]}
+      >
+        {/*
+          EN UN GRUPO, LA FOTO DE QUIEN ESCRIBE (10/10/2026). Va al
+          lado del primer mensaje de cada ráfaga; en los siguientes
+          queda su hueco, para que las burbujas no bailen. Visto en
+          teléfono: con solo el nombre en gris no se distinguía
+          quién mandaba cada cosa.
+        */}
+        {esGrupo && !mine ? (
+          agrupado ? (
+            <View style={styles.huecoDeAvatar} />
+          ) : (
+            <Avatar
+              size={28}
+              image={
+                profileImageUrl(miembroDe(infoDeConversacion, item.autorId)?.avatarPath) ??
+                null
+              }
+              name={nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre)}
+            />
+          )
+        ) : null}
+        <View
+          style={[
+            styles.bubble,
+            mine ? styles.mine : styles.theirs,
+            // Dentro de una ráfaga las burbujas se acercan y pierden
+            // la esquina que apunta al lado: se leen como un bloque.
+            agrupado && (mine ? styles.mineSeguida : styles.theirsSeguida),
+            agrupado && styles.pegada,
+            sinMarco && styles.bubbleSinMarco,
+            {
+              // La ajena se despega del fondo con un gris suave en
+              // vez de un borde: en claro, blanco sobre blanco con
+              // una línea parecía una casilla de formulario.
+              backgroundColor: sinFondo
+                ? 'transparent'
+                : mine
+                  ? colors.burbujaPropia
+                  : colors.surfaceAlt,
+              borderColor: fallido
+                ? colors.danger
+                : sinFondo
+                  ? 'transparent'
+                  : mine
+                    ? colors.burbujaPropia
+                    : colors.border,
+              opacity: item.estado === 'enviando' ? 0.75 : 1,
+            },
+          ]}
+        >
+          {/*
+            DE QUIÉN ES, solo en un grupo y solo en el primer
+            mensaje de cada ráfaga ajena: repetir el nombre en
+            cinco burbujas seguidas de la misma persona no dice
+            nada.
+          */}
+          {conAutor && !sinMarco ? (
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.autorDeGrupo,
+                // Cada persona, su color: se la reconoce antes de leerla.
+                { color: colorDeAutor(item.autorId, mode === 'dark') },
+              ]}
+            >
+              {nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre) ||
+                t('groups.someone')}
+            </Text>
+          ) : null}
+          {/*
+            A QUÉ MENSAJE RESPONDE (10/10/2026). Tocarla lleva al
+            original, con el mismo camino que «ver en el chat».
+            Hermana de lo demás, nunca envolviéndolo.
+          */}
+          {item.respuestaA ? (
+            <Pressable
+              onPress={() => setMensajeBuscado(item.respuestaA?.id ?? null)}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.replyGoTo')}
+              style={[
+                styles.cita,
+                { borderLeftColor: colorDeAutor(item.respuestaA.autorId, mode === 'dark') },
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.citaAutor,
+                  { color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.text },
+                ]}
+              >
+                {item.respuestaA.autorId === currentUserId
+                  ? t('chatViews.you')
+                  : item.respuestaA.autor || t('groups.someone')}
+              </Text>
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.citaTexto,
+                  { color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.textMuted },
+                ]}
+              >
+                {textoDeLaCita(item.respuestaA)}
+              </Text>
+            </Pressable>
+          ) : null}
+          {/*
+            A QUE HISTORIA RESPONDIA, encima de todo lo demás: es el
+            contexto que hace que se entienda lo que viene debajo.
+
+            Va como HERMANO del texto y de los adjuntos, nunca
+            envolviéndolos, por lo mismo que se explica más abajo con
+            el `Pressable`: anidar zonas pulsables genera HTML inválido
+            en web.
+          */}
+          {item.storyContext ? (
+            <RespuestaAHistoria contexto={item.storyContext} mio={mine} />
+          ) : null}
+
+          {item.attachments?.length ? (
+            <View
+              style={[
+                styles.adjuntos,
+                sinMarco && styles.adjuntosSinMarco,
+                alRas && styles.adjuntosAlRas,
+                alRas && adjuntosArriba && styles.adjuntosArriba,
+              ]}
+            >
+              {item.attachments.map((adjunto, indice, todos) =>
+                pintarAdjunto(adjunto, mine, {
+                  mensaje: item,
+                  conAcciones,
+                  forma: sinMarco ? 'sin_marco' : alRas ? 'al_ras' : 'normal',
+                  /*
+                    SIN BURBUJA, LO QUE IBA DENTRO DE ELLA VA ENCIMA
+                    DE LA IMAGEN, sobre un fondo oscuro para que se
+                    lea con cualquier foto: de quién es, arriba de
+                    la primera; la hora y el estado, abajo de la
+                    última.
+                  */
+                  encima: sinMarco ? (
+                    <>
+                      {indice === 0 && conAutor ? (
+                        <View style={[styles.sobreMedio, styles.autorSobreMedio]}>
+                          <Text numberOfLines={1} style={styles.textoSobreMedio}>
+                            {nombreDelAutor(
+                              infoDeConversacion,
+                              item.autorId,
+                              item.autorNombre,
+                            ) || t('groups.someone')}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {indice === todos.length - 1 && mostrarHora ? (
+                        <View style={[styles.sobreMedio, styles.horaSobreMedio]}>
+                          <Text style={styles.textoSobreMedio}>
+                            {item.estado === 'enviando'
+                              ? t('chat.sending')
+                              : fallido
+                                ? t('chat.notSent')
+                                : item.createdAt}
+                          </Text>
+                          {mine ? (
+                            // Sobre la foto la franja es oscura en los dos temas.
+                            <MarcaDeEntrega
+                              estado={entrega}
+                              color="#FFF"
+                              colorDeLeido={COLOR_DE_LEIDO.sobreOscuro}
+                            />
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null,
+                }),
+              )}
+            </View>
+          ) : null}
+
+          {/*
+            PULSACIÓN LARGA PARA EL MENÚ DE ACCIONES, y solo sobre lo
+            propio.
+
+            Es el gesto que ya espera cualquiera que venga de otro
+            chat. No hay botón visible: uno por burbuja ensuciaría la
+            conversación entera para algo que casi nunca se usa.
+
+            POR QUÉ ENVUELVE EL TEXTO Y LA HORA, Y NO LA BURBUJA
+            ENTERA. Porque en web cada `Pressable` es un `<button>`, y
+            los adjuntos YA son `Pressable` (se tocan para ver la foto,
+            para oír la nota). Un Pressable rodeando a otro genera HTML
+            inválido y rompe la hidratación — es una trampa que este
+            proyecto ya pagó. Aquí van como HERMANOS: los adjuntos
+            arriba, esto debajo.
+
+            `onLongPress` sin `onPress`: tocar la burbuja sigue sin
+            hacer nada, como antes.
+          */}
+          <Pressable
+            onLongPress={
+              conAcciones ? () => abrirAcciones(item) : undefined
+            }
+            delayLongPress={400}
+            // Una foto sin marco no tiene nada aquí debajo: el
+            // menú se abre manteniendo presionada la propia foto.
+            accessibilityRole={conAcciones && !sinMarco ? 'button' : undefined}
+            accessibilityLabel={
+              conAcciones && !sinMarco ? t('chat.holdForActions') : undefined
+            }
+          >
+            {/*
+              Los enlaces se pueden tocar (07/10/2026): el de una
+              reunión pegado aquí se abre con un toque. Sin
+              enlaces se pinta exactamente lo de antes.
+            */}
+            {item.text && comoSticker ? (
+              <Text style={styles.sticker}>{item.text}</Text>
+            ) : item.text ? (
+              <TextoConEnlaces
+                texto={item.text}
+                colorDelTexto={mine ? colors.sobreBurbujaPropia : colors.text}
+                colorDelFondo={mine ? colors.burbujaPropia : undefined}
+                style={{ color: mine ? colors.sobreBurbujaPropia : colors.text, fontSize: 15, lineHeight: 22 }}
+              />
+            ) : null}
+
+            {item.progreso !== undefined ? (
+              <View style={[styles.barra, { backgroundColor: colors.border }]}>
+                <View
+                  style={[
+                    styles.barraAvance,
+                    {
+                      // Sin burbuja, la barra va sobre el fondo del chat.
+                      backgroundColor:
+                        mine && !sinMarco ? colors.sobreBurbujaPropia : colors.primary,
+                      width: `${Math.round(item.progreso * 100)}%`,
+                    },
+                  ]}
+                />
+              </View>
+            ) : null}
+
+            {mostrarHora && !sinMarco ? (
+              /*
+                LA HORA Y EL ESTADO, legibles. Eran 9 puntos al 70 %:
+                sobre la burbuja negra no se leía. Y el estado del
+                envío se dice con un icono además de con el texto:
+                una marca mientras sale, dos cuando el servidor lo
+                confirma, dos en celeste cuando lo leyeron, y un
+                aviso si no salió. Ver `lib/lecturaDeMensajes`.
+              */
+              <View style={[styles.pieDeBurbuja, mine && styles.pieDeBurbujaMia]}>
+                <Text
+                  style={{
+                    // Sin burbuja detrás, la hora va sobre el fondo del chat.
+                    color: mine && !comoSticker ? colors.sobreBurbujaPropia : colors.textMuted,
+                    fontSize: 11,
+                    opacity: 0.8,
+                  }}
+                >
+                  {item.estado === 'enviando'
+                    ? t('chat.sending')
+                    : fallido
+                      ? t('chat.notSent')
+                      : item.createdAt}
+                </Text>
+                {mine ? (
+                  <MarcaDeEntrega
+                    estado={entrega}
+                    color={comoSticker ? colors.textMuted : colors.sobreBurbujaPropia}
+                    // La burbuja propia es del color principal: oscura en
+                    // el tema claro y clara en el oscuro. Un sticker no
+                    // lleva burbuja y va sobre el fondo del tema, al revés.
+                    colorDeLeido={
+                      // Por contraste con lo que hay DETRÁS (la burbuja
+                      // propia, o el fondo si es un sticker), no por el
+                      // modo: con una burbuja de color, «leído» se veía mal.
+                      colorDeLeidoSobre(
+                        comoSticker ? colors.background : colors.burbujaPropia,
+                        comoSticker ? colors.textMuted : colors.sobreBurbujaPropia,
+                      ) ??
+                      ((mode === 'dark') === comoSticker
+                        ? COLOR_DE_LEIDO.sobreOscuro
+                        : COLOR_DE_LEIDO.sobreClaro)
+                    }
+                    style={styles.iconoDeEstado}
+                  />
+                ) : null}
+              </View>
+            ) : null}
+          </Pressable>
+          {/*
+            LAS REACCIONES. Tocar una pone la propia o la quita.
+            Fuera del `Pressable` de arriba: un botón dentro de
+            otro genera HTML inválido en la web.
+          */}
+          {item.reacciones?.length ? (
+            <View style={styles.reacciones}>
+              {item.reacciones.map((reaccion) => (
+                <Pressable
+                  key={reaccion.emoji}
+                  onPress={() =>
+                    void reaccionar(item, reaccion.mia ? null : reaccion.emoji)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={t('chat.reactionOf', {
+                    emoji: reaccion.emoji,
+                    n: reaccion.cuantos,
+                  })}
+                  style={[
+                    styles.reaccion,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: reaccion.mia ? colors.text : colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.reaccionTexto, { color: colors.text }]}>
+                    {reaccion.cuantos > 1
+                      ? `${reaccion.emoji} ${reaccion.cuantos}`
+                      : reaccion.emoji}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+
+        {fallido ? (
+          <View style={styles.accionesFallo}>
+            <Pulsable
+              onPress={() => reintentar(item)}
+              escala={ESCALA_AL_PULSAR.chip}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.retrySend')}
+              style={styles.accionFallo}
+            >
+              <Feather name="refresh-cw" size={13} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>
+                {t('common.retry')}
+              </Text>
+            </Pulsable>
+            <Pressable
+              onPress={() => descartar(item)}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.discardMessage')}
+              style={styles.accionFallo}
+            >
+              <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                {t('common.discard')}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </DeslizarParaResponder>
+    </Aparecer>
+  );
+});
+
+type PropsDelRedactor = {
+  funciones: FuncionesDelChat;
+  grabadora: ReturnType<typeof useGrabadoraDeVoz>;
+  supabaseEnabled: boolean;
+  /** Hay fotos o archivos elegidos: se puede enviar aunque no haya texto. */
+  hayAdjuntos: boolean;
+  enviando: boolean;
+  /** Avisa a quien tenga el chat abierto de que se está escribiendo. */
+  escritura: { alEscribir: (texto: string) => void };
+  /** Manda lo escrito. Devuelve si se lo llevó: entonces el campo se vacía. */
+  alEnviar: (texto: string) => boolean;
+  setMenuAbierto: (abierto: boolean) => void;
+  setStickersAbiertos: (abiertos: boolean) => void;
+};
+
+/**
+ * El redactor del chat: el `+`, los stickers, el campo y, según haya algo que
+ * mandar, el botón de enviar o el micrófono.
+ *
+ * LLEVA SU PROPIO TEXTO (28/10/2026). Cuando el texto era estado de la
+ * pantalla, cada tecla repintaba el chat entero: la cabecera, las hojas y
+ * todas las burbujas a la vista (auditoría del 27/10, §6.1). Ahora una tecla
+ * repinta esto y nada más. La pantalla se entera de lo escrito al enviarlo
+ * (`alEnviar`); los demás, de que se escribe, por `escritura`.
+ */
+function RedactorDelChat({
+  funciones,
+  grabadora,
+  supabaseEnabled,
+  hayAdjuntos,
+  enviando,
+  escritura,
+  alEnviar,
+  setMenuAbierto,
+  setStickersAbiertos,
+}: PropsDelRedactor) {
+  const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  // El de la barra de gestos; con el teclado abierto, cero: ya está encima.
+  const margenInferior = useMargenInferior();
+  const [text, setText] = useState('');
+
+  /*
+    Mientras hay una nota de voz en marcha NUNCA hay «algo que enviar» por la
+    vía del texto: si no, empezar a grabar con un adjunto ya elegido cambiaría
+    el micrófono por el avión de papel y la barra de voz se quedaría sin su
+    botón, con la grabación viva y sin forma de mandarla ni de tirarla.
+  */
+  const hayQueEnviar = !grabadora.ocupada && (text.trim().length > 0 || hayAdjuntos);
+
+  /** Lo escrito, a la pantalla. El campo se vacía solo si se lo llevó. */
+  const submit = () => {
+    if (alEnviar(text.trim())) setText('');
+  };
+
+  return (
+    <View
+      style={[
+        styles.inputBar,
+        {
+          borderTopColor: colors.border,
+          backgroundColor: colors.background,
+          // Evita que el campo quede bajo la barra de gestos / home indicator.
+          paddingBottom: spacing.lg + margenInferior,
+        },
+      ]}
+    >
+      {/*
+        MIENTRAS HAY UNA NOTA DE VOZ EN MARCHA, LA FILA ES DE LA GRABADORA.
+        El `+` y el campo de texto se apartan y su sitio lo ocupa la barra
+        de la nota (`BotonDeNotaDeVoz`), con la papelera a la izquierda y
+        el envío a la derecha. Dejarlos daría dos modos a la vez —hablando
+        y escribiendo—, y la barra tendría que flotar sobre los mensajes,
+        que es donde estaba y donde no se encontraba la papelera.
+      */}
+      {grabadora.ocupada ? null : (
+        /*
+          El `+` es un botón: lleva su círculo y se hunde al tocarlo.
+          Suelto sobre el fondo parecía un signo, no algo que se pulsa.
+        */
+        <Pulsable
+          accessibilityLabel={t('chat.attach')}
+          accessibilityRole="button"
+          onPress={() => setMenuAbierto(true)}
+          disabled={!supabaseEnabled}
+          escala={ESCALA_AL_PULSAR.icono}
+          opacidad={supabaseEnabled ? 1 : 0.4}
+          style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+        >
+          <Feather name="plus" size={22} color={colors.text} />
+        </Pulsable>
+      )}
+
+      {grabadora.ocupada || !supabaseEnabled ? null : (
+        <Pulsable
+          accessibilityLabel={t('stickers.open')}
+          accessibilityRole="button"
+          onPress={() => setStickersAbiertos(true)}
+          escala={ESCALA_AL_PULSAR.icono}
+          style={[styles.addButton, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+        >
+          <Feather name="smile" size={22} color={colors.text} />
+        </Pulsable>
+      )}
+
+      {grabadora.ocupada ? null : (
+        <Input
+          value={text}
+          onChangeText={(texto) => {
+            setText(texto);
+            // Mientras se teclea se avisa a quien tenga el chat abierto.
+            escritura.alEscribir(texto);
+          }}
+          onSubmitEditing={submit}
+          placeholder={t('profile.message')}
+          placeholderTextColor={colors.textMuted}
+          returnKeyType="send"
+          containerStyle={styles.inputContainer}
+          forma="pastilla"
+          style={{ minHeight: 40 }}
+        />
+      )}
+
+      {/*
+        EL MICROFONO SOLO EXISTE SI EL SERVIDOR PUEDE GUARDAR LA NOTA.
+
+        Mientras la 0044 no esté aplicada, `funciones.notasDeVoz` es `false`
+        y aquí no se pinta nada: NUNCA UN BOTON MUERTO. Y cuando hay algo
+        escrito o adjuntado, el micrófono deja su sitio al avión de papel —
+        los dos a la vez obligarían a elegir entre dos botones que hacen lo
+        mismo desde el punto de vista de quien mira: mandar.
+      */}
+      {funciones.notasDeVoz && !hayQueEnviar && supabaseEnabled ? (
+        <BotonDeNotaDeVoz
+          fase={grabadora.fase}
+          segundos={grabadora.segundos}
+          avance={grabadora.avance}
+          progreso={grabadora.progreso}
+          nivel={grabadora.nivel}
+          uri={grabadora.nota?.uri ?? null}
+          empezar={() => void grabadora.empezar()}
+          detener={() => void grabadora.detener()}
+          cancelar={() => void grabadora.cancelar()}
+          eliminar={() => grabadora.eliminar()}
+          enviar={() => void grabadora.enviar()}
+          deshabilitado={enviando}
+        />
+      ) : (
+        // El mismo botón redondo que en comentarios: crece cuando hay algo
+        // que mandar y enseña la espera dentro, sin cambiar de tamaño.
+        <View style={styles.sendButton}>
+          <BotonDeEnviar
+            onPress={submit}
+            listo={hayQueEnviar}
+            enviando={enviando}
+            accessibilityLabel={t('chat.sendMessage')}
+          />
+        </View>
+      )}
     </View>
   );
 }

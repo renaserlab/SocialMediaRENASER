@@ -11,7 +11,7 @@ import {
   type TemaDeGrupo,
   type TemasDeGrupo,
 } from '@/lib/temasDeGrupo';
-import { completar } from '@/repositories/MessageRepository';
+import { completar, leerDisponibilidadDelChat } from '@/repositories/MessageRepository';
 import type { Message } from '@/types';
 
 /**
@@ -64,13 +64,13 @@ export const TemasRepository = {
    *
    * Es lo que decide si el chat ofrece «Agregar a un tema»: preguntar antes es
    * lo que evita un botón que respondería 503. Un fallo de red o un servidor
-   * antiguo responden que no, como `MessageRepository.funciones`.
+   * antiguo responden que no, como `MessageRepository.funciones`. Es la misma
+   * respuesta que la de las funciones del chat, así que se comparte con ella
+   * (`leerDisponibilidadDelChat`).
    */
   async disponibilidad(): Promise<DisponibilidadDeTemas> {
     try {
-      const dto = await apiRequest<{ topics?: boolean; subgroups?: boolean }>(
-        `${API_V1}/conversations/availability`,
-      );
+      const dto = (await leerDisponibilidadDelChat()) as { topics?: boolean; subgroups?: boolean } | null;
       return { temas: dto?.topics === true, comunidades: dto?.subgroups === true };
     } catch {
       return SIN_DISPONIBILIDAD;
