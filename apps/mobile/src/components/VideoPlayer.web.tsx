@@ -34,6 +34,7 @@ export function VideoPlayer({
   controlsBottomInset = 0,
   hidePlayButton = false,
   onMutedChange,
+  onFirstFrame,
 }: VideoPlayerProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLVideoElement | null>(null);
@@ -224,6 +225,9 @@ export function VideoPlayer({
         disableRemotePlayback
         // El menu contextual del navegador tiene su propio "Guardar video como".
         onContextMenu={(event) => event.preventDefault()}
+        // `loadeddata` es el primer fotograma disponible: el mismo «listo» que
+        // `onFirstFrameRender` en nativo (ver `onFirstFrame` en los tipos).
+        onLoadedData={onFirstFrame ? () => onFirstFrame() : undefined}
         style={{
           position: 'absolute',
           inset: 0,

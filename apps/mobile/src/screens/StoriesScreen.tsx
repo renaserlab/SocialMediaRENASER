@@ -23,10 +23,26 @@ import { SinTecladoDelante } from '@/components/SinTecladoDelante';
 import { useTecladoALaVista } from '@/components/teclado';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { assets } from '@/data/assets';
+import {
+  ESPERA_MAXIMA_MS,
+  barraAvanza,
+  cargaDe,
+  muestraCargando,
+  precargasDelVisor,
+  seHaVisto,
+  trasAviso,
+  type AvisoDeCarga,
+  type CargaDelTramo,
+} from '@/lib/cargaDeHistorias';
 import { confirm, notify } from '@/lib/confirm';
 import { toast } from '@/lib/toast';
 import { MessageRepository } from '@/repositories/MessageRepository';
 import { StoryRepository } from '@/repositories/StoryRepository';
+import {
+  pausarPrecargas,
+  precargaEnCurso,
+  precargarHistorias,
+} from '@/services/precargaDeHistorias';
 import { useAppStore } from '@/store/useAppStore';
 import { palette, radius, spacing } from '@/theme/tokens';
 import type { StoryViewer } from '@/types';
@@ -77,7 +93,6 @@ export function StoriesScreen() {
    * `width`, pero aun asi el valor deja de pasar por el estado de React.
    */
   const progress = useRef(new Animated.Value(0)).current;
-  const animation = useRef<Animated.CompositeAnimation | null>(null);
   const resumeFrom = useRef(0);
 
   const close = useCallback(() => {
@@ -128,45 +143,149 @@ export function StoriesScreen() {
     }
   }, [authorIndex]);
 
+  /*
+    `goNext` cambia con cada tramo; la animacion lo lee de aqui al terminar.
+    Asi `runProgress` no cambia nunca y la barra solo se reinicia cuando cambia
+    el tramo o su carga, no porque se haya creado una funcion nueva.
+  */
+  const goNextRef = useRef(goNext);
+  goNextRef.current = goNext;
+
   const runProgress = useCallback(
     (from: number, totalMs: number) => {
       progress.setValue(from);
-      const anim = Animated.timing(progress, {
+      // Para pararla basta `progress.stopAnimation`: no hace falta guardarla.
+      Animated.timing(progress, {
         toValue: 1,
         duration: Math.max(0, totalMs * (1 - from)),
         easing: Easing.linear,
         useNativeDriver: false,
-      });
-      animation.current = anim;
-      anim.start(({ finished }) => {
-        if (finished) goNext();
+      }).start(({ finished }) => {
+        if (finished) goNextRef.current();
       });
     },
-    [progress, goNext],
+    [progress],
   );
 
-  // Arranca el tramo y lo marca como visto.
-  useEffect(() => {
-    if (!item) return;
-    resumeFrom.current = 0;
-    runProgress(0, item.durationMs);
-    markStoryViewed(item.id);
-    return () => {
-      animation.current?.stop();
-    };
-  }, [item, runProgress, markStoryViewed]);
+  /*
+    LA BARRA ESPERA A LA FOTO.
 
-  // Mantener pulsado pausa (patron de Instagram); al soltar, continua.
+    Antes el tramo empezaba a contar al abrirse, y la foto tarda en llegar
+    (bucket privado, sin CDN: hasta 1,8 s solo de primer byte). Ese tiempo se
+    descontaba del tramo mirando negro. Ahora cuenta desde que la foto —o el
+    primer fotograma del video— esta en pantalla; si falla o pasa el tope de
+    espera, arranca igual para que el visor nunca se quede parado. Las reglas
+    viven en `lib/cargaDeHistorias.ts`, donde estan probadas.
+
+    El estado va marcado con el id del tramo: lo guardado de OTRO tramo no
+    vale (`cargaDe` lo descarta), asi que al pasar al siguiente no hay un solo
+    render en el que la barra arranque con la carga del anterior.
+
+    Y todo lo que sigue depende del ID del tramo, no del objeto: marcarlo como
+    visto reescribe el almacen y crea un objeto nuevo para el mismo tramo, y
+    eso antes reiniciaba la barra justo al abrir.
+  */
+  const [cargaGuardada, setCargaGuardada] = useState<CargaDelTramo | null>(null);
+  const carga = item ? cargaDe(cargaGuardada, item) : null;
+  const tramoActual = useRef(item);
+  tramoActual.current = item;
+
+  /** Avisos de la imagen, del video y del tope. Los de otro tramo se ignoran. */
+  const avisarCarga = useCallback((tramoId: string, aviso: AvisoDeCarga) => {
+    setCargaGuardada((guardada) => {
+      const actual = tramoActual.current;
+      return actual ? trasAviso(cargaDe(guardada, actual), tramoId, aviso) : guardada;
+    });
+  }, []);
+
+  const tramoId = item?.id;
+  const duracion = item?.durationMs ?? 0;
+  const avanza = carga ? barraAvanza(carga, paused) : false;
+  const esperandoFoto = carga ? muestraCargando(carga) : false;
+  const visto = carga ? seHaVisto(carga) : false;
+  const fotoResuelta = !!carga && carga.fase !== 'cargando';
+
+  // Tramo nuevo: la barra vuelve a cero y espera a su foto. Va ANTES que el
+  // efecto que la arranca: React ejecuta las puestas en marcha en orden.
   useEffect(() => {
-    if (!item) return;
-    if (paused) {
+    resumeFrom.current = 0;
+    progress.setValue(0);
+  }, [tramoId, progress]);
+
+  /*
+    La barra corre mientras el tramo puede contar y nadie lo tiene en pausa
+    (mantener pulsado, escribir una respuesta, la hoja de «Visto por»). Al
+    pararse se guarda por donde iba y al seguir se retoma desde ahi; si para
+    porque cambio el tramo, el efecto de arriba lo devuelve a cero.
+  */
+  useEffect(() => {
+    if (!tramoId || !avanza) return;
+    runProgress(resumeFrom.current, duracion);
+    return () => {
       progress.stopAnimation((value) => {
         resumeFrom.current = value;
       });
-    } else if (resumeFrom.current > 0) {
-      runProgress(resumeFrom.current, item.durationMs);
-    }
-  }, [paused, item, progress, runProgress]);
+    };
+  }, [tramoId, avanza, duracion, progress, runProgress]);
+
+  // El tope: pasado `ESPERA_MAXIMA_MS` sin foto, el tramo arranca igual.
+  useEffect(() => {
+    if (!tramoId || !esperandoFoto) return;
+    const tope = setTimeout(() => avisarCarga(tramoId, 'espera-agotada'), ESPERA_MAXIMA_MS);
+    return () => clearTimeout(tope);
+  }, [tramoId, esperandoFoto, avisarCarga]);
+
+  /*
+    Visto cuando SE VE, no al abrir: quien pasa al siguiente antes de que
+    llegue la foto, o la abre sin red, no la ha visto. Asi su anillo sigue
+    encendido y el autor no suma una visita que no hubo.
+  */
+  useEffect(() => {
+    if (tramoId && visto) markStoryViewed(tramoId);
+  }, [tramoId, visto, markStoryViewed]);
+
+  /*
+    Lo siguiente, en cuanto lo de ahora esta resuelto: el proximo tramo de este
+    autor y el primero del siguiente. No antes, para no quitarle ancho de banda
+    a la foto que se esta esperando. `delante` porque es mas urgente que lo que
+    se adelanto desde la fila.
+  */
+  useEffect(() => {
+    if (!fotoResuelta) return;
+    precargarHistorias(precargasDelVisor(groups, authorIndex, segIndex), { delante: true });
+  }, [fotoResuelta, groups, authorIndex, segIndex]);
+
+  /*
+    Y al reves: mientras la foto de pantalla no ha llegado, la cola no empieza
+    ninguna precarga nueva. Medido: la foto que se toca compartiendo linea con
+    la precarga de otro autor llegaba mas tarde que sin precargar nada.
+  */
+  useEffect(() => {
+    if (!esperandoFoto) return;
+    return pausarPrecargas();
+  }, [tramoId, esperandoFoto]);
+
+  /*
+    SI ESTA FOTO YA VIENE DE CAMINO POR LA PRECARGA, SE ESPERA A ESA DESCARGA
+    en vez de lanzar otra. En Android serian dos descargas de la misma foto
+    repartiendose la linea (ver `services/precargaDeHistorias.ts`); al
+    terminar, la foto sale de la cache. Si la precarga falla, el visor la pide
+    por su cuenta; el tope de espera sigue corriendo igual.
+  */
+  const claveDeFoto = item?.mediaType === 'image' && item.mediaUrl ? item.storagePath : null;
+  const precargaPendiente = claveDeFoto ? precargaEnCurso(claveDeFoto) : undefined;
+  const [precargaTerminada, setPrecargaTerminada] = useState<string | null>(null);
+  useEffect(() => {
+    if (!claveDeFoto || !precargaPendiente) return;
+    let vivo = true;
+    void precargaPendiente.then(() => {
+      if (vivo) setPrecargaTerminada(claveDeFoto);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [claveDeFoto, precargaPendiente]);
+  const fotoEnCamino = !!precargaPendiente && precargaTerminada !== claveDeFoto;
 
   const openViewers = async () => {
     if (!item) return;
@@ -302,18 +421,44 @@ export function StoriesScreen() {
         Instagram o TikTok.
       */}
       {item.mediaType === 'video' && item.mediaUrl ? (
+        /*
+          Un reproductor por tramo (`key`): asi cada video avisa de SU primer
+          fotograma. Reutilizando el componente, el aviso del segundo video
+          dependia de que expo-video lo repitiera al cambiar de fuente.
+          Mientras llega, el propio reproductor ya enseña su indicador.
+        */
         <VideoPlayer
+          key={item.id}
           uri={item.mediaUrl}
           style={StyleSheet.absoluteFill}
           contentFit="contain"
           active={!paused}
+          onFirstFrame={() => avisarCarga(item.id, 'cargada')}
         />
       ) : (
+        /*
+          `cacheKey` = ruta de Storage: la firma cambia cada ~50 min y, sin
+          clave, una historia ya vista se volvia a descargar entera. Es tambien
+          la clave con la que la guarda la precarga (ver
+          `services/precargaDeHistorias.ts`).
+
+          `recyclingKey` por tramo: sin el, mientras llega la foto nueva se
+          seguia viendo la ANTERIOR, con el texto del tramo nuevo encima.
+        */
         <ExpoImage
-          source={item.mediaUrl ? { uri: item.mediaUrl } : assets.hero}
+          source={
+            !item.mediaUrl
+              ? assets.hero
+              : fotoEnCamino
+              ? null
+              : { uri: item.mediaUrl, cacheKey: item.storagePath }
+          }
+          recyclingKey={item.id}
           style={StyleSheet.absoluteFill}
           contentFit="contain"
           transition={150}
+          onLoad={() => avisarCarga(item.id, 'cargada')}
+          onError={() => avisarCarga(item.id, 'fallida')}
         />
       )}
       <LinearGradient
@@ -321,6 +466,17 @@ export function StoriesScreen() {
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
+
+      {/* La foto esta en camino: el mismo indicador que el resto de la app. */}
+      {esperandoFoto && item.mediaType !== 'video' ? (
+        <View style={styles.cargando} pointerEvents="none">
+          <ActivityIndicator
+            size="large"
+            color={media.text}
+            accessibilityLabel={t('common.loading')}
+          />
+        </View>
+      ) : null}
 
       {/* Zonas de tap: izquierda retrocede, derecha avanza */}
       <GestureDetector gesture={gesture}>
@@ -507,6 +663,7 @@ export function StoriesScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: media.background },
   empty: { alignItems: 'center', justifyContent: 'center', gap: spacing.lg },
+  cargando: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   safe: { flex: 1, paddingHorizontal: spacing.lg },
   zoneLeft: { position: 'absolute', left: 0, top: 0, bottom: 0, width: '32%' },
   zoneRight: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '68%' },
