@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # En desarrollo sin Supabase, arranca con SQLite para poder levantar la app.
     database_url: str = "sqlite+aiosqlite:///./renaser_dev.db"
 
+    #: Tope por SENTENCIA de las sesiones de la API, en milisegundos. CERO lo
+    #: desactiva. Solo PostgreSQL: ver `shared/database.py`, donde esta el
+    #: porque del valor.
+    database_statement_timeout_ms: int = 30000
+
     # --- Supabase ---
     supabase_url: str = ""
     supabase_anon_key: str = ""

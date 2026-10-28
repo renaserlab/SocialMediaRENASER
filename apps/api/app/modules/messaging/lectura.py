@@ -19,8 +19,9 @@ el volumen de datos —son cuatro nombres y cuatro frases— sino el NUMERO DE
 IDAS Y VUELTAS.
 
 COMO SE ARREGLA. Las mismas tres cosas se piden para TODAS las conversaciones de
-la pagina a la vez: los perfiles con un `IN`, los ultimos mensajes con una
-funcion de ventana (`row_number`) y los no leidos con un `GROUP BY`. El total
+la pagina a la vez: los perfiles con un `IN`, los ultimos mensajes con un
+`LIMIT 1` correlacionado dentro de la misma consulta (ver `ultimos_mensajes`)
+y los no leidos con un `GROUP BY`. El total
 queda en cuatro consultas, y son cuatro tanto si hay tres conversaciones como si
 hay ochenta. El coste deja de crecer con la lista.
 
@@ -37,11 +38,13 @@ from collections import Counter
 
 from sqlalchemy import DateTime, Uuid, and_, column, func, or_, select, table
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import ajustes_de_grupo, esquema, preferencias
 from app.modules.messaging.etiquetas import etiquetas_por_conversacion
 from app.modules.messaging.models import (
+    Conversation,
     ConversationMember,
     Message,
     MessageAttachment,
@@ -126,54 +129,71 @@ async def ultimos_mensajes(
 ) -> dict[str, Message]:
     """El ultimo mensaje vivo de cada conversacion, en UNA consulta.
 
-    Se numeran los mensajes por conversacion con `row_number()` y se queda con
-    el primero de cada grupo. La alternativa —un `LIMIT 1` por conversacion— es
-    justo el N+1 que este fichero existe para quitar.
+    POR QUE YA NO ES UNA FUNCION DE VENTANA. Antes se numeraban con
+    `row_number() OVER (PARTITION BY conversation_id ...)` y se quedaba el
+    primero. Correcto, pero numeraba TODO el historial de cada conversacion para
+    quedarse con una fila: con el grupo «General» de la prueba de carga (100 000
+    mensajes) eran 157 ms y 30 MB de ordenacion volcados a disco EN CADA
+    APERTURA DE LA BANDEJA de cualquiera de sus mil miembros. Lo que crecia no
+    era la pagina, era la conversacion mas larga de la pagina.
+
+    AHORA, «EL ULTIMO» SE PIDE COMO TAL. Por cada conversacion de la pagina, una
+    subconsulta correlacionada con `ORDER BY created_at DESC, id DESC LIMIT 1`
+    que PostgreSQL resuelve bajando por `messages_conversation_created_idx`
+    (`conversation_id, created_at`) desde el final y parando en la primera fila
+    viva: lee una o dos entradas del indice, tenga la conversacion diez mensajes
+    o cien mil. Despues se cruza por clave primaria para traer el resto de
+    columnas. Sigue siendo UNA consulta para toda la pagina —la correlacion
+    viaja dentro de ella, no en un bucle de Python—, asi que no es el N+1 que
+    este fichero existe para quitar.
+
+    POR QUE CORRELACIONADA Y NO `LATERAL`. En PostgreSQL las dos dan el mismo
+    plan (bajar por el indice con `LIMIT 1` por conversacion), pero SQLite, que
+    es donde corren las pruebas, no sabe `LATERAL`. Una sola forma que entienden
+    los dos motores vale mas que dos ramas que pueden divergir sin que ninguna
+    prueba lo vea.
 
     El desempate por `id` no es adorno: el `now()` de SQLite tiene resolucion de
     SEGUNDO, asi que varios mensajes escritos seguidos comparten marca de tiempo
     y sin un segundo criterio el «ultimo» seria el que quisiera el motor. En
     PostgreSQL cada insercion trae microsegundos y casi nunca empata, pero un
-    orden que depende de eso no es un orden.
+    orden que depende de eso no es un orden. Es el MISMO orden que
+    `_ULTIMO_REMITENTE` en `router.py`: si divergieran, el filtro «No
+    respondidos» escogeria por un mensaje y la fila enseñaria otro.
 
-    Las funciones de ventana estan en SQLite desde la 3.25 (2018) y en
-    PostgreSQL desde siempre: no hay motor donde esto no corra.
+    Una conversacion sin mensajes vivos no sale en el diccionario: la
+    subconsulta da NULL y el cruce por clave primaria no encuentra nada.
     """
     if not conversation_ids:
         return {}
 
-    orden = (
-        func.row_number()
-        .over(
-            partition_by=Message.conversation_id,
-            order_by=(Message.created_at.desc(), Message.id.desc()),
-        )
-        .label("posicion")
-    )
-    numerados = (
-        select(
-            Message.id.label("id"),
-            Message.conversation_id.label("conversation_id"),
-            Message.sender_id.label("sender_id"),
-            Message.body.label("body"),
-            Message.created_at.label("created_at"),
-            orden,
-        )
+    # Alias: la subconsulta lee `messages` y la consulta de fuera tambien. Sin
+    # el, SQLAlchemy correlacionaria las dos `messages` entre si y la
+    # subconsulta se quedaria sin tabla propia.
+    candidato = aliased(Message)
+    ultimo_id = (
+        select(candidato.id)
         .where(
-            Message.conversation_id.in_(conversation_ids),
-            Message.deleted_at.is_(None),
+            candidato.conversation_id == Conversation.id,
+            candidato.deleted_at.is_(None),
         )
-        .subquery()
+        .order_by(candidato.created_at.desc(), candidato.id.desc())
+        .limit(1)
+        .correlate(Conversation)
+        .scalar_subquery()
     )
     filas = (
         await db.execute(
             select(
-                numerados.c.id,
-                numerados.c.conversation_id,
-                numerados.c.sender_id,
-                numerados.c.body,
-                numerados.c.created_at,
-            ).where(numerados.c.posicion == 1)
+                Message.id,
+                Message.conversation_id,
+                Message.sender_id,
+                Message.body,
+                Message.created_at,
+            )
+            .select_from(Conversation)
+            .join(Message, Message.id == ultimo_id)
+            .where(Conversation.id.in_(conversation_ids))
         )
     ).all()
     return {fila.conversation_id: fila for fila in filas}
@@ -191,6 +211,15 @@ async def no_leidos(
 
     `last_read_at` a nulo significa «nunca ha abierto esta conversacion», y
     entonces cuenta todo lo que no haya escrito ella misma.
+
+    POR QUE NO SE CORTA EN 100 (auditoria 28/10/2026). Contar todo lo pendiente
+    cuesta: 46 ms con 46 000 sin leer en un grupo grande, y el globo del movil
+    pinta «99+» de 100 en adelante (`textoDelGlobo`). Pero el globo no es el
+    unico que lo lee: el aviso al entrar («Tienes N mensajes sin leer», en
+    `useAvisosEnVivo`) suma las cuentas EXACTAS, y `hayPendientesQueDecir` solo
+    avisa si el total crecio. Con el corte, ese aviso diria «100» habiendo
+    4 000 y dejaria de avisar en cuanto todo estuviera topado. Cortar aqui exige
+    antes que el movil deje de usar el numero exacto.
     """
     if not conversation_ids:
         return {}
