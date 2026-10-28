@@ -221,10 +221,13 @@ export const MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA = 25;
 /**
  * Si la bandeja atiende el «escribiendo» de esa conversación.
  *
- * Un chat de dos, siempre. Un grupo, solo si se sabe que es pequeño: el
- * tamaño llega en la propia fila (`members_count`), sin pedir nada. Si no
- * llega —un servidor anterior—, se trata como grande: un «escribiendo» de
- * menos en una fila es mucho más barato que tumbar el tiempo real de todos.
+ * Un chat de dos, siempre. Un grupo, solo si es pequeño: el tamaño llega en
+ * la propia fila (`members_count`), sin pedir nada.
+ *
+ * SIN TAMAÑO SE ATIENDE, COMO ANTES. Solo falta con una API anterior a este
+ * cambio, y la web sale de `main` en cada push mientras la API se despliega
+ * aparte: tratarlo como grande quitaría el «escribiendo» de todos los grupos
+ * de la bandeja hasta que llegue la API. Atenderlo cuesta lo mismo que hoy.
  */
 export function seAtiendeEnBandeja(conversacion: {
   esGrupo?: boolean;
@@ -232,11 +235,8 @@ export function seAtiendeEnBandeja(conversacion: {
 }): boolean {
   if (conversacion.esGrupo !== true) return true;
   const miembros = conversacion.miembros;
-  return (
-    typeof miembros === 'number' &&
-    miembros > 0 &&
-    miembros <= MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA
-  );
+  if (typeof miembros !== 'number' || !(miembros > 0)) return true;
+  return miembros <= MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA;
 }
 
 /**

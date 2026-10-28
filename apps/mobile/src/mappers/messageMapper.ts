@@ -191,8 +191,8 @@ export function toConversation(dto: ConversationDto): Conversation {
     // Para colocar en el teléfono lo que llega por tiempo real sin contarlo
     // dos veces (`lib/bandejaEnVivo.ts`).
     ultimoMensajeEn: dto.last_message_at ?? null,
-    // Sin el campo (servidor anterior) se queda sin valor, y la bandeja trata
-    // al grupo como grande: no atiende su «escribiendo». Ver `lib/escribiendo`.
+    // Sin el campo (API anterior) se queda sin valor, y la bandeja atiende su
+    // «escribiendo» como antes. Ver `seAtiendeEnBandeja` en `lib/escribiendo`.
     miembros: leerCuenta(dto.members_count) || undefined,
   };
 }

@@ -272,18 +272,18 @@ test('el umbral es el orientativo de la auditoría y deja el coste acotado', () 
   assert.equal(Math.ceil(500 / porSegundo), 50);
 });
 
-test('un chat de dos se atiende siempre; un grupo, solo si se sabe que es pequeño', () => {
+test('un chat de dos se atiende siempre; un grupo, salvo si se sabe que es grande', () => {
   assert.ok(seAtiendeEnBandeja({ esGrupo: false }));
   assert.ok(seAtiendeEnBandeja({}));
   assert.ok(seAtiendeEnBandeja({ esGrupo: true, miembros: 3 }));
   assert.ok(seAtiendeEnBandeja({ esGrupo: true, miembros: MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA }));
   assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: MIEMBROS_PARA_ESCRIBIENDO_EN_BANDEJA + 1 }));
   assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: 300 }));
-  // Sin el tamaño (un servidor anterior) se trata como grande: un
-  // «escribiendo» de menos es mucho más barato que tumbar el tiempo real.
-  assert.ok(!seAtiendeEnBandeja({ esGrupo: true }));
-  assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: 0 }));
-  assert.ok(!seAtiendeEnBandeja({ esGrupo: true, miembros: Number.NaN }));
+  // Sin el tamaño (una API anterior) se atiende, como antes de este cambio:
+  // la web puede salir antes que la API y no debe perder el «escribiendo».
+  assert.ok(seAtiendeEnBandeja({ esGrupo: true }));
+  assert.ok(seAtiendeEnBandeja({ esGrupo: true, miembros: 0 }));
+  assert.ok(seAtiendeEnBandeja({ esGrupo: true, miembros: Number.NaN }));
 });
 
 test('de las primeras veinte, se quitan los grupos grandes y no se baja a buscar más', () => {
