@@ -91,4 +91,13 @@ export type VideoPlayerProps = {
   onProgressSeconds?: (seconds: number) => void;
   /** El video llego al final. Lo sabe el reproductor y nadie mas. */
   onEnded?: () => void;
+  /**
+   * Ya se ve el primer fotograma.
+   *
+   * Es el «listo» que le importa a quien mide el tiempo desde fuera: el visor
+   * de historias no empieza a contar el tramo hasta que hay algo en pantalla.
+   * Sin esto contaba desde que se montaba el reproductor, y el segundo que
+   * tarda un video en arrancar se descontaba del tramo.
+   */
+  onFirstFrame?: () => void;
 };

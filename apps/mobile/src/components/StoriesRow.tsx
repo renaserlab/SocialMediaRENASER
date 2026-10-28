@@ -7,7 +7,9 @@ import Feather from '@expo/vector-icons/Feather';
 
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
+import { precargasDeLaFila } from '@/lib/cargaDeHistorias';
 import { haptics } from '@/lib/haptics';
+import { precargarHistorias } from '@/services/precargaDeHistorias';
 import { useAppStore } from '@/store/useAppStore';
 import { estilo, radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -74,6 +76,23 @@ export function StoriesRow({ grupos, estado, alAbrir }: Props = {}) {
     if (alimentadoDesdeFuera) return;
     void loadStories();
   }, [alimentadoDesdeFuera, loadStories]);
+
+  /*
+    Con la lista en la mano, se adelanta la foto con la que abre cada uno de
+    los primeros autores sin ver: las URLs firmadas ya vienen en el listado y
+    antes no se usaban hasta tocar la burbuja. Que se adelanta y con que tope
+    esta en `lib/cargaDeHistorias.ts`; lo ya precargado no se repite, asi que
+    cada recarga del almacen (volver a Explorar, publicar, borrar) no lo
+    vuelve a pedir.
+
+    Solo con los grupos del almacen: los que llegan de fuera (la bandeja) no
+    traen tramos a proposito, y rellenarlos para precargar seria lanzar la
+    cascada de cuatro saltos que esa fila existe para evitar.
+  */
+  useEffect(() => {
+    if (alimentadoDesdeFuera) return;
+    precargarHistorias(precargasDeLaFila(gruposDelAlmacen));
+  }, [alimentadoDesdeFuera, gruposDelAlmacen]);
 
   const groups = alimentadoDesdeFuera ? grupos : gruposDelAlmacen;
   const status = alimentadoDesdeFuera ? (estado ?? 'idle') : estadoDelAlmacen;

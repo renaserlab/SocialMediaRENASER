@@ -145,6 +145,7 @@ export function VideoPlayer({
   startAtSeconds = 0,
   onProgressSeconds,
   onEnded,
+  onFirstFrame,
 }: VideoPlayerProps) {
   const { t } = useTranslation();
   /*
@@ -403,6 +404,7 @@ export function VideoPlayer({
         onFirstFrameRender={() => {
           perfMark('VIDEO_FIRST_FRAME');
           setFirstFrame(true);
+          onFirstFrame?.();
         }}
         // `allowsFullscreen` está deprecada en expo-video. Además, en un feed
         // vertical (reels) no tiene sentido ofrecer pantalla completa.
