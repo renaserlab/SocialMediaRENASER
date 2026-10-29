@@ -4,7 +4,7 @@ LO QUE DEFIENDEN ESTAS PRUEBAS. La 0110 reescribe cinco políticas de lectura
 (`messages_read`, `conversation_members_read`, `conversations_read`,
 `message_attachments_read` y `story_views_read`) para que PostgreSQL calcule
 «de qué conversaciones soy» una vez por consulta en vez de una vez por fila, y
-mueve la condición de `messages_insert` a una función `security definer`. Una
+QUITA `messages_insert`, para que los mensajes solo los escriba la API. Una
 política más rápida que deja ver una fila de más es una fuga; una que deja ver
 una de menos es un chat que se queda en blanco. Por eso:
 
@@ -18,8 +18,10 @@ una de menos es un chat que se queda en blanco. Por eso:
      tiene que ver cada persona es la que dice qué significa «bien».
   3. LA INSERCIÓN (§5.8). La de la 0108 fallaba por permisos para todo el
      mundo, y si alguien concedía ese permiso dejaba de proteger los temas.
-     Ahora decide lo que la 0108 quería decidir, y se compara caso por caso
-     con su condición evaluada con permisos completos.
+     Hoy nadie puede insertar directamente, y la 0110 deja exactamente eso,
+     ahora a propósito: cada persona, en cada conversación, falla antes (por
+     permisos) y falla después (por RLS), también con el permiso concedido.
+     La API, que no pasa por la RLS, sigue escribiendo.
   4. QUE NINGUNA PREGUNTA FILA A FILA y que la migración se puede pegar dos
      veces, o rendirse sin dejar nada si no consigue el bloqueo.
 
@@ -75,7 +77,9 @@ LECTURAS = {
     "message_attachments_read": ("message_attachments", "id::text"),
     "story_views_read": ("story_views", "story_id::text || ':' || viewer_id::text"),
 }
-REESCRITAS = (*LECTURAS, "messages_insert")
+#: Las seis que había antes de la 0110 y que la 0110 toca: cinco se
+#: reescriben y `messages_insert` se quita.
+TOCADAS = (*LECTURAS, "messages_insert")
 PERSONAS = ("ana", "beto", "carla", "dani", "eva", "admin", "anon")
 
 AUTH_UID_DE_SUPABASE = """
@@ -110,18 +114,28 @@ def test_cada_politica_se_borra_antes_de_crearse() -> None:
     puede fallar en el segundo `create policy`."""
     codigo = _sin_comentarios(SQL)
     creadas = re.findall(r"create\s+policy\s+(\w+)\s+on\s+public\.(\w+)", codigo)
-    assert sorted(nombre for nombre, _ in creadas) == sorted(REESCRITAS)
+    assert sorted(nombre for nombre, _ in creadas) == sorted(LECTURAS)
     for nombre, tabla in creadas:
         borrar = codigo.find(f"drop policy if exists {nombre} on public.{tabla};")
         crear = codigo.find(f"create policy {nombre} on public.{tabla}")
         assert -1 < borrar < crear, f"{nombre} no se borra antes de crearse"
 
 
-def test_solo_crea_dos_funciones_y_no_toca_datos_ni_is_conversation_member() -> None:
+def test_quita_la_insercion_directa_y_no_la_sustituye() -> None:
+    """Como la 0103 con las conversaciones y sus miembros: sin política de
+    INSERT, la clave del cliente no inserta. Ni otra política ni una función
+    que la reabra."""
+    codigo = _sin_comentarios(SQL)
+    assert "drop policy if exists messages_insert on public.messages;" in codigo
+    assert not re.search(r"create\s+policy\s+\w+\s+on\s+public\.messages\s+for\s+(insert|all)", codigo)
+    assert not re.search(r"create\s+policy\s+\w+\s+on\s+public\.messages\s+(using|with)", codigo)
+    assert "puede_escribir_en_la_conversacion" not in codigo
+
+
+def test_solo_crea_una_funcion_y_no_toca_datos_ni_is_conversation_member() -> None:
     codigo = _sin_comentarios(SQL)
     assert re.findall(r"create\s+or\s+replace\s+function\s+public\.(\w+)", codigo) == [
         "mis_conversaciones",
-        "puede_escribir_en_la_conversacion",
     ]
     assert not re.search(r"create\s+function", codigo)
     assert not re.search(r"\b(create\s+table|insert\s+into|update\s+public|delete\s+from|truncate)\b", codigo)
@@ -129,15 +143,17 @@ def test_solo_crea_dos_funciones_y_no_toca_datos_ni_is_conversation_member() -> 
     # La siguen usando otras políticas (adjuntos, etiquetas, Storage): no se
     # redefine.
     assert not re.search(r"function\s+public\.is_conversation_member", codigo)
-    # Y ninguna de las seis la llama, ni lee los temas desde la política.
+    # Y ninguna de las cinco la llama, ni lee los temas desde la política.
     for politica in re.findall(r"create\s+policy\s.*?;", codigo, flags=re.S):
         assert "is_conversation_member" not in politica, politica
         assert "conversation_topics" not in politica, politica
 
 
-def test_las_funciones_son_security_definer_stable_y_con_search_path() -> None:
+def test_la_funcion_es_security_definer_stable_y_con_search_path() -> None:
+    """El mismo contexto que `is_conversation_member`: si no, la lista no
+    diría lo mismo que ella."""
     codigo = _sin_comentarios(SQL)
-    for funcion in ("mis_conversaciones", "puede_escribir_en_la_conversacion"):
+    for funcion in ("mis_conversaciones",):
         cabecera = codigo.split(f"function public.{funcion}(")[1].split("$$")[0]
         assert "security definer" in cabecera, funcion
         assert re.search(r"\bstable\b", cabecera), funcion
@@ -173,14 +189,15 @@ def _uno(pg, sql: str, *args):
 
 
 def _politicas(pg) -> dict[str, tuple[str, str, str | None, str | None]]:
-    """Las seis tal como están en la base: tabla, comando, using, with check."""
+    """Las que toca la 0110 tal como están en la base: tabla, comando, using,
+    with check. Antes de la 0110 son seis; después, las cinco lecturas."""
     return {
         nombre: (tabla, comando, qual, with_check)
         for tabla, nombre, comando, qual, with_check in _todas(
             pg,
             "select tablename, policyname, cmd, qual, with_check from pg_policies "
             "where schemaname = 'public' and policyname = any(%s)",
-            list(REESCRITAS),
+            list(TOCADAS),
         )
     }
 
@@ -360,7 +377,7 @@ def mundo(pg):
     """Hasta la 0109 con datos, las políticas de antes copiadas, y la 0110."""
     _montar(pg, hasta="0109")
     viejas = _politicas(pg)
-    assert set(viejas) == set(REESCRITAS), f"faltan políticas antes de la 0110: {viejas.keys()}"
+    assert set(viejas) == set(TOCADAS), f"faltan políticas antes de la 0110: {viejas.keys()}"
     datos = _sembrar(pg)
     _aplicar_desde(pg, "0110")
     # Lo que Supabase trae y el prólogo no: entrar en `public` y un
@@ -467,74 +484,61 @@ def test_las_conversaciones_propias_por_rpc_no_ensenan_nada_nuevo(mundo, pg) -> 
 
 
 # =========================================================================== #
-# 4. Insertar (§5.8)
+# 4. Insertar (§5.8): nadie, ni antes ni ahora; solo la API
 # =========================================================================== #
-def _insertar(pg, mundo: dict, quien: str, conversacion: str, remitente: str | None = None) -> str:
-    """`ok`, `rls` (la política dice que no) o el error de permisos tal cual."""
+def _insertar(pg, mundo: dict, quien: str, conversacion: str, *, antes: bool = False) -> str:
+    """`ok`, `rls` (la RLS dice que no) o el error de permisos tal cual.
+
+    Cada persona escribe a su nombre; `anon`, que no tiene nombre, lo intenta
+    a nombre de Beto. Con `antes`, con la `messages_insert` de la 0108.
+    """
     import psycopg
 
-    remitente = remitente or quien
+    remitente = mundo["p"]["beto" if quien == "anon" else quien]
     try:
         with pg.transaction(force_rollback=True):
+            if antes:
+                _poner_politicas(pg, {"messages_insert": mundo["viejas"]["messages_insert"]})
             _ser(pg, mundo, quien)
             _hacer(
                 pg,
                 "insert into public.messages (conversation_id, sender_id, body) values (%s, %s, 'directo')",
                 mundo["c"][conversacion],
-                mundo["p"].get(remitente),
+                remitente,
             )
     except psycopg.errors.InsufficientPrivilege as error:
         return "rls" if "row-level security" in str(error) else str(error)
     return "ok"
 
 
-def _condicion_de_la_0108(pg, mundo: dict, quien: str, conversacion: str, remitente: str) -> bool:
-    """La condición de la 0108, evaluada como `postgres`: sin RLS ni permisos de
-    por medio, que es lo que quien la escribió daba por hecho."""
-    _, _, _, with_check = mundo["viejas"]["messages_insert"]
-    with pg.transaction(force_rollback=True):
-        if quien != "anon":
-            _hacer(
-                pg,
-                "select set_config('request.jwt.claims', %s, true)",
-                json.dumps({"sub": mundo["p"][quien], "role": "authenticated"}),
-            )
-        return bool(
-            _uno(
-                pg,
-                f"select coalesce(({with_check}), false) from (select cast(%s as uuid) as "
-                "conversation_id, cast(%s as uuid) as sender_id) as messages",
-                mundo["c"][conversacion],
-                mundo["p"].get(remitente),
-            )
-        )
-
-
-#: (quién inserta, en qué conversación, a nombre de quién, qué tiene que pasar)
-INSERCIONES = [
-    pytest.param("beto", "G", "beto", "ok", id="miembro_en_su_grupo"),
-    pytest.param("eva", "D", "eva", "ok", id="miembro_en_su_chat_de_dos"),
-    pytest.param("ana", "TC", "ana", "ok", id="quien_creo_el_tema_escribe_en_el"),
-    pytest.param("eva", "S", "eva", "ok", id="miembro_de_la_comunidad"),
-    pytest.param("beto", "G", "ana", "rls", id="a_nombre_de_otra_persona"),
-    pytest.param("carla", "G", "carla", "rls", id="quien_no_es_miembro"),
-    pytest.param("dani", "G", "dani", "rls", id="quien_se_fue_del_grupo"),
-    pytest.param("beto", "D", "beto", "rls", id="en_un_chat_de_dos_ajeno"),
-    pytest.param("beto", "TC", "beto", "rls", id="miembro_en_el_chat_de_un_tema"),
-    pytest.param("beto", "TB", "beto", "rls", id="miembro_en_el_chat_de_un_tema_borrado"),
-    pytest.param("beto", "S", "beto", "rls", id="del_grupo_pero_no_de_la_comunidad"),
-    pytest.param("carla", "X", "carla", "rls", id="quien_creo_la_conversacion_sin_ser_miembro"),
-    pytest.param("admin", "G", "admin", "rls", id="la_administracion_no_escribe_en_chats_ajenos"),
-    pytest.param("anon", "G", "beto", "rls", id="anonimo"),
-]
+CONVERSACIONES = ("G", "D", "TC", "TB", "S", "X", "V")
+PERMISO_DE_LOS_TEMAS = "permission denied for table conversation_topics"
 
 
 @SIN_POSTGRES
-@pytest.mark.parametrize("quien,conversacion,remitente,esperado", INSERCIONES)
-def test_insertar_directamente(mundo, pg, quien, conversacion, remitente, esperado) -> None:
-    assert _insertar(pg, mundo, quien, conversacion, remitente) == esperado
-    # Y es lo que la 0108 quería decir, no solo lo que esta prueba espera.
-    assert _condicion_de_la_0108(pg, mundo, quien, conversacion, remitente) is (esperado == "ok")
+@pytest.mark.parametrize("conversacion", CONVERSACIONES)
+@pytest.mark.parametrize("quien", PERSONAS)
+def test_nadie_inserta_directamente_ni_antes_ni_ahora(mundo, pg, quien, conversacion) -> None:
+    """LA REGLA: nadie puede hacer ni más ni menos que hoy. Miembro o no, en un
+    grupo, un chat de dos, un tema o una comunidad, quien lo creó, la
+    administración y `anon`: antes fallaba por el permiso que le faltaba a la
+    0108 y ahora falla porque no hay política de inserción."""
+    assert _insertar(pg, mundo, quien, conversacion, antes=True).startswith(PERMISO_DE_LOS_TEMAS)
+    assert _insertar(pg, mundo, quien, conversacion) == "rls"
+
+
+@SIN_POSTGRES
+def test_ni_a_nombre_de_otra_persona(mundo, pg) -> None:
+    import psycopg
+
+    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="row-level security"):
+        with pg.transaction(force_rollback=True):
+            _ser(pg, mundo, "beto")
+            _hacer(
+                pg,
+                "insert into public.messages (conversation_id, sender_id, body) values (%s, %s, 'x')",
+                mundo["c"]["G"], mundo["p"]["ana"],
+            )
 
 
 @SIN_POSTGRES
@@ -557,12 +561,15 @@ def test_con_la_politica_de_la_0108_fallaba_por_permisos_en_todas(mundo, pg, con
 
 
 @SIN_POSTGRES
-def test_conceder_los_temas_ya_no_abre_su_chat(mundo, pg) -> None:
+def test_conceder_los_temas_ya_no_abre_nada(mundo, pg) -> None:
     """EL CANDADO QUE CERRABA POR ACCIDENTE. Con la política de la 0108, basta
     con conceder SELECT sobre `conversation_topics` para que cualquier miembro
     escriba en «Anuncios»: la subconsulta ve cero filas (RLS sin políticas).
-    Con la 0110 la condición no depende de ese permiso."""
-    concedido = "grant select on public.conversation_topics to authenticated"
+    Con la 0110, con ese permiso concedido, no escribe nadie: ni Beto, ni Ana,
+    que creó el tema, ni nadie más."""
+    import psycopg
+
+    concedido = "grant select on public.conversation_topics to authenticated, anon"
 
     with pg.transaction(force_rollback=True):
         _hacer(pg, concedido)
@@ -574,29 +581,50 @@ def test_conceder_los_temas_ya_no_abre_su_chat(mundo, pg) -> None:
             mundo["c"]["TC"], mundo["p"]["beto"],
         )  # pasa: es el agujero
 
-    import psycopg
-
-    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="row-level security"):
-        with pg.transaction(force_rollback=True):
-            _hacer(pg, concedido)
-            _ser(pg, mundo, "beto")
-            _hacer(
-                pg,
-                "insert into public.messages (conversation_id, sender_id, body) values (%s, %s, 'x')",
-                mundo["c"]["TC"], mundo["p"]["beto"],
-            )
+    for quien in PERSONAS:
+        for conversacion in ("TC", "G"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege, match="row-level security"):
+                with pg.transaction(force_rollback=True):
+                    _hacer(pg, concedido)
+                    _ser(pg, mundo, quien)
+                    _hacer(
+                        pg,
+                        "insert into public.messages (conversation_id, sender_id, body) "
+                        "values (%s, %s, 'x')",
+                        mundo["c"][conversacion],
+                        mundo["p"]["beto" if quien == "anon" else quien],
+                    )
 
 
 @SIN_POSTGRES
-def test_a_quien_no_es_miembro_la_funcion_no_le_cuenta_nada(mundo, pg) -> None:
-    """Se puede llamar por PostgREST con cualquier identificador. A quien no
-    es miembro le responde `false` siempre, sea o no el chat de un tema."""
-    for conversacion in ("G", "TC", "TB", "D", "V"):
-        with pg.transaction(force_rollback=True):
-            _ser(pg, mundo, "carla")
-            assert _uno(
-                pg, "select public.puede_escribir_en_la_conversacion(%s)", mundo["c"][conversacion]
-            ) is False, conversacion
+def test_no_queda_ninguna_puerta_de_escritura_en_messages(mundo, pg) -> None:
+    """Sin política de INSERT (ni de ALL) y con la RLS puesta: sin ella, no
+    tener política dejaría la tabla abierta en vez de cerrada. Y sin funciones
+    de escritura sueltas que se puedan llamar por PostgREST."""
+    assert _uno(pg, "select relrowsecurity from pg_class where oid = 'public.messages'::regclass") is True
+    assert _todas(
+        pg,
+        "select policyname, cmd from pg_policies where schemaname = 'public' "
+        "and tablename = 'messages' order by 1",
+    ) == [("messages_delete", "UPDATE"), ("messages_read", "SELECT")]
+    assert _uno(pg, "select to_regprocedure('public.puede_escribir_en_la_conversacion(uuid)')") is None
+
+
+@SIN_POSTGRES
+def test_la_api_sigue_escribiendo(mundo, pg) -> None:
+    """La API se conecta con el rol del servidor, al que la RLS no se le
+    aplica: quitar la política no le cambia nada."""
+    with pg.transaction(force_rollback=True):
+        nuevo = _uno(
+            pg,
+            "insert into public.messages (conversation_id, sender_id, body) values (%s, %s, 'por la API') "
+            "returning id::text",
+            mundo["c"]["TC"], mundo["p"]["ana"],
+        )
+        assert nuevo is not None
+        # Y lo que escribe la API lo leen los miembros por la RLS nueva.
+        _ser(pg, mundo, "beto")
+        assert _uno(pg, "select count(*) from public.messages where id = %s", nuevo) == 1
 
 
 # =========================================================================== #
@@ -606,7 +634,9 @@ def test_a_quien_no_es_miembro_la_funcion_no_le_cuenta_nada(mundo, pg) -> None:
 def test_ninguna_politica_reescrita_pregunta_fila_a_fila(mundo, pg) -> None:
     """Ni `is_conversation_member` ni `auth.uid()` / `is_admin()` sueltos: todo
     dentro de un `(select …)`, que PostgreSQL calcula una sola vez."""
-    for nombre, (_, _, qual, with_check) in _politicas(pg).items():
+    politicas = _politicas(pg)
+    assert set(politicas) == set(LECTURAS)
+    for nombre, (_, _, qual, with_check) in politicas.items():
         definicion = qual or with_check
         assert "is_conversation_member" not in definicion, nombre
         assert "conversation_topics" not in definicion, nombre
@@ -645,7 +675,7 @@ def _foto(pg) -> list[tuple]:
         pg,
         "select proname, prosrc, prosecdef, provolatile, array_to_string(proconfig, ',') "
         "from pg_proc where pronamespace = 'public'::regnamespace "
-        "and proname in ('mis_conversaciones', 'puede_escribir_en_la_conversacion', 'is_conversation_member') "
+        "and proname in ('mis_conversaciones', 'is_conversation_member') "
         "order by 1",
     )
 
@@ -664,12 +694,11 @@ def test_si_no_consigue_el_bloqueo_se_rinde_y_no_deja_nada(mundo, pg) -> None:
     esperando (y con ella todo el chat), se rinde a los 5 s y no cambia nada."""
     import psycopg
 
-    # La base como estaba antes de la 0110: las políticas viejas y sin las
-    # dos funciones (las políticas nuevas dependen de ellas, así que primero
-    # se cambian las políticas).
+    # La base como estaba antes de la 0110: las seis políticas viejas y sin
+    # la función (las políticas nuevas dependen de ella, así que primero se
+    # cambian las políticas).
     _poner_politicas(pg, mundo["viejas"])
     _hacer(pg, "drop function public.mis_conversaciones()")
-    _hacer(pg, "drop function public.puede_escribir_en_la_conversacion(uuid)")
     try:
         antes = _foto(pg)
         listo = threading.Event()

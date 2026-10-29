@@ -21,10 +21,11 @@
 --      CUALQUIER inserción directa en `messages` con la clave del cliente
 --      falla con «permission denied for table conversation_topics», también
 --      en un chat de dos personas. Hoy no se nota porque los mensajes los
---      escribe la API. Pero el día que alguien conceda ese SELECT, la
---      subconsulta verá cero filas (RLS sin políticas) y la regla «en el chat
---      de un tema solo escribe quien lo administra» dejará de cumplirse sin que
---      falle nada.
+--      escribe la API. Pero el candado cierra por accidente: el día que
+--      alguien conceda ese SELECT, la subconsulta verá cero filas (RLS sin
+--      políticas), cualquier miembro podrá insertar con la clave del cliente y
+--      la regla «en el chat de un tema solo escribe quien lo administra»
+--      dejará de cumplirse sin que falle nada.
 --
 -- QUÉ HACE.
 --
@@ -39,10 +40,25 @@
 --   · `story_views_read`: la misma condición, escrita para que se resuelva una
 --     vez: las historias propias se buscan una sola vez (por el índice de
 --     autor) y `auth.uid()` e `is_admin()` van dentro de `(select …)`.
---   · `messages_insert`: la condición de la 0108, entera, se mueve a
---     `puede_escribir_en_la_conversacion()`, `security definer`. Así ve
---     `conversation_topics` y `conversations` completas, que es lo que la 0108
---     daba por hecho, y no depende de qué permisos tenga quien inserta.
+--   · `messages_insert`: SE QUITA, sin sustituirla. Sin política de INSERT y
+--     con RLS activada, la clave del cliente no puede insertar en `messages`:
+--     los mensajes solo los escribe la API, que se conecta con el rol del
+--     servidor y no pasa por la RLS. Es lo mismo que hizo la 0103 con
+--     `conversations_insert` y `conversation_members_insert`.
+--
+-- POR QUÉ QUITARLA Y NO ARREGLARLA. Arreglarla (mover su condición a una
+-- función `security definer`) la habría hecho funcionar POR PRIMERA VEZ desde
+-- la 0108: un miembro volvería a poder insertar directamente en cualquier
+-- conversación que no sea el chat de un tema, saltándose lo que solo hace la
+-- API (rechazar un mensaje vacío, actualizar `updated_at`, mandar los
+-- avisos). Hoy eso no lo puede hacer nadie: toda inserción directa falla. La
+-- regla de esta migración es que nadie pueda hacer ni más ni menos que hoy, y
+-- quitarla deja exactamente eso, ahora a propósito y no por un permiso que
+-- falta. Y el candado deja de depender de que nadie conceda SELECT sobre
+-- `conversation_topics`: ya no hay ninguna política que la lea. Lo único que
+-- cambia es el texto del error: «new row violates row-level security policy»
+-- en vez de «permission denied for table conversation_topics» (los dos son
+-- el código 42501).
 --
 -- POR QUÉ UNA FUNCIÓN Y NO LA SUBCONSULTA QUE PROBÓ LA AUDITORÍA
 -- (`conversation_id in (select conversation_id from conversation_members
@@ -82,18 +98,19 @@
 --     historia mía con este id?») contra la misma tabla y con la misma RLS de
 --     `stories` aplicada. Las historias propias siempre pasan esa RLS
 --     (`author_id = auth.uid()`), caducadas o no.
---   · `messages_insert`: misma condición que escribió la 0108, y con el
---     significado que la 0108 quería. Lo único que cambia es que deja de
---     fallar por permisos. OJO: eso significa que un miembro vuelve a poder
---     insertar directamente, con la clave del cliente, en una conversación
---     que NO es el chat de un tema, como permitía la 0001 hasta la 0108.
+--   · Insertar en `messages` con la clave del cliente: antes fallaba
+--     siempre (por permisos) y ahora falla siempre (por RLS), para todo el
+--     mundo y en cualquier conversación. La API, que es quien escribe, no
+--     pasa por la RLS y sigue igual.
 --
 -- QUÉ NO HACE.
 --   · No toca `is_conversation_member`: la siguen usando la inserción de
 --     adjuntos, las etiquetas (0045), Storage (0033) y las sesiones (0097).
 --   · No toca las otras políticas del proyecto que llaman a `auth.uid()` sin
 --     `(select …)`. Esta migración se limita a las cinco de lectura de la
---     auditoría y a la inserción de mensajes.
+--     auditoría y a quitar la inserción de mensajes.
+--   · No toca `message_attachments_insert`: sigue exigiendo que el mensaje
+--     sea de quien adjunta, y esos mensajes solo los crea la API.
 --   · No toca ninguna fila.
 --
 -- BLOQUEOS. `drop policy` y `create policy` toman un bloqueo exclusivo de
@@ -144,45 +161,7 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
--- 2. Quién puede escribir en una conversación (§5.8)
--- -----------------------------------------------------------------------------
--- Las dos condiciones de la 0108 sobre la conversación, juntas: ser miembro, y
--- que no sea el chat de un tema creado por otra persona. `security definer`
--- para que vea `conversation_topics` y `conversations` enteras, sin depender
--- de los permisos ni de la RLS de quien inserta.
---
--- LA PERTENENCIA VA DENTRO A PROPÓSITO. Una función que respondiera solo «¿es
--- el chat de un tema ajeno?» se podría llamar por PostgREST con cualquier
--- identificador y diría si existe ese tema; esta, a quien no es miembro, le
--- responde siempre `false`.
---
--- No mira `deleted_at`: la 0108 tampoco. Un tema borrado sigue sin admitir que
--- escriba otro que no sea quien lo creó.
-create or replace function public.puede_escribir_en_la_conversacion(target_conversation uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public, pg_temp
-as $$
-  select exists (
-      select 1
-      from public.conversation_members
-      where conversation_id = target_conversation
-        and user_id = auth.uid()
-    )
-    and not exists (
-      select 1
-      from public.conversation_topics t
-      join public.conversations c on c.id = t.chat_id
-      where t.chat_id = target_conversation
-        and c.created_by is distinct from auth.uid()
-    );
-$$;
-
-
--- -----------------------------------------------------------------------------
--- 3. Las cuatro lecturas del chat
+-- 2. Las cuatro lecturas del chat
 -- -----------------------------------------------------------------------------
 -- EL `::uuid[]` NO SOBRA. Sin él, `= any ((select …))` se lee como
 -- `= ANY (subconsulta)` y PostgreSQL compara un uuid con una lista entera.
@@ -210,7 +189,7 @@ create policy message_attachments_read on public.message_attachments for select 
 
 
 -- -----------------------------------------------------------------------------
--- 4. Quién vio una historia
+-- 3. Quién vio una historia
 -- -----------------------------------------------------------------------------
 -- Las mismas tres vías de la 0003: la vista es mía, la historia es mía, o soy
 -- de la administración. La segunda se sigue preguntando a `stories` con su
@@ -226,17 +205,14 @@ create policy story_views_read on public.story_views for select using (
 
 
 -- -----------------------------------------------------------------------------
--- 5. Insertar un mensaje
+-- 4. Insertar un mensaje: solo la API (§5.8)
 -- -----------------------------------------------------------------------------
+-- Sin política de INSERT, la RLS lo niega a `anon` y a `authenticated`.
 drop policy if exists messages_insert on public.messages;
-create policy messages_insert on public.messages for insert with check (
-  sender_id = (select auth.uid())
-  and public.puede_escribir_en_la_conversacion(conversation_id)
-);
 
 
 -- -----------------------------------------------------------------------------
--- 6. Que no quede a medias
+-- 5. Que no quede a medias
 -- -----------------------------------------------------------------------------
 do $$
 declare
@@ -245,80 +221,87 @@ declare
 begin
   for politica in
     select * from (values
-      ('messages', 'messages_read', 'SELECT'),
-      ('conversation_members', 'conversation_members_read', 'SELECT'),
-      ('conversations', 'conversations_read', 'SELECT'),
-      ('message_attachments', 'message_attachments_read', 'SELECT'),
-      ('story_views', 'story_views_read', 'SELECT'),
-      ('messages', 'messages_insert', 'INSERT')
-    ) as v(tabla, nombre, comando)
+      ('messages', 'messages_read'),
+      ('conversation_members', 'conversation_members_read'),
+      ('conversations', 'conversations_read'),
+      ('message_attachments', 'message_attachments_read'),
+      ('story_views', 'story_views_read')
+    ) as v(tabla, nombre)
   loop
-    select coalesce(p.qual, p.with_check) into definicion
+    select p.qual into definicion
     from pg_policies p
     where p.schemaname = 'public'
       and p.tablename = politica.tabla
       and p.policyname = politica.nombre
-      and p.cmd = politica.comando;
+      and p.cmd = 'SELECT';
     if definicion is null then
-      raise exception 'La 0110 ha dejado % sin su política % (%).',
-        politica.tabla, politica.nombre, politica.comando;
+      raise exception 'La 0110 ha dejado % sin su política de lectura %.',
+        politica.tabla, politica.nombre;
     end if;
-    -- Ninguna de las seis puede seguir preguntando fila a fila.
+    -- Ninguna de las cinco puede seguir preguntando fila a fila.
     if definicion like '%is_conversation_member%' then
       raise exception '% sigue llamando a is_conversation_member por fila.', politica.nombre;
     end if;
-    -- Y la inserción no puede volver a leer los temas con los permisos de
-    -- quien inserta: es el fallo de la 0108.
-    if definicion like '%conversation_topics%' then
-      raise exception '% vuelve a consultar conversation_topics desde la política.', politica.nombre;
-    end if;
   end loop;
 
-  -- Las dos funciones, con el contexto del que depende su significado.
+  -- `messages` sin ninguna puerta de escritura para la clave del cliente, y
+  -- con la RLS puesta: sin ella, no tener política la dejaría ABIERTA.
+  if not (select relrowsecurity from pg_class where oid = 'public.messages'::regclass) then
+    raise exception 'messages no tiene RLS activada: sin política de INSERT quedaría abierta.';
+  end if;
   if exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'messages' and cmd in ('INSERT', 'ALL')
+  ) then
+    raise exception 'messages sigue teniendo una política que deja insertar con la clave del cliente.';
+  end if;
+
+  -- La lista de conversaciones, con el contexto del que depende su
+  -- significado: el mismo que `is_conversation_member`.
+  if not exists (
     select 1
     from pg_proc f
-    join pg_namespace n on n.oid = f.pronamespace
-    where n.nspname = 'public'
-      and f.proname in ('mis_conversaciones', 'puede_escribir_en_la_conversacion')
-      and (not f.prosecdef
-           or f.provolatile <> 's'
-           or not coalesce(f.proconfig, '{}') @> array['search_path=public, pg_temp'])
-  ) or (
-    select count(*)
-    from pg_proc f
-    join pg_namespace n on n.oid = f.pronamespace
-    where n.nspname = 'public'
-      and f.proname in ('mis_conversaciones', 'puede_escribir_en_la_conversacion')
-  ) <> 2 then
+    where f.oid = to_regprocedure('public.mis_conversaciones()')
+      and f.prosecdef
+      and f.provolatile = 's'
+      and coalesce(f.proconfig, '{}') @> array['search_path=public, pg_temp']
+  ) then
     raise exception
-      'mis_conversaciones() y puede_escribir_en_la_conversacion() tienen que '
-      'existir, ser security definer y stable, y fijar el search_path.';
+      'mis_conversaciones() tiene que existir, ser security definer y stable, '
+      'y fijar el search_path.';
   end if;
 end
 $$;
 
 
 -- -----------------------------------------------------------------------------
--- 7. Que PostgREST se entere del cambio de esquema
+-- 6. Que PostgREST se entere del cambio de esquema
 -- -----------------------------------------------------------------------------
 notify pgrst, 'reload schema';
 
 
 -- -----------------------------------------------------------------------------
--- 8. Comprobación
+-- 7. Comprobación
 -- -----------------------------------------------------------------------------
--- Seis filas. Ninguna debe nombrar `is_conversation_member` ni
--- `conversation_topics`.
+-- Seis filas: las cinco lecturas, ninguna con `is_conversation_member`, y una
+-- última que debe decir que `messages` ya no tiene política de inserción.
 select tablename as tabla, policyname as politica, cmd as comando,
-       coalesce(qual, with_check) as condicion
+       qual as condicion
 from pg_policies
 where schemaname = 'public'
   and policyname in (
     'messages_read', 'conversation_members_read', 'conversations_read',
-    'message_attachments_read', 'story_views_read', 'messages_insert'
+    'message_attachments_read', 'story_views_read'
   )
-order by tablename, policyname;
+union all
+select 'messages', 'messages_insert', 'INSERT',
+       case when exists (
+         select 1 from pg_policies
+         where schemaname = 'public' and tablename = 'messages'
+           and cmd in ('INSERT', 'ALL')
+       ) then 'SIGUE EXISTIENDO: revisar'
+       else '(ninguna: los mensajes solo los escribe la API)' end
+order by 1, 2;
 
 
 -- -----------------------------------------------------------------------------
@@ -341,8 +324,10 @@ order by tablename, policyname;
 -- -----------------------------------------------------------------------------
 -- VUELTA ATRÁS (rollback)
 -- -----------------------------------------------------------------------------
--- Las seis políticas como estaban (0001, 0003, 0033 y 0108). OJO: la de
--- inserción vuelve con el fallo de permisos de §5.8.
+-- Las cinco lecturas como estaban (0001, 0003 y 0033) y la inserción como la
+-- dejó la 0108. OJO: esa inserción vuelve con el candado accidental de §5.8
+-- (falla por permisos, y deja de proteger los temas si alguien concede
+-- SELECT sobre `conversation_topics`).
 --
 --   drop policy if exists messages_read on public.messages;
 --   create policy messages_read on public.messages for select
@@ -376,12 +361,11 @@ order by tablename, policyname;
 --     )
 --   );
 --
--- Y después, ya sin nadie que las use:
+-- Y después, ya sin ninguna política que la use:
 --
---   drop function if exists public.puede_escribir_en_la_conversacion(uuid);
 --   drop function if exists public.mis_conversaciones();
 --
--- Si algún día se deshace la 0108 (borrar las tablas de temas), su vuelta
--- atrás ya devuelve `messages_insert` a la versión de la 0001, que no usa
--- `puede_escribir_en_la_conversacion()`; esta función se quedaría sin uso y
--- se puede borrar igual que arriba.
+-- Para volver solo a las lecturas de antes sin reabrir el candado accidental,
+-- basta con los cinco primeros pares `drop`/`create` y el `drop function`: no
+-- hace falta recrear `messages_insert`, y sin ella la inserción sigue siendo
+-- solo de la API.
