@@ -1,0 +1,84 @@
+# Notificaciones: se abren desde la campana de Explorar; lo sin leer se dice
+# con palabras («Sin leer.») ademas de con el circulo relleno y el punto; al
+# abrir la bandeja se marca todo como leido (la API pasa a 0); y cada aviso
+# lleva a lo suyo: el seguidor a su perfil, el comentario a la publicacion.
+#
+# NO depende de la pasada anterior: al empezar se vuelven a dejar SIN LEER las
+# dos notificaciones sembradas (por la API, con la sesion de Ana).
+#
+# Datos: e2e/datos/30-mensajes.sql (5 avisos de Beto para Ana) y la
+# publicacion a1 de Ana de 00-base.sql.
+appId: host.exp.exponent
+name: "Mensajes: notificaciones"
+tags:
+  - mensajes
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runScript:
+    file: _ayudas/api.js
+    env:
+      ACCION: avisos-sin-leer
+      EMAIL: ${E2E_EMAIL}
+      PASSWORD: ${E2E_PASSWORD}
+
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+# La campana de la cabecera de Explorar. Sin `rightLabel`, su nombre accesible
+# es el generico «Acción derecha» (ver hallazgos/mensajes.md).
+- extendedWaitUntil:
+    visible: "Acción derecha"
+    timeout: 20000
+- takeScreenshot: mensajes-campana-con-aviso
+- tapOn: "Acción derecha"
+
+# ---- La lista ------------------------------------------------------------
+- extendedWaitUntil:
+    visible: "Sin leer\\. Nuevo seguidor\\. Beto Prueba te empezó a seguir\\..*"
+    timeout: 20000
+- assertVisible: "Sin leer\\. Nuevo comentario\\. Beto Prueba comentó tu publicación\\..*"
+# Las leidas, sin el «Sin leer».
+- assertVisible: "Nuevo me gusta\\. A Beto Prueba le gustó tu publicación\\..*"
+- assertVisible: "Sesión confirmada\\. Beto Prueba aceptó tu solicitud\\..*"
+- assertVisible: "En vivo\\. Beto Prueba está transmitiendo en vivo\\..*"
+- takeScreenshot: mensajes-notificaciones
+
+# Abrirla marca todo como leido en el servidor.
+- runScript:
+    file: _ayudas/api.js
+    env:
+      ACCION: contar-avisos
+      EMAIL: ${E2E_EMAIL}
+      PASSWORD: ${E2E_PASSWORD}
+- assertTrue:
+    condition: ${output.avisos.sinLeer == '0'}
+    label: "Abrir Notificaciones deja la cuenta de la API en 0"
+
+# ---- Cada aviso lleva a lo suyo -----------------------------------------
+- tapOn: ".*Nuevo seguidor\\. Beto Prueba te empezó a seguir\\..*"
+- extendedWaitUntil:
+    visible: "Cuenta de pruebas E2E\\. Carpinteria\\."
+    timeout: 20000
+- assertVisible: "Beto Prueba"
+- back
+
+# Al volver, la lista ya no marca nada como nuevo.
+- extendedWaitUntil:
+    visible: "Nuevo seguidor\\. Beto Prueba te empezó a seguir\\..*"
+    timeout: 15000
+- assertNotVisible: "Sin leer\\..*"
+- takeScreenshot: mensajes-notificaciones-leidas
+
+- tapOn: "Nuevo comentario\\. Beto Prueba comentó tu publicación\\..*"
+- extendedWaitUntil:
+    visible: ".*Primer lote de tazas del taller.*"
+    timeout: 20000
+- back
+
+# La campana de Explorar ya sin el punto (ver captura).
+- back
+- extendedWaitUntil:
+    visible: "Acción derecha"
+    timeout: 15000
+- takeScreenshot: mensajes-campana-sin-aviso

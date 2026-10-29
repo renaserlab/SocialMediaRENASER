@@ -1,0 +1,174 @@
+# Idioma: Castellano → English → Português → Castellano desde Ajustes, y en
+# cada uno cambian los textos clave de Ajustes, la barra de pestañas y el
+# perfil. Las capturas (`-en`, `-pt`) sirven para buscar textos sin traducir.
+#
+# Pase lo que pase, `onFlowComplete` deja la app en castellano: el resto de la
+# suite busca los textos en español.
+#
+# OJO: aquí no se usa `_comun/ir-a-pestana.yaml`, porque busca «Explorar» para
+# saber si la barra está a la vista y en inglés pulsaría Atrás hasta salir.
+appId: host.exp.exponent
+name: "Ajustes: idioma ES → EN → PT → ES"
+tags:
+  - perfil-ajustes
+  - ajustes
+  - idioma
+onFlowComplete:
+  - runFlow:
+      when:
+        true: ${output.enCastellano != true}
+      file: _sub/volver-a-castellano.yaml
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Idioma de la App"
+      REINICIAR: "no"
+- assertVisible: "Castellano"
+
+# ---- English ---------------------------------------------------------------
+- tapOn: "Idioma de la App"
+- extendedWaitUntil:
+    visible: "Elige el idioma de la aplicación"
+    timeout: 10000
+- tapOn: "English"
+- tapOn: "Continuar"
+- extendedWaitUntil:
+    visible: "App Language"
+    timeout: 10000
+- assertVisible: "Settings"
+- assertVisible: "Display"
+- assertVisible: "Dark Mode"
+- assertVisible: "Currently: (Light|Dark)"
+- assertVisible: "English"
+- assertVisible: "Account & Membership"
+- assertVisible: "Your interests"
+- assertVisible: "Blocked accounts"
+- assertVisible: "Delete account"
+- assertNotVisible: "Configuración"
+- assertNotVisible: "Modo Oscuro"
+- takeScreenshot: perfil-ajustes-ajustes-en
+- scrollUntilVisible:
+    element: "Sign Out"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Privacy Policy"
+- assertVisible: "Terms and Conditions"
+- assertVisible: "Support and FAQ"
+- takeScreenshot: perfil-ajustes-ajustes-abajo-en
+# Documento legal en inglés: solo se captura (hoy sale en español, ver PA-05).
+- tapOn: "Privacy Policy"
+- extendedWaitUntil:
+    notVisible: "What data we collect and how we use it"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: perfil-ajustes-privacidad-en
+- tapOn: "Back"
+- extendedWaitUntil:
+    visible: "Sign Out"
+    timeout: 10000
+
+# Pestañas y perfil en inglés. Atrás desde Ajustes (abierto por enlace) va a
+# la raíz.
+- tapOn: "Back"
+- extendedWaitUntil:
+    visible: "Explore"
+    timeout: 15000
+- assertVisible: "Home"
+- assertVisible: "Messages"
+- assertVisible: "Profile"
+- tapOn: "Profile"
+- extendedWaitUntil:
+    visible: "MY PROFILE"
+    timeout: 15000
+- assertVisible: "Followers"
+- assertVisible: "Likes"
+- assertVisible: "Posts"
+- assertVisible: "School"
+- assertVisible: "Reviews"
+- assertNotVisible: "Seguidores"
+- takeScreenshot: perfil-ajustes-perfil-en
+
+# ---- Português -------------------------------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "App Language"
+      REINICIAR: "no"
+- tapOn: "App Language"
+- extendedWaitUntil:
+    visible: "Choose the app language"
+    timeout: 10000
+- tapOn: "Português"
+- tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Idioma do App"
+    timeout: 10000
+- assertVisible: "Configurações"
+- assertVisible: "Exibição"
+- assertVisible: "Modo Escuro"
+- assertVisible: "Atualmente: (Claro|Escuro)"
+- assertVisible: "Português"
+- assertVisible: "Conta & Assinatura"
+- assertVisible: "Seus interesses"
+- assertVisible: "Contas bloqueadas"
+- assertVisible: "Excluir conta"
+- takeScreenshot: perfil-ajustes-ajustes-pt
+- scrollUntilVisible:
+    element: "Sair"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Política de Privacidade"
+- assertVisible: "Termos e Condições"
+- assertVisible: "Suporte e perguntas frequentes"
+- takeScreenshot: perfil-ajustes-ajustes-abajo-pt
+- tapOn: "Voltar"
+- extendedWaitUntil:
+    visible: "Mensagens"
+    timeout: 15000
+- assertVisible: "Início"
+- assertVisible: "Explorar"
+- assertVisible: "Perfil"
+- tapOn: "Perfil"
+- extendedWaitUntil:
+    visible: "MEU PERFIL"
+    timeout: 15000
+- assertVisible: "Seguidores"
+- assertVisible: "Seguindo"
+- assertVisible: "Curtidas"
+- assertVisible: "Publicações"
+- assertVisible: "Escola"
+- assertVisible: "Avaliações"
+- takeScreenshot: perfil-ajustes-perfil-pt
+
+# ---- De vuelta a Castellano --------------------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Idioma do App"
+      REINICIAR: "no"
+- tapOn: "Idioma do App"
+- extendedWaitUntil:
+    visible: "Escolha o idioma do aplicativo"
+    timeout: 10000
+- tapOn: "Castellano"
+- tapOn: "Continuar"
+- extendedWaitUntil:
+    visible: "Idioma de la App"
+    timeout: 10000
+- assertVisible: "Configuración"
+- assertVisible: "Modo Oscuro"
+- assertVisible: "Castellano"
+- evalScript: ${output.enCastellano = true}
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Explorar"
+    timeout: 15000
+- assertVisible: "Inicio"
+- assertVisible: "Mensajes"

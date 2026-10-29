@@ -1,0 +1,103 @@
+# REPRODUCCIÓN DE UN FALLO CONOCIDO (hallazgo PA-06). Comprueba el
+# comportamiento ACTUAL, que es el incorrecto: cuando se arregle, este flujo
+# fallará en el paso marcado con «ARREGLO:» y hay que invertir esa comprobación.
+#
+#  PA-06  Desbloquear a alguien desde Ajustes › Cuentas bloqueadas no refresca
+#         su perfil: `BlockedUsersScreen` llama a `ProfileRepository.unblock`
+#         pero no toca `cachePerfil`, y el perfil guardado (con
+#         `isBlocked: true`) sigue «vigente» 2 minutos. Al volver a abrirlo sale
+#         «Bloqueaste a esta persona» y «Desbloquear», aunque en el servidor ya
+#         no hay bloqueo.
+#
+# Datos: 40-perfil.sql (Delia, sin bloqueos). Termina con Delia desbloqueada
+# (el botón «Desbloquear» del perfil viejo repite el desbloqueo y refresca).
+appId: host.exp.exponent
+name: "Perfil ajeno (fallo conocido): desbloquear en Ajustes no refresca el perfil"
+tags:
+  - perfil-ajustes
+  - bug-conocido
+env:
+  DELIA: e2e0d0d0-0000-4000-8000-000000000040
+onFlowComplete:
+  # Delia desbloqueada siempre al salir.
+  # Por la API y no por la pantalla: funciona aunque la app se haya quedado
+  # sin sesión o con una bandeja abierta (ver _sub/api.js).
+  - runFlow:
+      commands:
+        - runScript:
+            file: _sub/api.js
+            env:
+              ACCION: desbloquear-delia
+              EMAIL: ${E2E_EMAIL}
+              PASSWORD: ${E2E_PASSWORD}
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+      REINICIAR: "no"
+- runFlow:
+    when:
+      visible: "Desbloquear"
+    commands:
+      - tapOn: "Desbloquear"
+      - extendedWaitUntil:
+          visible: "Seguir"
+          timeout: 10000
+
+# Bloquear desde el perfil.
+- tapOn: "Bloquear a esta persona"
+- extendedWaitUntil:
+    visible: "Bloquear a Delia Prueba"
+    timeout: 10000
+- tapOn: "Bloquear"
+- extendedWaitUntil:
+    visible: "Bloqueaste a esta persona"
+    timeout: 15000
+
+# Desbloquear desde Ajustes › Cuentas bloqueadas (sin recargar la app).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- tapOn: "Cuentas bloqueadas"
+- extendedWaitUntil:
+    visible: "Delia Prueba"
+    timeout: 15000
+- tapOn: "Desbloquear a Delia Prueba"
+- extendedWaitUntil:
+    visible: "Volverás a ver sus publicaciones.*"
+    timeout: 10000
+- tapOn:
+    text: "Desbloquear"
+    below: "Volverás a ver sus publicaciones.*"
+- extendedWaitUntil:
+    notVisible: "Delia Prueba"
+    timeout: 15000
+
+# Volver a su perfil enseguida (antes de 2 minutos), sin recargar la app.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+      REINICIAR: "no"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-bug-perfil-sigue-bloqueado
+# ARREGLO: cuando se arregle, aquí debe verse «Seguir» y NO «Bloqueaste a esta
+# persona»: invertir estas dos comprobaciones.
+- assertVisible: "Bloqueaste a esta persona"
+- assertNotVisible: "Seguir"
+
+# Pulsar «Desbloquear» en el perfil viejo lo arregla (repite y refresca).
+- tapOn: "Desbloquear"
+- extendedWaitUntil:
+    visible: "Seguir"
+    timeout: 15000
+- assertNotVisible: "Bloqueaste a esta persona"

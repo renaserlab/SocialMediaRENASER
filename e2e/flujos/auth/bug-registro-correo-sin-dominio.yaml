@@ -1,0 +1,41 @@
+# REPRODUCCION DE UN FALLO CONOCIDO (hallazgo AUTH-02 de hallazgos/auth.md).
+# Comprueba el comportamiento ACTUAL, que es el incorrecto: cuando se arregle,
+# este flujo fallara en el paso marcado con «ARREGLO:» y hay que invertir esa
+# comprobacion.
+#
+#  AUTH-02  El registro acepta un correo sin dominio de nivel superior
+#           («nombre@dominio», p. ej. la errata «ana@gmail») y crea la cuenta,
+#           mientras que «¿Olvidaste tu contraseña?» rechaza ese mismo correo.
+#           Quien se equivoque al registrarse no puede ni pedir la recuperacion.
+#
+# Las cuentas creadas (sin-dominio-*@e2e) las borra sembrar.sh.
+appId: host.exp.exponent
+name: "auth (fallo conocido): registro con correo sin dominio"
+tags:
+  - auth
+  - bug-conocido
+---
+- evalScript: ${output.correo = 'sin-dominio-' + Date.now() + '@e2e'}
+- runFlow: ../_comun/cerrar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: register
+      ESPERAR: "Crea tu cuenta"
+      REINICIAR: "no"
+- tapOn: "Juan Pérez"
+- inputText: "Sin Dominio"
+- tapOn: "ejemplo@correo.com"
+- inputText: ${output.correo}
+- tapOn: "Crea una contraseña"
+- inputText: ${E2E_PASSWORD}
+- hideKeyboard
+- tapOn: "Crear cuenta"
+- extendedWaitUntil:
+    visible: "(Introduce un correo electrónico válido|Ese correo no parece válido.*|Saltar por ahora|Inicio)"
+    timeout: 30000
+# Sin captura de referencia: lo que se ve hoy es el fallo. La evidencia esta
+# en hallazgos/auth/AUTH-02-*.png.
+# ARREGLO: cuando AUTH-02 este corregido esto falla; cambiar por
+#   - assertVisible: "(Introduce un correo electrónico válido|Ese correo no parece válido.*)"
+- assertVisible: "(Saltar por ahora|Inicio)"

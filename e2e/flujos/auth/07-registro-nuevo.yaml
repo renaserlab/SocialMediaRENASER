@@ -1,0 +1,47 @@
+# Registro completo con un correo nuevo: crea la cuenta, entra y, como es nueva,
+# le toca el cuestionario de intereses. Se salta y se cierra la sesion.
+#
+# Los correos son registro-<marca de tiempo>@e2e.zeta.test; sembrar.sh borra
+# todas las cuentas @e2e.zeta.test en cada pasada.
+appId: host.exp.exponent
+name: auth/registro-nuevo
+tags:
+  - auth
+---
+- evalScript: ${output.correo = 'registro-' + Date.now() + '@e2e.zeta.test'}
+- runFlow: ../_comun/cerrar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: register
+      ESPERAR: "Crea tu cuenta"
+      REINICIAR: "no"
+- tapOn: "Juan Pérez"
+- inputText: "Nueva Cuenta"
+- tapOn: "ejemplo@correo.com"
+- inputText: ${output.correo}
+- tapOn: "Crea una contraseña"
+- inputText: ${E2E_PASSWORD}
+- hideKeyboard
+- tapOn: "Crear cuenta"
+# Cuenta nueva = cuestionario pendiente.
+- extendedWaitUntil:
+    visible: "Saltar por ahora"
+    timeout: 30000
+- takeScreenshot: auth-registro-cuestionario
+- tapOn: "Saltar por ahora"
+- extendedWaitUntil:
+    visible: "Inicio"
+    timeout: 30000
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- assertVisible: ${output.correo}
+- assertVisible: "Nueva Cuenta"
+- runFlow:
+    file: ../_comun/cerrar-sesion.yaml
+    env:
+      REINICIAR: "no"

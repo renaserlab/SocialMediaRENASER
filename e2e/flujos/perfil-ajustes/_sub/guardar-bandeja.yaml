@@ -1,0 +1,11 @@
+# Pulsa «Guardar cambios» de la bandeja «Editar perfil» (queda por debajo del
+# pliegue: se desplaza hasta él).
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- scrollUntilVisible:
+    element: "Guardar cambios"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Guardar cambios"

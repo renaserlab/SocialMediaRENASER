@@ -1,0 +1,142 @@
+# Perfil de otra persona: «Seguir» (rosa) → «Siguiendo» → «Seguir», con el
+# contador de seguidores subiendo y bajando, y el estado guardado al volver.
+#
+# Datos: 40-perfil.sql crea a Delia Prueba (nadie la sigue: 0 seguidores, 0
+# siguiendo, 0 me gusta). Se usa a Delia y no a Beto porque Ana y Beto se
+# siguen en 00-base y otros módulos cuentan con ello.
+#
+# Tolerante a un corte anterior: si Ana ya sigue a Delia, primero deja de
+# seguirla. Al final queda como empezó (sin seguirla).
+appId: host.exp.exponent
+name: "Perfil ajeno: seguir y dejar de seguir con contadores"
+tags:
+  - perfil-ajustes
+  - perfil
+env:
+  DELIA: e2e0d0d0-0000-4000-8000-000000000040
+onFlowComplete:
+  # Si se cortó siguiendo a Delia, se deja de seguir.
+  # Por la API y no por la pantalla: funciona aunque la app se haya quedado
+  # sin sesión o con una bandeja abierta (ver _sub/api.js).
+  - runFlow:
+      when:
+        true: ${output.dejoDeSeguir != true}
+      commands:
+        - runScript:
+            file: _sub/api.js
+            env:
+              ACCION: dejar-de-seguir-delia
+              EMAIL: ${E2E_EMAIL}
+              PASSWORD: ${E2E_PASSWORD}
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+      REINICIAR: "no"
+
+# ---- Ficha ajena: sin lápiz, con Seguir / Mensaje / Bloquear ----------------
+- assertVisible: "PERFIL"
+- assertVisible: "@?delia_e2e"
+- assertVisible: "Perfil de pruebas E2E para seguir y bloquear"
+- assertNotVisible: "Editar perfil"
+- assertVisible: "Mensaje"
+- assertVisible: "Bloquear a esta persona"
+
+# Punto de partida: sin seguirla.
+- runFlow:
+    when:
+      notVisible: "Seguir"
+    commands:
+      - tapOn:
+          text: "Siguiendo"
+          below: "Me gusta"
+      - extendedWaitUntil:
+          visible: "Seguir"
+          timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: "Ver Seguidores"
+      containsChild:
+        text: "0"
+    timeout: 10000
+- takeScreenshot: perfil-ajustes-perfil-ajeno-seguir
+
+# ---- Seguir ----------------------------------------------------------------
+- tapOn: "Seguir"
+- extendedWaitUntil:
+    visible:
+      text: "Siguiendo"
+      below: "Me gusta"
+    timeout: 10000
+- assertNotVisible: "Seguir"
+- extendedWaitUntil:
+    visible:
+      text: "Ver Seguidores"
+      containsChild:
+        text: "1"
+    timeout: 10000
+- takeScreenshot: perfil-ajustes-perfil-ajeno-siguiendo
+
+# Se guarda: al volver a abrir el perfil (app recargada) sigue «Siguiendo».
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+- extendedWaitUntil:
+    visible:
+      text: "Siguiendo"
+      below: "Me gusta"
+    timeout: 15000
+- assertVisible:
+    text: "Ver Seguidores"
+    containsChild:
+      text: "1"
+
+# Delia aparece en la lista «Siguiendo» de Ana.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: following/me
+      ESPERAR: "Beto Prueba"
+      REINICIAR: "no"
+- assertVisible: "Delia Prueba"
+
+# ---- Dejar de seguir -------------------------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+      REINICIAR: "no"
+- tapOn:
+    text: "Siguiendo"
+    below: "Me gusta"
+- extendedWaitUntil:
+    visible: "Seguir"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      text: "Ver Seguidores"
+      containsChild:
+        text: "0"
+    timeout: 10000
+- evalScript: ${output.dejoDeSeguir = true}
+
+# Y también se guarda.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+- extendedWaitUntil:
+    visible: "Seguir"
+    timeout: 15000
+- assertVisible:
+    text: "Ver Seguidores"
+    containsChild:
+      text: "0"

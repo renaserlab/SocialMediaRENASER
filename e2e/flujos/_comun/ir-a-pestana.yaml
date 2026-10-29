@@ -1,0 +1,22 @@
+# Cambia de pestaña con la barra inferior.
+#
+# Parametros (env):
+#   PESTANA   Inicio | Explorar | Crear | Mensajes | Perfil   (obligatorio)
+#
+# En «Crear» la barra no se pinta (la sustituye el selector de tipo de
+# publicacion): si no se ve, se vuelve atras hasta que aparezca.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- repeat:
+    times: 3
+    while:
+      notVisible: "Explorar"
+    commands:
+      - back
+# Con mensajes sin leer la etiqueta accesible es «Mensajes. N sin leer», pero
+# el texto visible sigue siendo «Mensajes».
+- tapOn:
+    text: ${PESTANA}
+- runFlow: quitar-ruido.yaml

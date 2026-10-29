@@ -1,0 +1,47 @@
+# «¿Olvidaste tu contraseña?» abre su pantalla, valida el correo y confirma el envio.
+#
+# Se usa un correo SIN cuenta (nadie@e2e.zeta.test): Supabase contesta igual
+# (no revela si existe) pero no manda nada, asi que no gasta el limite local
+# de 2 correos por hora.
+appId: host.exp.exponent
+name: auth/olvido-contrasena
+tags:
+  - auth
+---
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: login
+      ESPERAR: "Hola de nuevo"
+- tapOn: "¿Olvidaste tu contraseña\\?"
+- extendedWaitUntil:
+    visible: "Escribe tu correo y te enviamos un enlace para crear una nueva."
+    timeout: 15000
+- assertVisible: "Enviar enlace"
+- takeScreenshot: auth-olvido
+# Vacio: el boton esta desactivado; pulsarlo no hace nada.
+- tapOn: "Enviar enlace"
+- assertNotVisible: "Revisa tu correo"
+- assertVisible: "Escribe tu correo y te enviamos un enlace para crear una nueva."
+# Mal formado (aqui SI se exige punto en el dominio, a diferencia del registro).
+- tapOn: "ejemplo@correo.com"
+- inputText: "nadie@sin-dominio"
+- hideKeyboard
+- tapOn: "Enviar enlace"
+- assertVisible: "Escribe un correo válido."
+- takeScreenshot: auth-olvido-error
+- tapOn: "ejemplo@correo.com"
+- eraseText: 30
+- inputText: "nadie@e2e.zeta.test"
+- hideKeyboard
+- tapOn: "Enviar enlace"
+- extendedWaitUntil:
+    visible: "Revisa tu correo"
+    timeout: 20000
+- assertVisible: ".*nadie@e2e.zeta.test.*"
+- assertVisible: "Volver a iniciar sesión"
+- takeScreenshot: auth-olvido-enviado
+- tapOn: "Volver a iniciar sesión"
+- extendedWaitUntil:
+    visible: "Hola de nuevo"
+    timeout: 15000

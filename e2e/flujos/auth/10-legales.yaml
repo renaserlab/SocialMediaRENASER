@@ -1,0 +1,37 @@
+# Los enlaces de Términos y de Política de Privacidad del registro abren su
+# documento, y al volver el formulario sigue donde estaba.
+appId: host.exp.exponent
+name: auth/legales
+tags:
+  - auth
+---
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: register
+      ESPERAR: "Crea tu cuenta"
+# Lo escrito antes de ir a leer tiene que seguir ahi al volver.
+- tapOn: "Juan Pérez"
+- inputText: "Nombre Guardado"
+- hideKeyboard
+- tapOn: "Términos"
+- extendedWaitUntil:
+    visible: "Términos y Condiciones"
+    timeout: 15000
+- assertVisible: ".*Estos Términos regulan el uso de RENASER.*"
+- takeScreenshot: auth-terminos
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Crea tu cuenta"
+    timeout: 15000
+- assertVisible: "Nombre Guardado"
+- tapOn: "Política de Privacidad"
+- extendedWaitUntil:
+    visible: ".*Esta política explica qué datos personales recoge RENASER.*"
+    timeout: 15000
+- takeScreenshot: auth-privacidad
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Crea tu cuenta"
+    timeout: 15000
+- assertVisible: "Nombre Guardado"

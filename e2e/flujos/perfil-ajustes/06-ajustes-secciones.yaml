@@ -1,0 +1,148 @@
+# Ajustes: se llega desde el perfil (⋮ › Configuración), están todas las
+# secciones y cada fila que navega abre su pantalla y vuelve.
+#
+# NO se pulsan «Eliminar cuenta», «Reiniciar Aplicación» (solo en desarrollo)
+# ni «Probar una notificación» (abre el permiso del sistema). «Cerrar Sesión»
+# tiene su propio flujo.
+appId: host.exp.exponent
+name: "Ajustes: secciones, documentos legales y cuentas bloqueadas"
+tags:
+  - perfil-ajustes
+  - ajustes
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: "MI PERFIL"
+    timeout: 20000
+
+# ---- Perfil › ⋮ › Configuración --------------------------------------------
+- tapOn: "Acción derecha"
+- extendedWaitUntil:
+    visible: "Opciones"
+    timeout: 10000
+- tapOn: "Configuración"
+- extendedWaitUntil:
+    visible: "Visualización"
+    timeout: 10000
+
+# ---- Visualización y cuenta ------------------------------------------------
+- assertVisible: "Modo Oscuro"
+- assertVisible: "Actualmente: (Claro|Oscuro)"
+- assertVisible: "Idioma de la App"
+- assertVisible: "Castellano"
+- assertVisible: "Cuenta & Membresía"
+- assertVisible: "Ana Prueba"
+- assertVisible: ${E2E_EMAIL}
+- takeScreenshot: perfil-ajustes-ajustes-arriba
+
+# Idioma: abre y vuelve sin cambiar nada (el cambio tiene su flujo).
+- tapOn: "Idioma de la App"
+- extendedWaitUntil:
+    visible: "Elige el idioma de la aplicación"
+    timeout: 10000
+- assertVisible: "English"
+- assertVisible: "Português"
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Visualización"
+    timeout: 10000
+
+# Tus intereses: el cuestionario en modo edición.
+- tapOn: "Tus intereses"
+- extendedWaitUntil:
+    visible: "Tus preferencias"
+    timeout: 15000
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Visualización"
+    timeout: 10000
+
+# Compras y devoluciones (la fila y la cabecera dicen lo mismo: se espera a
+# que desaparezca el subtítulo de la fila).
+- tapOn: "Compras y devoluciones"
+- extendedWaitUntil:
+    notVisible: "Tu historial y el estado de tus devoluciones"
+    timeout: 10000
+- assertVisible: "Compras y devoluciones"
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Visualización"
+    timeout: 10000
+
+# Cuentas bloqueadas: abre (vacía o con gente; el bloqueo tiene su flujo).
+- tapOn: "Cuentas bloqueadas"
+- extendedWaitUntil:
+    notVisible: "Revisa y desbloquea a quien quieras"
+    timeout: 10000
+- assertVisible: "Cuentas bloqueadas"
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Visualización"
+    timeout: 10000
+
+# Eliminar cuenta: está, pero no se toca.
+- assertVisible: "Eliminar cuenta"
+
+# ---- Ayuda -----------------------------------------------------------------
+- scrollUntilVisible:
+    element: "Soporte y preguntas frecuentes"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Soporte y preguntas frecuentes"
+- extendedWaitUntil:
+    visible: "Soporte"
+    timeout: 10000
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Soporte y preguntas frecuentes"
+    timeout: 10000
+
+# ---- Legal: Privacidad y Términos ------------------------------------------
+- scrollUntilVisible:
+    element: "Términos y Condiciones"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Política de Privacidad"
+- extendedWaitUntil:
+    visible: "1. Quién trata tus datos"
+    timeout: 10000
+- takeScreenshot: perfil-ajustes-privacidad
+- scrollUntilVisible:
+    element: "10. Cambios en esta política"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Términos y Condiciones"
+    timeout: 10000
+- tapOn: "Términos y Condiciones"
+- extendedWaitUntil:
+    notVisible: "Normas de la comunidad y acuerdo de licencia"
+    timeout: 10000
+- assertVisible: "Términos y Condiciones"
+- takeScreenshot: perfil-ajustes-terminos
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Normas de la comunidad y acuerdo de licencia"
+    timeout: 10000
+
+# ---- Notificaciones y sesión, al final -------------------------------------
+- scrollUntilVisible:
+    element: "Salir de tu cuenta en este dispositivo"
+    direction: DOWN
+    timeout: 10000
+- assertVisible: "Probar una notificación"
+- assertVisible: "Sesión"
+- assertVisible: "Cerrar Sesión"
+- takeScreenshot: perfil-ajustes-ajustes-abajo
+
+# Volver sale de Ajustes al perfil.
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "MI PERFIL"
+    timeout: 10000

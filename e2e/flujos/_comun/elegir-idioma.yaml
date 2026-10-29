@@ -1,0 +1,22 @@
+# Contesta la pantalla de idioma del primer arranque (si esta a la vista).
+#
+# Parametros (env, opcionales):
+#   IDIOMA   Castellano (por omision) | English | Português
+#
+# El titulo sale en el idioma del sistema hasta que se elige: «Idioma» o
+# «Language»; el boton, «Continuar» o «Continue».
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    when:
+      visible: "(Idioma|Language)"
+    commands:
+      - tapOn: ${IDIOMA || 'Castellano'}
+      # El aviso rojo de LogBox cae justo encima de «Continuar».
+      - runFlow: quitar-ruido.yaml
+      - tapOn: "(Continuar|Continue)"
+      - extendedWaitUntil:
+          notVisible: "(Castellano|English|Português)"
+          timeout: 15000

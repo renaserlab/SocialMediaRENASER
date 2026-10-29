@@ -1,0 +1,73 @@
+# Evento con entradas (TICKETED): la ficha ofrece «Elegir entradas» con su
+# precio «Desde», y NUNCA la reserva gratuita. Se llega hasta elegir cantidad;
+# no se aparta ni se paga nada.
+#
+# En el entorno local la API corre sin FEATURE_EVENT_TICKETING, asi que la
+# pantalla de entradas responde «La venta de entradas aún no está disponible».
+# El flujo cubre las dos ramas; ver hallazgos (la ficha promete una compra que
+# el servidor tiene apagada).
+appId: host.exp.exponent
+name: "Eventos: evento con entradas hasta elegir cantidad"
+tags:
+  - eventos-escuela-crear
+  - eventos
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: events
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Agenda de eventos"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "Concierto E2E de cuencos tibetanos"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn: "Concierto E2E de cuencos tibetanos"
+
+- extendedWaitUntil:
+    visible: "Elegir entradas"
+    timeout: 20000
+- assertVisible: "En línea"
+- assertVisible: "Desde S/ 35.00 PEN"
+# Los dos flujos no conviven: con entradas no hay reserva gratuita.
+- assertNotVisible: "Reservar mi cupo"
+- assertNotVisible: "Seleccionado por Z"
+- takeScreenshot: eventos-escuela-crear-ficha-con-entradas
+
+- tapOn: "Elegir entradas"
+- extendedWaitUntil:
+    visible: "(General|La venta de entradas aún no está disponible)"
+    timeout: 20000
+
+# Rama A: la venta esta apagada en el servidor.
+- runFlow:
+    when:
+      visible: "La venta de entradas aún no está disponible"
+    commands:
+      - assertVisible: "La función está construida pero todavía no se ha activado."
+      - takeScreenshot: eventos-escuela-crear-entradas-no-disponible
+
+# Rama B: la venta esta encendida. Se elige una y se vuelve sin apartar.
+- runFlow:
+    when:
+      visible: "Agregar una de General"
+    commands:
+      - assertVisible: "Quedan .*"
+      - tapOn: "Agregar una de General"
+      - extendedWaitUntil:
+          visible: "Apartar 1 entrada por 10 minutos"
+          timeout: 10000
+      - assertVisible: "Apartar no es comprar. El pago todavía no está disponible."
+      - assertVisible: "S/ 35.00 PEN"
+      - takeScreenshot: eventos-escuela-crear-entradas-elegidas
+
+- back
+- extendedWaitUntil:
+    visible: "Desde S/ 35.00 PEN"
+    timeout: 10000

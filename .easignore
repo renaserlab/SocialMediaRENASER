@@ -66,6 +66,10 @@ graphify-out/
 # migraciones copiadas y estado de la CLI. Se regenera sola.
 .supabase-local/
 
+# Suite E2E (Maestro): la salida de cada ejecucion (capturas, junit, depuracion)
+# se regenera; las referencias de e2e/referencias/ SI se versionan.
+e2e/salida/
+
 # ---- Lo que git ignora por otras vias --------------------------------------
 # apps/mobile/.gitignore (generado por expo-cli)
 apps/mobile/expo-env.d.ts
@@ -74,3 +78,5 @@ apps/mobile/expo-env.d.ts
 .github/agents/
 .github/hooks/
 .github/skills/
+# Suite E2E: no hace falta para compilar la app.
+e2e/

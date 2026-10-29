@@ -1,0 +1,110 @@
+# Grupos con temas y comunidades (estilo Telegram).
+#
+#  1. «Taller E2E», que ADMINISTRA Ana: se abre por su lista (General, el tema
+#     «Avisos» y la comunidad «Esmaltes»), el tema es de solo lectura con el
+#     compositor de la administracion (Enviar apagado con el campo vacio), y
+#     Ana crea un tema y lo elimina (deja el grupo como estaba).
+#  2. «Carpinteria E2E», que administra Beto: Ana es miembro normal, ve el
+#     tema y la comunidad «Torno» con «Unirme», pero NO puede crear temas.
+#
+# Datos: e2e/datos/30-mensajes.sql.
+appId: host.exp.exponent
+name: "Mensajes: grupos, temas y comunidades"
+tags:
+  - mensajes
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+- extendedWaitUntil:
+    visible: "Chat con Taller E2E\\..*"
+    timeout: 30000
+- tapOn: "Chat con Taller E2E\\..*"
+
+# ---- 1. La lista del grupo que administra Ana ------------------------------
+- extendedWaitUntil:
+    visible: "Tema Avisos, solo lectura\\..*"
+    timeout: 20000
+- assertVisible: "General, el chat de todo el grupo\\..*"
+- assertVisible: "Temas"
+- assertVisible: "Comunidades"
+- assertVisible: "Comunidad Esmaltes\\..*"
+- assertVisible: "Miembros: 2 · 1 tema · 1 comunidad"
+- assertVisible: "Nuevo tema"
+- assertVisible: "Crear comunidad"
+- takeScreenshot: mensajes-grupo-lista
+
+# El tema: solo escribe la administracion; con el campo vacio, «Enviar» apagado.
+- tapOn: "Tema Avisos, solo lectura\\..*"
+- extendedWaitUntil:
+    visible: "Horario: lunes a viernes de 9 a 18\\."
+    timeout: 20000
+- assertVisible: "Escribe en Avisos"
+- assertVisible:
+    text: "Enviar mensaje"
+    enabled: false
+- takeScreenshot: mensajes-tema
+- back
+- extendedWaitUntil:
+    visible: "Tema Avisos, solo lectura\\..*"
+    timeout: 15000
+
+# Crear un tema...
+- tapOn: "Nuevo tema"
+- extendedWaitUntil:
+    visible: "Por ejemplo: Material de estudio"
+    timeout: 10000
+- tapOn: "Por ejemplo: Material de estudio"
+- inputText: "Tema Maestro"
+- tapOn: "Crear tema"
+- extendedWaitUntil:
+    visible: "Tema Tema Maestro, solo lectura\\..*"
+    timeout: 15000
+- assertVisible: "Miembros: 2 · 2 temas · 1 comunidad"
+- takeScreenshot: mensajes-grupo-tema-creado
+
+# ...y eliminarlo, para dejar el grupo como estaba.
+- tapOn: "Tema Tema Maestro, solo lectura\\..*"
+- extendedWaitUntil:
+    visible: "Más opciones del tema"
+    timeout: 15000
+- tapOn: "Más opciones del tema"
+- tapOn: "Eliminar tema"
+- extendedWaitUntil:
+    visible: "¿Eliminar este tema\\?"
+    timeout: 10000
+- tapOn:
+    text: "Eliminar"
+    below: "¿Eliminar este tema\\?"
+- extendedWaitUntil:
+    notVisible: "Tema Tema Maestro, solo lectura\\..*"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Miembros: 2 · 1 tema · 1 comunidad"
+    timeout: 15000
+
+# ---- 2. Un grupo en el que Ana es miembro normal ---------------------------
+- back
+- extendedWaitUntil:
+    visible: "Chat con Carpinteria E2E\\..*"
+    timeout: 15000
+- tapOn: "Chat con Carpinteria E2E\\..*"
+- extendedWaitUntil:
+    visible: "Tema Planos, solo lectura\\..*"
+    timeout: 20000
+# Beto escribio en el tema y Ana no lo ha abierto: se dice con palabras.
+- assertVisible: "Tema Planos, solo lectura\\..*Sin ver: 1"
+- assertVisible: "Torno"
+- assertVisible: "Unirme"
+- assertNotVisible: "Nuevo tema"
+- assertNotVisible: "Crear comunidad"
+- takeScreenshot: mensajes-grupo-miembro
+
+# En el tema, un miembro no tiene compositor: solo la barra que lo explica.
+- tapOn: "Tema Planos, solo lectura\\..*"
+- extendedWaitUntil:
+    visible: "Aquí solo escribe la administración. Se conversa en General."
+    timeout: 20000
+- assertNotVisible: "Enviar mensaje"

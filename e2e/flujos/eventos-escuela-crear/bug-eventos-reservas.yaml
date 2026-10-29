@@ -1,0 +1,112 @@
+# REPRODUCCION DE FALLOS CONOCIDOS (hallazgos E0, E2, E3 y E4). Comprueba el
+# comportamiento ACTUAL, que es el incorrecto: cuando se arreglen, este flujo
+# fallara en el paso marcado con «ARREGLO:» y hay que invertir esa comprobacion.
+#
+#  E0  la ficha no reconoce la reserva propia: tras «Reservar mi cupo» el aforo
+#      sube pero el boton sigue diciendo «Reservar mi cupo» (nunca «Cancelar mi
+#      reserva»): la reserva del destacado no se puede cancelar en ningun sitio.
+#  E3  la fila de un evento SIN FECHA ofrece «Reservar» y el servidor acepta,
+#      pero la ficha dice que no se puede reservar (y no deja cancelar).
+#  E4  el boton redondo cancela la reserva sin pedir confirmacion.
+#  E2  el boton redondo de un evento CON ENTRADAS siempre falla.
+#
+# Deja a Ana reservada en el Taller (E0 impide cancelar): correr.sh resiembra.
+appId: host.exp.exponent
+name: "Eventos (fallos conocidos): reservar desde la fila de la agenda"
+tags:
+  - eventos-escuela-crear
+  - eventos
+  - bug-conocido
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: events
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Taller E2E de respiración consciente"
+    timeout: 20000
+
+# ---- E0: la ficha no reconoce la reserva propia ---------------------------
+- tapOn: "(Ver detalles y reservar|Reserva confirmada)"
+- extendedWaitUntil:
+    visible: "Reservar mi cupo"
+    timeout: 20000
+- tapOn: "Reservar mi cupo"
+- extendedWaitUntil:
+    visible: "1 de 30 cupos"
+    timeout: 15000
+# ARREGLO: deberia decir «Cancelar mi reserva» (la ficha pide el evento sin
+# sesion, `getEvent(id, { auth: false })`, y `reserved_by_me` vuelve falso).
+- assertVisible: "Reservar mi cupo"
+- assertNotVisible: "Cancelar mi reserva"
+- takeScreenshot: eventos-escuela-crear-bug-ficha-reservada
+- back
+- extendedWaitUntil:
+    visible: "Reserva confirmada"
+    timeout: 15000
+
+# ---- E3: reservar un evento sin fecha desde la fila ------------------------
+- scrollUntilVisible:
+    element: "Retiro E2E con fecha por confirmar"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    text: "Reservar"
+    below: "Fecha por confirmar"
+# ARREGLO: la fila no deberia ofrecer reservar (o el servidor deberia negarse).
+- extendedWaitUntil:
+    visible:
+      text: "Reserva confirmada"
+      below: "Fecha por confirmar"
+    timeout: 15000
+- takeScreenshot: eventos-escuela-crear-bug-sin-fecha-reservado
+- tapOn: "Retiro E2E con fecha por confirmar"
+- extendedWaitUntil:
+    visible: "Todavía no hay fecha: aún no se puede reservar."
+    timeout: 15000
+# ARREGLO: la ficha deberia reconocer la reserva y permitir cancelarla.
+- assertNotVisible: "Cancelar mi reserva"
+- takeScreenshot: eventos-escuela-crear-bug-sin-fecha-ficha
+- back
+
+# ---- E4: el boton redondo cancela sin preguntar ----------------------------
+- extendedWaitUntil:
+    visible: "Retiro E2E con fecha por confirmar"
+    timeout: 15000
+- tapOn:
+    text: "Reserva confirmada"
+    below: "Fecha por confirmar"
+# ARREGLO: deberia salir «¿Cancelar la reserva?» como en la ficha.
+- assertNotVisible: "¿Cancelar la reserva\\?"
+- extendedWaitUntil:
+    visible:
+      text: "Reservar"
+      below: "Fecha por confirmar"
+    timeout: 15000
+
+# ---- E2: el boton redondo en un evento con entradas ------------------------
+- scrollUntilVisible:
+    element: "Concierto E2E de cuencos tibetanos"
+    direction: UP
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    text: "Reservar"
+    above: "Fecha por confirmar"
+# ARREGLO: deberia llevar a la ficha / «Elegir entradas», no a un error.
+- extendedWaitUntil:
+    visible: "No se pudo actualizar la reserva"
+    timeout: 15000
+- takeScreenshot: eventos-escuela-crear-bug-fila-con-entradas
+- tapOn: "(OK|Aceptar|ACEPTAR|Entendido)"
+- extendedWaitUntil:
+    visible:
+      text: "Reservar"
+      above: "Fecha por confirmar"
+    timeout: 10000

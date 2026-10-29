@@ -1,0 +1,55 @@
+# Me gusta en una publicacion abierta por ENLACE DIRECTO en frio (lo que pasa
+# al tocar un enlace compartido o un aviso): la app arranca directamente en
+# /post/<id>, sin haber cargado el muro.
+#
+# Datos: 20-inicio-explorar.sql, P4 de Beto sin me gusta (solo la usa este
+# flujo, para que un fallo aqui no estropee el punto de partida de los demas).
+#
+# HALLAZGO ABIERTO (ver e2e/hallazgos/inicio-explorar.md, H-01): en este caso
+# `PostCard` pinta el contador de su copia local y `toggleLikePost` solo
+# actualiza `likeCounts` y el muro, asi que el numero no se mueve. Este flujo
+# fallara en «Ver quién reaccionó» hasta que se arregle. Si falla ahi, la P4
+# queda con el me gusta puesto: volver a sembrar antes de repetir.
+appId: host.exp.exponent
+name: "Publicacion: me gusta por enlace directo"
+tags:
+  - inicio-explorar
+  - publicacion
+  - regresion
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+# En frio: se para Expo Go y se abre el enlace (la sesion se conserva).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: post/e2e20000-0000-4000-8000-000000000004
+      ESPERAR: "Enlace directo E2E: cola de milano a mano, sin plantilla."
+- assertVisible: "Publicación"
+- assertNotVisible: "Ver quién reaccionó"
+
+- tapOn:
+    text: "Me gusta"
+    index: 0
+# Esperado: el contador sube a 1 y pasa a ser el boton «Ver quién reaccionó».
+- extendedWaitUntil:
+    visible: "Ver quién reaccionó"
+    timeout: 10000
+- assertVisible:
+    text: "1"
+    childOf:
+      text: "Ver quién reaccionó"
+- takeScreenshot:
+    path: inicio-explorar-corazon-enlace-directo
+    # Solo el boton del corazon: contorno negro sin me gusta, relleno rosa con el.
+    cropOn:
+      text: "Me gusta"
+      index: 0
+
+# Quitarlo: vuelve a 0.
+- tapOn:
+    text: "Me gusta"
+    index: 0
+- extendedWaitUntil:
+    notVisible: "Ver quién reaccionó"
+    timeout: 10000

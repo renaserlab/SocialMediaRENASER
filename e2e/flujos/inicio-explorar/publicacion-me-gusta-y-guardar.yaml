@@ -1,0 +1,138 @@
+# Detalle de una publicacion: me gusta (corazon relleno y rosa, contador +1),
+# quitarlo (vuelve a 0), guardar (aviso + icono marcado) y quitar de guardados.
+# Deja la publicacion como estaba.
+#
+# Datos: 20-inicio-explorar.sql, P1 de Beto sin me gusta ni guardados.
+#
+# Como se reconoce el estado sin testID:
+#   - Con me gusta > 0 el NUMERO se vuelve un boton aparte con
+#     accessibilityLabel «Ver quién reaccionó»; con 0 no existe.
+#   - Guardar es un switch: su accessibilityLabel pasa de «Guardar» a
+#     «Quitar de guardados» y su estado `checked` cambia. El rotulo visible
+#     de debajo dice «Guardar» en los dos estados, asi que el estado se mira
+#     por «Quitar de guardados».
+appId: host.exp.exponent
+name: "Publicacion: me gusta y guardar"
+tags:
+  - inicio-explorar
+  - publicacion
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+# Al detalle por el buscador de Explorar: es un camino real (la publicacion es
+# solo de texto y en el muro no hay nada que la abra) y deja el muro cargado,
+# que es el caso normal. El enlace directo en frio tiene su propio flujo
+# (publicacion-enlace-directo.yaml) porque ahi falla el contador.
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 20000
+- tapOn: "Personas, publicaciones, cursos o eventos..."
+- inputText: "Lijado fino"
+- extendedWaitUntil:
+    visible: "Ver publicación de Beto Prueba"
+    timeout: 15000
+- hideKeyboard
+- tapOn: "Ver publicación de Beto Prueba"
+- extendedWaitUntil:
+    visible: "Lijado fino antes del barniz: grano 320 y sin prisa."
+    timeout: 20000
+- assertVisible: "Publicación"
+- assertVisible: "Ver perfil de Beto Prueba"
+- assertVisible: "Ver todos los comentarios"
+
+# Punto de partida: sin me gusta y sin guardar.
+- assertNotVisible: "Ver quién reaccionó"
+- assertNotVisible: "Quitar de guardados"
+- takeScreenshot:
+    path: inicio-explorar-corazon-sin-me-gusta
+    # Solo el boton del corazon: contorno negro sin me gusta, relleno rosa con el.
+    cropOn:
+      text: "Me gusta"
+      index: 0
+
+# ---- ME GUSTA ------------------------------------------------------------------
+# El primer «Me gusta» del arbol es el boton (el segundo es el rotulo de abajo).
+- tapOn:
+    text: "Me gusta"
+    index: 0
+- extendedWaitUntil:
+    visible: "Ver quién reaccionó"
+    timeout: 10000
+- assertVisible:
+    text: "1"
+    childOf:
+      text: "Ver quién reaccionó"
+# El corazon relleno y rosa (`meGusta` de tokens): comparar con la referencia.
+- takeScreenshot:
+    path: inicio-explorar-corazon-con-me-gusta
+    # Solo el boton del corazon: contorno negro sin me gusta, relleno rosa con el.
+    cropOn:
+      text: "Me gusta"
+      index: 0
+
+# El contador abre quien reacciono: Ana.
+- tapOn: "Ver quién reaccionó"
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 10000
+- takeScreenshot: inicio-explorar-reacciones
+- back
+- extendedWaitUntil:
+    visible: "Lijado fino antes del barniz: grano 320 y sin prisa."
+    timeout: 10000
+
+# Quitar el me gusta: el contador vuelve a 0 y deja de ser boton.
+- tapOn:
+    text: "Me gusta"
+    index: 0
+- extendedWaitUntil:
+    notVisible: "Ver quién reaccionó"
+    timeout: 10000
+
+# ---- GUARDAR ----------------------------------------------------------------------
+# El rotulo de debajo tambien dice «Guardar» (y lo sigue diciendo guardada):
+# el primero del arbol es el switch.
+- tapOn:
+    text: "Guardar"
+    index: 0
+    # El aviso dura 5 s y, tras un toque, Maestro comprueba si la pantalla
+    # cambio con volcados del arbol que en este emulador tardan ~10 s mientras
+    # el aviso se anima: para entonces ya se ha ido. Sin esa comprobacion el
+    # toque vuelve antes; aun asi el aviso se comprueba como OPCIONAL (aviso en
+    # el informe, no fallo) y lo que manda es el estado del interruptor.
+    retryTapIfNoChange: false
+    waitToSettleTimeoutMs: 500
+- assertVisible:
+    text: "Publicación guardada"
+    optional: true
+- assertVisible:
+    text: "Quitar de guardados"
+    checked: true
+- takeScreenshot: inicio-explorar-guardada
+
+# Quitar de guardados (deja la publicacion como estaba).
+- tapOn:
+    text: "Quitar de guardados"
+    checked: true
+    retryTapIfNoChange: false
+    waitToSettleTimeoutMs: 500
+- assertVisible:
+    text: "Publicación eliminada de Guardados"
+    optional: true
+- extendedWaitUntil:
+    notVisible: "Quitar de guardados"
+    timeout: 10000
+
+# Fuera del detalle y busqueda vacia: Explorar como estaba.
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Borrar la búsqueda"
+    timeout: 10000
+- tapOn: "Borrar la búsqueda"
+- extendedWaitUntil:
+    visible: "Crear nueva publicación"
+    timeout: 10000

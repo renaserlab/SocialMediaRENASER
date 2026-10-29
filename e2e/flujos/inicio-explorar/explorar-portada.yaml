@@ -1,0 +1,77 @@
+# Explorar, lo fijo de arriba: cabecera, buscador, los cuatro accesos, la fila
+# de historias, Para ti / Siguiendo, el compositor y las tarjetas «Tu circulo»
+# y «Podcast».
+#
+# Datos: 20-inicio-explorar.sql (circulo «Circulo E2E de oficios», 2 miembros).
+appId: host.exp.exponent
+name: "Explorar: portada, accesos y tarjetas"
+tags:
+  - inicio-explorar
+  - explorar
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 20000
+# Buscador fijo (accessibilityLabel = placeholder).
+- assertVisible: "Personas, publicaciones, cursos o eventos..."
+
+# Los cuatro accesos a verticales.
+- assertVisible: "Escuela"
+- assertVisible: "Eventos"
+- assertVisible: "Servicios.*"
+- assertVisible: "Productos"
+
+# Fila de historias: la propia y la de Beto.
+- assertVisible: "Tu historia"
+- assertVisible: "Ver historia de Beto Prueba"
+
+# Para ti / Siguiendo del muro y el compositor con el nombre de Ana.
+- assertVisible: "Para ti"
+- assertVisible: "Siguiendo"
+- assertVisible: "Crear nueva publicación"
+- assertVisible: "¿Qué estás aprendiendo hoy, Ana\\?"
+
+# Tarjetas: «Tu circulo» con su contador real y «Podcast».
+- extendedWaitUntil:
+    visible: "\\d+ personas avanzando"
+    timeout: 15000
+- assertVisible: "Tu círculo"
+- assertVisible: "Podcast"
+- assertVisible: "Escucha los episodios"
+- takeScreenshot: inicio-explorar-explorar-portada
+
+# «Tu circulo» abre el circulo destacado.
+- tapOn:
+    text: "Tu círculo"
+    index: 0
+- extendedWaitUntil:
+    visible: "CÍRCULO"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Circulo E2E de oficios"
+    timeout: 15000
+- takeScreenshot: inicio-explorar-circulo
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 10000
+
+# Acceso «Escuela» -> catalogo de cursos, y vuelta.
+- tapOn:
+    text: "Escuela"
+    index: 0
+- extendedWaitUntil:
+    notVisible: "Personas, publicaciones, cursos o eventos..."
+    timeout: 10000
+- takeScreenshot: inicio-explorar-acceso-escuela
+- back
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 10000

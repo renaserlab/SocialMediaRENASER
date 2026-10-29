@@ -1,0 +1,98 @@
+# El globo de no leidos: el numero de la pestaña Mensajes coincide con lo que
+# cuenta la API, la fila de Beto lo dice en negrita con su globo rosa, y leer
+# el chat lo descuenta al volver.
+#
+# NO depende de la pasada anterior: Beto escribe por la API al empezar (asi
+# siempre hay algo sin leer) y los numeros esperados se le preguntan a la API
+# en el momento, con la misma regla que usa la app.
+#
+# Datos: e2e/datos/30-mensajes.sql (chat Ana–Beto).
+appId: host.exp.exponent
+name: "Mensajes: globo de no leidos"
+tags:
+  - mensajes
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+
+- runScript:
+    file: _ayudas/api.js
+    env:
+      ACCION: beto-escribe
+      EMAIL_B: ${E2E_EMAIL_B}
+      PASSWORD: ${E2E_PASSWORD}
+      TEXTO: "Te escribo desde la prueba de no leidos"
+- runScript:
+    file: _ayudas/api.js
+    env:
+      ACCION: contar
+      EMAIL: ${E2E_EMAIL}
+      PASSWORD: ${E2E_PASSWORD}
+- assertTrue:
+    condition: ${output.mensajes.sinLeerBeto != '0'}
+    label: "La API cuenta algo sin leer en el chat con Beto"
+
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+
+# La pestaña anuncia la cuenta con palabras (no solo con el globo rosa).
+- extendedWaitUntil:
+    visible: "Mensajes\\. Mensajes sin leer: ${output.mensajes.sinLeerTotal}"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\. Te escribo desde la prueba de no leidos"
+    timeout: 15000
+# El globo de la fila lleva la cifra (el lector de pantalla no la oye: ver
+# hallazgos/mensajes.md).
+- assertVisible:
+    text: ${output.mensajes.sinLeerBeto}
+    childOf: "Chat con Beto Prueba\\..*"
+- takeScreenshot: mensajes-no-leidos
+
+# Leer el chat...
+- tapOn: "Chat con Beto Prueba\\..*"
+- extendedWaitUntil:
+    visible: "Ver el perfil de Beto Prueba"
+    timeout: 20000
+# Si se abre a mitad del historial (M12, intermitente), se baja hasta lo nuevo.
+- scrollUntilVisible:
+    element: "Te escribo desde la prueba de no leidos"
+    direction: DOWN
+    timeout: 20000
+- back
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 15000
+# La fila ya no lleva globo.
+- extendedWaitUntil:
+    notVisible:
+      text: "\\d+"
+      childOf: "Chat con Beto Prueba\\..*"
+    timeout: 10000
+
+# ...lo descuenta: la API dice 0 para Beto y la pestaña pinta el nuevo total.
+- runScript:
+    file: _ayudas/api.js
+    env:
+      ACCION: contar
+      EMAIL: ${E2E_EMAIL}
+      PASSWORD: ${E2E_PASSWORD}
+- assertTrue:
+    condition: ${output.mensajes.sinLeerBeto == '0'}
+    label: "Abrir el chat lo marca como leido en el servidor"
+- runFlow:
+    when:
+      true: ${output.mensajes.sinLeerTotal != '0'}
+    commands:
+      - extendedWaitUntil:
+          visible: "Mensajes\\. Mensajes sin leer: ${output.mensajes.sinLeerTotal}"
+          timeout: 15000
+- runFlow:
+    when:
+      true: ${output.mensajes.sinLeerTotal == '0'}
+    commands:
+      - extendedWaitUntil:
+          notVisible: "Mensajes\\. Mensajes sin leer: .*"
+          timeout: 15000
+- takeScreenshot: mensajes-no-leidos-tras-leer

@@ -1,0 +1,23 @@
+# Subflujo del modulo: acepta, si aparece, el dialogo de permisos del sistema
+# (camara o fotos/medios) que Expo Go pide al entrar en Crear. Si no aparece no
+# hace nada. Cubre el emulador en ingles y en espanol, y el aviso propio de Expo
+# Go cuando otro proyecto ya tenia el permiso («Allow Z to also use it?», con
+# los botones DENY / ALLOW en mayusculas).
+#
+# UNA sola condicion de primer nivel: cada condicion que no se cumple cuesta
+# ~7 s, y este subflujo se llama varias veces por flujo. La segunda (por si el
+# sistema encadena otro permiso, p. ej. microfono) solo se evalua si hubo uno.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    when:
+      visible: "(While using the app|Mientras se usa la app|Mientras la app está en uso|Only this time|Solo esta vez|Allow|Permitir|Allow all|Permitir todo|ALLOW|PERMITIR)"
+    commands:
+      - tapOn: "(While using the app|Mientras se usa la app|Mientras la app está en uso|Allow all|Permitir todo|Allow|Permitir|ALLOW|PERMITIR)"
+      - runFlow:
+          when:
+            visible: "(While using the app|Mientras se usa la app|Mientras la app está en uso|Only this time|Solo esta vez|Allow|Permitir|Allow all|Permitir todo|ALLOW|PERMITIR)"
+          commands:
+            - tapOn: "(While using the app|Mientras se usa la app|Mientras la app está en uso|Allow all|Permitir todo|Allow|Permitir|ALLOW|PERMITIR)"

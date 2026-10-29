@@ -1,0 +1,150 @@
+# PENDIENTE (28-10-2026): no ha pasado entero en el emulador; fuera de la suite por defecto (etiqueta `pendiente`). Ver hallazgos/RESUMEN.md.
+# Editar el perfil desde el lápiz: cambiar nombre y descripción, guardar y
+# verlo en el perfil (también tras recargar la app). Después se restaura por
+# la API y se comprueba que el perfil y la pantalla antigua /edit-profile (que
+# se conserva por los enlaces viejos) enseñan lo de partida.
+#
+# Para gastar pocas teclas se AÑADE « E2E» al final de cada campo. Escribir en
+# la bandeja es muy lento en este emulador (≈10 s por carácter, con el perfil
+# repintándose debajo; Maestro corta cada orden a los 120 s), y `eraseText` se
+# cuelga aquí (ver _sub/borrar.yaml).
+#
+# Restaurar tecleando NO es fiable: dónde queda el cursor en la biografía
+# depende de si cabe en una línea, y una vez acabó guardando texto mezclado.
+# Por eso se restaura con _sub/api.js (y lo mismo en `onFlowComplete`).
+#
+# Datos: 00-base.sql / 40-perfil.sql (nombre y descripción de partida).
+appId: host.exp.exponent
+name: "Perfil: editar nombre y descripción, y restaurarlos"
+tags:
+  - perfil-ajustes
+  - perfil
+  - pendiente
+env:
+  SUFIJO: " E2E"
+  NOMBRE_NUEVO: "Ana Prueba E2E"
+  BIO_NUEVA: "Cuenta de pruebas E2E. Ceramica y diseno. E2E"
+onFlowComplete:
+  # Por la API, no por la pantalla: con el flujo cortado la app puede estar en
+  # cualquier estado (ver _sub/api.js).
+  - runFlow:
+      when:
+        true: ${output.perfilRestaurado != true}
+      commands:
+        - runScript:
+            file: _sub/api.js
+            env:
+              ACCION: restaurar-ana
+              EMAIL: ${E2E_EMAIL}
+              PASSWORD: ${E2E_PASSWORD}
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 20000
+
+# ---- Cambiar nombre y descripción en la bandeja del lápiz ------------------
+- tapOn: "Editar perfil"
+- extendedWaitUntil:
+    visible: "Nombre completo"
+    timeout: 10000
+# Dónde queda el cursor al tocar (se escribe detrás de lo que hay):
+#   - nombre (una línea, texto corto): el centro del campo cae a la derecha
+#     del texto → cursor al final;
+#   - biografía (varias líneas): el toque deja el cursor a esa altura de la
+#     ÚLTIMA línea —con la de partida, que ocupa una línea, en mitad de la
+#     frase—, y «Dpad Down» en la última línea lo lleva al final.
+# La biografía va PRIMERO, con el teclado cerrado: con él abierto la bandeja
+# se desplaza y el toque cae en otra parte.
+- tapOn:
+    text: "Biografía"
+    index: 1
+- pressKey: Remote Dpad Down
+- inputText: ${SUFIJO}
+- tapOn:
+    text: "Nombre completo"
+    index: 1
+- inputText: ${SUFIJO}
+- assertVisible:
+    text: ${NOMBRE_NUEVO}
+    below: "Nombre completo"
+- assertVisible:
+    text: ${BIO_NUEVA}
+    below: "Biografía"
+- takeScreenshot: perfil-ajustes-editar-bandeja-rellena
+- scrollUntilVisible:
+    element: "Guardar cambios"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Guardar cambios"
+# El aviso «Perfil actualizado» no se comprueba: dura menos de lo que tarda
+# este emulador en dar el toque por terminado (~14 s). Lo que cuenta es que la
+# bandeja se cierra y el perfil enseña lo nuevo.
+- extendedWaitUntil:
+    notVisible: "Elegir de la galería"
+    timeout: 20000
+
+# ---- El perfil enseña lo nuevo, también tras recargar la app ---------------
+- assertVisible: ${NOMBRE_NUEVO}
+- assertVisible: ${BIO_NUEVA}
+- assertNotVisible: "Ana Prueba"
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: home
+      ESPERAR: "Inicio"
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: ${NOMBRE_NUEVO}
+    timeout: 20000
+- assertVisible: ${BIO_NUEVA}
+
+# ---- Restaurar (por la API) y comprobarlo en la app -------------------------
+- runScript:
+    file: _sub/api.js
+    env:
+      ACCION: restaurar-ana
+      EMAIL: ${E2E_EMAIL}
+      PASSWORD: ${E2E_PASSWORD}
+- evalScript: ${output.perfilRestaurado = true}
+# La pantalla antigua /edit-profile carga lo guardado (app recargada: el perfil
+# se vuelve a pedir al servidor al arrancar).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: edit-profile
+      ESPERAR: "Guardar cambios"
+- extendedWaitUntil:
+    visible:
+      text: "Ana Prueba"
+      below: "Nombre completo"
+    timeout: 15000
+- assertVisible:
+    text: "Cuenta de pruebas E2E. Ceramica y diseno."
+    below: "Biografía"
+- assertVisible:
+    text: "ana_e2e"
+    below: "Nombre de usuario"
+- takeScreenshot: perfil-ajustes-editar-pantalla-antigua
+# Atrás sin guardar: sin historial (se abrió por enlace) vuelve a la raíz.
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Explorar"
+    timeout: 15000
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 20000
+- assertVisible: "Cuenta de pruebas E2E. Ceramica y diseno."
+- assertNotVisible: ${NOMBRE_NUEVO}

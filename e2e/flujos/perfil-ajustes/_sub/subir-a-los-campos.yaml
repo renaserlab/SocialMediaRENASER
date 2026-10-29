@@ -1,0 +1,14 @@
+# Vuelve a subir la bandeja «Editar perfil» hasta los campos.
+#
+# Tras pulsar «Guardar cambios» la bandeja queda desplazada hasta abajo y el
+# rótulo «Nombre completo» se sale por arriba: entonces solo queda una
+# coincidencia (la del campo) y `index: 1` ya no existe; y tocar un campo medio
+# tapado puede caer en el fondo, que cierra la bandeja.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- scrollUntilVisible:
+    element: "Tomar foto"
+    direction: UP
+    timeout: 10000

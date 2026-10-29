@@ -1,0 +1,21 @@
+# Borra TECLAS caracteres del campo con el foco, con Retroceso.
+#
+# POR QUÉ NO `eraseText`. En el perfil (bandeja del lápiz y /edit-profile)
+# `eraseText` se cuelga: va por el servidor de Maestro en el dispositivo
+# (UiAutomator, que espera a que la app esté quieta entre tecla y tecla) y a
+# los 120 s Maestro lo da por muerto, aunque sean 14 caracteres. `pressKey` va
+# por `adb shell input keyevent` y no espera a nada.
+#
+# Parámetros (env):
+#   TECLAS   cuántas veces pulsar Retroceso (obligatorio)
+#
+# Tocar el campo en su centro deja el cursor al final del texto (si el texto
+# es corto), que es lo que hace falta para borrarlo entero.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- repeat:
+    times: ${TECLAS}
+    commands:
+      - pressKey: Backspace

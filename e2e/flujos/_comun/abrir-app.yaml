@@ -1,0 +1,50 @@
+# Abre Z en Expo Go (Metro local en 127.0.0.1:8081) y espera a que pinte.
+#
+# Parametros (env, todos opcionales):
+#   RUTA       URL de expo-router SIN barra inicial («login», «settings»,
+#              «home», «post/<id>»...). Vacia = la raiz, que decide sola a
+#              donde ir (idioma, cuestionario o muro). OJO: con REINICIAR «no»
+#              hay que dar RUTA; abrir la raiz con la app ya en marcha no
+#              navega a ningun sitio. Para el muro, RUTA «home».
+#   ESPERAR    regex del texto que confirma que la pantalla cargo. Por omision,
+#              cualquier pantalla de arranque conocida.
+#   REINICIAR  «no» para NO parar Expo Go antes. Por omision se para, asi cada
+#              flujo empieza con el JS recien cargado (la sesion y lo guardado
+#              en el dispositivo se conservan).
+#
+# Ejemplo:
+#   - runFlow:
+#       file: ../_comun/abrir-app.yaml
+#       env:
+#         RUTA: login
+#         ESPERAR: "Hola de nuevo"
+appId: host.exp.exponent
+tags:
+  - comun
+---
+# Arranque en frio: se para Expo Go y se abre su inicio ANTES del enlace. Con
+# el proceso parado, el `openLink` a veces solo abre y cierra el lanzador de
+# Expo Go y la app no llega a cargarse.
+- runFlow:
+    when:
+      true: "${REINICIAR != 'no'}"
+    commands:
+      - stopApp
+      - launchApp:
+          stopApp: false
+# Reintento por si aun asi se pierde, o por un «System UI isn't responding».
+- retry:
+    maxRetries: 2
+    commands:
+      - openLink:
+          link: "${RUTA ? 'exp://127.0.0.1:8081/--/' + RUTA : 'exp://127.0.0.1:8081'}"
+      # Bundle frio o primer arranque de Expo Go: puede tardar bastante con
+      # render por software. Tambien sale de la espera si el sistema pone un
+      # dialogo de «no responde», para quitarlo.
+      - extendedWaitUntil:
+          visible: "(${ESPERAR || 'Inicio|Idioma|Language|Hola de nuevo|Crea tu cuenta|Configuración'}|.*isn't responding)"
+          timeout: 90000
+      - runFlow: quitar-ruido.yaml
+      - extendedWaitUntil:
+          visible: "${ESPERAR || '(Inicio|Idioma|Language|Hola de nuevo|Crea tu cuenta|Configuración)'}"
+          timeout: 30000

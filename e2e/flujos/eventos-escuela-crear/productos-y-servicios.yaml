@@ -1,0 +1,160 @@
+# Productos y Servicios, SOLO LECTURA: nunca se guarda, se agrega a la bolsa
+# ni se compra nada.
+#
+# Productos: dos productos de Beto (50-eventos-escuela.sql): el cuaderno con
+# precio, variantes y evaluacion aprobada, y la taza sin precio.
+# Servicios: la API local corre con feature_services apagada; la vertical dice
+# que no esta disponible. Si algun dia se enciende, el flujo solo fotografia el
+# catalogo (no hay servicios sembrados).
+appId: host.exp.exponent
+name: "Productos y servicios: catálogo y ficha (lectura)"
+tags:
+  - eventos-escuela-crear
+  - productos
+  - servicios
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+
+# ---- Servicios desde Explorar ---------------------------------------------
+- extendedWaitUntil:
+    visible: "Servicios.*"
+    timeout: 20000
+- runFlow:
+    when:
+      visible: "Servicios\\. Todavía no disponible"
+    commands:
+      - tapOn: "Servicios\\. Todavía no disponible"
+      # Es un toast de pocos segundos. En Explorar cada toque tarda 12–17 s en
+      # volver (la pantalla nunca queda quieta, ver H-12), así que a veces ya se
+      # fue cuando Maestro mira: se comprueba si llega a verse, sin exigirlo.
+      - extendedWaitUntil:
+          visible: "Servicios llegará más adelante\\. Te avisaremos cuando esté\\."
+          timeout: 5000
+          optional: true
+      # Sin captura: el toast puede salir o no (ver arriba).
+# Por enlace directo la pantalla tampoco se rompe: dice que no esta abierta.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: servicios
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "(Servicios aún no está disponible|Servicios publicados|Todavía no hay servicios publicados)"
+    timeout: 20000
+- assertVisible: "¿Qué necesitas resolver\\?"
+- assertNotVisible: "Ocurrió un error"
+- takeScreenshot: eventos-escuela-crear-servicios
+- back
+
+# ---- Productos --------------------------------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: productos
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Productos Z"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "Cuaderno E2E de tapa dura"
+    timeout: 20000
+- assertVisible: "No está todo\\. Está lo que merece estar\\."
+- assertVisible: "Selección Z"
+- assertVisible: "45\\.00 PEN"
+- assertVisible: "Taller de Beto E2E"
+- takeScreenshot: eventos-escuela-crear-productos
+- scrollUntilVisible:
+    element: "Taza E2E sin precio"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: "Precio no configurado"
+- scrollUntilVisible:
+    element: "Creadores de excelencia"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- takeScreenshot: eventos-escuela-crear-productos-abajo
+
+# Ficha del cuaderno: evaluado, con razones y variantes.
+- scrollUntilVisible:
+    element: "Cuaderno E2E de tapa dura"
+    direction: UP
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    text: "Cuaderno E2E de tapa dura"
+    index: 0
+- extendedWaitUntil:
+    visible: "De Taller de Beto E2E"
+    timeout: 20000
+- assertVisible: "Detalle"
+- assertVisible: "Versión 1"
+- assertVisible: "Este producto todavía no tiene imágenes publicadas."
+- takeScreenshot: eventos-escuela-crear-producto-ficha
+- scrollUntilVisible:
+    element: "Por qué está en Z"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: "Materiales de alta duración"
+- scrollUntilVisible:
+    element: "Variantes"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- scrollUntilVisible:
+    element: "Arena.*"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: "Negro.*"
+- scrollUntilVisible:
+    element: "País de origen: PE"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- takeScreenshot: eventos-escuela-crear-producto-ficha-abajo
+# La barra fija avisa de que no se vende (no se toca nada).
+- assertVisible: "En Z todavía no se compran productos\\. Guardar no reserva nada\\."
+- back
+- extendedWaitUntil:
+    visible: "Productos Z"
+    timeout: 15000
+
+# Ficha de la taza: lo que falta se dice, no se inventa.
+- scrollUntilVisible:
+    element: "Taza E2E sin precio"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    text: "Taza E2E sin precio"
+    index: 0
+- extendedWaitUntil:
+    visible: "De Taller de Beto E2E"
+    timeout: 20000
+- scrollUntilVisible:
+    element: "No tiene variantes\\."
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: "Las razones de la aprobación todavía no están publicadas\\."
+- assertNotVisible: "Agregar a la bolsa"
+- takeScreenshot: eventos-escuela-crear-producto-sin-precio
+- back

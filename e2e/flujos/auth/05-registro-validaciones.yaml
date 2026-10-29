@@ -1,0 +1,38 @@
+# Registro: requisitos a la vista, validaciones de cliente y correo ya usado.
+appId: host.exp.exponent
+name: auth/registro-validaciones
+tags:
+  - auth
+---
+- runFlow: ../_comun/cerrar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: register
+      ESPERAR: "Crea tu cuenta"
+      REINICIAR: "no"
+- assertVisible: "Solo te llevará un minuto."
+- assertVisible: "Nombre completo"
+- assertVisible: "Mínimo 6 caracteres"
+- takeScreenshot: auth-registro
+# Todo vacio: un error por campo.
+- tapOn: "Crear cuenta"
+- assertVisible: "El nombre debe tener al menos 3 caracteres"
+- assertVisible: "Introduce un correo electrónico válido"
+- assertVisible: "La contraseña debe tener al menos 6 caracteres"
+# Con el error de la contraseña puesto, el requisito se calla (dice lo mismo).
+- assertNotVisible: "Mínimo 6 caracteres"
+- takeScreenshot: auth-registro-vacio
+# Valores cortos o mal formados: siguen los mismos errores.
+- tapOn: "Juan Pérez"
+- inputText: "Al"
+- tapOn: "ejemplo@correo.com"
+- inputText: "correo-sin-arroba"
+- tapOn: "Crea una contraseña"
+- inputText: "12345"
+- hideKeyboard
+- tapOn: "Crear cuenta"
+- assertVisible: "El nombre debe tener al menos 3 caracteres"
+- assertVisible: "Introduce un correo electrónico válido"
+- assertVisible: "La contraseña debe tener al menos 6 caracteres"
+- takeScreenshot: auth-registro-errores
