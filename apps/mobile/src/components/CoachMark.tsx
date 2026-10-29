@@ -3,6 +3,7 @@ import { Animated, Easing, Pressable, StyleSheet, View, type ViewStyle } from 'r
 import Feather from '@expo/vector-icons/Feather';
 
 import { Text } from '@/components/Text';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -46,10 +47,21 @@ export function CoachMark({
   const dismissed = useAppStore((state) => state.dismissedGuides.includes(id));
   const dismissGuide = useAppStore((state) => state.dismissGuide);
 
+  const reducirMovimiento = useReduceMotion();
+  const debeLatir = visible && !dismissed && !reducirMovimiento;
+
   // Latido corto hacia el elemento senalado: llama la atencion sin animar
   // nada permanente que distraiga mientras se lee el feed.
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    // Solo late mientras se ve. Una guia cerrada o que no toca no pinta nada,
+    // pero su bucle seguia moviendo el valor y Android repintaba Explorar sin
+    // parar (gasta bateria y Maestro nunca encuentra la pantalla quieta). Con
+    // «reducir movimiento» la burbuja se queda fija en su sitio.
+    if (!debeLatir) {
+      pulse.setValue(0);
+      return undefined;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
@@ -68,7 +80,7 @@ export function CoachMark({
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [pulse, debeLatir]);
 
   if (!visible || dismissed) return null;
 
