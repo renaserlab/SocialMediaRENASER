@@ -154,3 +154,18 @@ jobs:
       # variable de entorno dejaria el job en verde sin ejecutar nada.
       - name: Ninguna prueba de PostgreSQL puede quedar omitida ni faltar
         run: python scripts/exigir_bateria_completa.py migraciones.xml
+      # LA HUELLA DE LO QUE SE PROBO. Solo se llega aqui si la bateria entera
+      # paso y el guardia no encontro nada omitido. El nombre lleva el ARBOL del
+      # commit probado (en un PR, su fusion con la base): el contenido exacto de
+      # todos los ficheros, no el commit. Si al fusionar `main` queda con ese
+      # mismo arbol, la puerta del despliegue sabe que ese codigo ya paso y no
+      # paga otros 43 minutos por repetirlo. Ver desplegar-aws.yml.
+      - name: Anotar el arbol probado
+        run: git rev-parse 'HEAD^{tree}' | tee arbol-probado.txt && echo "ARBOL=$(cat arbol-probado.txt)" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bateria-completa-${{ env.ARBOL }}
+          path: apps/api/arbol-probado.txt
+          retention-days: 14
+          # Al relanzar el trabajo, la huella del intento anterior ya existe.
+          overwrite: true
