@@ -1,0 +1,37 @@
+# Subflujo del modulo: desde cualquier pestaña, abre Crear en modo
+# Publicación y llega al editor de solo texto («Escribir sin foto»).
+#
+# Ese enlace SOLO aparece en la galeria con permiso concedido (ver hallazgos):
+# en la camara no esta. Por eso el camino es camara → galeria → enlace.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    file: ../../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Crear
+- runFlow: permiso-opcional.yaml
+- extendedWaitUntil:
+    visible: "Publicación"
+    timeout: 20000
+# Crear recuerda el ultimo modo: se fuerza Publicación.
+- tapOn: "Publicación"
+- extendedWaitUntil:
+    visible:
+      text: "Publicación"
+      selected: true
+    timeout: 10000
+- runFlow: permiso-opcional.yaml
+- extendedWaitUntil:
+    visible: "Elegir de la galería"
+    timeout: 20000
+- tapOn: "Elegir de la galería"
+- runFlow: permiso-opcional.yaml
+- extendedWaitUntil:
+    visible: "Escribir sin foto"
+    timeout: 20000
+- tapOn: "Escribir sin foto"
+- extendedWaitUntil:
+    visible: "¿Qué quieres compartir?"
+    timeout: 15000

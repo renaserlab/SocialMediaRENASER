@@ -1,0 +1,73 @@
+# En el chat con Beto: el enlace del mensaje se pinta como enlace (subrayado,
+# ver captura) y se anuncia como tal; al subir por el historial aparecen el
+# separador de dia y el boton «Ir al último mensaje», que devuelve al final.
+#
+# Datos: e2e/datos/30-mensajes.sql (21 mensajes, 16 de ayer).
+appId: host.exp.exponent
+name: "Mensajes: enlace en el chat e ir al final"
+tags:
+  - mensajes
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 30000
+- tapOn: "Chat con Beto Prueba\\..*"
+- extendedWaitUntil:
+    visible: "Ver el perfil de Beto Prueba"
+    timeout: 20000
+
+# El chat deberia abrirse por el ultimo mensaje. A veces se abre a mitad del
+# historial y SIN el boton de bajar (hallazgo M12, intermitente): se avisa
+# como advertencia, sin tumbar el resto del flujo.
+- extendedWaitUntil:
+    visible: "¿Llevas las tazas\\?"
+    timeout: 20000
+    optional: true
+    label: "M12: el chat se abre por el ultimo mensaje"
+- scrollUntilVisible:
+    element: "La feria de artesanos: https://example\\.com/feria-e2e"
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element: "¿Llevas las tazas\\?"
+    direction: DOWN
+    timeout: 20000
+# El enlace es su propio trozo pulsable dentro del texto (rol «link»).
+- assertVisible: "https://example\\.com/feria-e2e"
+- takeScreenshot: mensajes-chat-enlace
+
+# Abajo del todo no hay a donde ir: sin boton. (Si hubo que bajar a mano por
+# M12 y la lista quedo casi al final, se termina de bajar con el boton.)
+- runFlow:
+    when:
+      visible: "Ir al último mensaje"
+    commands:
+      - tapOn: "Ir al último mensaje"
+- extendedWaitUntil:
+    notVisible: "Ir al último mensaje"
+    timeout: 10000
+
+# Subir hasta el principio de ayer.
+- scrollUntilVisible:
+    element: "Hola Ana, ¿cómo va el taller\\?"
+    direction: UP
+    timeout: 30000
+    speed: 60
+- extendedWaitUntil:
+    visible: "Ir al último mensaje"
+    timeout: 10000
+- takeScreenshot: mensajes-chat-historial
+
+# Volver al final.
+- tapOn: "Ir al último mensaje"
+- extendedWaitUntil:
+    visible: "Genial, salimos a las 10\\."
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: "Ir al último mensaje"
+    timeout: 10000

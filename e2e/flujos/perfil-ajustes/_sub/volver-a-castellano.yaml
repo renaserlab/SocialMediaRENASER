@@ -1,0 +1,21 @@
+# Deja la app en castellano, sea cual sea el idioma en que este.
+#
+# Se usa en `onFlowComplete` de los flujos que cambian de idioma: si uno se
+# corta en inglés o portugués, el resto de la suite (que busca «Inicio»,
+# «Configuración»...) fallaría entero. Va por la ruta /language, que existe
+# siempre y no depende de saber leer Ajustes en el idioma actual.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    file: ../../_comun/abrir-app.yaml
+    env:
+      RUTA: language
+      ESPERAR: "Castellano"
+      REINICIAR: "no"
+- tapOn: "Castellano"
+- tapOn: "(Continuar|Continue)"
+- extendedWaitUntil:
+    notVisible: "Português"
+    timeout: 15000

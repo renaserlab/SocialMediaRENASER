@@ -1,0 +1,35 @@
+# Acceso con la cuenta buena: se entra y se cae en las pestañas.
+appId: host.exp.exponent
+name: auth/login-correcto
+tags:
+  - auth
+---
+- runFlow: ../_comun/cerrar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: login
+      ESPERAR: "Hola de nuevo"
+      REINICIAR: "no"
+- tapOn: "ejemplo@correo.com"
+- inputText: ${E2E_EMAIL}
+- tapOn: "Tu contraseña"
+- inputText: ${E2E_PASSWORD}
+- hideKeyboard
+- tapOn: "Iniciar sesión"
+# Sin cuestionario pendiente (lo marca 00-base.sql) se va directo al muro.
+- extendedWaitUntil:
+    visible: "Inicio"
+    timeout: 30000
+- assertNotVisible: "Hola de nuevo"
+- assertVisible: "Explorar"
+- assertVisible: "Mensajes"
+- assertVisible: "Perfil"
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 20000
+- assertVisible: "@ana_e2e"

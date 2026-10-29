@@ -1,0 +1,74 @@
+# El chat con Beto: se abre desde la bandeja, enseña la conversacion y deja
+# mandar un mensaje. Con el campo vacio el boton de la derecha es el
+# microfono (notas de voz activas en local); al escribir pasa a «Enviar».
+# La burbuja nueva sale con su hora y el campo se vacia.
+#
+# Datos: e2e/datos/30-mensajes.sql. Lo que se envia aqui lo borra la siguiente
+# siembra.
+appId: host.exp.exponent
+name: "Mensajes: abrir el chat y enviar"
+tags:
+  - mensajes
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 30000
+- tapOn: "Chat con Beto Prueba\\..*"
+
+# Cabecera con la persona y la conversacion sembrada.
+- extendedWaitUntil:
+    visible: "Ver el perfil de Beto Prueba"
+    timeout: 20000
+# Deberia abrirse por el final; si se abre a mitad (M12, intermitente), se baja.
+- extendedWaitUntil:
+    visible: "Genial, salimos a las 10\\."
+    timeout: 20000
+    optional: true
+    label: "M12: el chat se abre por el ultimo mensaje"
+- scrollUntilVisible:
+    element: "Genial, salimos a las 10\\."
+    direction: DOWN
+    timeout: 20000
+- assertVisible: "Lo vi, ¡qué buena! Vamos juntos\\."
+
+# Campo vacio: microfono, no «Enviar».
+- assertVisible: "Mensaje"
+- assertVisible: "Grabar nota de voz"
+- assertNotVisible: "Enviar mensaje"
+- takeScreenshot: mensajes-chat
+
+# Escribir y enviar. El texto lleva un numero para no confundirlo con el de
+# una pasada anterior.
+- evalScript: ${output.enviado = 'Prueba E2E numero ' + (Date.now() % 1000000)}
+- tapOn: "Mensaje"
+- inputText: ${output.enviado}
+- extendedWaitUntil:
+    visible:
+      text: "Enviar mensaje"
+      enabled: true
+    timeout: 5000
+- assertNotVisible: "Grabar nota de voz"
+- tapOn: "Enviar mensaje"
+
+# La burbuja aparece, deja de estar «Enviando…» y el campo vuelve a vacio.
+- extendedWaitUntil:
+    visible: ${output.enviado}
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: "Enviando…"
+    timeout: 15000
+- assertNotVisible: "No se envió"
+# Con su hora debajo (formato del telefono: «12:11 PM» o «12:11»).
+- assertVisible:
+    text: "\\d{1,2}:\\d{2}.*"
+    below: ${output.enviado}
+- extendedWaitUntil:
+    visible: "Grabar nota de voz"
+    timeout: 5000
+- hideKeyboard
+- takeScreenshot: mensajes-chat-enviado

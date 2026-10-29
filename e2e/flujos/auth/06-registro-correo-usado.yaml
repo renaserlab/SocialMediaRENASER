@@ -1,0 +1,40 @@
+# Registro: lo que solo puede decir el servidor.
+#   - Un correo con arroba pero sin dominio («ana@») pasa la validacion del
+#     formulario (solo mira la «@») y lo rechaza Supabase: aviso traducido.
+#   - Un correo que ya tiene cuenta: error en el propio campo del correo.
+appId: host.exp.exponent
+name: auth/registro-correo-usado
+tags:
+  - auth
+---
+- runFlow: ../_comun/cerrar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: register
+      ESPERAR: "Crea tu cuenta"
+      REINICIAR: "no"
+- tapOn: "Juan Pérez"
+- inputText: "Ana Duplicada"
+- tapOn: "ejemplo@correo.com"
+- inputText: "ana@"
+- tapOn: "Crea una contraseña"
+- inputText: ${E2E_PASSWORD}
+- hideKeyboard
+- tapOn: "Crear cuenta"
+- extendedWaitUntil:
+    visible: "Ese correo no parece válido.*"
+    timeout: 20000
+- takeScreenshot: auth-registro-correo-invalido
+- tapOn: "Entendido"
+# Ahora con el correo de Ana, que ya existe.
+- tapOn: "ana@"
+- eraseText: 10
+- inputText: ${E2E_EMAIL}
+- hideKeyboard
+- tapOn: "Crear cuenta"
+- extendedWaitUntil:
+    visible: "Ese correo ya tiene una cuenta"
+    timeout: 20000
+- assertVisible: "Crea tu cuenta"
+- takeScreenshot: auth-registro-correo-usado

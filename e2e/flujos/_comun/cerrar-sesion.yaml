@@ -1,0 +1,39 @@
+# Cierra la sesion desde Ajustes y vuelve a la raiz (muro sin cuenta). Si la
+# raiz pide idioma (nadie lo eligio aun en este dispositivo), elige Castellano.
+# Si no habia sesion, no hace nada (y se queda en Ajustes).
+#
+# Parametros (env, opcionales):
+#   REINICIAR  «no» para no parar Expo Go antes (ver abrir-app.yaml)
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    file: abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: ${REINICIAR}
+# «Tus intereses» solo sale con sesion abierta.
+- runFlow:
+    when:
+      visible: "Tus intereses"
+    commands:
+      # «Cerrar Sesión» esta al final de Ajustes.
+      - scrollUntilVisible:
+          element: "Salir de tu cuenta en este dispositivo"
+          direction: DOWN
+          timeout: 20000
+      - tapOn: "Salir de tu cuenta en este dispositivo"
+      # Dialogo de confirmacion: titulo y boton dicen lo mismo; el boton es el
+      # que queda debajo de la pregunta.
+      - extendedWaitUntil:
+          visible: ".*Seguro que quieres salir de tu cuenta.*"
+          timeout: 10000
+      - tapOn:
+          text: "Cerrar Sesión"
+          below: ".*Seguro que quieres salir de tu cuenta.*"
+      - extendedWaitUntil:
+          visible: "(Inicio|Idioma|Language)"
+          timeout: 30000
+      - runFlow: elegir-idioma.yaml

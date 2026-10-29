@@ -1,0 +1,33 @@
+# «Mis entradas» desde la agenda (acceso de quien tiene sesion).
+#
+# Ana no tiene entradas compradas: la reserva gratuita NO emite entrada. Con
+# FEATURE_EVENT_TICKETING apagada en la API local, la pantalla dice que la
+# venta no esta disponible; encendida, el estado vacio. Se aceptan los dos y se
+# fotografia el que salga. Nunca se pinta un error generico.
+appId: host.exp.exponent
+name: "Eventos: mis entradas"
+tags:
+  - eventos-escuela-crear
+  - eventos
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: events
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Agenda de eventos"
+    timeout: 20000
+- tapOn: "Mis entradas"
+- extendedWaitUntil:
+    visible: "(Todavía no tienes entradas|La venta de entradas aún no está disponible|Próximas)"
+    timeout: 20000
+- assertVisible: "Mis entradas"
+- assertNotVisible: "Ocurrió un error"
+- takeScreenshot: eventos-escuela-crear-mis-entradas
+- back
+- extendedWaitUntil:
+    visible: "Agenda de eventos"
+    timeout: 10000

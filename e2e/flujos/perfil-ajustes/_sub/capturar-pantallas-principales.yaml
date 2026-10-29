@@ -1,0 +1,70 @@
+# Captura Perfil, Explorar, Mensajes, Inicio y Ajustes con el tema actual.
+#
+# Parámetros (env):
+#   TEMA   claro | oscuro  (solo para el nombre de las capturas)
+#
+# Las capturas se llaman `perfil-ajustes-tema-<pantalla>-<TEMA>`.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    file: ../../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: "MI PERFIL"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-tema-perfil-${TEMA}
+
+- runFlow:
+    file: ../../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-tema-explorar-${TEMA}
+
+- runFlow:
+    file: ../../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+- extendedWaitUntil:
+    visible: "Beto Prueba|Mensajes"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-tema-mensajes-${TEMA}
+
+- runFlow:
+    file: ../../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Inicio
+- extendedWaitUntil:
+    visible: "Para ti"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-tema-inicio-${TEMA}
+
+- runFlow:
+    file: ../../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-tema-ajustes-${TEMA}
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Explorar"
+    timeout: 15000

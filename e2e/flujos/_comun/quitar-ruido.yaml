@@ -1,0 +1,66 @@
+# Retira lo que Expo Go y el sistema ponen encima de la app y que no es de Z:
+#   - avisos de LogBox (p. ej. «expo-notifications: Android Push notifications
+#     ...», el rojo de abajo): se abre el aviso y se pulsa «Dismiss»;
+#   - el dialogo «System UI isn't responding» / «... isn't responding» (ANR)
+#     del emulador lento: «Wait»;
+#   - la presentacion del menu de desarrollo de Expo Go («This is the developer
+#     menu...», puede salir tras borrar sus datos): «Continue». OJO: se mira el
+#     texto de la presentacion y no solo «Continue», que es tambien el boton de
+#     la pantalla de idioma en ingles.
+#
+# Se puede llamar cuantas veces haga falta: si no hay ruido no hace nada.
+#
+# RENDIMIENTO: cada condicion `when` que NO se cumple espera hasta 7 s (el
+# «optional lookup» de Maestro, contado desde la ultima interaccion). Por eso
+# hay UNA sola comprobacion por fuera y las concretas solo si hay algo.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    when:
+      visible: "(expo-notifications.*|.*isn't responding|.*developer menu.*)"
+    commands:
+      # Primero el aviso de LogBox, que es lo habitual (sale en cada arranque):
+      # la espera de 7 s que cuesta comprobar que ya no esta deja las dos
+      # comprobaciones siguientes sin coste.
+      # Tocar el aviso abre el inspector de LogBox, con «Dismiss» abajo.
+      # Si el toque cae mientras el JS esta ocupado (recien cargado) el
+      # inspector no se abre: se reintenta el toque y el bucle vuelve a probar.
+      - repeat:
+          times: 3
+          while:
+            visible: "expo-notifications.*"
+          commands:
+            - tapOn:
+                text: "expo-notifications.*"
+                retryTapIfNoChange: true
+            - runFlow:
+                when:
+                  visible: "Dismiss"
+                commands:
+                  - tapOn: "Dismiss"
+      - runFlow:
+          when:
+            visible: ".*isn't responding"
+          commands:
+            - tapOn: "Wait"
+            # Con el dialogo delante no se veia el aviso de LogBox.
+            - repeat:
+                times: 3
+                while:
+                  visible: "expo-notifications.*"
+                commands:
+                  - tapOn:
+                      text: "expo-notifications.*"
+                      retryTapIfNoChange: true
+                  - runFlow:
+                      when:
+                        visible: "Dismiss"
+                      commands:
+                        - tapOn: "Dismiss"
+      - runFlow:
+          when:
+            visible: ".*developer menu.*"
+          commands:
+            - tapOn: "Continue"

@@ -1,0 +1,24 @@
+# Deja la app en tema claro (el de partida de toda la suite).
+#
+# Se usa en `onFlowComplete` del flujo de temas: si se corta en oscuro, las
+# capturas de los demás módulos saldrían todas distintas de su referencia.
+# Lee Ajustes en cualquiera de los tres idiomas por si coincide con un corte
+# del flujo de idioma.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    file: ../../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "(Configuración|Settings|Configurações)"
+      REINICIAR: "no"
+- runFlow:
+    when:
+      visible: "(Actualmente|Currently|Atualmente): (Oscuro|Dark|Escuro)"
+    commands:
+      - tapOn: "(Modo Oscuro|Dark Mode|Modo Escuro)"
+- extendedWaitUntil:
+    visible: "(Actualmente|Currently|Atualmente): (Claro|Light)"
+    timeout: 10000

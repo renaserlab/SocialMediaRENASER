@@ -1,0 +1,143 @@
+# PENDIENTE (28-10-2026): no ha pasado entero en el emulador; fuera de la suite por defecto (etiqueta `pendiente`). Ver hallazgos/RESUMEN.md.
+# Reglas del formulario de perfil: nombre vacío, corto o solo espacios, y
+# usuario inválido. Nada de esto se guarda: al cerrar la bandeja el perfil
+# sigue igual, y al reabrirla vuelve a lo guardado.
+#
+# Lo que NO se prueba aquí: el límite de 600 caracteres de la descripción (y
+# 120 del nombre). Escribir 600 caracteres en este emulador pasa de los 120 s
+# que aguanta el servidor de Maestro por orden. Se comprobó contra la API (ver
+# hallazgos/perfil-ajustes.md, PA-01): el servidor responde 422 y el formulario
+# no tiene límite ni contador.
+#
+# Detalles del emulador: escribir en la bandeja va a ≈10 s por carácter, así
+# que se teclea lo mínimo (8 caracteres en total); se borra con
+# _sub/borrar.yaml (no `eraseText`), y antes de tocar un campo se sube la
+# bandeja (_sub/subir-a-los-campos.yaml). Solo se tocan campos de una línea:
+# su centro queda a la derecha del texto y el cursor, al final.
+#
+# Datos: 00-base.sql / 40-perfil.sql. `onFlowComplete` repone el perfil (por la
+# API) por si alguna regla dejara de cumplirse y se guardara algo.
+appId: host.exp.exponent
+name: "Perfil: validaciones al editar (nombre y usuario)"
+tags:
+  - perfil-ajustes
+  - perfil
+  - pendiente
+onFlowComplete:
+  - runFlow:
+      when:
+        true: ${output.perfilIntacto != true}
+      commands:
+        - runScript:
+            file: _sub/api.js
+            env:
+              ACCION: restaurar-ana
+              EMAIL: ${E2E_EMAIL}
+              PASSWORD: ${E2E_PASSWORD}
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 20000
+- tapOn: "Editar perfil"
+- extendedWaitUntil:
+    visible: "Nombre completo"
+    timeout: 10000
+
+# ---- Nombre vacío ----------------------------------------------------------
+- tapOn:
+    text: "Nombre completo"
+    index: 1
+- runFlow:
+    file: _sub/borrar.yaml
+    env:
+      TECLAS: 12
+- runFlow: _sub/guardar-bandeja.yaml
+- extendedWaitUntil:
+    visible: "El nombre debe tener al menos 3 caracteres"
+    timeout: 5000
+- takeScreenshot: perfil-ajustes-validacion-nombre-vacio
+
+# ---- Nombre de 2 letras: el aviso se va al escribir y vuelve al guardar ----
+- runFlow: _sub/subir-a-los-campos.yaml
+- tapOn:
+    text: "Nombre completo"
+    index: 1
+- inputText: "Al"
+- extendedWaitUntil:
+    notVisible: "El nombre debe tener al menos 3 caracteres"
+    timeout: 5000
+- runFlow: _sub/guardar-bandeja.yaml
+- extendedWaitUntil:
+    visible: "El nombre debe tener al menos 3 caracteres"
+    timeout: 5000
+
+# ---- Solo espacios cuenta como vacío ---------------------------------------
+- runFlow: _sub/subir-a-los-campos.yaml
+- tapOn:
+    text: "Nombre completo"
+    index: 1
+- runFlow:
+    file: _sub/borrar.yaml
+    env:
+      TECLAS: 3
+- inputText: "   "
+- runFlow: _sub/guardar-bandeja.yaml
+- extendedWaitUntil:
+    visible: "El nombre debe tener al menos 3 caracteres"
+    timeout: 5000
+
+# ---- Usuario inválido (con espacio): los dos avisos a la vez ----------------
+- runFlow: _sub/subir-a-los-campos.yaml
+- tapOn:
+    text: "Nombre de usuario"
+    index: 1
+- runFlow:
+    file: _sub/borrar.yaml
+    env:
+      TECLAS: 9
+- inputText: "a b"
+- runFlow: _sub/guardar-bandeja.yaml
+- extendedWaitUntil:
+    visible: "Usuario inválido.*"
+    timeout: 5000
+- assertVisible: "El nombre debe tener al menos 3 caracteres"
+- takeScreenshot: perfil-ajustes-validacion-usuario
+
+# ---- Cerrar sin guardar: el perfil no cambia --------------------------------
+- back
+- runFlow:
+    when:
+      visible: "Elegir de la galería"
+    commands:
+      # El primer «Atrás» puede solo cerrar el teclado.
+      - back
+- extendedWaitUntil:
+    notVisible: "Elegir de la galería"
+    timeout: 10000
+- assertVisible: "Ana Prueba"
+- assertVisible: "@?ana_e2e"
+
+# Al reabrir, la bandeja vuelve a lo guardado (no a lo que se dejó escrito).
+- tapOn: "Editar perfil"
+- extendedWaitUntil:
+    visible: "Nombre completo"
+    timeout: 10000
+- assertVisible:
+    text: "Ana Prueba"
+    below: "Nombre completo"
+- assertVisible:
+    text: "ana_e2e"
+    below: "Nombre de usuario"
+- assertNotVisible: "Usuario inválido.*"
+- assertNotVisible: "El nombre debe tener al menos 3 caracteres"
+- back
+- extendedWaitUntil:
+    notVisible: "Elegir de la galería"
+    timeout: 10000
+- evalScript: ${output.perfilIntacto = true}

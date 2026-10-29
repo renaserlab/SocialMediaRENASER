@@ -1,0 +1,83 @@
+# BLOQUEADO EN EXPO GO (28-10-2026): la galeria pide el permiso de AUDIO, que Expo Go no declara, y se queda cargando (hallazgo C5). Fuera de la suite por defecto (etiqueta `bloqueado-expo-go`).
+# Pestaña Crear: los cuatro modos, el aviso de «Vivo» en Expo Go y la
+# validacion del editor de texto vacio. No publica nada.
+#
+# Expo Go no da acceso fiable a la galeria: nunca se elige una foto. Solo se
+# llega al selector y al editor sin foto.
+appId: host.exp.exponent
+name: "Crear: modos y validación de contenido vacío"
+tags:
+  - eventos-escuela-crear
+  - crear
+  - bloqueado-expo-go
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Crear
+- runFlow: _sub/permiso-opcional.yaml
+
+# Los cuatro modos del selector (role=tab con estado seleccionado).
+- extendedWaitUntil:
+    visible: "Publicación"
+    timeout: 20000
+- assertVisible: "Historia"
+- assertVisible: "Reel"
+- assertVisible: "Vivo"
+- tapOn: "Publicación"
+- extendedWaitUntil:
+    visible:
+      text: "Publicación"
+      selected: true
+    timeout: 10000
+- runFlow: _sub/permiso-opcional.yaml
+- takeScreenshot: eventos-escuela-crear-crear-publicacion
+
+# Vivo: en Expo Go no hay SDK de directo; ofrece grabar un reel.
+- tapOn: "Vivo"
+- extendedWaitUntil:
+    visible: "Transmitir en vivo todavía no está disponible"
+    timeout: 10000
+- assertVisible: "Grabar un reel"
+- takeScreenshot: eventos-escuela-crear-crear-vivo
+- tapOn: "Grabar un reel"
+- runFlow: _sub/permiso-opcional.yaml
+- extendedWaitUntil:
+    visible:
+      text: "Reel"
+      selected: true
+    timeout: 10000
+
+# Editor de solo texto: vacio no se puede publicar.
+- runFlow: _sub/ir-al-editor-de-texto.yaml
+- assertVisible: "Escribe algo para poder publicar."
+- assertVisible: "0/700"
+- assertVisible:
+    text: "Publicar"
+    enabled: false
+- takeScreenshot: eventos-escuela-crear-crear-editor-vacio
+# Solo espacios sigue sin valer.
+- tapOn: "Descripción de la publicación"
+- inputText: "    "
+- assertVisible: "Escribe algo para poder publicar."
+- assertVisible:
+    text: "Publicar"
+    enabled: false
+# Con texto se habilita (y no se publica).
+- inputText: "hola"
+- extendedWaitUntil:
+    visible:
+      text: "Publicar"
+      enabled: true
+    timeout: 5000
+- assertNotVisible: "Escribe algo para poder publicar."
+- hideKeyboard
+
+# Salir sin publicar: Volver (a la camara) y Cerrar (a Inicio).
+- tapOn: "Volver"
+- runFlow: _sub/permiso-opcional.yaml
+- tapOn: "Cerrar"
+- extendedWaitUntil:
+    visible: "Inicio"
+    timeout: 15000

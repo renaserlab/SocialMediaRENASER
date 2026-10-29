@@ -1,0 +1,66 @@
+# Ficha de un evento gratuito y su reserva.
+#
+# Empieza en la agenda, entra por el boton rosa del destacado, comprueba la
+# ficha, reserva el cupo y verifica que el SERVIDOR lo cuenta (aforo) y que la
+# agenda lo refleja («Reserva confirmada»).
+#
+# NO cancela: hoy la ficha no reconoce la reserva propia y no ofrece «Cancelar
+# mi reserva» (hallazgo E0, reproducido en bug-eventos-reservas.yaml). La
+# reserva se repone al resembrar (correr.sh siembra por omision). Repetible sin
+# resembrar: reservar dos veces no consume otro cupo.
+appId: host.exp.exponent
+name: "Eventos: ficha y reserva gratuita"
+tags:
+  - eventos-escuela-crear
+  - eventos
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: events
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Taller E2E de respiración consciente"
+    timeout: 20000
+
+- tapOn: "(Ver detalles y reservar|Reserva confirmada)"
+- extendedWaitUntil:
+    visible: "Seleccionado por Z"
+    timeout: 20000
+
+# La ficha: sello, titulo, fecha, modalidad, lugar, aforo y organizador.
+- assertVisible: "Evento"
+- assertVisible: "Taller E2E de respiración consciente"
+- assertVisible: ".*18:00 – 20:00"
+- assertVisible: "Presencial"
+- assertVisible: "Casa Renaser, Miraflores"
+- assertVisible: "[01] de 30 cupos"
+- assertVisible: "Organiza"
+- assertVisible: "Beto Prueba"
+- assertVisible: "Ver todas las reseñas"
+- takeScreenshot: eventos-escuela-crear-ficha-gratis
+
+- scrollUntilVisible:
+    element: "Reservar mi cupo"
+    direction: DOWN
+    timeout: 10000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn: "Reservar mi cupo"
+# Lo cuenta el servidor: el aforo se vuelve a pedir tras reservar.
+- extendedWaitUntil:
+    visible: "1 de 30 cupos"
+    timeout: 15000
+
+# De vuelta en la agenda el destacado ya dice que hay reserva.
+- back
+- extendedWaitUntil:
+    visible: "Reserva confirmada"
+    timeout: 15000
+# El aviso «Cupo reservado» tapa la cabecera unos segundos: fuera de la captura.
+- extendedWaitUntil:
+    notVisible: "Cupo reservado"
+    timeout: 8000
+- takeScreenshot: eventos-escuela-crear-agenda-reservado

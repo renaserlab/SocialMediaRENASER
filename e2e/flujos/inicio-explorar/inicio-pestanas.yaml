@@ -1,0 +1,119 @@
+# Inicio: las tres vistas del feed vertical (Para ti, Siguiendo, Live).
+#
+# Sin videos sembrados (la siembra E2E no sube ninguno), «Para ti» enseña su
+# estado vacio con «Publicar el primero», que lleva a Crear. Si alguna vez hay
+# videos, el flujo comprueba el reel en lugar del vacio (rama `when`).
+#
+# Datos: 00-base.sql (Ana y Beto se siguen; ninguno tiene videos).
+appId: host.exp.exponent
+name: "Inicio: Para ti, Siguiendo y Live"
+tags:
+  - inicio-explorar
+  - inicio
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Inicio
+
+# Cabecera: las tres pestanas (role=tab) y el «+» de crear.
+- extendedWaitUntil:
+    visible:
+      text: "Para ti"
+      selected: true
+    timeout: 20000
+- assertVisible: "Siguiendo"
+- assertVisible: "Live"
+- assertVisible: "Crear contenido"
+
+# ---- PARA TI ---------------------------------------------------------------
+- extendedWaitUntil:
+    visible: "Todavía no hay videos|Me gusta"
+    timeout: 20000
+- runFlow:
+    when:
+      visible: "Todavía no hay videos"
+    commands:
+      - assertVisible: "Cuando alguien publique un video, aparecerá aquí."
+      - assertVisible: "Publicar el primero"
+      - takeScreenshot: inicio-explorar-inicio-para-ti-vacio
+      # «Publicar el primero» lleva a Crear (con su selector de modos).
+      - tapOn: "Publicar el primero"
+      # Expo Go pide aqui el permiso de camara (sistema o su propio aviso).
+      - runFlow: ../eventos-escuela-crear/_sub/permiso-opcional.yaml
+      - extendedWaitUntil:
+          visible: "Publicación"
+          timeout: 10000
+      - assertVisible: "Reel"
+      # Sin captura: lo que pinta Crear depende de si Expo Go tiene ya el
+      # permiso de camara (vista de camara, o «Sin la cámara no se puede
+      # grabar»), y eso cambia de una ejecucion a otra.
+      - runFlow:
+          file: ../_comun/ir-a-pestana.yaml
+          env:
+            PESTANA: Inicio
+      - extendedWaitUntil:
+          visible:
+            text: "Para ti"
+            selected: true
+          timeout: 10000
+- runFlow:
+    when:
+      notVisible: "Todavía no hay videos"
+    commands:
+      # Hay videos: el reel enseña sus acciones laterales.
+      - assertVisible: "Me gusta"
+      - takeScreenshot: inicio-explorar-inicio-para-ti-reel
+
+# ---- SIGUIENDO ---------------------------------------------------------------
+- tapOn: "Siguiendo"
+- extendedWaitUntil:
+    visible:
+      text: "Siguiendo"
+      selected: true
+    timeout: 10000
+# Ana sigue a Beto y Beto no tiene videos: «Nada nuevo por ahora».
+- extendedWaitUntil:
+    visible: "Nada nuevo por ahora|Sigue personas para ver su contenido|Me gusta"
+    timeout: 20000
+- runFlow:
+    when:
+      visible: "Nada nuevo por ahora"
+    commands:
+      - assertVisible: "Las personas que sigues no han publicado videos recientes."
+      - assertVisible: "Descubrir personas"
+- takeScreenshot: inicio-explorar-inicio-siguiendo
+
+# ---- LIVE ----------------------------------------------------------------------
+- tapOn: "Live"
+- extendedWaitUntil:
+    visible:
+      text: "Live"
+      selected: true
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "Todavía no hay transmisiones|No pudimos comprobarlo|EN VIVO"
+    timeout: 20000
+- assertNotVisible: "No pudimos comprobarlo"
+- takeScreenshot: inicio-explorar-inicio-live
+- runFlow:
+    when:
+      visible: "Descubrir contenido"
+    commands:
+      # Sin directos, la salida lleva a Explorar.
+      - tapOn: "Descubrir contenido"
+      - extendedWaitUntil:
+          visible: "EXPLORAR"
+          timeout: 10000
+
+# Vuelta a «Para ti» para dejar Inicio como estaba.
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Inicio
+- tapOn: "Para ti"
+- assertVisible:
+    text: "Para ti"
+    selected: true

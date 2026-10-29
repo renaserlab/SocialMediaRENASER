@@ -1,0 +1,59 @@
+# BLOQUEADO EN EXPO GO (28-10-2026): la galeria pide el permiso de AUDIO, que Expo Go no declara, y se queda cargando (hallazgo C5). Fuera de la suite por defecto (etiqueta `bloqueado-expo-go`).
+# Publicar una publicacion de solo texto, encontrarla y borrarla.
+#
+# Una publicacion de texto NO sale en Inicio (muro de video) ni en la cuadricula
+# del perfil (solo fotos/videos): el unico sitio donde se ve es el muro de
+# Explorar. Ahi se busca por una marca unica y se elimina desde «Más opciones».
+# Si el flujo se corta a medias, 00-base.sql borra lo que dejo al resembrar.
+appId: host.exp.exponent
+name: "Crear: publicar texto, verlo en Explorar y eliminarlo"
+tags:
+  - eventos-escuela-crear
+  - crear
+  - bloqueado-expo-go
+---
+- evalScript: ${output.marca = 'E2E-' + Date.now().toString().slice(-7)}
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow: _sub/ir-al-editor-de-texto.yaml
+
+- tapOn: "Descripción de la publicación"
+- inputText: "Publicacion de texto ${output.marca} creada por Maestro"
+- hideKeyboard
+- assertVisible:
+    text: "Publicar"
+    enabled: true
+- takeScreenshot: eventos-escuela-crear-crear-editor-lleno
+- tapOn: "Publicar"
+
+# Tras publicar vuelve a Inicio con el aviso «Publicado».
+- extendedWaitUntil:
+    visible: "Inicio"
+    timeout: 30000
+
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+- scrollUntilVisible:
+    element: ".*${output.marca}.*"
+    direction: DOWN
+    timeout: 30000
+    visibilityPercentage: 100
+    centerElement: true
+- takeScreenshot: eventos-escuela-crear-crear-en-explorar
+
+# Borrarla: menu de la tarjeta → Eliminar publicación → confirmar.
+- tapOn:
+    text: "Más opciones"
+    above: ".*${output.marca}.*"
+- extendedWaitUntil:
+    visible: "Eliminar publicación"
+    timeout: 10000
+- tapOn: "Eliminar publicación"
+- extendedWaitUntil:
+    visible: "Esta acción no se puede deshacer."
+    timeout: 10000
+- tapOn: "Eliminar"
+- extendedWaitUntil:
+    notVisible: ".*${output.marca}.*"
+    timeout: 15000

@@ -1,0 +1,106 @@
+# Explorar: el muro de publicaciones (Para ti y Siguiendo) y el buscador global
+# (etiquetas, publicaciones, sin resultados y borrar).
+#
+# Datos: 20-inicio-explorar.sql (P1 «Lijado fino...», P2 con #TallerE2E).
+appId: host.exp.exponent
+name: "Explorar: muro y busqueda"
+tags:
+  - inicio-explorar
+  - explorar
+  - busqueda
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 20000
+
+# ---- MURO: Para ti -----------------------------------------------------------
+# P1 es la publicacion mas reciente de la siembra: tiene que salir en el muro.
+- scrollUntilVisible:
+    element: "Lijado fino antes del barniz: grano 320 y sin prisa."
+    direction: DOWN
+    timeout: 60000
+    centerElement: true
+- assertVisible: "Ver perfil de Beto Prueba"
+# La fila de acciones con nombre debajo de cada icono.
+- assertVisible: "Comentar"
+- assertVisible: "Repostear"
+- assertVisible: "Compartir"
+- takeScreenshot: inicio-explorar-muro-para-ti
+
+# P2: la etiqueta y la persona etiquetada se pintan como enlaces.
+- scrollUntilVisible:
+    element: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
+    direction: DOWN
+    timeout: 60000
+    centerElement: true
+- assertVisible: "Con @beto_e2e"
+
+# ---- MURO: Siguiendo -----------------------------------------------------------
+# Ana sigue a Beto: en Siguiendo salen las de Beto y no las de quien no sigue.
+- scrollUntilVisible:
+    element: "Crear nueva publicación"
+    direction: UP
+    timeout: 60000
+- tapOn:
+    text: "Siguiendo"
+    index: 0
+- scrollUntilVisible:
+    element: "Lijado fino antes del barniz: grano 320 y sin prisa."
+    direction: DOWN
+    timeout: 60000
+- takeScreenshot: inicio-explorar-muro-siguiendo
+- scrollUntilVisible:
+    element: "Crear nueva publicación"
+    direction: UP
+    timeout: 60000
+- tapOn:
+    text: "Para ti"
+    index: 0
+
+# ---- BUSQUEDA --------------------------------------------------------------------
+- tapOn: "Personas, publicaciones, cursos o eventos..."
+- inputText: "TallerE2E"
+- extendedWaitUntil:
+    visible: "#TallerE2E"
+    timeout: 15000
+- assertVisible: "Etiquetas"
+- assertVisible: "1 publicación"
+- assertVisible: "Publicaciones"
+- assertVisible: "Ver publicación de Ana Prueba"
+- hideKeyboard
+- takeScreenshot: inicio-explorar-busqueda-resultados
+
+# La etiqueta del resultado abre su pantalla.
+- tapOn: "#TallerE2E"
+- extendedWaitUntil:
+    visible: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
+    timeout: 15000
+- assertVisible: "1 publicación"
+- back
+- extendedWaitUntil:
+    visible: "Ver publicación de Ana Prueba"
+    timeout: 10000
+
+# Sin resultados: lo dice con el termino buscado.
+- tapOn: "Borrar la búsqueda"
+- tapOn: "Personas, publicaciones, cursos o eventos..."
+- inputText: "qzxwvkj"
+- extendedWaitUntil:
+    visible: "Sin resultados"
+    timeout: 15000
+- assertVisible: "No encontramos nada para «qzxwvkj»."
+- hideKeyboard
+- takeScreenshot: inicio-explorar-busqueda-vacia
+
+# Borrar devuelve el muro.
+- tapOn: "Borrar la búsqueda"
+- extendedWaitUntil:
+    visible: "Crear nueva publicación"
+    timeout: 10000
+- assertNotVisible: "Sin resultados"

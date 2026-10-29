@@ -1,0 +1,64 @@
+# Escuela: la evaluacion del curso (2 preguntas, se aprueba con 70 %).
+# Responde bien las dos y comprueba «Aprobado». Cada pasada deja un intento
+# mas; el resembrado los borra.
+appId: host.exp.exponent
+name: "Escuela: evaluación del curso"
+tags:
+  - eventos-escuela-crear
+  - escuela
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: evaluacion/e2e0c0c0-0000-4000-8000-0000000000c1
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Empezar evaluación"
+    timeout: 30000
+- assertVisible: "Evaluación"
+- assertVisible: "Evaluación E2E: respiración"
+- assertVisible: "Se aprueba con 70%."
+- takeScreenshot: eventos-escuela-crear-evaluacion-intro
+- tapOn: "Empezar evaluación"
+
+- extendedWaitUntil:
+    visible: "Pregunta 1 de 2"
+    timeout: 15000
+- assertVisible: "¿Por dónde conviene inhalar en la práctica básica\\?"
+- tapOn: "Por la nariz"
+- assertVisible:
+    text: "Por la nariz"
+    checked: true
+- takeScreenshot: eventos-escuela-crear-evaluacion-pregunta
+- tapOn: "Siguiente"
+- extendedWaitUntil:
+    visible: "Pregunta 2 de 2"
+    timeout: 10000
+# Sin responder la ultima no se puede enviar.
+- assertVisible: "Te faltan 1 por responder."
+- assertVisible:
+    text: "Enviar evaluación"
+    enabled: false
+- tapOn: "7 segundos"
+- tapOn: "Enviar evaluación"
+
+- extendedWaitUntil:
+    visible: "¿Enviar la evaluación\\?"
+    timeout: 10000
+- assertVisible: "No podrás cambiar tus respuestas después de enviarla."
+- tapOn:
+    text: "Enviar evaluación"
+    below: "No podrás cambiar tus respuestas después de enviarla."
+- extendedWaitUntil:
+    visible: "Tu nota"
+    timeout: 20000
+- assertVisible: "100%"
+- assertVisible: "Aprobado"
+- assertNotVisible: "Volver a intentarlo"
+- takeScreenshot: eventos-escuela-crear-evaluacion-resultado
+- tapOn: "Volver al curso"
+- extendedWaitUntil:
+    visible: "Programa"
+    timeout: 15000

@@ -1,0 +1,50 @@
+# REPRODUCCION DE UN FALLO CONOCIDO (hallazgo M11 de hallazgos/mensajes.md).
+# Comprueba el comportamiento ACTUAL, que es el incorrecto: cuando se arregle,
+# este flujo fallara en el paso marcado con «ARREGLO:» y hay que invertir esa
+# comprobacion (esperar «Nada por aquí» y que no quede «Cargando…»).
+#
+#  M11  Buscar en la bandeja algo que no esta se queda en «Cargando…» para
+#       siempre. Cada termino lanza la busqueda (offset=0) y, al quedarse la
+#       lista vacia, FlashList pide «la pagina siguiente» (`cargarMas`, con el
+#       offset de la lista ANTERIOR). Esa segunda peticion sube el sello y la
+#       respuesta de la busqueda se descarta por vieja: `servido` no llega
+#       nunca a lo tecleado.
+#
+# Datos: e2e/datos/30-mensajes.sql (ninguna conversacion contiene «zqx»).
+appId: host.exp.exponent
+name: "Mensajes (fallo conocido): buscar sin resultados se queda cargando"
+tags:
+  - mensajes
+  - bug-conocido
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 30000
+
+- tapOn: "Buscar por nombre o usuario"
+- inputText: "zqx"
+- hideKeyboard
+
+# Lo correcto seria el vacio de busqueda en un par de segundos (la API
+# responde en milisegundos). Se le dan 15 s.
+- extendedWaitUntil:
+    visible: "Nada por aquí"
+    timeout: 15000
+    optional: true
+# ARREGLO: cuando M11 este corregido esto falla; cambiar por
+#   - assertVisible: "Nada por aquí"
+#   - assertNotVisible: "Cargando…"
+- assertVisible: "Cargando…"
+- assertNotVisible: "Nada por aquí"
+- takeScreenshot: mensajes-bug-busqueda-sin-resultados
+
+# La «x» devuelve la bandeja (no se queda atascada).
+- tapOn: "Borrar la búsqueda"
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 15000

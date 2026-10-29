@@ -1,0 +1,42 @@
+# Acceso: validacion de campos vacios y contraseña equivocada.
+appId: host.exp.exponent
+name: auth/login-errores
+tags:
+  - auth
+---
+- runFlow: ../_comun/cerrar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: login
+      ESPERAR: "Hola de nuevo"
+      REINICIAR: "no"
+- assertVisible: "Inicia sesión para continuar."
+- assertVisible: "Correo electrónico"
+- assertVisible: "Contraseña"
+- assertVisible: "¿Olvidaste tu contraseña\\?"
+- assertVisible: "¿No tienes cuenta\\?"
+- takeScreenshot: auth-login
+# Vacio: los dos errores en su campo, sin llamar al servidor.
+- tapOn: "Iniciar sesión"
+- assertVisible: "Introduce un correo electrónico válido"
+- assertVisible: "La contraseña debe tener al menos 6 caracteres"
+- takeScreenshot: auth-login-vacio
+# Contraseña equivocada: error junto al campo, en castellano y sin decir cual falla.
+- tapOn: "ejemplo@correo.com"
+- inputText: ${E2E_EMAIL}
+- tapOn: "Tu contraseña"
+- inputText: "Incorrecta-999"
+- hideKeyboard
+- assertNotVisible: "Introduce un correo electrónico válido"
+- tapOn: "Iniciar sesión"
+- extendedWaitUntil:
+    visible: "Correo o contraseña incorrectos."
+    timeout: 20000
+- assertVisible: "Hola de nuevo"
+- takeScreenshot: auth-login-error
+# Al corregir la contraseña el error se va. (El campo de contraseña no expone
+# su texto: se toca por el texto de ayuda, que sigue en el nodo.)
+- tapOn: "Tu contraseña"
+- inputText: "x"
+- assertNotVisible: "Correo o contraseña incorrectos."

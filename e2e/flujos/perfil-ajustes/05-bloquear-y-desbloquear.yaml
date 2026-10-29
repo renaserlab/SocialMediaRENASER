@@ -1,0 +1,111 @@
+# Bloquear desde el perfil ajeno, verlo en Ajustes › Cuentas bloqueadas y
+# desbloquear desde ahí.
+#
+# Datos: 40-perfil.sql (Delia Prueba, sin bloqueos con Ana). Al final queda
+# desbloqueada; si se corta a medias, `onFlowComplete` la desbloquea por la API.
+appId: host.exp.exponent
+name: "Perfil ajeno: bloquear y desbloquear desde Ajustes"
+tags:
+  - perfil-ajustes
+  - ajustes
+env:
+  DELIA: e2e0d0d0-0000-4000-8000-000000000040
+onFlowComplete:
+  # Si se cortó con Delia bloqueada, se desbloquea.
+  # Por la API y no por la pantalla: funciona aunque la app se haya quedado
+  # sin sesión o con una bandeja abierta (ver _sub/api.js).
+  - runFlow:
+      when:
+        true: ${output.desbloqueada != true}
+      commands:
+        - runScript:
+            file: _sub/api.js
+            env:
+              ACCION: desbloquear-delia
+              EMAIL: ${E2E_EMAIL}
+              PASSWORD: ${E2E_PASSWORD}
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+      REINICIAR: "no"
+# Si un corte anterior la dejó bloqueada, se parte de desbloqueada.
+- runFlow:
+    when:
+      visible: "Desbloquear"
+    commands:
+      - tapOn: "Desbloquear"
+      - extendedWaitUntil:
+          visible: "Seguir"
+          timeout: 10000
+
+# ---- Bloquear (pide confirmación) ------------------------------------------
+- tapOn: "Bloquear a esta persona"
+- extendedWaitUntil:
+    visible: "Bloquear a Delia Prueba"
+    timeout: 10000
+- takeScreenshot: perfil-ajustes-bloquear-confirmacion
+# Cancelar no cambia nada.
+- tapOn: "Cancelar"
+- extendedWaitUntil:
+    notVisible: "Bloquear a Delia Prueba"
+    timeout: 10000
+- assertVisible: "Seguir"
+- tapOn: "Bloquear a esta persona"
+- extendedWaitUntil:
+    visible: "Bloquear a Delia Prueba"
+    timeout: 10000
+- tapOn: "Bloquear"
+- extendedWaitUntil:
+    visible: "Bloqueaste a esta persona"
+    timeout: 15000
+# Ficha mínima: se puede deshacer, pero no seguir ni escribir ni ver contenido.
+- assertVisible: "Desbloquear"
+- assertNotVisible: "Seguir"
+- assertNotVisible: "Mensaje"
+- assertNotVisible: "Perfil de pruebas E2E para seguir y bloquear"
+- takeScreenshot: perfil-ajustes-perfil-bloqueado
+
+# ---- Ajustes › Cuentas bloqueadas ------------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- tapOn: "Cuentas bloqueadas"
+- extendedWaitUntil:
+    visible: "Delia Prueba"
+    timeout: 15000
+- assertVisible: "@?delia_e2e"
+- takeScreenshot: perfil-ajustes-cuentas-bloqueadas
+- tapOn: "Desbloquear a Delia Prueba"
+- extendedWaitUntil:
+    visible: "Volverás a ver sus publicaciones.*"
+    timeout: 10000
+# El botón del diálogo, no el de la fila (los dos dicen «Desbloquear»).
+- tapOn:
+    text: "Desbloquear"
+    below: "Volverás a ver sus publicaciones.*"
+- extendedWaitUntil:
+    notVisible: "Delia Prueba"
+    timeout: 15000
+- evalScript: ${output.desbloqueada = true}
+
+# El perfil vuelve a ser normal (el bloqueo deshizo cualquier seguimiento).
+# Con la app RECARGADA: sin recargar, el perfil sigue saliendo bloqueado
+# durante 2 minutos (fallo PA-06, reproducido en bug-desbloquear-no-refresca-perfil.yaml).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${DELIA}
+      ESPERAR: "Delia Prueba"
+- extendedWaitUntil:
+    visible: "Seguir"
+    timeout: 15000
+- assertVisible: "Perfil de pruebas E2E para seguir y bloquear"
+- assertNotVisible: "Bloqueaste a esta persona"

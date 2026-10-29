@@ -1,0 +1,141 @@
+# Agenda de eventos: llegar desde Explorar, los tres bloques (proximos, sin
+# fecha, anteriores), el boton rosa del destacado y el filtro por modalidad.
+#
+# Datos: e2e/datos/50-eventos-escuela.sql (eventos e1..e4 de Beto).
+appId: host.exp.exponent
+name: "Eventos: agenda, bloques y modalidades"
+tags:
+  - eventos-escuela-crear
+  - eventos
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+
+# El acceso de la vertical (accessibilityLabel = «Eventos»).
+- extendedWaitUntil:
+    visible:
+      text: "Eventos"
+      enabled: true
+    timeout: 20000
+- tapOn:
+    text: "Eventos"
+    index: 0
+- extendedWaitUntil:
+    visible: "Agenda de eventos"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "Taller E2E de respiración consciente"
+    timeout: 20000
+
+# Bloque de proximos con el destacado y su boton principal (rosa desde el 27/10).
+- assertVisible: "Próximos eventos"
+- assertVisible: "(Ver detalles y reservar|Reserva confirmada)"
+- assertVisible:
+    text: "Todas"
+    selected: true
+# Accesos de quien tiene sesion.
+- assertVisible: "Organiza un evento"
+- takeScreenshot: eventos-escuela-crear-agenda
+
+# El segundo proximo va en fila, con su boton redondo de reservar.
+- scrollUntilVisible:
+    element: "Concierto E2E de cuencos tibetanos"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: "Reservar"
+
+# Sin fecha y anteriores, al final y con su propio titulo.
+- scrollUntilVisible:
+    element: "Encuentro E2E en vivo ya celebrado"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- assertVisible: "Fecha por confirmar"
+- assertVisible: "Retiro E2E con fecha por confirmar"
+- assertVisible: "Eventos anteriores"
+- assertVisible: "Finalizado"
+- takeScreenshot: eventos-escuela-crear-agenda-anteriores
+
+# Un evento terminado se puede abrir, pero no se reserva.
+- tapOn: "Encuentro E2E en vivo ya celebrado"
+- extendedWaitUntil:
+    visible: "Este evento ya terminó."
+    timeout: 15000
+- assertNotVisible: "Reservar mi cupo"
+- back
+- extendedWaitUntil:
+    visible: "Agenda de eventos"
+    timeout: 10000
+
+# ---- Modalidades (filtra el servidor) -------------------------------------
+- scrollUntilVisible:
+    element: "Todas"
+    direction: UP
+    timeout: 15000
+    visibilityPercentage: 100
+    centerElement: true
+- tapOn:
+    text: "Presencial"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      text: "Presencial"
+      selected: true
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "Taller E2E de respiración consciente"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: "Concierto E2E de cuencos tibetanos"
+    timeout: 15000
+- takeScreenshot: eventos-escuela-crear-agenda-presencial
+
+- tapOn:
+    text: "En línea"
+    index: 0
+- extendedWaitUntil:
+    visible: "Concierto E2E de cuencos tibetanos"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: "Taller E2E de respiración consciente"
+    timeout: 15000
+
+- tapOn:
+    text: "En vivo"
+    index: 0
+- extendedWaitUntil:
+    visible: "Encuentro E2E en vivo ya celebrado"
+    timeout: 15000
+- assertNotVisible: "Concierto E2E de cuencos tibetanos"
+
+# Volver a «Todas» deja la lista entera.
+- tapOn:
+    text: "Todas"
+    index: 0
+- extendedWaitUntil:
+    visible: "Taller E2E de respiración consciente"
+    timeout: 15000
+
+# ---- Busqueda (tambien en el servidor, 500 ms despues de teclear) ----------
+- tapOn: "¿Qué quieres vivir?"
+- inputText: "cuencos"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: "Concierto E2E de cuencos tibetanos"
+    timeout: 15000
+- extendedWaitUntil:
+    notVisible: "Taller E2E de respiración consciente"
+    timeout: 15000
+- eraseText: 20
+- inputText: "zzzz-no-existe"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: "No encontramos eventos con esa búsqueda."
+    timeout: 15000
+- takeScreenshot: eventos-escuela-crear-agenda-sin-resultados

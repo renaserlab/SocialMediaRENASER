@@ -1,0 +1,49 @@
+# Cerrar sesion: pide confirmacion, «Cancelar» la conserva y confirmar la cierra.
+appId: host.exp.exponent
+name: auth/cerrar-sesion
+tags:
+  - auth
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- assertVisible: ${E2E_EMAIL}
+- scrollUntilVisible:
+    element: "Salir de tu cuenta en este dispositivo"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Salir de tu cuenta en este dispositivo"
+- extendedWaitUntil:
+    visible: ".*Seguro que quieres salir de tu cuenta.*"
+    timeout: 10000
+- takeScreenshot: auth-cerrar-sesion-confirmar
+# Cancelar: sigue dentro.
+- tapOn: "Cancelar"
+- assertNotVisible: ".*Seguro que quieres salir de tu cuenta.*"
+- assertVisible: "Salir de tu cuenta en este dispositivo"
+# Confirmar: fuera.
+- tapOn: "Salir de tu cuenta en este dispositivo"
+- extendedWaitUntil:
+    visible: ".*Seguro que quieres salir de tu cuenta.*"
+    timeout: 10000
+- tapOn:
+    text: "Cerrar Sesión"
+    below: ".*Seguro que quieres salir de tu cuenta.*"
+- extendedWaitUntil:
+    visible: "(Inicio|Idioma)"
+    timeout: 30000
+- runFlow: ../_comun/elegir-idioma.yaml
+- assertVisible: "Inicio"
+# En Ajustes ya no hay cuenta ni opcion de cerrar sesion.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- assertNotVisible: ${E2E_EMAIL}
+- assertNotVisible: "Tus intereses"

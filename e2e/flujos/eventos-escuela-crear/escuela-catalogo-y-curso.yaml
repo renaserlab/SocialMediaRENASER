@@ -1,0 +1,137 @@
+# PENDIENTE (28-10-2026): no ha pasado entero en el emulador; fuera de la suite por defecto (etiqueta `pendiente`). Ver hallazgos/RESUMEN.md.
+# Escuela: llegar desde Explorar, filtros de nivel, y la ficha de un curso
+# gratuito con su temario y la barra de progreso a cero.
+#
+# Datos: e2e/datos/50-eventos-escuela.sql («Curso E2E: Respiración consciente»,
+# de Beto, 1 modulo y 3 lecciones de texto, nivel principiante).
+appId: host.exp.exponent
+name: "Escuela: catálogo, niveles y ficha del curso"
+tags:
+  - eventos-escuela-crear
+  - escuela
+  - pendiente
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+- extendedWaitUntil:
+    visible:
+      text: "Escuela"
+      enabled: true
+    timeout: 20000
+- tapOn:
+    text: "Escuela"
+    index: 0
+
+- extendedWaitUntil:
+    visible: "¿Qué quieres aprender\\?"
+    timeout: 20000
+- assertVisible: "Mi Biblioteca"
+- assertVisible: "Crea un curso"
+- assertVisible:
+    text: "Todos"
+    selected: true
+- assertVisible: "Principiante"
+- assertVisible: "Intermedio"
+- assertVisible: "Avanzado"
+- scrollUntilVisible:
+    element: "Todo el catálogo"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- scrollUntilVisible:
+    element: "Curso E2E: Respiración consciente"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- assertVisible: "Gratis"
+- takeScreenshot: eventos-escuela-crear-escuela-catalogo
+
+# Nivel: el curso es de principiante; en «Avanzado» no puede salir.
+- scrollUntilVisible:
+    element: "Avanzado"
+    direction: UP
+    timeout: 45000
+    visibilityPercentage: 100
+- tapOn: "Avanzado"
+- extendedWaitUntil:
+    visible:
+      text: "Avanzado"
+      selected: true
+    timeout: 10000
+# El aviso vacio va al pie, debajo de «Todo el catálogo».
+- scrollUntilVisible:
+    element: "Ningún curso coincide con lo que buscas."
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- takeScreenshot: eventos-escuela-crear-escuela-sin-resultados
+- tapOn: "Principiante"
+- scrollUntilVisible:
+    element: "Curso E2E: Respiración consciente"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- scrollUntilVisible:
+    element: "Todos"
+    direction: UP
+    timeout: 45000
+    visibilityPercentage: 100
+- tapOn: "Todos"
+
+# Ficha del curso.
+- scrollUntilVisible:
+    element: "Curso E2E: Respiración consciente"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- tapOn:
+    text: "Curso E2E: Respiración consciente"
+    index: 0
+- extendedWaitUntil:
+    visible: "Programa"
+    timeout: 20000
+# Sin portada, la imagen local ocupa mas que la pantalla (hallazgo S7): el
+# contenido de la ficha queda debajo y hay que bajar hasta el.
+- takeScreenshot: eventos-escuela-crear-escuela-curso-portada
+- scrollUntilVisible:
+    element: "Por Beto Prueba"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- assertVisible: "Curso E2E: Respiración consciente"
+- assertVisible: "Gratis"
+- assertVisible: "Principiante"
+# La guia de primera vez se cierra si aparece (se recuerda en el dispositivo).
+- tapOn:
+    text: "Cerrar guía"
+    optional: true
+- takeScreenshot: eventos-escuela-crear-escuela-curso
+- scrollUntilVisible:
+    element: "Temario"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- scrollUntilVisible:
+    element: "Progreso del curso"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- assertVisible: "\\d+% completado"
+- scrollUntilVisible:
+    element: "1\\. Fundamentos de la respiración"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- assertVisible: "\\d / 3 lecciones"
+- scrollUntilVisible:
+    element: "Pausa consciente de un minuto.*"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- assertVisible: "Respirar por la nariz.*"
+- assertVisible: "La respiración 4-7-8.*"
+- assertVisible: "(Empezar curso|Continuar curso)"
+- takeScreenshot: eventos-escuela-crear-escuela-temario

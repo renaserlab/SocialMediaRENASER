@@ -1,0 +1,36 @@
+# Cambiar el idioma traduce la interfaz (las pestañas) y se puede volver.
+appId: host.exp.exponent
+name: auth/idioma-cambiar
+tags:
+  - auth
+---
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: language
+      ESPERAR: "(Idioma|Language)"
+- runFlow:
+    file: ../_comun/elegir-idioma.yaml
+    env:
+      IDIOMA: English
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 30000
+- assertVisible: "Explore"
+- assertNotVisible: "Explorar"
+# Y de vuelta a Castellano (deja el dispositivo como estaba).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: language
+      ESPERAR: "Language"
+      REINICIAR: "no"
+- assertVisible: "Choose the app language"
+- runFlow:
+    file: ../_comun/elegir-idioma.yaml
+    env:
+      IDIOMA: Castellano
+- extendedWaitUntil:
+    visible: "Inicio"
+    timeout: 30000
+- assertVisible: "Explorar"

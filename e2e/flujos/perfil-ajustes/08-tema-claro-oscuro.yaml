@@ -1,0 +1,71 @@
+# PENDIENTE (28-10-2026): no ha pasado entero en el emulador; fuera de la suite por defecto (etiqueta `pendiente`). Ver hallazgos/RESUMEN.md.
+# Tema claro / oscuro: el interruptor de Ajustes y la pareja de capturas de
+# Perfil, Explorar, Mensajes, Inicio y Ajustes en los DOS temas.
+#
+# Estas capturas son la base principal de regresión visual del módulo:
+# `comparar.sh` avisa si cambian. Lo que hay que mirar en ellas: nada de
+# texto blanco sobre blanco ni negro sobre negro, y el rosa de los resaltes
+# (lápiz del perfil, «+» de Crear, globo de no leídos) legible en oscuro.
+#
+# Empieza y termina en claro; `onFlowComplete` lo garantiza aunque se corte.
+appId: host.exp.exponent
+name: "Tema: claro y oscuro en las cinco pantallas principales"
+tags:
+  - perfil-ajustes
+  - tema
+  - pendiente
+onFlowComplete:
+  - runFlow:
+      when:
+        true: ${output.enClaro != true}
+      file: _sub/volver-a-tema-claro.yaml
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow: _sub/volver-a-tema-claro.yaml
+
+# ---- CLARO -----------------------------------------------------------------
+- runFlow:
+    file: _sub/capturar-pantallas-principales.yaml
+    env:
+      TEMA: claro
+
+# ---- Cambiar a OSCURO desde Ajustes ----------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- assertVisible: "Actualmente: Claro"
+- tapOn: "Modo Oscuro"
+- extendedWaitUntil:
+    visible: "Actualmente: Oscuro"
+    timeout: 10000
+- evalScript: ${output.enClaro = false}
+
+# El tema se guarda: sobrevive a recargar la app.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+- assertVisible: "Actualmente: Oscuro"
+
+- runFlow:
+    file: _sub/capturar-pantallas-principales.yaml
+    env:
+      TEMA: oscuro
+
+# ---- De vuelta a CLARO -----------------------------------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+      REINICIAR: "no"
+- tapOn: "Modo Oscuro"
+- extendedWaitUntil:
+    visible: "Actualmente: Claro"
+    timeout: 10000
+- evalScript: ${output.enClaro = true}

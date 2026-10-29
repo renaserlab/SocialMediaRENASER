@@ -1,0 +1,41 @@
+# Primer arranque: sin nada guardado, la raiz pregunta el idioma antes que nada;
+# una vez elegido no vuelve a preguntar.
+#
+# OJO: `clearState` borra TODO lo de Expo Go (idioma, sesion, cache del bundle).
+# Al terminar deja el idioma en Castellano y la sesion cerrada; los demas flujos
+# entran con iniciar-sesion, asi que no les afecta.
+appId: host.exp.exponent
+name: auth/idioma-primer-arranque
+tags:
+  - auth
+---
+- clearState
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      ESPERAR: "(Idioma|Language)"
+- assertVisible: "Elige el idioma de la aplicación"
+- assertVisible: "Castellano"
+- assertVisible: "English"
+- assertVisible: "Português"
+- assertVisible: "Continuar"
+- takeScreenshot: auth-idioma
+# La flecha de volver no deja saltarse la eleccion: sin historial vuelve a la
+# raiz, que trae de nuevo aqui (ver hallazgos/auth.md: la flecha sobra).
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Elige el idioma de la aplicación"
+    timeout: 15000
+- runFlow: ../_comun/elegir-idioma.yaml
+- extendedWaitUntil:
+    visible: "Inicio"
+    timeout: 30000
+- assertVisible: "Explorar"
+- assertVisible: "Perfil"
+# Al volver a abrir la app ya no pregunta.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      ESPERAR: "(Inicio|Idioma)"
+- assertVisible: "Inicio"
+- assertNotVisible: "Elige el idioma de la aplicación"

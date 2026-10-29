@@ -1,0 +1,58 @@
+# Enlaces dentro de una publicacion: la #etiqueta abre su pantalla y la
+# @persona etiquetada abre su perfil.
+#
+# Datos: 20-inicio-explorar.sql, P2 de Ana con #TallerE2E y Beto etiquetado.
+#
+# Los dos enlaces son <Text> anidados con accessibilityRole="link". En Android
+# React Native los expone como nodos virtuales cuyo content-desc es el texto
+# del tramo («#TallerE2E», «@beto_e2e»), y asi es como se tocan aqui: tocar el
+# parrafo entero pulsaria su centro, que no cae sobre el enlace.
+appId: host.exp.exponent
+name: "Publicacion: #etiqueta y @mencion"
+tags:
+  - inicio-explorar
+  - publicacion
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+# Directo al detalle (UUID fijo de la siembra), sin volver a parar Expo Go.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: post/e2e20000-0000-4000-8000-000000000002
+      ESPERAR: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
+      REINICIAR: "no"
+- extendedWaitUntil:
+    visible: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
+    timeout: 20000
+- assertVisible: "Con @beto_e2e"
+- takeScreenshot: inicio-explorar-publicacion-con-enlaces
+
+# ---- #etiqueta ----------------------------------------------------------------
+- tapOn: "#TallerE2E"
+- extendedWaitUntil:
+    visible: "1 publicación"
+    timeout: 15000
+# Cabecera y titulo con la etiqueta, y la publicacion dentro.
+- assertVisible:
+    text: "#TallerE2E"
+    index: 1
+- assertVisible: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
+- takeScreenshot: inicio-explorar-etiqueta
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Con @beto_e2e"
+    timeout: 10000
+
+# ---- @mencion ------------------------------------------------------------------
+- tapOn: "@beto_e2e"
+- extendedWaitUntil:
+    visible: "Beto Prueba"
+    timeout: 15000
+- assertVisible: "Cuenta de pruebas E2E. Carpinteria."
+- assertNotVisible: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
+- takeScreenshot: inicio-explorar-perfil-desde-mencion
+- back
+- extendedWaitUntil:
+    visible: "Con @beto_e2e"
+    timeout: 10000

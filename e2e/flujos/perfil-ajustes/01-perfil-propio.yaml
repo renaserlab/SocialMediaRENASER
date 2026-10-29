@@ -1,0 +1,130 @@
+# Perfil propio: cabecera, cifras, descripción, accesos de sección, el menú
+# «Opciones» y el lápiz rosa de editar.
+#
+# Datos: 00-base.sql (Ana: nombre, usuario, descripción, 2 fotos + 1 texto;
+# Ana y Beto se siguen) y 40-perfil.sql (repone nombre y descripción de Ana).
+# Las cifras exactas no se comprueban: otros módulos pueden cambiarlas en la
+# misma pasada (seguir, me gusta). Sí que cada una tenga su número.
+appId: host.exp.exponent
+name: "Perfil: perfil propio, cifras, secciones y lápiz de editar"
+tags:
+  - perfil-ajustes
+  - perfil
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Perfil
+
+# ---- Cabecera e identidad --------------------------------------------------
+- extendedWaitUntil:
+    visible: "MI PERFIL"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "Ana Prueba"
+    timeout: 15000
+- assertVisible: "@?ana_e2e"
+- assertVisible: "Cuenta de pruebas E2E. Ceramica y diseno."
+
+# ---- Cifras: Siguiendo · Seguidores · Me gusta, cada una con su número -----
+- assertVisible:
+    text: "\\d+"
+    above: "Siguiendo"
+- assertVisible:
+    text: "\\d+"
+    above: "Seguidores"
+- assertVisible:
+    text: "\\d+"
+    above: "Me gusta"
+
+# ---- Accesos de sección ----------------------------------------------------
+- assertVisible: "Publicaciones"
+- assertVisible: "Podcast"
+- assertVisible: "Escuela"
+- assertVisible: "Reseñas"
+- assertVisible: "Agenda"
+- takeScreenshot: perfil-ajustes-perfil-propio
+
+- tapOn: "Reseñas"
+- extendedWaitUntil:
+    visible: "Reseñas recibidas"
+    timeout: 10000
+- tapOn: "Escuela"
+- extendedWaitUntil:
+    visible: "(Todavía no has publicado ningún curso.|Agregar curso)"
+    timeout: 10000
+- tapOn: "Podcast"
+- extendedWaitUntil:
+    visible: "Agregar audio"
+    timeout: 10000
+# «Publicaciones» vuelve a la galería: las 2 fotos sembradas de Ana.
+- tapOn: "Publicaciones"
+- extendedWaitUntil:
+    notVisible: "Agregar audio"
+    timeout: 10000
+
+# ---- Cifras que llevan a su lista ------------------------------------------
+- tapOn: "Ver Siguiendo"
+- extendedWaitUntil:
+    visible: "Beto Prueba"
+    timeout: 15000
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "MI PERFIL"
+    timeout: 10000
+- tapOn: "Ver Seguidores"
+- extendedWaitUntil:
+    visible: "Beto Prueba"
+    timeout: 15000
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "MI PERFIL"
+    timeout: 10000
+
+# ---- Menú «Opciones» (los tres puntos de la cabecera) ----------------------
+# El botón no tiene nombre propio: su etiqueta accesible es «Acción derecha».
+- tapOn: "Acción derecha"
+- extendedWaitUntil:
+    visible: "Opciones"
+    timeout: 10000
+- assertVisible: "Guardados"
+- assertVisible: "Mi galería"
+- assertVisible: "Mis eventos"
+- assertVisible: "Configuración"
+- takeScreenshot: perfil-ajustes-perfil-opciones
+- back
+- extendedWaitUntil:
+    notVisible: "Opciones"
+    timeout: 10000
+
+# ---- El lápiz rosa abre la bandeja «Editar perfil» -------------------------
+# La bandeja es un Modal: mientras está abierta, Maestro solo ve lo de dentro.
+- tapOn: "Editar perfil"
+- extendedWaitUntil:
+    visible: "Elegir de la galería"
+    timeout: 10000
+- assertVisible: "Tomar foto"
+# Cada campo con lo guardado (la etiqueta accesible del campo es su rótulo).
+- assertVisible:
+    text: "Ana Prueba"
+    below: "Nombre completo"
+- assertVisible:
+    text: "ana_e2e"
+    below: "Nombre de usuario"
+- assertVisible:
+    text: "Cuenta de pruebas E2E. Ceramica y diseno."
+    below: "Biografía"
+- assertVisible: "Audio de presentación"
+- takeScreenshot: perfil-ajustes-perfil-bandeja-editar
+# «Guardar cambios» queda por debajo del pliegue de la bandeja.
+- scrollUntilVisible:
+    element: "Guardar cambios"
+    direction: DOWN
+    timeout: 10000
+- back
+- extendedWaitUntil:
+    notVisible: "Elegir de la galería"
+    timeout: 10000
+- assertVisible: "MI PERFIL"

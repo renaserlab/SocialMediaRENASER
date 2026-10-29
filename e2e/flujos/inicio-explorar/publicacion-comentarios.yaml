@@ -1,0 +1,105 @@
+# PENDIENTE (28-10-2026): no ha pasado entero en el emulador; fuera de la suite por defecto (etiqueta `pendiente`). Ver hallazgos/RESUMEN.md.
+# Comentarios: llegar al detalle tocando la foto en el muro, abrir la hoja de
+# comentarios, comprobar que vacio (o solo espacios) no se envia, escribir uno
+# y verlo aparecer; despues, la pantalla completa de comentarios.
+#
+# Datos: 20-inicio-explorar.sql, P3 de Beto con foto y dos comentarios.
+# Cada pasada anade un comentario con marca de tiempo (no choca con los de
+# pasadas anteriores); la siguiente siembra los borra.
+appId: host.exp.exponent
+name: "Publicacion: comentarios"
+tags:
+  - inicio-explorar
+  - publicacion
+  - comentarios
+  - pendiente
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 20000
+
+# P3 en el muro; un toque en su foto abre el detalle.
+- scrollUntilVisible:
+    element: "Acabado al aceite o al barniz\\? Os leo en los comentarios."
+    direction: DOWN
+    # P3 es la tercera del muro y cada volcado del arbol tarda 10-15 s en este
+    # emulador: con 60 s se agoto justo cuando aparecia (28/10).
+    timeout: 120000
+    centerElement: true
+# La foto (4:5, ancho completo) va justo debajo del texto, que ahora esta en
+# el centro: ocupa toda la mitad de abajo hasta la barra. La foto no tiene
+# etiqueta ni rol accesible (ver hallazgos), asi que se toca por posicion.
+- tapOn:
+    point: "50%,72%"
+- extendedWaitUntil:
+    visible: "Ver todos los comentarios"
+    timeout: 15000
+- assertVisible: "Publicación"
+- assertVisible: "\\d+ comentarios"
+
+# ---- Hoja de comentarios --------------------------------------------------------
+- tapOn:
+    text: "Comentarios"
+    index: 0
+- extendedWaitUntil:
+    visible: "Comentarios · \\d+"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "Al aceite, sin duda: se nota la veta."
+    timeout: 10000
+- assertVisible: "Gracias, Ana. El sabado lo probamos."
+- assertVisible: "Escribe un comentario..."
+
+# Vacio: el boton de enviar esta apagado.
+- assertVisible:
+    text: "Enviar"
+    enabled: false
+# Solo espacios: sigue apagado.
+- tapOn: "Escribe un comentario..."
+- inputText: "   "
+- assertVisible:
+    text: "Enviar"
+    enabled: false
+- takeScreenshot: inicio-explorar-comentario-vacio
+- eraseText: 10
+
+# Un comentario de verdad, con marca de tiempo para que sea unico.
+- evalScript: ${output.comentario = 'Comentario E2E ' + Date.now()}
+- inputText: ${output.comentario}
+- assertVisible:
+    text: "Enviar"
+    enabled: true
+- tapOn: "Enviar"
+- extendedWaitUntil:
+    visible: ${output.comentario}
+    timeout: 15000
+# El campo se vacia al enviar: el boton vuelve a estar apagado. (El texto de
+# ayuda no sirve para comprobarlo: Android lo expone tambien con texto dentro.)
+- assertVisible:
+    text: "Enviar"
+    enabled: false
+- assertNotVisible: "No se pudo comentar"
+- hideKeyboard
+- takeScreenshot: inicio-explorar-comentarios-hoja
+- back
+
+# ---- Pantalla completa de comentarios -------------------------------------------
+- tapOn: "Ver todos los comentarios"
+- extendedWaitUntil:
+    visible: "Comentarios · \\d+"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: ${output.comentario}
+    timeout: 15000
+- assertVisible: "Al aceite, sin duda: se nota la veta."
+- takeScreenshot: inicio-explorar-comentarios-pantalla
+- tapOn: "Volver"
+- extendedWaitUntil:
+    visible: "Ver todos los comentarios"
+    timeout: 10000

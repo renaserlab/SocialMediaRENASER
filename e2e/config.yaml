@@ -1,0 +1,18 @@
+# Espacio de trabajo de Maestro para la suite E2E de Z.
+#
+# Se usa al correr TODO (`e2e/scripts/correr.sh` sin argumentos, que lanza
+# `maestro test --config e2e/config.yaml e2e/flujos`).
+#
+# Entran los .yaml de primer nivel de cada carpeta de modulo. Quedan fuera:
+#   - las carpetas que empiezan por «_» (`_comun/`, `<modulo>/_sub/`): son
+#     subflujos que se llaman con runFlow, no pruebas;
+#   - por si acaso, cualquier flujo con la etiqueta `comun`;
+#   - los que aun no pasan enteros en el emulador (`pendiente`) y los que Expo
+#     Go no deja correr (`bloqueado-expo-go`). Se lanzan a mano con
+#     `correr.sh <flujo>` o `--etiquetas=pendiente`.
+flows:
+  - "[!_]*/*.yaml"
+excludeTags:
+  - comun
+  - pendiente
+  - bloqueado-expo-go

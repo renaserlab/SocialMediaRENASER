@@ -1,0 +1,67 @@
+# Historias en Explorar: la burbuja de Beto con el anillo rosa (sin ver),
+# abrirla, ver su texto y cerrarla.
+#
+# Datos: 20-inicio-explorar.sql siembra CUATRO historias de Beto de 30 s que
+# Ana no ha visto.
+#
+# POR QUE SE PAUSA. Mientras la barra de progreso avanza (animacion por JS),
+# el arbol de accesibilidad no se puede leer hasta que UiAutomator se cansa de
+# esperar: en este emulador cada paso de Maestro tarda hasta 40 s y la
+# historia de 30 s pasa sola a la siguiente. Por eso: se acepta cualquiera de
+# las cuatro, y en cuanto se puede se toca el campo de respuesta, que pausa la
+# historia (`onFocus` -> `setPaused(true)`); a partir de ahi todo va rapido.
+# Al cerrar quedan historias sin ver, asi que el anillo sigue rosa aunque no
+# se vuelva a sembrar.
+appId: host.exp.exponent
+name: "Explorar: historias (anillo, abrir y cerrar)"
+tags:
+  - inicio-explorar
+  - explorar
+  - historias
+---
+- runFlow: ../_comun/abrir-app.yaml
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Explorar
+
+- extendedWaitUntil:
+    visible: "Ver historia de Beto Prueba"
+    timeout: 20000
+- assertVisible: "Tu historia"
+# El «+» de la propia burbuja (accesible aparte de la foto).
+- assertVisible: "Agregar a tu historia"
+
+# Recorte de la fila de historias: el anillo de Beto debe ser el degradado
+# rosa de «sin ver». Referencia en e2e/referencias/inicio-explorar/.
+- takeScreenshot:
+    path: inicio-explorar-historias-fila
+    cropOn:
+      text: "Ver historia de Beto Prueba"
+
+# Abrir la historia de Beto. Sin reintento: si Maestro creyera que el toque no
+# hizo nada, lo repetiria en el mismo punto, que en el visor es «Siguiente tramo».
+- tapOn:
+    text: "Ver historia de Beto Prueba"
+    retryTapIfNoChange: false
+- extendedWaitUntil:
+    visible: "Historia E2E de Beto \\d: .*"
+    timeout: 60000
+# Pausa: foco en «Responder a Beto Prueba…».
+- tapOn:
+    text: "Responder a Beto Prueba…"
+    retryTapIfNoChange: false
+- assertVisible: "Historia E2E de Beto \\d: .*"
+- assertVisible: "Beto Prueba"
+- assertVisible: "Cerrar historias"
+# Con el teclado abierto a proposito: esconderlo quitaria el foco y la
+# historia seguiria corriendo (y en Android lo hace con «Atras»).
+- takeScreenshot: inicio-explorar-historia-abierta
+
+# Cerrar con la X (accessibilityLabel «Cerrar historias»).
+- tapOn: "Cerrar historias"
+- extendedWaitUntil:
+    visible: "EXPLORAR"
+    timeout: 30000
+- assertVisible: "Ver historia de Beto Prueba"

@@ -1,0 +1,53 @@
+# Deja la sesion abierta con E2E_EMAIL / E2E_PASSWORD y termina en las pestañas.
+#
+# Si ya esta abierta con ESA cuenta no vuelve a entrar: solo lo comprueba en
+# Ajustes. Si esta abierta con OTRA, la cierra antes. Siempre termina en la
+# raiz (el muro, pestaña Inicio).
+#
+# Parametros (env):
+#   E2E_EMAIL, E2E_PASSWORD   obligatorios (correr.sh los exporta: Ana)
+#
+# Para entrar como Beto:
+#   - runFlow:
+#       file: ../_comun/iniciar-sesion.yaml
+#       env:
+#         E2E_EMAIL: ${E2E_EMAIL_B}
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- runFlow:
+    file: abrir-app.yaml
+    env:
+      RUTA: settings
+      ESPERAR: "Configuración"
+- runFlow:
+    when:
+      notVisible: ${E2E_EMAIL}
+    commands:
+      # Otra cuenta abierta (o ninguna): cerrar-sesion no hace nada si no hay.
+      - runFlow:
+          file: cerrar-sesion.yaml
+          env:
+            REINICIAR: "no"
+      - runFlow:
+          file: abrir-app.yaml
+          env:
+            RUTA: login
+            ESPERAR: "Hola de nuevo"
+            REINICIAR: "no"
+      - tapOn: "ejemplo@correo.com"
+      - inputText: ${E2E_EMAIL}
+      - tapOn: "Tu contraseña"
+      - inputText: ${E2E_PASSWORD}
+      - hideKeyboard
+      - tapOn: "Iniciar sesión"
+      - extendedWaitUntil:
+          visible: "Inicio"
+          timeout: 30000
+- runFlow:
+    file: abrir-app.yaml
+    env:
+      RUTA: home
+      REINICIAR: "no"
+      ESPERAR: "Inicio"

@@ -1,0 +1,106 @@
+# Escuela: empezar el curso (inscribe), completar la leccion 1 y ver el avance
+# en «Mi Biblioteca» (33 %, 1 de 3 lecciones).
+#
+# Repetible: si la leccion 1 ya estaba completada (pasada anterior sin
+# resembrar), se entra por su fila del temario y se comprueba el estado final.
+# El resembrado deja el curso «sin empezar».
+appId: host.exp.exponent
+name: "Escuela: lección completada y progreso"
+tags:
+  - eventos-escuela-crear
+  - escuela
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: course/e2e0c0c0-0000-4000-8000-0000000000c1
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Programa"
+    timeout: 30000
+- scrollUntilVisible:
+    element: "Por Beto Prueba"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- tapOn:
+    text: "Cerrar guía"
+    optional: true
+- scrollUntilVisible:
+    element: "(Empezar curso|Continuar curso)"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+
+# Primera vez: «Empezar curso» inscribe y abre la primera leccion pendiente.
+- runFlow:
+    when:
+      visible: "Empezar curso"
+    commands:
+      - tapOn: "Empezar curso"
+# Ya empezado: se abre la leccion 1 desde su fila del temario.
+- runFlow:
+    when:
+      visible: "Continuar curso"
+    commands:
+      - scrollUntilVisible:
+          element: "Respirar por la nariz.*"
+          direction: UP
+          timeout: 45000
+          visibilityPercentage: 100
+      - tapOn: "Respirar por la nariz.*"
+
+- extendedWaitUntil:
+    visible: "Lección del Curso"
+    timeout: 20000
+- assertVisible: "Lección 1: Respirar por la nariz"
+- assertVisible: "Duración: 5 min"
+- assertVisible: "Esta lección aún no tiene video."
+- assertVisible: "Descripción"
+- assertVisible: "Recursos"
+- assertVisible: "Notas"
+- takeScreenshot: eventos-escuela-crear-escuela-leccion
+
+- runFlow:
+    when:
+      visible: "Marcar como completada"
+    commands:
+      - tapOn: "Marcar como completada"
+- extendedWaitUntil:
+    visible:
+      text: "Lección completada"
+      enabled: false
+    timeout: 15000
+- takeScreenshot: eventos-escuela-crear-escuela-leccion-completada
+
+# Siguiente leccion, sin completarla.
+- scrollUntilVisible:
+    element: "Siguiente"
+    direction: DOWN
+    timeout: 45000
+    visibilityPercentage: 100
+- tapOn: "Siguiente"
+- extendedWaitUntil:
+    visible: "Lección 2: La respiración 4-7-8"
+    timeout: 15000
+- assertVisible: "Marcar como completada"
+
+# El avance se lee en la biblioteca (refresca al entrar).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: library
+      REINICIAR: "no"
+      ESPERAR: ".+"
+- extendedWaitUntil:
+    visible: "Mi Biblioteca"
+    timeout: 20000
+- tapOn: "En progreso"
+- extendedWaitUntil:
+    visible: "Curso E2E: Respiración consciente.*"
+    timeout: 15000
+- assertVisible: "33% completado"
+- assertVisible: ".*1 de 3 lecciones.*"
+- takeScreenshot: eventos-escuela-crear-escuela-biblioteca
