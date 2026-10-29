@@ -417,3 +417,40 @@ def test_los_trabajos_de_la_api_en_ci_pasan_por_el_filtro_y_el_despliegue_no() -
     assert "needs.cambios" not in despliegue and "toca-la-api" not in despliegue, (
         "la puerta del despliegue no puede saltarse la bateria por un filtro"
     )
+
+
+def _bloque(texto: str, trabajo: str) -> str:
+    inicio = texto.index(f"\n  {trabajo}:\n")
+    resto = texto[inicio + 1 :]
+    siguiente = re.search(r"\n  [a-z_-]+:\n", resto)
+    return resto[: siguiente.start()] if siguiente else resto
+
+
+def test_la_huella_de_ci_solo_se_deja_si_la_bateria_entera_paso() -> None:
+    """La puerta del despliegue se fia de esta huella: que nunca mienta.
+
+    El despliegue se salta la bateria si `main` tiene EXACTAMENTE el arbol que
+    `migraciones` ya probo (repetirla eran 43 minutos para el mismo resultado).
+    Eso solo es verdad si la huella se sube DESPUES de pytest y del guardia:
+    los pasos van en orden y el primero que falla para el trabajo.
+    """
+    lineas = _sin_comentarios(_bloque(CI.read_text(encoding="utf-8"), "migraciones"))
+    donde = lambda patron: next(i for i, l in enumerate(lineas) if patron in l)  # noqa: E731
+    assert donde("bateria-completa-") > donde("exigir_bateria_completa.py") > donde("pytest -q")
+    assert any("HEAD^{tree}" in l for l in lineas), "la huella no lleva el arbol probado"
+
+
+def test_la_puerta_del_despliegue_solo_se_salta_con_la_huella_de_ese_arbol() -> None:
+    """Sin huella del MISMO contenido, la bateria entera; y nada mas la salta."""
+    bloque = _bloque((FLUJOS / "desplegar-aws.yml").read_text(encoding="utf-8"), "pruebas")
+    lineas = _sin_comentarios(bloque)
+    assert any("HEAD^{tree}" in l for l in lineas), "no compara el arbol que se va a publicar"
+    assert any("bateria-completa-$ARBOL" in l for l in lineas)
+    assert any('".github/workflows/ci.yml"' in l for l in lineas), (
+        "la huella tiene que venir de ci.yml, que corre la bateria con el mismo guardia"
+    )
+    condiciones = {l.split("if:", 1)[1].strip() for l in lineas if l.strip().startswith("if:")}
+    condiciones.discard("${{ inputs.etiqueta_para_volver_atras == '' }}")
+    assert condiciones == {"steps.huella.outputs.probada != 'true'"}, (
+        f"la bateria del despliegue se salta por algo que no es la huella: {condiciones}"
+    )
