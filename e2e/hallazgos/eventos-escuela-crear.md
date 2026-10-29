@@ -25,9 +25,9 @@ modulos y las de `e2e/salida/` desaparecen enseguida.
 | `eventos-mis-entradas.yaml` | PASA (14:04), sin cambios. |
 | `bug-eventos-reservas.yaml` (etiqueta `bug-conocido`) | PASA (15:08), sin cambios. Comprueba el comportamiento INCORRECTO de E0, E2, E3 y E4: fallara cuando se arreglen (pasos «ARREGLO:»). Si se quiere la suite en verde sin el, `--exclude-tags bug-conocido`. |
 | `escuela-evaluacion.yaml` | PASA (15:08), sin cambios. |
-| `escuela-catalogo-y-curso.yaml` | FALLO por S7 (contenido debajo de la portada gigante + desplazamiento lento). Corregido (desplazar hasta el autor, 45 s, sin centrar): **pendiente de verificar en dispositivo** (en cola). |
-| `escuela-leccion-y-progreso.yaml` | Igual que el anterior: **pendiente de verificar en dispositivo** (en cola). |
-| `productos-y-servicios.yaml` | Nunca corrido: **pendiente de verificar en dispositivo** (en cola). |
+| `escuela-catalogo-y-curso.yaml` | PASA solo (29-10, contra `main` eeb4751) tras cerrar la guía del temario con `_sub/cerrar-guia-del-curso.yaml`. Sigue `pendiente`: dentro de la suite corre después de `escuela-leccion-y-progreso` (Maestro no sigue el orden alfabético) y ve el curso empezado. |
+| `escuela-leccion-y-progreso.yaml` | PASA (29-10, contra `main` eeb4751), con el mismo subflujo de la guía. |
+| `productos-y-servicios.yaml` | PASA (29-10, contra `main` eeb4751). Al volver de la ficha se comprueba «Nuevos en Z», porque la cabecera se desplaza con la lista. |
 | `crear-opciones-y-validacion.yaml` | Nunca corrido: **pendiente de verificar en dispositivo**. |
 | `crear-publicar-texto.yaml` | Nunca corrido: **pendiente de verificar en dispositivo**. |
 | `_sub/permiso-opcional.yaml`, `_sub/ir-al-editor-de-texto.yaml` | Subflujos de Crear, nunca corridos. |
@@ -155,6 +155,8 @@ veces seguidas y en cada `sembrar.sh` desde las 12:30, sin errores).
 ## Escuela
 
 ### S7. Ficha del curso: la portada de respaldo ocupa mas que la pantalla — ALTA [dispositivo]
+**Corregido en `main` con #31** (tanda 2): la portada pasa a `expo-image` con
+`contentFit="cover"` y respeta el 16:9. Comprobado en el emulador el 29-10.
 - **Pasos:** abrir «Curso E2E: Respiración consciente» (sin portada) desde
   Escuela o por enlace (`/course/<id>`).
 - **Esperado:** portada 16:9 (`styles.hero: { width: '100%', aspectRatio: 16 / 9 }`)

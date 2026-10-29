@@ -34,19 +34,30 @@ tags:
 - takeScreenshot: inicio-explorar-muro-para-ti
 
 # P2: la etiqueta y la persona etiquetada se pintan como enlaces.
+# Sin centerElement: con P2 ya a la vista en la mitad de abajo, el deslizamiento
+# para centrarla se pasaba de largo, la dejaba por encima de la pantalla y
+# Maestro seguia bajando hasta el final del muro sin volver (29-10).
 - scrollUntilVisible:
     element: "Este sabado abrimos el taller a quien quiera venir #TallerE2E"
     direction: DOWN
     timeout: 60000
-    centerElement: true
-- assertVisible: "Con @beto_e2e"
+- scrollUntilVisible:
+    element: "Con @beto_e2e"
+    direction: DOWN
+    timeout: 30000
 
 # ---- MURO: Siguiendo -----------------------------------------------------------
 # Ana sigue a Beto: en Siguiendo salen las de Beto y no las de quien no sigue.
+# Se sube hasta las PESTAÑAS, no hasta el redactor: van encima de el, y el
+# desplazamiento se para en cuanto el redactor entra entero, a veces con las
+# pestañas unos px por encima de la vista (pasó con la tanda 2 de rendimiento,
+# que cambia el ritmo al quitar el bucle de H-12). 120 s: desde P2 hacen falta
+# 3-4 deslizamientos y, con la guia de Explorar a la vista tras auth/01, cada
+# uno tarda ~20 s (29-10: con 60 s las pestañas aparecieron justo al agotarse).
 - scrollUntilVisible:
-    element: "Crear nueva publicación"
+    element: "Siguiendo"
     direction: UP
-    timeout: 60000
+    timeout: 120000
 - tapOn:
     text: "Siguiendo"
     index: 0
@@ -56,16 +67,27 @@ tags:
     timeout: 60000
 - takeScreenshot: inicio-explorar-muro-siguiendo
 - scrollUntilVisible:
-    element: "Crear nueva publicación"
+    element: "Para ti"
     direction: UP
-    timeout: 60000
+    timeout: 120000
 - tapOn:
     text: "Para ti"
     index: 0
 
 # ---- BUSQUEDA --------------------------------------------------------------------
+# El teclado del emulador (Gboard) a veces mete una letra de su sugerencia: el
+# 29-10 escribio «TallerE2KE» y la app busco eso. Si el campo no dice
+# exactamente lo escrito, se borra con la «x» (borrar letra a letra es muy
+# lento aqui) y se escribe otra vez.
 - tapOn: "Personas, publicaciones, cursos o eventos..."
 - inputText: "TallerE2E"
+- runFlow:
+    when:
+      notVisible: "TallerE2E"
+    commands:
+      - tapOn: "Borrar la búsqueda"
+      - tapOn: "Personas, publicaciones, cursos o eventos..."
+      - inputText: "TallerE2E"
 - extendedWaitUntil:
     visible: "#TallerE2E"
     timeout: 15000
@@ -91,6 +113,13 @@ tags:
 - tapOn: "Borrar la búsqueda"
 - tapOn: "Personas, publicaciones, cursos o eventos..."
 - inputText: "qzxwvkj"
+- runFlow:
+    when:
+      notVisible: "qzxwvkj"
+    commands:
+      - tapOn: "Borrar la búsqueda"
+      - tapOn: "Personas, publicaciones, cursos o eventos..."
+      - inputText: "qzxwvkj"
 - extendedWaitUntil:
     visible: "Sin resultados"
     timeout: 15000
