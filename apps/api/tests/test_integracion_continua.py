@@ -342,3 +342,78 @@ def test_el_node_del_ci_es_el_que_las_pruebas_necesitan() -> None:
     assert (int(exigido.group(1)), int(exigido.group(2))) >= (22, 15), (
         "`engines` permite un node en el que cuatro baterias no se importan"
     )
+
+
+#: Un fichero real de cada sitio de FUERA de apps/api que leen hoy las pruebas
+#: de la API. Medido con un grep de las rutas que construyen, no recordado.
+LEIDOS_DESDE_FUERA = (
+    "apps/api/app/main.py",
+    "supabase/migrations/0001_initial.sql",
+    "supabase/tests/prologo_local.sql",
+    "infra/aws/02-plataforma.yaml",
+    "docs/Z_STRIPE_PUESTA_EN_MARCHA.md",
+    "docs/Z_SERVICIOS_CONDICIONES_PILOTO_V1.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/desplegar-aws.yml",
+    "package.json",
+    "apps/mobile/package.json",
+    "apps/mobile/scripts/pruebas.mjs",
+    "apps/mobile/src/i18n/es.ts",
+    "apps/mobile/src/screens/SupportScreen.tsx",
+)
+
+#: Y lo que NO: si esto pusiera en marcha la bateria, el filtro no ahorraria
+#: nada y cada cambio de una pantalla volveria a costar ~55 minutos.
+NO_TOCAN_LA_API = (
+    "apps/mobile/src/screens/ChatScreen.tsx",
+    "apps/mobile/src/components/CoachMark.tsx",
+    "README.md",
+)
+
+
+def _rutas_que_prueba_la_api() -> list[re.Pattern[str]]:
+    fichero = RAIZ / ".github" / "rutas-que-prueba-la-api.txt"
+    lineas = fichero.read_text(encoding="utf-8").splitlines()
+    return [re.compile(l) for l in lineas if l.strip() and not l.startswith("#")]
+
+
+def test_el_filtro_de_ci_no_se_salta_lo_que_leen_las_pruebas() -> None:
+    """Un cambio en un fichero que lee una prueba de la API la ejecuta.
+
+    ci.yml se salta `api` y `migraciones` cuando el cambio no toca ninguna ruta
+    de `.github/rutas-que-prueba-la-api.txt`: corrian ~55 minutos en cada
+    cambio del movil y agotaron los minutos de Actions. Pero las pruebas de la
+    API no leen solo apps/api: si el filtro olvidara una de esas rutas, romper
+    ese fichero dejaria la integracion en verde. La puerta del despliegue
+    ejecuta siempre la bateria entera; esto evita enterarse alli.
+    """
+    rutas = _rutas_que_prueba_la_api()
+    assert rutas, "el filtro no tiene rutas"
+    for fichero in LEIDOS_DESDE_FUERA:
+        assert (RAIZ / fichero).exists(), f"{fichero} ya no existe: actualiza la lista"
+        assert any(r.search(fichero) for r in rutas), (
+            f"las pruebas de la API leen {fichero} y un cambio en el no las ejecuta"
+        )
+    for fichero in NO_TOCAN_LA_API:
+        assert not any(r.search(fichero) for r in rutas), (
+            f"{fichero} pone en marcha la bateria de la API sin que ninguna prueba lo lea"
+        )
+
+
+def test_los_trabajos_de_la_api_en_ci_pasan_por_el_filtro_y_el_despliegue_no() -> None:
+    """El filtro decide en ci.yml; a produccion no se llega sin la bateria entera."""
+    texto = CI.read_text(encoding="utf-8")
+    for trabajo in ("api", "migraciones"):
+        inicio = texto.index(f"\n  {trabajo}:\n")
+        resto = texto[inicio + 1 :]
+        siguiente = re.search(r"\n  [a-z_-]+:\n", resto)
+        bloque = resto[: siguiente.start()] if siguiente else resto
+        assert "needs.cambios.outputs.api == 'true'" in bloque, (
+            f"el trabajo `{trabajo}` no pasa por el filtro de cambios"
+        )
+    assert "toca-la-api.sh" in texto, "el trabajo `cambios` no usa el guion"
+
+    despliegue = (FLUJOS / "desplegar-aws.yml").read_text(encoding="utf-8")
+    assert "needs.cambios" not in despliegue and "toca-la-api" not in despliegue, (
+        "la puerta del despliegue no puede saltarse la bateria por un filtro"
+    )

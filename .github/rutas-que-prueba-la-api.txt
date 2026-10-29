@@ -1,0 +1,28 @@
+# Lo que puede poner en rojo las pruebas de la API (expresiones de grep -E).
+#
+# Si un cambio no toca ninguna de estas rutas, ci.yml se salta los trabajos
+# `api` y `migraciones` (~55 minutos de Actions): no hay prueba de la API que
+# pueda cambiar de resultado. Lo usa `.github/scripts/toca-la-api.sh`.
+#
+# NO ES SOLO apps/api. Las pruebas de la API LEEN ficheros de fuera: las
+# migraciones y su prologo, la plantilla de AWS, los flujos de Actions, los
+# package.json, el lanzador de pruebas del movil, unos documentos y dos
+# ficheros del movil (las condiciones del piloto se comprueban contra la
+# pantalla de soporte y su texto). Una prueba nueva que lea otro fichero de
+# fuera tiene que anadir aqui su ruta; si no, un cambio en ese fichero no la
+# ejecutaria hasta el siguiente cambio de la API. La puerta del despliegue
+# (desplegar-aws.yml) ejecuta SIEMPRE la bateria entera, asi que lo peor que
+# puede pasar es enterarse tarde, nunca publicar en rojo.
+#
+# `tests/test_integracion_continua.py` comprueba que estas rutas siguen
+# cubriendo lo que leen las pruebas de hoy.
+^apps/api/
+^supabase/
+^infra/
+^docs/
+^\.github/
+^package\.json$
+^apps/mobile/package\.json$
+^apps/mobile/scripts/
+^apps/mobile/src/i18n/es\.ts$
+^apps/mobile/src/screens/SupportScreen\.tsx$

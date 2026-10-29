@@ -5,7 +5,37 @@ on:
   push:
     branches: [main, develop]
 
+# Un push nuevo a un PR deja sin sentido la vuelta anterior: se cancela en vez
+# de pagar sus ~55 minutos. Los push a `main` no se agrupan (cada uno lleva su
+# run_id), asi que ninguno cancela ni deja en espera a otro.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # QUE HA CAMBIADO. Los trabajos `api` y `migraciones` cuestan ~55 minutos de
+  # Actions por vuelta, y antes corrian igual en un cambio que solo tocaba una
+  # pantalla del movil. Con los 2000 minutos al mes del plan gratuito, eso
+  # agoto la cuota el 12/10/2026 y dejo el despliegue bloqueado. Las rutas que
+  # cuentan y por que estan en `.github/rutas-que-prueba-la-api.txt`.
+  cambios:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.decidir.outputs.api }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decidir
+        env:
+          EVENTO: ${{ github.event_name }}
+          RAMA: ${{ github.ref_name }}
+          ANTES: ${{ github.event.before }}
+        run: |
+          API=$(.github/scripts/toca-la-api.sh)
+          echo "api=$API" >> "$GITHUB_OUTPUT"
+          echo "Pruebas de la API en esta vuelta: $API" >> "$GITHUB_STEP_SUMMARY"
+
   mobile:
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +58,8 @@ jobs:
       - run: npm run mobile:test
 
   api:
+    needs: cambios
+    if: needs.cambios.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -60,6 +92,8 @@ jobs:
   # MIGRACIONES_DATABASE_URL y NO DATABASE_URL a proposito, porque la prueba
   # borra y recrea el esquema `public`.
   migraciones:
+    needs: cambios
+    if: needs.cambios.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
