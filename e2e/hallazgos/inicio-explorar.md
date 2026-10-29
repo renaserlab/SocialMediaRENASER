@@ -171,8 +171,26 @@ en dispositivo** (no llegó a correr: el emulador quedó reservado).
 
 ## H-12 · Explorar no deja de pintar aunque nada se mueva — media (rendimiento)
 
-**Estado:** medido en el emulador el 28-10 (revision de la suite). La causa
-exacta esta por confirmar.
+**Estado:** causa **confirmada** el 29-10 (sesion de rendimiento): es el bucle
+de `CoachMark`. El arreglo esta en la rama `perf/tanda-2-pr` (b67be91), sin
+subir ni mergear todavia. Cuando llegue a `main`, Explorar y la ficha del curso
+dejan de pintar en reposo y Maestro deberia ir mucho mas rapido en ellas.
+
+- **Confirmacion** (29-10, 11:10–11:17, emulador, Ana en Explorar, 3 tandas de
+  5 s sin tocar):
+
+  | | Antes (`perf/tanda-2-pr` e8d0631) | Despues (+ b67be91) |
+  |---|---|---|
+  | Fotogramas en 5 s, arriba | 62 / 63 / 65 | **0 / 0 / 0** |
+  | Fotogramas en 5 s, desplazada | 68 / 71 / 66 | **0 / 0 / 0** |
+  | `uiautomator dump` | «could not get idle state» a los 14–19 s | correcto en 2–3 s |
+
+  El arreglo hace que el latido de la guia solo corra con `visible &&
+  !dismissed && !reducirMovimiento`. Pasan las 5137 pruebas del movil y `tsc`.
+- **Efecto en la suite** (29-10): con la guia del curso a la vista, Maestro no
+  llegaba a «Empezar curso» en 45 s (`escuela-leccion-y-progreso`). Los flujos
+  la cierran ahora con `_sub/cerrar-guia-del-curso.yaml`; con el arreglo en
+  `main` ese subflujo dejaria de ser imprescindible.
 
 - **Medida** (`dumpsys gfxinfo`, 5 s sin tocar nada, la misma sesion de Ana):
 
@@ -190,7 +208,7 @@ exacta esta por confirmar.
     los vea.
   - En un telefono real son ~60 fps constantes mientras Explorar esta abierto,
     o sea bateria y CPU gastadas.
-- **Sospechoso principal:** `src/components/CoachMark.tsx`. El `useEffect`
+- **Causa:** `src/components/CoachMark.tsx`. El `useEffect`
   arranca un `Animated.loop` infinito ANTES del
   `if (!visible || dismissed) return null`.
   - Explorar monta dos guias (`primera-publicacion`, `explorar-programa`) aunque
@@ -200,9 +218,6 @@ exacta esta por confirmar.
     usan `useReduceMotion()`.
   - El comentario dice «latido corto… sin animar nada permanente», pero
     `Animated.loop` sin `iterations` es infinito.
-- **Como confirmarlo:** arrancar el bucle solo con `visible && !dismissed &&
-  !reducirMovimiento` y repetir la medida: Explorar deberia dar 0 fotogramas en
-  reposo.
 
 ## Lo que no se pudo comprobar
 

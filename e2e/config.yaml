@@ -1,7 +1,9 @@
 # Espacio de trabajo de Maestro para la suite E2E de Z.
 #
-# Se usa al correr TODO (`e2e/scripts/correr.sh` sin argumentos, que lanza
-# `maestro test --config e2e/config.yaml e2e/flujos`).
+# Para lanzar TODO de una vez con Maestro a mano:
+#   maestro test --config e2e/config.yaml e2e/flujos
+# `e2e/scripts/correr.sh` sin argumentos ya no lo usa: corre modulo a modulo
+# (ver el comentario alli).
 #
 # Entran los .yaml de primer nivel de cada carpeta de modulo. Quedan fuera:
 #   - las carpetas que empiezan por «_» (`_comun/`, `<modulo>/_sub/`): son

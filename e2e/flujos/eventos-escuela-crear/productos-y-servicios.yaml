@@ -131,9 +131,14 @@ tags:
 # La barra fija avisa de que no se vende (no se toca nada).
 - assertVisible: "En Z todavía no se compran productos\\. Guardar no reserva nada\\."
 - back
+# La cabecera «Productos Z» va dentro de la lista y se desplaza con ella: al
+# volver, la lista conserva el desplazamiento de antes y la cabecera puede
+# quedar medio tapada por la barra de estado. Se comprueba el catalogo por algo
+# que siempre queda a la vista y que no esta en la ficha.
 - extendedWaitUntil:
-    visible: "Productos Z"
+    visible: "(Productos Z|Nuevos en Z)"
     timeout: 15000
+- assertNotVisible: "De Taller de Beto E2E"
 
 # Ficha de la taza: lo que falta se dice, no se inventa.
 - scrollUntilVisible:

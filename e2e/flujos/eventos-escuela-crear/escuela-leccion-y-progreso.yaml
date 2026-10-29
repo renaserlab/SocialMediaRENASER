@@ -25,9 +25,7 @@ tags:
     direction: DOWN
     timeout: 45000
     visibilityPercentage: 100
-- tapOn:
-    text: "Cerrar guía"
-    optional: true
+- runFlow: _sub/cerrar-guia-del-curso.yaml
 - scrollUntilVisible:
     element: "(Empezar curso|Continuar curso)"
     direction: DOWN

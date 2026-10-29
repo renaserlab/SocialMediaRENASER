@@ -13,7 +13,7 @@ abajo van agrupados para arreglarlos de una vez.
 | Id | Qué pasa | Dónde |
 |---|---|---|
 | E0 | Tras reservar un evento gratuito la ficha no ofrece «Cancelar mi reserva»: `getEvent()` pide el evento con `auth: false` y `reserved_by_me` llega siempre falso. En el destacado no hay otra forma de cancelar. `[disp]` | eventos-escuela-crear.md |
-| M11 | Buscar en la bandeja descarta la respuesta del servidor; sin resultados se queda en «Cargando…» para siempre, y una conversación que no está cargada no se encuentra. `[disp]` | mensajes.md |
+| ~~M11~~ | **Corregido en #27.** Buscar en la bandeja descartaba la respuesta del servidor; sin resultados se queda en «Cargando…» para siempre, y una conversación que no está cargada no se encuentra. `[disp]` | mensajes.md |
 | S7 | Un curso sin portada abre con la imagen de respaldo a tamaño real (~1000 dp): el título, el precio y el botón quedan dos pantallas más abajo. `[disp]` | eventos-escuela-crear.md |
 | E1 | Un evento con entradas ofrece «Elegir entradas» aunque la venta está apagada en el servidor, y la reserva gratuita también queda bloqueada: nadie puede apuntarse. `[disp]` | eventos-escuela-crear.md |
 | H-01 | En una publicación abierta por enlace o notificación, el «me gusta» no mueve el contador y el corazón ignora lo que dice el servidor. `[código]` | inicio-explorar.md |
@@ -51,7 +51,8 @@ M12: a veces el chat abre a mitad del historial (intermitente, regresión).
 Y H-12: Explorar pinta fotogramas sin parar aunque nada se mueva (medido:
 0 fotogramas en reposo en Inicio, Perfil y Mensajes; ~60 cada 5 s en el
 emulador en Explorar). Gasta batería y hace que cada toque de Maestro tarde
-12–17 s. Sospechoso: el bucle de `CoachMark`.
+12–17 s. Causa confirmada el 29-10: el bucle de `CoachMark`; el arreglo
+(0 fotogramas en reposo) está en `perf/tanda-2-pr`, sin mergear.
 
 ## Flujos fuera de la suite por defecto
 
@@ -80,6 +81,5 @@ fallan en el paso `# ARREGLO:` cuando alguien lo corrige; entonces se invierte
 esa comprobación y el flujo pasa a vigilar que no vuelva.
 
 - `auth/bug-registro-correo-sin-dominio.yaml` — AUTH-02
-- `mensajes/bug-busqueda-sin-resultados.yaml` — M11
 - `eventos-escuela-crear/bug-eventos-reservas.yaml` — E0, E2, E3, E4
 - `perfil-ajustes/bug-desbloquear-no-refresca-perfil.yaml` — PA-06

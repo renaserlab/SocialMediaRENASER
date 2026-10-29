@@ -2,7 +2,7 @@
 # Corre la suite E2E (o parte) en el emulador, con el cerrojo del dispositivo.
 #
 # Uso:
-#   e2e/scripts/correr.sh                       # todo (e2e/flujos con config.yaml)
+#   e2e/scripts/correr.sh                       # todo, modulo a modulo
 #   e2e/scripts/correr.sh auth                  # un modulo (carpeta de e2e/flujos)
 #   e2e/scripts/correr.sh e2e/flujos/auth/03-login.yaml   # un flujo
 #   e2e/scripts/correr.sh auth mensajes         # varios
@@ -59,10 +59,35 @@ for a in "$@"; do
   esac
 done
 
+# ---- Todo: modulo a modulo ---------------------------------------------------
+# El emulador crece ~4,5 GB por hora y la suite entera tarda mas de lo que
+# aguanta su tope: el 29-10 lo mato el OOM a la 1 h 50 min, a mitad de Perfil.
+# Corriendo cada modulo por separado, entre uno y otro se resiembra y
+# `emulador.sh` lo reinicia si hace falta. De paso cada modulo arranca de los
+# mismos datos, sin lo que dejaron los anteriores (la agenda salia «reservada»
+# o la bandeja con mensajes de otra prueba segun el orden).
+if [ ${#objetivos[@]} -eq 0 ]; then
+  fallaron=(); cambiaron=()
+  for m in "$E2E"/flujos/[!_]*/; do
+    m="${m%/}"
+    log "==== modulo ${m##*/}"
+    set +e; "${BASH_SOURCE[0]}" "$@" "$m"; c=$?; set -e
+    case "$c" in
+      0) ;;
+      3) cambiaron+=("${m##*/}") ;;
+      *) fallaron+=("${m##*/}") ;;
+    esac
+  done
+  [ ${#cambiaron[@]} -eq 0 ] || log "pantallas que cambian en: ${cambiaron[*]}"
+  if [ ${#fallaron[@]} -gt 0 ]; then log "FALLO en: ${fallaron[*]}"; exit 1; fi
+  if [ ${#cambiaron[@]} -gt 0 ]; then exit 3; fi
+  log "OK: todos los modulos"
+  exit 0
+fi
+
 # Los `pendiente` y `bloqueado-expo-go` solo entran si se nombran (archivo o
 # --etiquetas): en una carpeta entera se apartan.
 solo_archivos=1
-if [ ${#objetivos[@]} -eq 0 ]; then solo_archivos=0; fi
 for o in "${objetivos[@]}"; do [ -d "$o" ] && solo_archivos=0; done
 if [ "$solo_archivos" = 0 ]; then
   for t in pendiente bloqueado-expo-go; do
@@ -91,11 +116,7 @@ args=(test --format junit --output "$SALIDA/junit.xml"
       --exclude-tags "$excluir"
       -e "E2E_EMAIL=$E2E_EMAIL" -e "E2E_PASSWORD=$E2E_PASSWORD" -e "E2E_EMAIL_B=$E2E_EMAIL_B")
 [ -n "$etiquetas" ] && args+=(--include-tags "$etiquetas")
-if [ ${#objetivos[@]} -eq 0 ]; then
-  args+=(--config "$E2E/config.yaml" "$E2E/flujos")
-else
-  args+=("${objetivos[@]}")
-fi
+args+=("${objetivos[@]}")
 
 log "salida en ${SALIDA#$E2E/}"
 set +e

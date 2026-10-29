@@ -1,0 +1,21 @@
+# Subflujo del modulo: en la ficha de un curso, baja hasta la guia «Toca aquí ·
+# Abre la primera lección del temario» y la cierra. Si ya estaba cerrada, se
+# queda en «Temario», que va justo debajo; el flujo sigue bajando desde ahi.
+#
+# Por que hace falta: la guia sale hasta que se cierra en el dispositivo, y
+# auth/01 borra los datos de Expo Go, asi que en la suite completa vuelve a
+# salir. Mientras se ve, su animacion en bucle no deja la pantalla quieta
+# (H-12) y cada desplazamiento de Maestro tarda tanto que el boton del curso no
+# llega a aparecer en 45 s. Un «Cerrar guía» opcional ANTES de bajar no sirve:
+# la guia esta debajo de la cabecera y Maestro solo ve lo que hay en pantalla.
+appId: host.exp.exponent
+tags:
+  - comun
+---
+- scrollUntilVisible:
+    element: "(Toca aquí|Temario)"
+    direction: DOWN
+    timeout: 45000
+- tapOn:
+    text: "Cerrar guía"
+    optional: true

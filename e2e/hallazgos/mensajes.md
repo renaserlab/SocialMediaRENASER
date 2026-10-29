@@ -11,7 +11,7 @@ fuera a alguien) · **Baja** (detalle visible o deuda).
 
 | # | Hallazgo | Severidad |
 |---|---|---|
-| M11 | Buscar en la bandeja descarta la respuesta del servidor: sin resultados se queda en «Cargando…» para siempre | Alta |
+| M11 | ~~Buscar en la bandeja descarta la respuesta del servidor: sin resultados se queda en «Cargando…» para siempre~~ **Corregido** en #27 | Alta |
 | M12 | A veces el chat se abre a mitad del historial y sin el boton «Ir al último mensaje» (intermitente) | Media |
 | M1 | Cada burbuja del chat se anuncia como «Mantén presionado para ver las acciones del mensaje» | Media |
 | M2 | «Leído» solo se distingue por el color de las dos marcas | Media |
@@ -28,8 +28,11 @@ fuera a alguien) · **Baja** (detalle visible o deuda).
 
 ## M11 · Buscar en la bandeja descarta la respuesta del servidor — Alta (funcional)
 
-Flujo que lo reproduce: `flujos/mensajes/bug-busqueda-sin-resultados.yaml`
-(etiqueta `bug-conocido`; comprueba el comportamiento ACTUAL).
+**Corregido** en `main` con #27 (82caf52): el 29-10 la busqueda sin
+resultados ya muestra «Nada por aquí». El flujo que lo reproducía pasó a
+vigilar que no vuelva: `flujos/mensajes/busqueda-sin-resultados.yaml`. Solo
+comprueba el caso sin resultados; que se encuentre una conversacion que no
+estaba cargada sigue sin flujo propio.
 
 **Pasos:** Mensajes → tocar «Buscar por nombre o usuario» → escribir «zqx»
 (nada lo contiene).
