@@ -1,4 +1,12 @@
-# PENDIENTE (28-10-2026): no ha pasado entero en el emulador; fuera de la suite por defecto (etiqueta `pendiente`). Ver hallazgos/RESUMEN.md.
+# PENDIENTE (29-10-2026): pasa solo, con los datos recien sembrados, pero no
+# dentro de la suite. Maestro no corre los flujos de una carpeta por orden
+# alfabetico: escuela-leccion-y-progreso va antes, deja a Ana inscrita (33 %) y
+# el catalogo enseña «Continúa aprendiendo»; tocar el curso abre entonces la
+# leccion 2 en vez de la ficha. Arreglo pendiente: que las lecciones las haga
+# otro usuario de prueba, para que el catalogo de Ana no dependa del orden.
+# Se corre a mano: e2e/scripts/correr.sh e2e/flujos/eventos-escuela-crear/escuela-catalogo-y-curso.yaml
+# (antes no llegaba a «Empezar curso» por la guia del temario; eso ya lo
+# resuelve _sub/cerrar-guia-del-curso.yaml).
 # Escuela: llegar desde Explorar, filtros de nivel, y la ficha de un curso
 # gratuito con su temario y la barra de progreso a cero.
 #
@@ -131,5 +139,10 @@ tags:
     visibilityPercentage: 100
 - assertVisible: "Respirar por la nariz.*"
 - assertVisible: "La respiración 4-7-8.*"
-- assertVisible: "(Empezar curso|Continuar curso)"
+# El boton va debajo del temario: segun si la guia se vio y se cerro, queda
+# dentro o justo por debajo de la pantalla.
+- scrollUntilVisible:
+    element: "(Empezar curso|Continuar curso)"
+    direction: DOWN
+    timeout: 45000
 - takeScreenshot: eventos-escuela-crear-escuela-temario

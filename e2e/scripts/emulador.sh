@@ -64,6 +64,13 @@ dispositivo_listo() {
 
 responde() { curl -s -m 3 -o /dev/null "$1"; }
 
+# Huella del codigo de la app en el checkout principal: commit + cambios sin
+# commitear de apps/mobile.
+codigo_de_la_app() {
+  printf '%s %s\n' "$(git -C "$REPO" rev-parse HEAD 2>/dev/null)" \
+    "$(git -C "$REPO" diff HEAD -- apps/mobile 2>/dev/null | md5sum | cut -c1-12)"
+}
+
 # Memoria (MB) del scope del emulador: RAM anonima MAS lo que tiene en swap.
 # El emulador crece con las horas (~3,7 GB al arrancar, ~4,5 GB mas por hora de
 # pruebas). La RAM se queda en el tope del scope (4500 MB) y lo demas se va a
@@ -88,6 +95,16 @@ if [ "${ZETA_REINICIO_PREVENTIVO:-0}" = 1 ] && dispositivo_listo; then
     "$ADB" emu kill >/dev/null 2>&1 || true
     for p in $viejos; do
       timeout 90 bash -c "while [ -e /proc/$p ]; do sleep 2; done" || true
+    done
+    # Con 10 GB en swap, cerrarse le cuesta mas de 90 s. Si sigue vivo, el paso
+    # siguiente lo tomaria por un emulador arrancando y esperaria 6 min a un
+    # dispositivo que no va a volver (paso el 29-10). Se le termina por PID
+    # (solo los de pids_emulador, que miran el ejecutable real).
+    for p in $viejos; do
+      [ -e "/proc/$p" ] || continue
+      log "el emulador $p no se cerro en 90 s: se termina"
+      kill -TERM "$p" 2>/dev/null || true
+      timeout 20 bash -c "while [ -e /proc/$p ]; do sleep 1; done" || kill -KILL "$p" 2>/dev/null || true
     done
     timeout 30 bash -c "while [ \"\$('$ADB' get-state 2>/dev/null)\" = device ]; do sleep 2; done" || true
   fi
@@ -194,9 +211,21 @@ if curl -s -m 3 http://127.0.0.1:8081/status | grep -q running; then
     log "       Paralo (o espera a que lo pare quien lo arranco) y vuelve a lanzar."
     exit 1
   fi
+  # Con CI=1 Metro no vigila los archivos («reloads are disabled»): si el
+  # checkout principal cambia de commit despues de arrancarlo, sigue sirviendo
+  # el codigo viejo. El 29-10 una suite entera probo eeb4751 creyendo probar
+  # a8d5cb1. Se guarda con que codigo arranco y, si ya no coincide, se reinicia.
+  if [ -n "$dir_metro" ] && [ "$(cat "$LOGS/metro.codigo" 2>/dev/null)" != "$(codigo_de_la_app)" ]; then
+    log "Metro (pid $pid_metro) sirve otro codigo del que hay en $REPO: se reinicia"
+    kill -TERM "$pid_metro" 2>/dev/null || true
+    timeout 30 bash -c 'while curl -s -m 2 http://127.0.0.1:8081/status | grep -q running; do sleep 1; done' ||
+      kill -KILL "$pid_metro" 2>/dev/null || true
+    sleep 2
+  fi
 fi
 if ! curl -s -m 3 http://127.0.0.1:8081/status | grep -q running; then
-  log "Metro (8081) no responde: arrancando desde $REPO/apps/mobile"
+  log "Metro (8081) no responde: arrancando desde $REPO/apps/mobile ($(git -C "$REPO" rev-parse --short HEAD))"
+  codigo_de_la_app > "$LOGS/metro.codigo"
   ( cd "$REPO/apps/mobile" && export CI=1 && en_segundo_plano setsid nohup npx expo start --port 8081 \
       > "$LOGS/metro.log" 2>&1 < /dev/null )
   if ! timeout 180 bash -c 'until curl -s -m 2 http://127.0.0.1:8081/status | grep -q running; do sleep 2; done'; then

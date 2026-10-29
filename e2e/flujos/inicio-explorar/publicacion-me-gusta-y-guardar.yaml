@@ -128,6 +128,12 @@ tags:
     timeout: 10000
 
 # Fuera del detalle y busqueda vacia: Explorar como estaba.
+# El aviso sale ARRIBA, encima de la cabecera, y tapa el boton «Volver»
+# durante sus ~5 s (hallazgo H-13): tocar antes da en el aviso. Desde la tanda 2
+# (H-12) Maestro va lo bastante rapido para llegar con el aviso aun puesto.
+- extendedWaitUntil:
+    notVisible: "Publicación (guardada|eliminada de Guardados)"
+    timeout: 10000
 - tapOn: "Volver"
 - extendedWaitUntil:
     visible: "Borrar la búsqueda"

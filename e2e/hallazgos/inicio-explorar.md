@@ -169,12 +169,30 @@ en dispositivo** (no llegó a correr: el emulador quedó reservado).
 - **Esperado:** el aviso solo cuando hay sugerencias que enseñar
   (`conSugerencias && feedParaTi.items.length > 0`).
 
+## H-13 · El aviso de «Publicación guardada» tapa el botón «Volver» — baja
+
+**Estado:** visto en el emulador el 29-10, con `main` a8d5cb1.
+
+- **Pasos:** abre una publicación, toca «Guardar» (o «Quitar de guardados») y,
+  enseguida, la flecha de volver.
+- **Esperado:** se vuelve atrás.
+- **Real:** el aviso «Publicación guardada · Ver lista» sale arriba, encima de
+  la cabecera, y durante unos 5 s tapa la flecha y el título. El toque cae en
+  el aviso y no pasa nada. Se ve en `referencias/inicio-explorar/inicio-explorar-guardada.png`
+  de la corrida del 29-10 (`salida/20261029-173813`).
+- **Por qué no salía antes:** con H-12, Maestro tardaba 12–17 s por toque y el
+  aviso ya se había ido.
+- **Propuesta:** sacar los avisos abajo (encima de la barra de pestañas) o
+  dejar libre la zona de la cabecera.
+- El flujo `publicacion-me-gusta-y-guardar` espera a que el aviso se vaya antes
+  de volver.
+
 ## H-12 · Explorar no deja de pintar aunque nada se mueva — media (rendimiento)
 
 **Estado:** causa **confirmada** el 29-10 (sesion de rendimiento): es el bucle
-de `CoachMark`. El arreglo esta en la rama `perf/tanda-2-pr` (b67be91), sin
-subir ni mergear todavia. Cuando llegue a `main`, Explorar y la ficha del curso
-dejan de pintar en reposo y Maestro deberia ir mucho mas rapido en ellas.
+de `CoachMark`. **Corregido en `main` con #31** (tanda 2, a8d5cb1): en la
+suite del 29-10, «Explorar: muro y busqueda» bajo de ~13 a ~7 min. Una guia
+VISIBLE sigue latiendo a proposito; las cerradas u ocultas ya no.
 
 - **Confirmacion** (29-10, 11:10–11:17, emulador, Ana en Explorar, 3 tandas de
   5 s sin tocar):
