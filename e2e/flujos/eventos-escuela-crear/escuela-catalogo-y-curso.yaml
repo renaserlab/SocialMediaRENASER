@@ -104,11 +104,9 @@ tags:
 - assertVisible: "Curso E2E: Respiración consciente"
 - assertVisible: "Gratis"
 - assertVisible: "Principiante"
-# La guia de primera vez se cierra si aparece (se recuerda en el dispositivo).
-- tapOn:
-    text: "Cerrar guía"
-    optional: true
 - takeScreenshot: eventos-escuela-crear-escuela-curso
+# La guia de primera vez se cierra si aparece (se recuerda en el dispositivo).
+- runFlow: _sub/cerrar-guia-del-curso.yaml
 - scrollUntilVisible:
     element: "Temario"
     direction: DOWN

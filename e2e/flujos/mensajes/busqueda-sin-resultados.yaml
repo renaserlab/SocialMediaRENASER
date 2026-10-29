@@ -1,0 +1,41 @@
+# Vigila que no vuelva el hallazgo M11 (hallazgos/mensajes.md), corregido en
+# main con #27 (82caf52).
+#
+#  M11  Buscar en la bandeja algo que no estaba se quedaba en «Cargando…» para
+#       siempre. Cada termino lanzaba la busqueda (offset=0) y, al quedarse la
+#       lista vacia, FlashList pedia «la pagina siguiente» (`cargarMas`, con el
+#       offset de la lista ANTERIOR). Esa segunda peticion subia el sello y la
+#       respuesta de la busqueda se descartaba por vieja.
+#
+# Datos: e2e/datos/30-mensajes.sql (ninguna conversacion contiene «zqx»).
+appId: host.exp.exponent
+name: "Mensajes: buscar sin resultados muestra el vacío"
+tags:
+  - mensajes
+---
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/ir-a-pestana.yaml
+    env:
+      PESTANA: Mensajes
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 30000
+
+- tapOn: "Buscar por nombre o usuario"
+- inputText: "zqx"
+- hideKeyboard
+
+# La API responde en milisegundos: el vacio tiene que salir en un par de
+# segundos. Se le dan 15 s por la lentitud del emulador.
+- extendedWaitUntil:
+    visible: "Nada por aquí"
+    timeout: 15000
+- assertNotVisible: "Cargando…"
+- takeScreenshot: mensajes-busqueda-sin-resultados
+
+# La «x» devuelve la bandeja (no se queda atascada).
+- tapOn: "Borrar la búsqueda"
+- extendedWaitUntil:
+    visible: "Chat con Beto Prueba\\..*"
+    timeout: 15000

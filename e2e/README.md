@@ -6,7 +6,7 @@ en Docker + API FastAPI). Nada de lo que hace toca la base gestionada.
 
 ```
 e2e/
-├── config.yaml          espacio de trabajo de Maestro (qué flujos entran al correr todo)
+├── config.yaml          espacio de trabajo de Maestro, para `maestro test` a mano sobre todo e2e/flujos
 ├── scripts/
 │   ├── emulador.sh      arranca/comprueba emulador, puertos, barra fija, backend y Metro
 │   ├── sembrar.sh       usuarios de prueba + imágenes en Storage + datos/*.sql
@@ -70,7 +70,7 @@ La contraseña de los dos es `Zeta-e2e-2026`. Los flujos la reciben por `env`:
 ## Correr
 
 ```bash
-e2e/scripts/correr.sh                          # todo
+e2e/scripts/correr.sh                          # todo, módulo a módulo (resiembra y revisa el emulador entre uno y otro)
 e2e/scripts/correr.sh auth                     # un módulo (carpeta de e2e/flujos)
 e2e/scripts/correr.sh e2e/flujos/auth/04-login-errores.yaml   # un flujo
 e2e/scripts/correr.sh auth mensajes --sin-sembrar             # varios, sin resembrar
@@ -170,13 +170,22 @@ versiona las nuevas imágenes en el mismo commit que el cambio de interfaz.
 - **Sin transformador de imágenes en el Supabase local.** Las fotos de perfil
   se piden por `/render/image/...`, que responde 404: por eso Ana y Beto no
   tienen foto (se ven las iniciales).
-- **El emulador crece en memoria.** Arranca con ~3,7 GB de memoria anónima y
-  sube con las horas de uso; al llegar al tope del scope (4,5 GB) el OOM del
-  cgroup lo mata a mitad de una prueba (pasó el 28-10 a las 2 h 20 min: todos
+- **El emulador crece en memoria.** Arranca con ~3,7 GB y sube unos 4,5 GB por
+  hora de pruebas (el 29-10 el OOM lo mató a la 1 h 50 min de suite seguida;
+  por eso `correr.sh` sin argumentos va módulo a módulo). La RAM se queda en el tope del scope (4,5 GB) y el resto se
+  va a swap (hasta 8 GB, `MemorySwapMax`): el 28-10 llegó a 10 GB de swap, el
+  sistema se quedó sin swap y los toques se volvieron lentísimos. Si además
+  llega al tope de swap, el OOM del cgroup lo mata a mitad de una prueba (todos
   los flujos siguientes fallan en milisegundos y `adb devices` sale vacío).
   `correr.sh` llama a `emulador.sh` con `ZETA_REINICIO_PREVENTIVO=1`, que lo
-  reinicia entre ejecuciones si pasa de 4100 MB (`ZETA_LIMITE_ANON_MB`), y
-  `emulador.sh` lo vuelve a levantar si no hay dispositivo.
+  reinicia antes de cada ejecución si RAM + swap pasa de 6000 MB
+  (`ZETA_LIMITE_MB`), y `emulador.sh` lo vuelve a levantar si no hay
+  dispositivo.
+- **Capturas que dependen del día.** Los datos de prueba usan fechas relativas
+  a «ahora» (`now() + interval …`), así que las capturas con fechas u horas
+  (agenda, bandeja, historial del chat) cambian de un día para otro y la
+  comparación las marca como CAMBIA aunque la app esté bien. Míralas a ojo
+  antes de renovarlas con `--actualizar-referencias`.
 - **Lentitud.** El emulador va con render por software y CPU limitada: un flujo
   típico tarda 1–3 minutos. Cada condición `when` que no se cumple espera hasta
   7 s (el «optional lookup» de Maestro): agrúpalas.

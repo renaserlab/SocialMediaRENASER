@@ -11,8 +11,8 @@
 #   ZETA_REPO      checkout PRINCIPAL desde el que corre Metro
 #                  (por defecto ~/Documentos/Proyectos-Renaser/SocialMediaRENASER)
 #   ZETA_REINICIO_PREVENTIVO=1
-#                  reinicia el emulador si su memoria anonima pasa de
-#                  ZETA_LIMITE_ANON_MB (4100 por omision). Lo pone correr.sh,
+#                  reinicia el emulador si su memoria (RAM anonima + swap)
+#                  pasa de ZETA_LIMITE_MB (6000 por omision). Lo pone correr.sh,
 #                  que tiene el cerrojo del dispositivo: a mano NO, que mataria
 #                  la ejecucion de otro.
 set -euo pipefail
@@ -64,22 +64,26 @@ dispositivo_listo() {
 
 responde() { curl -s -m 3 -o /dev/null "$1"; }
 
-# Memoria anonima (MB) del scope del emulador. El tope del scope es 4500 MB y
-# el emulador crece con las horas (~3,7 GB al arrancar, ~4,5 GB a las 2-3 h de
-# uso): al llegar al tope el OOM del cgroup lo mata EN MITAD de una prueba.
-memoria_anon_mb() {
-  local p cg
+# Memoria (MB) del scope del emulador: RAM anonima MAS lo que tiene en swap.
+# El emulador crece con las horas (~3,7 GB al arrancar, ~4,5 GB mas por hora de
+# pruebas). La RAM se queda en el tope del scope (4500 MB) y lo demas se va a
+# swap, asi que mirar solo la RAM no lo ve nunca: el 28-10 llevaba 10 GB en
+# swap, el sistema se quedo sin swap y cada toque iba a paso de tortuga.
+memoria_mb() {
+  local p cg anon swap
   p="$(pids_emulador | head -1)"
   [ -n "$p" ] || { echo 0; return; }
-  cg="$(sed -n 's/^0:://p' "/proc/$p/cgroup" 2>/dev/null)"
-  awk '/^anon /{ print int($2 / 1048576) }' "/sys/fs/cgroup$cg/memory.stat" 2>/dev/null || echo 0
+  cg="/sys/fs/cgroup$(sed -n 's/^0:://p' "/proc/$p/cgroup" 2>/dev/null)"
+  anon="$(awk '/^anon /{ print int($2 / 1048576) }' "$cg/memory.stat" 2>/dev/null)"
+  swap="$(awk '{ print int($1 / 1048576) }' "$cg/memory.swap.current" 2>/dev/null)"
+  echo $(( ${anon:-0} + ${swap:-0} ))
 }
 
 # ---- 1. Emulador ---------------------------------------------------------
 if [ "${ZETA_REINICIO_PREVENTIVO:-0}" = 1 ] && dispositivo_listo; then
-  anon="$(memoria_anon_mb)"
-  if [ "${anon:-0}" -gt "${ZETA_LIMITE_ANON_MB:-4100}" ]; then
-    log "memoria del emulador en ${anon} MB (tope 4500): reinicio preventivo"
+  usada="$(memoria_mb)"
+  if [ "${usada:-0}" -gt "${ZETA_LIMITE_MB:-6000}" ]; then
+    log "el emulador usa ${usada} MB entre RAM y swap: reinicio preventivo"
     viejos="$(pids_emulador | tr '\n' ' ')"
     "$ADB" emu kill >/dev/null 2>&1 || true
     for p in $viejos; do
@@ -91,8 +95,9 @@ fi
 
 if ! dispositivo_listo; then
   if [ -z "$(pids_emulador)" ]; then
-    log "arrancando $AVD (CPU 300%, RAM 4.5 GB, render por software)..."
-    en_segundo_plano setsid nohup systemd-run --user --scope --unit="zeta-emulador-$(date +%s)" -p CPUQuota=300% -p MemoryMax=4500M \
+    # MemorySwapMax: sin el, el emulador se come el swap de todo el sistema.
+    log "arrancando $AVD (CPU 300%, RAM 4.5 GB + 8 GB de swap, render por software)..."
+    en_segundo_plano setsid nohup systemd-run --user --scope --unit="zeta-emulador-$(date +%s)" -p CPUQuota=300% -p MemoryMax=4500M -p MemorySwapMax=8G \
       env QT_QPA_PLATFORM=xcb __GLX_VENDOR_LIBRARY_NAME=mesa LIBGL_ALWAYS_SOFTWARE=1 \
       nice -n 10 "$ANDROID_HOME/emulator/emulator" -avd "$AVD" -gpu swiftshader_indirect \
       -no-snapshot-load -no-snapshot-save -memory 2048 -cores 2 -no-boot-anim -no-audio \
@@ -128,6 +133,29 @@ if [ "${RECIEN_ARRANCADO:-0}" = 1 ]; then
   sh_adb wm dismiss-keyguard
 fi
 
+# Tras un arranque en frio, Google Play Services pasa 10-15 min recompilando
+# sus modulos y se come los 2 nucleos: cada tecla de Maestro tarda ~10 s y el
+# login no llega a escribirse (el 28-10 fallaron asi los tres primeros flujos
+# de la suite). Se espera a que el sistema quede en reposo: dos medidas
+# seguidas de 5 s con mas del 85 % de CPU libre.
+cpu_libre_pct() {  # % de CPU libre del emulador en los proximos 5 s
+  local a b
+  a="$("$ADB" shell head -1 /proc/stat 2>/dev/null)"; sleep 5
+  b="$("$ADB" shell head -1 /proc/stat 2>/dev/null)"
+  awk -v a="$a" -v b="$b" 'BEGIN {
+    n = split(a, x); split(b, y); t = 0
+    for (i = 2; i <= n; i++) t += y[i] - x[i]
+    print (t > 0 ? int(100 * (y[5] - x[5]) / t) : 0) }'
+}
+if [ "${RECIEN_ARRANCADO:-0}" = 1 ]; then
+  log "esperando a que el emulador quede en reposo (max 20 min)..."
+  seguidas=0; fin=$((SECONDS + 1200))
+  while [ "$seguidas" -lt 2 ] && [ "$SECONDS" -lt "$fin" ]; do
+    if [ "$(cpu_libre_pct)" -gt 85 ]; then seguidas=$((seguidas + 1)); else seguidas=0; fi
+  done
+  [ "$seguidas" -ge 2 ] && log "en reposo" || log "AVISO: sigue ocupado tras 20 min; se sigue igual"
+fi
+
 sh_adb settings put global sysui_demo_allowed 1
 demo enter
 demo clock -e hhmm 1200
@@ -156,6 +184,17 @@ if ! responde http://127.0.0.1:8000/health; then
   fi
 fi
 
+# Un Metro ajeno en el 8081 (otra sesion sirviendo su rama desde otro
+# worktree) haria que la suite probara ese codigo sin enterarse.
+if curl -s -m 3 http://127.0.0.1:8081/status | grep -q running; then
+  pid_metro="$(ss -ltnpH 'sport = :8081' 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"
+  dir_metro="$(readlink "/proc/${pid_metro:-0}/cwd" 2>/dev/null || true)"
+  if [ -n "$dir_metro" ] && [ "$dir_metro" != "$REPO/apps/mobile" ]; then
+    log "ERROR: el Metro del 8081 (pid $pid_metro) sirve $dir_metro, no $REPO/apps/mobile."
+    log "       Paralo (o espera a que lo pare quien lo arranco) y vuelve a lanzar."
+    exit 1
+  fi
+fi
 if ! curl -s -m 3 http://127.0.0.1:8081/status | grep -q running; then
   log "Metro (8081) no responde: arrancando desde $REPO/apps/mobile"
   ( cd "$REPO/apps/mobile" && export CI=1 && en_segundo_plano setsid nohup npx expo start --port 8081 \

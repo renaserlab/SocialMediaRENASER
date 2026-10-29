@@ -47,5 +47,5 @@ tags:
     timeout: 15000
 - assertVisible: "Chat con Taller E2E\\..*"
 
-# La busqueda SIN resultados se queda en «Cargando…» (hallazgo M11): va en
-# bug-busqueda-sin-resultados.yaml.
+# La busqueda SIN resultados (hallazgo M11, ya corregido) va en
+# busqueda-sin-resultados.yaml.
