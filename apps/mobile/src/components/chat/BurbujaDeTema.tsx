@@ -127,6 +127,8 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
           activo={audioSonando === adjunto.id}
           alPulsar={() => alSonar(adjunto.id)}
           alTerminar={alParar}
+          // Mantener presionado abre el menú, como en General; tocar, escuchar.
+          alMantener={mantener}
         />
       );
     }
@@ -168,7 +170,9 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
     // temas, 30/10/2026). Sin nombre, como siempre.
     if (adjunto.kind !== 'video' || !adjunto.title?.trim()) return medio;
     return (
-      <View key={adjunto.id} style={styles.videoConNombre}>
+      // Con el ancho del video: medido por su contenido, un nombre largo lo
+      // ensancharía más que el video (ver el mismo arreglo en `ChatScreen`).
+      <View key={adjunto.id} style={[styles.videoConNombre, { width: anchoDeMedio }]}>
         <CabeceraDeAdjunto adjunto={adjunto} mio={mio} />
         {medio}
       </View>

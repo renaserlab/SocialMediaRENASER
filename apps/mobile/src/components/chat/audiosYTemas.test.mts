@@ -272,3 +272,32 @@ describe('revisión del 30/10/2026', () => {
     assert.equal((CHAT.match(/esDelNombre\(codigo\)/g) ?? []).length, 2);
   });
 });
+
+describe('certificación en el emulador (30/10/2026)', () => {
+  it('mantener presionada una nota de voz abre el menú; tocarla, la escucha', () => {
+    // En el chat y en un tema, la burbuja recibe la pulsación larga del mensaje.
+    const audio = CHAT.slice(CHAT.indexOf("if (adjunto.kind === 'audio') {"));
+    assert.match(
+      audio.slice(0, 900),
+      /<BurbujaDeNotaDeVoz[\s\S]*?alPulsar=\{\(\) => setAudioSonando\(adjunto\.id\)\}[\s\S]*?alMantener=\{alMantener\}/,
+    );
+    assert.match(fuente('components/chat/BurbujaDeTema.tsx'), /alTerminar=\{alParar\}\s*\/\/[^\n]*\n\s*alMantener=\{mantener\}/);
+    // Y en la burbuja es UN solo botón con los dos gestos: nada anidado en la web.
+    const caratula = VOZ.slice(VOZ.indexOf('function Caratula('));
+    assert.match(caratula, /<Pressable\s+onPress=\{alPulsar\}\s+onLongPress=\{alMantener\}/);
+    assert.equal((caratula.match(/<Pressable\b/g) ?? []).length, 1);
+  });
+
+  it('un video con nombre tiene ancho fijo, también al ras: no se sale de la burbuja propia', () => {
+    assert.match(
+      CHAT,
+      /contexto\.forma === 'al_ras' && !titulado\s*\?\s*\{ minWidth: anchoDeMedio \}\s*:\s*\{ width: anchoDeMedio \}/,
+    );
+    assert.match(CHAT, /<View key=\{adjunto\.id\} style=\{\[styles\.videoConNombre, \{ width: anchoDeMedio \}\]\}>/);
+    assert.match(CHAT, /videoConNombre: \{ gap: spacing\.sm \},/);
+    assert.match(
+      fuente('components/chat/BurbujaDeTema.tsx'),
+      /style=\{\[styles\.videoConNombre, \{ width: anchoDeMedio \}\]\}/,
+    );
+  });
+});
