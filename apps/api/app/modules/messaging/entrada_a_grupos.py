@@ -223,14 +223,21 @@ async def _tarjetas(db: AsyncSession, filas, uid: str) -> list[TarjetaDeGrupo]:
 
     `filas` trae `id`, `title`, `created_by`, `avatar_path` y `entrada`
     (`None` sin fila de ajustes). Cuantos son, quien administra, si quien mira
-    ya esta dentro, si tiene una solicitud viva y cuantos grupos y temas tiene
-    dentro se resuelven con un `IN` sobre los identificadores: seis consultas,
-    sean dos grupos o veinte (cuatro sin las tablas de la 0108 y la 0109).
+    ya esta dentro, si tiene una solicitud viva, cuantos grupos y temas tiene
+    dentro y si a quien mira lo sacaron se resuelven con un `IN` sobre los
+    identificadores: siete consultas, sean dos grupos o veinte (menos sin las
+    tablas de la 0108, la 0109 o la 0112).
+
+    `entrada` es la de QUIEN MIRA: `request` si lo sacaron, aunque este abierta.
     """
     if not filas:
         return []
     ids = [fila.id for fila in filas]
     grupos_dentro, temas_dentro = await _cuantos_dentro(db, ids)
+    # Para quien mira, una abierta de la que lo sacaron es «con solicitud»: la
+    # tarjeta dice como puede entrar EL, y la aplicacion enseña el candado y
+    # «Pedir unirme» sin saber nada de expulsiones.
+    sacado = await ajustes_de_grupo.donde_lo_sacaron(db, [str(i) for i in ids], uid)
 
     cuantos = dict(
         (
@@ -300,7 +307,11 @@ async def _tarjetas(db: AsyncSession, filas, uid: str) -> list[TarjetaDeGrupo]:
                     else "none"
                 ),
                 is_full=miembros >= grupos.MAX_MIEMBROS,
-                entrada="open" if fila.entrada == "open" else "request",
+                entrada=(
+                    "open"
+                    if fila.entrada == "open" and str(fila.id) not in sacado
+                    else "request"
+                ),
                 groups_count=grupos_dentro.get(str(fila.id), 0),
                 topics_count=temas_dentro.get(str(fila.id), 0),
             )
@@ -722,7 +733,8 @@ async def pedir_entrar(
     que hace que una aplicacion que no conoce `join` —la que ya esta en los
     telefonos— entre en una abierta con el boton de siempre: ignora la
     respuesta, vuelve a leer la tarjeta y la ve como miembro. Sin aviso a quien
-    administra: no hay nada que decidir (ver `unirse`). Las comunidades de
+    administra: no hay nada que decidir (ver `unirse`). SALVO A QUIEN SACO
+    QUIEN ADMINISTRA: para el es con solicitud, y queda pendiente con su aviso. Las comunidades de
     dentro de un grupo (`subgroups`) siguen como antes: tienen su propia
     entrada y su propio `…/subgroups/{id}/join`.
     """
@@ -748,7 +760,14 @@ async def pedir_entrar(
         por_enlace = await _por_donde_llega(db, conversation_id, fila, payload.code)
     if await hay_bloqueo(db, uid, fila.created_by):
         raise NotFoundError(_NO_ESTA, code="group_not_found")
-    abierta = comunidad is None and fila.entrada == "open"
+    # A quien saco quien administra, la abierta le es con solicitud: pedirlo
+    # deja la solicitud pendiente y avisa, como siempre. Solo se pregunta si
+    # esta abierta.
+    abierta = (
+        comunidad is None
+        and fila.entrada == "open"
+        and not await ajustes_de_grupo.donde_lo_sacaron(db, [conversation_id], uid)
+    )
 
     miembros = await _miembros(db, conversation_id)
     if str(uid) in miembros:
@@ -885,7 +904,8 @@ async def unirse(
     enlace activo; con un bloqueo entre los dos, el mismo 404 que si no
     existiera; 409 `group_is_full`, `join_request_too_soon` y
     `join_rate_limited`. Lo unico propio: con solicitud, 409
-    `group_requires_request` (se pide por `join-requests`).
+    `group_requires_request` (se pide por `join-requests`). Tambien a quien
+    saco quien administra: para el, una abierta es con solicitud.
 
     SOLO UNA COMUNIDAD, es decir, un chat de grupo de primer nivel. Un grupo de
     dentro tiene su propia ruta (`…/subgroups/{id}/join`) y el chat de un tema
@@ -921,7 +941,11 @@ async def unirse(
     )
     if await hay_bloqueo(db, uid, fila.created_by):
         raise NotFoundError(_NO_ESTA, code="group_not_found")
-    if fila.entrada != "open":
+    # Con solicitud, o abierta pero quien administra lo saco (0112): para el
+    # es con solicitud, y su tarjeta ya se lo dice.
+    if fila.entrada != "open" or await ajustes_de_grupo.donde_lo_sacaron(
+        db, [conversation_id], uid
+    ):
         raise ConflictError(
             "Para entrar en esta comunidad hay que pedirlo.",
             code="group_requires_request",
@@ -1097,6 +1121,8 @@ async def aceptar_solicitud(
             await grupos.exigir_que_sean_del_padre(db, padre, [persona])
         db.add(ConversationMember(conversation_id=conversation_id, user_id=persona))
         await grupos.sincronizar_temas(db, conversation_id, [persona], dentro=True)
+    # Quien administra dijo que si: si la habia sacado, eso deja de valer (0112).
+    await ajustes_de_grupo.olvidar_que_los_sacaron(db, conversation_id, [persona])
 
     solicitud.status = "approved"
     solicitud.resolved_at = datetime.now(timezone.utc)

@@ -41,6 +41,7 @@ from app.modules.messaging.models import (
     ConversationMember,
     GroupJoinRequest,
     GroupProfileListing,
+    GroupRemoval,
     GroupSettings,
 )
 
@@ -300,6 +301,68 @@ async def poner_en_mi_perfil(
             )
             .execution_options(synchronize_session=False)
         )
+
+
+async def donde_lo_sacaron(db: AsyncSession, conversation_ids: list[str], uid: str) -> set[str]:
+    """De cuales de esas comunidades saco a `uid` quien la administra. UNA consulta.
+
+    Para esa persona son «con solicitud» aunque esten abiertas (`GroupRemoval`).
+    Sin comunidades, o sin la 0112, ninguna y sin consultar: sin la 0112 todas
+    son con solicitud para todos.
+    """
+    if not conversation_ids or not await esquema.hay_comunidades_en_el_perfil(db):
+        return set()
+    return {
+        str(c)
+        for c in await db.scalars(
+            select(GroupRemoval.conversation_id).where(
+                GroupRemoval.conversation_id.in_(conversation_ids),
+                GroupRemoval.user_id == uid,
+            )
+        )
+    }
+
+
+async def anotar_que_lo_sacaron(
+    db: AsyncSession, conversation_id: str, uid: str, *, quien: str
+) -> None:
+    """Deja escrito que quien administra saco a `uid`. SIN COMMIT. Sin la 0112, nada.
+
+    Sacarlo otra vez actualiza la fila (cuando y quien), no la duplica: el
+    `on conflict` lo hace la base, sin una lectura previa.
+    """
+    if not await esquema.hay_comunidades_en_el_perfil(db):
+        return
+    ahora = func.now()
+    inserta = _insert_con_conflicto(db)
+    await db.execute(
+        inserta(GroupRemoval.__table__)
+        .values(conversation_id=conversation_id, user_id=uid, removed_by=quien)
+        .on_conflict_do_update(
+            index_elements=["conversation_id", "user_id"],
+            set_={"removed_at": ahora, "removed_by": quien},
+        )
+    )
+
+
+async def olvidar_que_los_sacaron(
+    db: AsyncSession, conversation_id: str, uids: list[str]
+) -> None:
+    """Quien administra los vuelve a meter: la expulsion deja de valer. SIN COMMIT.
+
+    Va en la transaccion que los mete (añadir a mano o aceptar su solicitud):
+    o vuelven y se olvida, o nada. Sin la 0112, nada.
+    """
+    if not uids or not await esquema.hay_comunidades_en_el_perfil(db):
+        return
+    await db.execute(
+        delete(GroupRemoval)
+        .where(
+            GroupRemoval.conversation_id == conversation_id,
+            GroupRemoval.user_id.in_(uids),
+        )
+        .execution_options(synchronize_session=False)
+    )
 
 
 async def avatares_de(db: AsyncSession, conversation_ids: list[str]) -> dict[str, str]:

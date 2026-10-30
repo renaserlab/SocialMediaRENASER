@@ -627,6 +627,9 @@ async def anadir_miembros(
             db.add(ConversationMember(conversation_id=conversation_id, user_id=persona))
         # En la misma transaccion: o entran al grupo y a sus temas, o a nada.
         await sincronizar_temas(db, conversation_id, nuevos, dentro=True)
+        # Quien administra los vuelve a meter: si los habia sacado, eso deja de
+        # valer (0112) y, si vuelven a salir, podran entrar solos en una abierta.
+        await ajustes_de_grupo.olvidar_que_los_sacaron(db, conversation_id, nuevos)
         try:
             await db.commit()
         except IntegrityError:
@@ -671,6 +674,13 @@ async def quitar_miembro(
     sus comunidades y de los chats de sus temas. Lo contrario dejaria a quien
     sacaron leyendo una comunidad del grupo del que lo sacaron. Del chat de un
     tema no se sale por separado (409): se sale del grupo.
+
+    A QUIEN SACA QUIEN ADMINISTRA, SE LE APUNTA (0112, decision del
+    30/10/2026): desde entonces, para esa persona la comunidad es «con
+    solicitud» aunque este abierta. Si no, en una abierta volveria a entrar con
+    un toque y sacarla no serviria de nada. Quien sale por su cuenta no queda
+    apuntado: puede volver como cualquiera. Solo en una comunidad de primer
+    nivel: los grupos de dentro tienen su propia entrada.
     """
     uid = current_user.id
     ensure_uuid(user_id, "Persona no encontrada.")
@@ -706,4 +716,6 @@ async def quitar_miembro(
 
     await subgrupos.sacar_de_todas(db, conversation_id, objetivo)
     await sincronizar_temas(db, conversation_id, [objetivo], dentro=False)
+    if not se_va_sola and await subgrupos.fila_de(db, conversation_id) is None:
+        await ajustes_de_grupo.anotar_que_lo_sacaron(db, conversation_id, objetivo, quien=uid)
     await db.commit()
