@@ -3258,6 +3258,10 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           activo={audioSonando === adjunto.id}
           alPulsar={() => setAudioSonando(adjunto.id)}
           alTerminar={() => setAudioSonando(null)}
+          // Mantener presionado abre el menú del mensaje, como en una foto o
+          // un archivo; tocar sigue siendo escuchar. Sin esto, la pulsación
+          // larga caía en el play (certificación del 30/10/2026).
+          alMantener={alMantener}
         />
       );
     }
@@ -3324,8 +3328,18 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
         style={[
           styles.medio,
           contexto.forma === 'sin_marco' && styles.medioSinMarco,
-          contexto.forma === 'al_ras' && styles.medioAlRas,
-          contexto.forma === 'al_ras' ? { minWidth: anchoDeMedio } : { width: anchoDeMedio },
+          contexto.forma === 'al_ras' && (titulado ? styles.medioConNombreAlRas : styles.medioAlRas),
+          /*
+            UN VIDEO CON NOMBRE TIENE ANCHO FIJO, también al ras. Estirado
+            (`alignSelf: 'stretch'` con un ancho mínimo y su proporción) dentro
+            de una burbuja que se mide por su contenido, Yoga calculaba el alto
+            de la burbuja con un ancho y el del video con otro: en la burbuja
+            propia el video se salía, la hora quedaba encima y el mensaje
+            siguiente lo tapaba (certificación del 30/10/2026).
+          */
+          contexto.forma === 'al_ras' && !titulado
+            ? { minWidth: anchoDeMedio }
+            : { width: anchoDeMedio },
           { aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) },
         ]}
       >
@@ -3343,7 +3357,7 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
     );
     if (!titulado) return medio;
     return (
-      <View key={adjunto.id} style={styles.videoConNombre}>
+      <View key={adjunto.id} style={[styles.videoConNombre, { width: anchoDeMedio }]}>
         <CabeceraDeAdjunto
           adjunto={adjunto}
           mio={mio}
@@ -4265,8 +4279,10 @@ const styles = StyleSheet.create({
   // Se estira a lo que mida la burbuja —que puede ensancharla el texto—, y
   // nunca menos que una foto suelta.
   medioAlRas: { alignSelf: 'stretch', borderRadius: 16 },
-  // Un video con nombre: la tarjeta encima y el video debajo.
-  videoConNombre: { alignSelf: 'stretch', gap: spacing.sm },
+  // Un video con nombre: la tarjeta encima y el video debajo, con el ancho
+  // del video y no estirado (ver el comentario de su `style`).
+  videoConNombre: { gap: spacing.sm },
+  medioConNombreAlRas: { borderRadius: 16 },
   cabeceraAlRas: {
     paddingHorizontal: RELLENO_H - MARCO_FINO,
     paddingTop: RELLENO_V - MARCO_FINO,
