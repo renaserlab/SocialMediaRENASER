@@ -1351,11 +1351,99 @@ def test_la_0113_solo_anade_y_el_relleno_corre_una_vez():
     assert codigo_sql.count("update public.message_attachments") == 1
 
 
+#: Los `CHECK` de la 0113 que repite el modelo con el mismo nombre.
+CHECKS_DE_LA_0113 = (
+    "message_attachments_title_check",
+    "message_attachments_title_sin_control_check",
+    "message_attachments_title_no_en_fotos_check",
+    "message_attachments_voice_note_solo_audio_check",
+)
+
+
+def test_las_reglas_del_nombre_tambien_estan_en_la_base():
+    """Certificación del 30/10/2026: por PostgREST se podía insertar una foto
+    con nombre de dos líneas y `voice_note = true`. Ahora lo paran tres
+    `CHECK`, y antes de cada uno se mira si alguna fila ya lo incumple."""
+    codigo_sql = _sin_comentarios(MIGRACION.read_text(encoding="utf-8"))
+    for nombre, condicion in (
+        (
+            "message_attachments_title_sin_control_check",
+            r"check \(title is null or title !~ '\[\\u0001-\\u001f\\u007f-\\u009f\]'\)",
+        ),
+        (
+            "message_attachments_title_no_en_fotos_check",
+            r"check \(title is null or kind in \('audio', 'document', 'video'\)\)",
+        ),
+        ("message_attachments_voice_note_solo_audio_check", r"check \(not voice_note or kind = 'audio'\)"),
+    ):
+        assert re.search(
+            rf"drop constraint if exists {nombre};\s+alter table public\.message_attachments\s+"
+            rf"add constraint {nombre}\s+{condicion}",
+            codigo_sql,
+        ), nombre
+        # Y la vuelta atrás lo quita.
+        assert f"drop constraint if exists {nombre};" in MIGRACION.read_text(encoding="utf-8").split(
+            "VUELTA ATRÁS"
+        )[1]
+    # La comprobación previa va ANTES de los `CHECK`, y para con un mensaje.
+    previa = codigo_sql.index("where voice_note and kind <> 'audio'")
+    assert previa < codigo_sql.index("add constraint message_attachments_title_sin_control_check")
+    assert codigo_sql.count("raise exception") >= 4
+
+
+@pytest.mark.asyncio
+async def test_la_base_de_las_pruebas_tambien_para_lo_que_para_la_0113(entorno):
+    """Los `CHECK` repetidos en el modelo: lo que producción rechaza, aquí también."""
+    _, sesiones, _ = entorno
+    mid = await _escrito(sesiones)
+    for kind, titulo, voz in (
+        ("document", "Dos\nlíneas", False),
+        ("audio", "C1\u0085medio", True),
+        ("audio", "Borrar\u007f", True),
+        ("image", "Una foto", False),
+        ("document", None, True),
+        ("video", "Clase", True),
+    ):
+        async with sesiones() as db:
+            with pytest.raises(IntegrityError):
+                await db.execute(
+                    insert(MessageAttachment.__table__).values(
+                        id=str(uuid4()),
+                        message_id=mid,
+                        conversation_id=GRUPO,
+                        storage_path=f"{GRUPO}/{ANA}/x",
+                        kind=kind,
+                        title=titulo,
+                        voice_note=voz,
+                    )
+                )
+                await db.commit()
+    # Lo correcto sí entra.
+    async with sesiones() as db:
+        for kind, titulo, voz in (
+            ("audio", "Respiración 🌬️ 4\u200b7", True),
+            ("audio", "Clase 3", False),
+            ("image", None, False),
+        ):
+            await db.execute(
+                insert(MessageAttachment.__table__).values(
+                    id=str(uuid4()),
+                    message_id=mid,
+                    conversation_id=GRUPO,
+                    storage_path=f"{GRUPO}/{ANA}/{uuid4()}",
+                    kind=kind,
+                    title=titulo,
+                    voice_note=voz,
+                )
+            )
+        await db.commit()
+
+
 def test_el_modelo_dice_lo_mismo_que_la_0113():
     tabla = MessageAttachment.__table__
     assert {"title", "voice_note"} <= {c.name for c in tabla.columns}
     assert tabla.c.title.nullable and not tabla.c.voice_note.nullable
-    assert "message_attachments_title_check" in {c.name for c in tabla.constraints}
+    assert set(CHECKS_DE_LA_0113) <= {c.name for c in tabla.constraints}
     # Fuera del mapeo: el ORM no las pide nunca (ver el docstring del modelo).
     mapeadas = {p.key for p in MessageAttachment.__mapper__.column_attrs}
     assert not {"title", "voice_note"} & mapeadas
