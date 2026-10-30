@@ -703,7 +703,14 @@ async def _leer_temas(
         )
     }
 
-    # Cuantos mensajes propios VIVOS tiene cada chat de tema.
+    # Cuantos mensajes propios VIVOS tiene cada chat de tema. EXACTO, sin tope:
+    # la aplicacion lo escribe tal cual («37 escritos aqui») y lo repite al
+    # pedir confirmacion para eliminar el tema.
+    #
+    # Lo contesta el indice parcial `messages_vivos_idx` (0111) sin abrir la
+    # tabla: guarda `(conversation_id, created_at)` de los mensajes vivos, que
+    # es todo lo que esta consulta mira. Una condicion mas sobre otra columna
+    # (el autor, el texto) obligaria a visitar cada fila del chat otra vez.
     propios = {
         str(chat): int(total)
         for chat, total in await db.execute(

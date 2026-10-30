@@ -35,6 +35,8 @@ al leer no puede quedarse vieja. Lo que la hace asumible:
     que tiene indice;
   * las palabras son un `ILIKE` con los comodines escapados; y exigen tres
     letras, que es lo que el indice trigram de la 0046 sabe aprovechar;
+  * «lleva un enlace» tiene su propio indice parcial (0111), que solo guarda
+    los mensajes vivos con enlace: contarlos no lee el resto del historial;
   * se pagina siempre, y nunca se trae la conversacion a memoria.
 
 LOS CRITERIOS NO SON CODIGO. Llegan como datos, se validan contra listas
@@ -56,7 +58,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import and_, case, false, func, or_, select, update
+from sqlalchemy import and_, case, false, func, literal, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -110,6 +112,12 @@ _TIPOS_DE_CATEGORIA = {"media": ["image", "video"]}
 #: La aplicacion reconoce ademas dominios escritos a pelo («renaser.pe»); aqui
 #: no, porque un `LIKE '%.pe%'` confundiria «etc.pero» con un sitio. Quien
 #: quiera que su enlace salga en «Enlaces» lo pega como sale al copiarlo.
+#:
+#: ESTAS TRES MARCAS ESTAN COPIADAS EN LA CONDICION DEL INDICE
+#: `messages_con_enlace_idx` (migracion 0111). PostgreSQL solo usa un indice
+#: parcial si la consulta pide lo mismo que el guarda, asi que cambiar una aqui
+#: sin rehacer el indice no rompe ninguna cuenta: la vuelve lenta, porque
+#: contar los enlaces volveria a leer la conversacion entera.
 _MARCAS_DE_ENLACE = ("%http://%", "%https://%", "%www.%")
 
 MAX_FILTROS_POR_CONVERSACION = 20
@@ -251,6 +259,32 @@ def _con_adjunto(tipos: list[str] | None = None) -> ColumnElement[bool]:
     return consulta.correlate(Message).exists()
 
 
+def _con_enlace() -> ColumnElement[bool]:
+    """«El texto de este mensaje lleva un enlace». UNA sola definicion.
+
+    La usan la cuenta de «Enlaces» y la lista de esa pestaña, y tienen que
+    decir lo mismo: si la cuenta dijera 12 y la lista trajera 11, el numero
+    estaria mintiendo.
+
+    LAS MARCAS VAN ESCRITAS EN EL SQL, NO COMO PARAMETROS (`literal_execute`).
+    El indice de la 0111 es PARCIAL: guarda solo los mensajes vivos con
+    enlace, y PostgreSQL solo lo usa si, al planificar, puede demostrar que la
+    consulta pide lo mismo que el guarda. Con `$2`, `$3` y `$4` no puede
+    demostrarlo, y asyncpg prepara las sentencias y las reutiliza: en cuanto
+    PostgreSQL pasara al plan generico de la sentencia preparada, la cuenta
+    volveria a leer la conversacion entera. Son tres textos fijos de este
+    fichero —ni una letra la escribe quien usa la aplicacion—, y SQLAlchemy los
+    escribe con su propio escapado, asi que no abren ninguna inyeccion. Las
+    palabras de un filtro siguen yendo como parametros.
+    """
+    return or_(
+        *(
+            Message.body.ilike(literal(marca, literal_execute=True))
+            for marca in _MARCAS_DE_ENLACE
+        )
+    )
+
+
 def _condiciones(criterios: Criterios, *, con_adjuntos: bool) -> list[ColumnElement[bool]]:
     """Los criterios, como condiciones sobre `messages`.
 
@@ -266,7 +300,7 @@ def _condiciones(criterios: Criterios, *, con_adjuntos: bool) -> list[ColumnElem
         if de_adjunto and con_adjuntos:
             de_alguno.append(_con_adjunto(de_adjunto))
         if "link" in criterios.types:
-            de_alguno.append(or_(*(Message.body.ilike(m) for m in _MARCAS_DE_ENLACE)))
+            de_alguno.append(_con_enlace())
         if "text" in criterios.types:
             con_texto = func.length(func.trim(Message.body)) > 0
             de_alguno.append(
@@ -615,15 +649,21 @@ async def _cuentas(
         for tipo, cuantos in zip((*TIPOS_DE_ADJUNTO, "media"), fila, strict=True):
             cuentas[tipo] = int(cuantos or 0)
 
+    # LA CUENTA ES EXACTA Y SE QUEDA EXACTA. La pantalla «Contenido» del 09/10
+    # (1fcaf49, aplicacion 1.2.1) la pinta tal cual en la pestaña («Enlaces ·
+    # 1234»), y un telefono puede seguir con ese codigo: un tope tipo «99+»
+    # cambiaria lo que ve. La de hoy solo mira si es cero.
+    #
+    # Lo que la hace barata es el indice parcial de la 0111: sus condiciones
+    # son exactamente estas —conversacion, vivo, fecha y `_con_enlace()`—, y
+    # PostgreSQL la contesta leyendo solo el indice, que guarda los mensajes
+    # con enlace y nada mas. Antes recorria todos los enlaces de la base, o la
+    # conversacion entera.
     cuentas["link"] = int(
         await db.scalar(
             select(func.count())
             .select_from(Message)
-            .where(
-                Message.conversation_id == conversation_id,
-                *vivos,
-                or_(*(Message.body.ilike(m) for m in _MARCAS_DE_ENLACE)),
-            )
+            .where(Message.conversation_id == conversation_id, *vivos, _con_enlace())
         )
         or 0
     )
