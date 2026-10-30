@@ -239,10 +239,14 @@ export async function hacerFoto(): Promise<AdjuntoElegido | null> {
  *
  * SALVO UN AUDIO que se sabe reproducir (mp3, m4a, aac, ogg, wav): ese va como
  * `audio` con `voiceNote: false`, y en el chat se escucha en vez de bajarse.
- * Ver `tipoDeArchivoElegido`.
+ * Ver `tipoDeArchivoElegido`. SOLO CON `audios`, que es tener la 0113 en el
+ * servidor (`attachment_titles`): una API anterior rechaza un audio que no
+ * es nota de voz porque no trae duración, así que sin ella va como documento,
+ * exactamente igual que antes.
  */
 export async function elegirArchivo(
   maximo: number = MAX_ARCHIVOS_DE_UNA_VEZ,
+  { audios = true }: { audios?: boolean } = {},
 ): Promise<{ archivos: AdjuntoElegido[]; sobran: number }> {
   const resultado = await DocumentPicker.getDocumentAsync({
     type: '*/*',
@@ -254,7 +258,7 @@ export async function elegirArchivo(
   const tope = Math.max(1, maximo);
   return {
     archivos: todos.slice(0, tope).map((asset): AdjuntoElegido => {
-      const kind = tipoDeArchivoElegido(asset.mimeType, asset.name);
+      const kind = audios ? tipoDeArchivoElegido(asset.mimeType, asset.name) : 'document';
       return {
         uri: asset.uri,
         kind,

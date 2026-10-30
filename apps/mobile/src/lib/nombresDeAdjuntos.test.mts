@@ -28,6 +28,8 @@ import {
   type TemaDeMensaje,
 } from './nombresDeAdjuntos.ts';
 import { es } from '../i18n/es.ts';
+import { leerCita, textoDeCita } from './reaccionesDeChat.ts';
+import { leerUltimo, resumenDeUltimo } from './temasDeGrupo.ts';
 
 /*
   Audios y temas (30/10/2026): el nombre de un adjunto y los temas de un
@@ -313,5 +315,45 @@ describe('lo pequeño', () => {
     assert.deepEqual(alternarSeleccion(antes, 'b'), ['a', 'b']);
     assert.deepEqual(alternarSeleccion(antes, 'a'), []);
     assert.deepEqual(antes, ['a']);
+  });
+});
+
+describe('una cita o lo último de un tema que es un audio sin texto', () => {
+  const cita = (extra: Record<string, unknown>) =>
+    leerCita({ id: 'm1', sender_id: 'u1', sender_name: 'Ana', excerpt: '', kind: 'audio', ...extra });
+  const ultimo = (extra: Record<string, unknown>) =>
+    leerUltimo({ sender_name: 'Ana', excerpt: '', kind: 'audio', at: null, ...extra });
+
+  it('dice «Nota de voz» si lo es y «Audio» si es un archivo de audio', () => {
+    assert.deepEqual(textoDeCita(cita({ voice_note: true })!), { clave: 'chat.replyVoiceNote' });
+    assert.deepEqual(textoDeCita(cita({ voice_note: false })!), { clave: 'chat.replyAudio' });
+    assert.deepEqual(resumenDeUltimo(ultimo({ voice_note: true })!), { clave: 'chat.replyVoiceNote' });
+    assert.deepEqual(resumenDeUltimo(ultimo({ voice_note: false })!), { clave: 'chat.replyAudio' });
+    assert.equal(es['chat.replyVoiceNote'], 'Nota de voz');
+    assert.equal(es['chat.replyAudio'], 'Audio');
+  });
+
+  it('una API anterior no manda el campo: «Audio», como siempre', () => {
+    assert.deepEqual(textoDeCita(cita({})!), { clave: 'chat.replyAudio' });
+    assert.equal(cita({})?.notaDeVoz, undefined);
+    assert.deepEqual(resumenDeUltimo(ultimo({})!), { clave: 'chat.replyAudio' });
+  });
+
+  it('con nombre, el extracto lo trae y es lo que se lee', () => {
+    assert.deepEqual(textoDeCita(cita({ voice_note: true, excerpt: 'Meditación de la mañana' })!), {
+      texto: 'Meditación de la mañana',
+    });
+    assert.deepEqual(resumenDeUltimo(ultimo({ voice_note: false, excerpt: 'Respiración 4-7-8' })!), {
+      texto: 'Respiración 4-7-8',
+    });
+  });
+
+  it('solo un audio lleva la marca; lo demás se lee igual que antes', () => {
+    assert.equal(cita({ kind: 'image', voice_note: true })?.notaDeVoz, undefined);
+    assert.equal(ultimo({ kind: 'document', voice_note: true })?.notaDeVoz, undefined);
+    // De un mensaje borrado no se dice nada.
+    assert.deepEqual(textoDeCita(cita({ deleted: true, voice_note: true })!), {
+      clave: 'chat.deletedMessage',
+    });
   });
 });

@@ -79,6 +79,7 @@ import { sePuedeResponder } from '@/lib/deslizarParaResponder';
 import { medioQueEs, soloLlevaMedios, vaSinMarco } from '@/lib/mediosDeChat';
 import {
   MAX_ARCHIVOS_DE_UNA_VEZ,
+  MAX_TITULO_DE_ADJUNTO,
   adjuntoNombrable,
   aplicarTemas,
   conTituloDeAdjunto,
@@ -1243,7 +1244,8 @@ export function ChatScreen() {
     setMenuAbierto(false);
     await afterSheetClose();
     try {
-      const eleccion = await elegirArchivo(MAX_ARCHIVOS_DE_UNA_VEZ);
+      // Sin la 0113 (`attachment_titles`), un audio va como documento, como antes.
+      const eleccion = await elegirArchivo(MAX_ARCHIVOS_DE_UNA_VEZ, { audios: funciones.nombres });
       if (eleccion.archivos.length > 0) setArchivosPorEnviar(eleccion);
     } catch (error) {
       notify(
@@ -1251,11 +1253,19 @@ export function ChatScreen() {
         error instanceof PermisoDenegadoError ? error.message : t('chat.pickerFailed'),
       );
     }
-  }, [t]);
+  }, [t, funciones.nombres]);
 
   const quitarElegido = useCallback((indice: number) => {
     setElegidos((previos) => previos.filter((_, i) => i !== indice));
   }, []);
+
+  /*
+    EL NOMBRE DE CADA VIDEO ELEGIDO, por su dirección en el teléfono. Lo
+    escribe `NombresDeVideos` y se lee AL ENVIAR: en una referencia y no en el
+    estado, para que teclear un nombre no repinte la pantalla entera (la
+    misma razón por la que el redactor lleva su propio texto).
+  */
+  const nombresDeVideos = useRef<Record<string, string>>({});
 
   // -------------------------------------------------------------------------
   // Enviar
@@ -1470,9 +1480,14 @@ export function ChatScreen() {
       mensaje.sender === 'me'
         ? t('chatViews.you')
         : nombreDelAutor(infoDeConversacion, mensaje.autorId, mensaje.autorNombre) || headerName,
-    extracto: mensaje.text.replace(/\s+/g, ' ').trim().slice(0, 140),
+    // Sin texto, el nombre del adjunto, como hace el servidor con `excerpt`.
+    extracto: (mensaje.text.replace(/\s+/g, ' ').trim() || mensaje.attachments?.[0]?.title?.trim() || '')
+      .slice(0, 140),
     tipo: mensaje.attachments?.[0]?.kind ?? null,
     eliminado: false,
+    ...(mensaje.attachments?.[0]?.kind === 'audio'
+      ? { notaDeVoz: mensaje.attachments[0].voiceNote !== false }
+      : {}),
   });
 
   /**
@@ -1493,13 +1508,19 @@ export function ChatScreen() {
 
     const envio: EnvioPendiente = {
       texto: body,
-      archivos: elegidos,
+      // Cada video, con el nombre que se le escribió (si se le escribió).
+      archivos: elegidos.map((archivo) =>
+        archivo.kind === 'video' && nombresDeVideos.current[archivo.uri]
+          ? { ...archivo, title: nombresDeVideos.current[archivo.uri] }
+          : archivo,
+      ),
       respondeA: respondiendoA?.id,
       cita: respondiendoA ? citaDe(respondiendoA) : undefined,
     };
     // Enviado: para los demás, ya no se está escribiendo.
     escritura.alParar();
     setElegidos([]);
+    nombresDeVideos.current = {};
     setRespondiendoA(null);
     void mandar(envio);
     return true;
@@ -2688,6 +2709,18 @@ export function ChatScreen() {
         ) : null}
 
         {/*
+          EL NOMBRE DE CADA VIDEO, opcional (audios y temas, 30/10/2026). Con
+          fotos y videos elegidos juntos solo lo llevan los videos: una foto
+          no tiene nombre. Viaja como su `title`; sin la 0113, no hay campo.
+        */}
+        {funciones.nombres && elegidos.some((archivo) => archivo.kind === 'video') ? (
+          <NombresDeVideos
+            videos={elegidos.filter((archivo) => archivo.kind === 'video')}
+            nombres={nombresDeVideos}
+          />
+        ) : null}
+
+        {/*
           A QUÉ SE ESTÁ RESPONDIENDO, mientras se escribe. Con su X: quien se
           arrepiente manda un mensaje normal.
         */}
@@ -2925,7 +2958,8 @@ export function ChatScreen() {
           EL NOMBRE de un audio, documento o video: quien lo envió y quien
           administra (la misma regla que borrar). Lo decide el servidor.
         */}
-        {accionesDe &&
+        {funciones.nombres &&
+        accionesDe &&
         puedeNombrar({
           mio: accionesDe.sender === 'me',
           administra: puedoBorrarAjenos,
@@ -2957,6 +2991,8 @@ export function ChatScreen() {
         onClose={() => setTemasPara(null)}
         // Sin nombre todavía: la hoja ofrece ponérselo al organizarlo.
         adjuntoSinNombre={(() => {
+          // Sin la 0113 no hay nombres: la hoja no ofrece el campo.
+          if (!funciones.nombres) return null;
           const adjunto = adjuntoNombrable(temasPara?.attachments);
           return adjunto && !adjunto.title ? adjunto : null;
         })()}
@@ -2980,6 +3016,7 @@ export function ChatScreen() {
 
       <HojaDeEnviarArchivos
         eleccion={archivosPorEnviar}
+        conNombres={funciones.nombres}
         onClose={() => setArchivosPorEnviar(null)}
         alEnviar={(archivos) => void enviarArchivos(archivos)}
       />
@@ -3874,6 +3911,46 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
   );
 });
 
+/**
+ * Un campo de nombre por cada video elegido de la galería, debajo de lo
+ * elegido (audios y temas, 30/10/2026). Con fotos y videos juntos solo los
+ * videos lo llevan: una foto no tiene nombre.
+ *
+ * LLEVA SU PROPIO TEXTO, como el redactor: si viviera en la pantalla, cada
+ * tecla la repintaría entera. Lo escrito se deja en `nombres`, que la
+ * pantalla lee al enviar.
+ */
+function NombresDeVideos({
+  videos,
+  nombres,
+}: {
+  videos: AdjuntoElegido[];
+  nombres: React.MutableRefObject<Record<string, string>>;
+}) {
+  const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  const [textos, setTextos] = useState<Record<string, string>>(() => ({ ...nombres.current }));
+  return (
+    <View style={[styles.nombresDeVideos, { borderTopColor: colors.border }]}>
+      {videos.map((video, indice) => (
+        <Input
+          key={`${video.uri}-${indice}`}
+          value={textos[video.uri] ?? ''}
+          onChangeText={(texto) => {
+            nombres.current = { ...nombres.current, [video.uri]: texto };
+            setTextos((actuales) => ({ ...actuales, [video.uri]: texto }));
+          }}
+          placeholder={t('videoName.placeholder')}
+          accessibilityLabel={t('videoName.label', { n: indice + 1 })}
+          maxLength={MAX_TITULO_DE_ADJUNTO}
+          forma="pastilla"
+          style={{ minHeight: 36 }}
+        />
+      ))}
+    </View>
+  );
+}
+
 type PropsDelRedactor = {
   funciones: FuncionesDelChat;
   grabadora: ReturnType<typeof useGrabadoraDeVoz>;
@@ -4020,9 +4097,10 @@ function RedactorDelChat({
           eliminar={() => grabadora.eliminar()}
           enviar={() => void grabadora.enviar()}
           deshabilitado={enviando}
-          // «Ponle nombre (opcional)» en la previa: viaja como `title`.
+          // «Ponle nombre (opcional)» en la previa: viaja como `title`. Sin
+          // la 0113 no hay campo, y la nota sale como siempre.
           nombre={grabadora.nombre}
-          alCambiarNombre={grabadora.setNombre}
+          alCambiarNombre={funciones.nombres ? grabadora.setNombre : undefined}
         />
       ) : (
         // El mismo botón redondo que en comentarios: crece cuando hay algo
@@ -4210,6 +4288,11 @@ const styles = StyleSheet.create({
   },
   accionFallo: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   previa: { maxHeight: 96, borderTopWidth: 1 },
+  nombresDeVideos: {
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
   previaContenido: { gap: spacing.sm, padding: spacing.sm },
   previaItem: {
     width: 72,

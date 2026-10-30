@@ -122,7 +122,8 @@ test('toda clave que puede salir de una cita está en el diccionario', () => {
   // y en la burbuja se pintaría la clave cruda.
   const fuente = leer('./reaccionesDeChat.ts');
   const claves = [...fuente.matchAll(/clave: '([\w.]+)'/g)].map((casa) => casa[1] as string);
-  assert.equal(claves.length, 6);
+  // Siete desde audios y temas (30/10/2026): «Nota de voz» además de «Audio».
+  assert.equal(claves.length, 7);
   for (const clave of claves) assert.ok(clave in es, clave);
 });
 
