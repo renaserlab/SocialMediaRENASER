@@ -169,6 +169,7 @@ async def test_sin_la_0112_el_perfil_la_tarjeta_y_los_ajustes_salen_como_antes(e
     perfil = await _perfil(http, identidad)
     assert cid in perfil and oculta not in perfil
     tarjeta = perfil[cid]
+    # En la tarjeta, «con solicitud»: es lo que leen la app de antes y la nueva.
     assert (tarjeta["entrada"], tarjeta["my_status"], tarjeta["members_count"]) == ("request", "none", 2)
     assert (tarjeta["groups_count"], tarjeta["topics_count"]) == (0, 0)
 
@@ -179,7 +180,8 @@ async def test_sin_la_0112_el_perfil_la_tarjeta_y_los_ajustes_salen_como_antes(e
         "listed_on_profile": True,
         "invite_enabled": False,
         "invite_code": None,
-        "entrada": "request",
+        # Sin la 0112 no se puede elegir: `None`, para que la app no lo ofrezca.
+        "entrada": None,
     }
     assert (await http.get(f"{API}/{oculta}/info")).json()["settings"]["listed_on_profile"] is False
 
@@ -203,7 +205,8 @@ async def test_sin_la_0112_en_mi_perfil_escribe_la_columna_de_siempre(entorno) -
         "listed_on_profile": True,
         "invite_enabled": False,
         "invite_code": None,
-        "entrada": "request",
+        # Sin la 0112 no se puede elegir: `None`, para que la app no lo ofrezca.
+        "entrada": None,
     }
     assert cid in await _perfil(http, identidad)
 

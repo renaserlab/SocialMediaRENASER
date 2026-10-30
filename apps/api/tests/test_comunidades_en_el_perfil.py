@@ -271,6 +271,42 @@ async def test_en_mi_perfil_es_de_quien_pregunta(entorno):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("con_fila", "columna"),
+    [
+        # La API anterior la QUITÓ del perfil: escribió la columna y dejó la fila.
+        (True, False),
+        # La API anterior la PUSO: escribió la columna y no hay fila.
+        (False, True),
+    ],
+)
+async def test_si_la_fila_y_la_columna_no_coinciden_no_sale_en_el_perfil(entorno, con_fila, columna):
+    http, sesiones, identidad = entorno
+    async with sesiones() as db:
+        db.add(GroupSettings(conversation_id=GRUPO, listed_on_profile=columna))
+        if con_fila:
+            db.add(GroupProfileListing(conversation_id=GRUPO, user_id=ANA))
+        await db.commit()
+        # Abierta, para que tampoco se pueda entrar «desde el perfil».
+        await db.execute(update(GroupSettings.__table__).values(entrada="open"))
+        await db.commit()
+
+    assert await _perfil(http, identidad) == []
+    for respuesta in (await _pedir(http), await _unirse(http)):
+        assert respuesta.status_code == 404
+        assert codigo(respuesta) == "group_not_found"
+    assert not await _es_miembro(sesiones, GRUPO, DAVID)
+    # El interruptor de quien administra dice lo mismo que su perfil.
+    identidad["uid"] = ANA
+    assert (await http.get(f"{API}/{GRUPO}/info")).json()["settings"]["listed_on_profile"] is False
+
+    # Encenderlo con esta API escribe las dos, y vuelve a salir.
+    assert (await _ajustar(http, identidad, listed_on_profile=True)).json()["listed_on_profile"] is True
+    assert [t["id"] for t in await _perfil(http, identidad)] == [GRUPO]
+    assert (await _unirse(http)).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_el_enlace_cambiado_responde_con_mi_perfil(entorno):
     http, _, identidad = entorno
     await _ajustar(http, identidad, listed_on_profile=True, invite_enabled=True)
@@ -664,6 +700,57 @@ async def test_la_aplicacion_antigua_entra_en_una_abierta_pidiendolo(entorno, av
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tenia_pendiente", [False, True])
+async def test_si_quien_administra_lo_mete_a_la_vez_entrar_no_falla(entorno, monkeypatch, tenia_pendiente):
+    """Pide entrar (o toca «Unirme») en el mismo instante en que quien
+    administra lo añade a mano: la comprobación de «ya está dentro» no lo ve,
+    y al entrar choca con la fila que acaba de escribir quien administra. Ya
+    está dentro, que es lo que pidió: éxito, no 409."""
+    http, sesiones, identidad = entorno
+    await _ajustar(http, identidad, listed_on_profile=True)
+    pendiente = None
+    if tenia_pendiente:
+        identidad["uid"] = DAVID
+        pendiente = (await _pedir(http)).json()["id"]
+    await _ajustar(http, identidad, entrada="open")
+    identidad["uid"] = ANA
+    assert (await http.post(f"{API}/{GRUPO}/members", json={"user_ids": [DAVID]})).status_code == 200
+
+    # El instante de la carrera: lo que se leyó antes de que Ana lo añadiera.
+    sin_david = entrada_a_grupos._miembros
+
+    async def _antes_de_que_lo_anadieran(db, conversation_id):
+        return await sin_david(db, conversation_id) - {DAVID}
+
+    monkeypatch.setattr(entrada_a_grupos, "_miembros", _antes_de_que_lo_anadieran)
+
+    identidad["uid"] = DAVID
+    pedida = await _pedir(http)
+    assert pedida.status_code == 201, pedida.text
+    assert pedida.json()["status"] == "approved"
+    # Su petición queda escrita como cumplida: la pendiente que tenía, o una nueva.
+    [(ident, estado, _, quien)] = await _solicitudes(sesiones)
+    assert (estado, quien) == ("approved", None)
+    assert pedida.json()["id"] == (pendiente or ident)
+
+    unirse = await _unirse(http)
+    assert unirse.status_code == 200, unirse.text
+    assert unirse.json()["my_status"] == "member"
+    assert len(await _solicitudes(sesiones)) == 1
+    async with sesiones() as db:
+        assert len(
+            (
+                await db.execute(
+                    select(ConversationMember).where(
+                        ConversationMember.conversation_id == GRUPO,
+                        ConversationMember.user_id == DAVID,
+                    )
+                )
+            ).all()
+        ) == 1
+
+
+@pytest.mark.asyncio
 async def test_las_comunidades_de_dentro_se_siguen_pidiendo_como_antes(entorno, avisos):
     """Un grupo de dentro `open` tiene su propia ruta; por `join-requests` sigue
     quedando pendiente, aunque su comunidad sea abierta."""
@@ -889,7 +976,8 @@ async def test_sin_la_0112_todo_funciona_como_antes(sin_la_0112, avisos):
         "listed_on_profile": True,
         "invite_enabled": True,
         "invite_code": codigo_del_enlace,
-        "entrada": "request",
+        # Sin la 0112 no se puede elegir cómo se entra: `None`, y la app no lo ofrece.
+        "entrada": None,
     }
     assert (await http.get(f"{API}/{GRUPO}/info")).json()["settings"] == puesta.json()
     async with sesiones() as db:
@@ -929,7 +1017,7 @@ async def test_sin_la_0112_todo_funciona_como_antes(sin_la_0112, avisos):
     identidad["uid"] = ANA
     cambiado = await http.post(f"{API}/{GRUPO}/group/invite/rotate")
     assert cambiado.status_code == 200
-    assert (cambiado.json()["listed_on_profile"], cambiado.json()["entrada"]) == (False, "request")
+    assert (cambiado.json()["listed_on_profile"], cambiado.json()["entrada"]) == (False, None)
 
 
 @pytest.mark.asyncio

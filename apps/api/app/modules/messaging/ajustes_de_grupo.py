@@ -57,7 +57,9 @@ class AjustesLeidos(BaseModel):
     #: El codigo del enlace. `None` hasta que se activa por primera vez.
     invite_code: str | None = None
     #: Como se entra (0112): `open`, de un toque; `request`, pidiendolo.
-    entrada: Literal["open", "request"] = "request"
+    #: `None` si este servidor todavia no puede guardarlo (falta la 0112): asi
+    #: la aplicacion no ofrece elegirlo para responder despues con un 503.
+    entrada: Literal["open", "request"] | None = "request"
 
 
 def codigo_nuevo() -> str:
@@ -124,22 +126,26 @@ def columna_de_entrada(con_la_0112: bool):
 
 
 def leer(
-    fila: GroupSettings | None, *, en_mi_perfil: bool, entrada: str | None
+    fila: GroupSettings | None,
+    *,
+    en_mi_perfil: bool,
+    entrada: Literal["open", "request"] | None,
 ) -> AjustesLeidos:
     """Los ajustes tal como los ve quien los pide.
 
     `en_mi_perfil` y `entrada` son OBLIGATORIOS y sin valor por defecto: desde
     la 0112 no salen de `fila` (el primero depende de quien pregunta y la
     segunda no esta en el modelo), y un valor puesto por olvido diria a quien
-    administra algo que no es.
+    administra algo que no es. `entrada` llega ya leida: `None` solo si falta
+    la 0112.
     """
     if fila is None:
-        return AjustesLeidos(listed_on_profile=en_mi_perfil, entrada=entrada_leida(entrada))
+        return AjustesLeidos(listed_on_profile=en_mi_perfil, entrada=entrada)
     return AjustesLeidos(
         listed_on_profile=en_mi_perfil,
         invite_enabled=bool(fila.invite_enabled),
         invite_code=fila.invite_code,
-        entrada=entrada_leida(entrada),
+        entrada=entrada,
     )
 
 
@@ -149,15 +155,17 @@ async def leer_para(
     """Los ajustes de una comunidad como los ve `uid`. UNA consulta como mucho.
 
     Con la 0112, como se entra y si sale en SU perfil se leen juntos, en una
-    sola sentencia. Sin ella, ninguna: `request` y la columna de siempre, que
-    es lo que respondia esta API antes de la 0112.
+    sola sentencia. Sin ella, ninguna: la columna de siempre, que es lo que
+    respondia esta API antes de la 0112, y `entrada = None`, que le dice a la
+    aplicacion que aqui todavia no se puede elegir.
+
+    «En mi perfil» es lo que ENSEÑA el perfil (`en_el_perfil_de_quien_la_creo`):
+    la fila Y la columna. Si no coinciden, el interruptor sale apagado, y
+    encenderlo escribe las dos.
     """
+    columna = bool(fila is not None and fila.listed_on_profile)
     if not await esquema.hay_comunidades_en_el_perfil(db):
-        return leer(
-            fila,
-            en_mi_perfil=bool(fila is not None and fila.listed_on_profile),
-            entrada=None,
-        )
+        return leer(fila, en_mi_perfil=columna, entrada=None)
     entrada = (
         select(ENTRADA)
         .where(GroupSettings.conversation_id == conversation_id)
@@ -172,7 +180,37 @@ async def leer_para(
         .exists()
     )
     leido = (await db.execute(select(entrada.label("entrada"), suya.label("suya")))).one()
-    return leer(fila, en_mi_perfil=bool(leido.suya), entrada=leido.entrada)
+    return leer(
+        fila, en_mi_perfil=columna and bool(leido.suya), entrada=entrada_leida(leido.entrada)
+    )
+
+
+async def en_el_perfil_de_quien_la_creo(
+    db: AsyncSession, conversation_id: str, *, columna: bool, creador: str
+) -> bool:
+    """Si la comunidad sale en el perfil de quien la creo (`columna` es su
+    `listed_on_profile`).
+
+    CON LA 0112, LAS DOS: su fila de `group_profile_listings` Y la columna. La
+    API de esta ronda escribe siempre las dos, pero no es la unica que escribe:
+    la API anterior (mientras se despliega la nueva, o si se vuelve a ella) y
+    una que todavia no ha visto la 0112 escriben solo la columna. Si quien
+    administra la QUITA de su perfil con una de esas, la fila del relleno se
+    queda: con el AND no sale, que es lo que decidio. Si la PONE, falta la
+    fila: no sale hasta que la vuelva a poner (el interruptor sale apagado).
+    Lo que no puede pasar es que vuelva a salir una que se quito.
+
+    Sin la 0112, la columna, como siempre.
+
+    ESTE AND ES DE AHORA, que solo puede enseñarla quien la creo. Cuando haya
+    co-administracion, la columna (una por comunidad) no puede hablar por cada
+    persona: se quita y decide solo la fila de cada uno.
+    """
+    if not columna:
+        return False
+    if not await esquema.hay_comunidades_en_el_perfil(db):
+        return True
+    return await esta_en_el_perfil(db, conversation_id, creador)
 
 
 async def poner_entrada(

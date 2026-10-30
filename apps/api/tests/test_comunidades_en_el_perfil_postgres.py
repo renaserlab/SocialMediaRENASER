@@ -578,6 +578,35 @@ async def test_el_perfil_y_la_tarjeta_en_postgresql(entorno) -> None:
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deriva",
+    [
+        # La API anterior la quitó del perfil: columna a `false`, la fila se quedó.
+        "update public.group_settings set listed_on_profile = false where conversation_id = cast(:c as uuid)",
+        # La API anterior la puso: columna a `true`, sin fila.
+        "delete from public.group_profile_listings where conversation_id = cast(:c as uuid)",
+    ],
+)
+async def test_si_la_fila_y_la_columna_no_coinciden_no_sale_en_postgresql(entorno, deriva) -> None:
+    http, motor, identidad = entorno
+    cid = await _comunidad(motor)
+    async with motor.begin() as c:
+        await c.execute(text(deriva), {"c": cid})
+    identidad["uid"] = DAVID
+    perfil = await http.get(f"{API}/groups/of/{ANA}")
+    assert perfil.status_code == 200, perfil.text
+    assert cid not in [t["id"] for t in perfil.json()]
+    for respuesta in (
+        await http.post(f"{API}/{cid}/join-requests", json={}),
+        await http.post(f"{API}/{cid}/join"),
+    ):
+        assert respuesta.status_code == 404
+    identidad["uid"] = ANA
+    assert (await http.get(f"{API}/{cid}/info")).json()["settings"]["listed_on_profile"] is False
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
 async def test_a_una_con_solicitud_no_se_entra_en_postgresql(entorno) -> None:
     http, motor, identidad = entorno
     cid = await _comunidad(motor, entrada="request")

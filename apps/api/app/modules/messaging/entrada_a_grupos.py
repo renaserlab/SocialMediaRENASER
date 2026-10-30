@@ -431,6 +431,12 @@ async def grupos_de_un_perfil(
     else:
         condiciones = [
             GroupProfileListing.user_id == user_id,
+            # Y TAMBIEN LA COLUMNA, mientras solo pueda enseñarla quien la creo:
+            # la API anterior escribe solo la columna, y una fila que esa API
+            # no borro no puede volver a enseñar lo que se quito
+            # (`ajustes_de_grupo.en_el_perfil_de_quien_la_creo`). Con
+            # co-administracion, este AND se va.
+            GroupSettings.listed_on_profile.is_(True),
             Conversation.kind == "group",
             Conversation.created_by == user_id,
         ]
@@ -450,7 +456,7 @@ async def grupos_de_un_perfil(
             select(*columnas)
             .select_from(GroupProfileListing)
             .join(Conversation, Conversation.id == GroupProfileListing.conversation_id)
-            .outerjoin(GroupSettings, GroupSettings.conversation_id == Conversation.id)
+            .join(GroupSettings, GroupSettings.conversation_id == Conversation.id)
             .where(*condiciones)
         )
     filas = (
@@ -533,10 +539,10 @@ async def _por_donde_llega(
     """Si llega por el enlace (`True`) o por un perfil (`False`). 404 si por ninguno.
 
     Sin enlace, la comunidad tiene que salir en el perfil de quien la
-    administra: con la columna de siempre (la que escribe la API anterior) o
-    con su fila de la 0112 (sin la 0112 solo cuenta la columna). Las dos se escriben juntas; mirar las dos es lo
-    que deja pasar exactamente lo que pasaba antes, y lo que enseña el perfil.
-    La segunda solo se pregunta si la primera no basta.
+    administra, con la MISMA regla que el perfil
+    (`ajustes_de_grupo.en_el_perfil_de_quien_la_creo`): con la 0112, su fila Y
+    la columna; sin ella, la columna. Lo que el perfil no enseña no se alcanza
+    «desde el perfil». Sin la columna ni se pregunta por la fila.
     """
     por_enlace = bool(
         code
@@ -545,9 +551,11 @@ async def _por_donde_llega(
         # Comparacion de tiempo constante: el codigo es un secreto compartido.
         and secrets.compare_digest(code, fila.invite_code)
     )
-    if por_enlace or fila.listed_on_profile:
-        return por_enlace
-    if await ajustes_de_grupo.esta_en_el_perfil(db, conversation_id, fila.created_by):
+    if por_enlace:
+        return True
+    if await ajustes_de_grupo.en_el_perfil_de_quien_la_creo(
+        db, conversation_id, columna=bool(fila.listed_on_profile), creador=fila.created_by
+    ):
         return False
     raise NotFoundError(_NO_ESTA, code="group_not_found")
 
@@ -626,9 +634,13 @@ async def _entrar_en_una_abierta(
     *,
     por_enlace: bool,
     pendiente: str | None,
+    meter: bool = True,
 ) -> str | None:
     """Mete a `uid` en una comunidad ABIERTA. Devuelve el id de la solicitud que lo
     deja escrito, o `None` si otra peticion lo metio en el mismo instante.
+
+    Con `meter=False` solo deja escrita la solicitud, ya aprobada: es para
+    quien, entre que miro y que entro, ya estaba dentro (`_ya_dentro`).
 
     QUEDA ESCRITO COMO UNA SOLICITUD APROBADA, sin `resolved_by` porque no
     decidio nadie: decidio la comunidad al abrirse. Asi el historial dice como
@@ -667,8 +679,9 @@ async def _entrar_en_una_abierta(
                     resolved_at=ahora,
                 )
             )
-        db.add(ConversationMember(conversation_id=conversation_id, user_id=uid))
-        await grupos.sincronizar_temas(db, conversation_id, [uid], dentro=True)
+        if meter:
+            db.add(ConversationMember(conversation_id=conversation_id, user_id=uid))
+            await grupos.sincronizar_temas(db, conversation_id, [uid], dentro=True)
         await db.commit()
     except IntegrityError:
         # Dos toques a la vez: la clave primaria de los miembros deja entrar a
@@ -755,7 +768,9 @@ async def pedir_entrar(
             db, conversation_id, uid, por_enlace=por_enlace, pendiente=pendiente
         )
         if hecha is None:
-            hecha = await _la_que_lo_metio(db, conversation_id, uid)
+            hecha = await _ya_dentro(
+                db, conversation_id, uid, por_enlace=por_enlace, pendiente=pendiente
+            )
         return SolicitudLeida(id=hecha, status="approved")
 
     solicitud = GroupJoinRequest(
@@ -805,30 +820,54 @@ async def pedir_entrar(
     return SolicitudLeida(id=solicitud.id, status="pending")
 
 
-async def _la_que_lo_metio(db: AsyncSession, conversation_id: str, uid: str) -> str:
-    """Tras perder la carrera de entrar: la solicitud aprobada de la peticion que gano.
+async def _ya_dentro(
+    db: AsyncSession,
+    conversation_id: str,
+    uid: str,
+    *,
+    por_enlace: bool,
+    pendiente: str | None,
+) -> str:
+    """Tras perder la carrera de entrar en una abierta: el id que responder.
 
-    Si ni esta dentro ni hay una aprobada, no entro nadie (el conflicto era
-    otro): 409 `join_request_race`, el mismo que cuando se pierde la de pedir.
+    Si ya esta dentro, lo que pidio se cumplio, lo metiera quien lo metiera: se
+    responde como a quien entro, igual que `unirse`. Puede haberlo metido OTRA
+    PETICION suya (dos toques): su solicitud aprobada es la que se devuelve. O
+    QUIEN ADMINISTRA, a mano y en el mismo instante: entonces no hay solicitud
+    aprobada, y se deja escrita la suya como cumplida —su pendiente, si la
+    tenia, o una nueva—, sin volver a meterlo.
+
+    Si no esta dentro, el conflicto era otro y no entro nadie: 409
+    `join_request_race`, el mismo que cuando se pierde la de pedir.
     """
     dentro = await db.get(
         ConversationMember, {"conversation_id": conversation_id, "user_id": uid}
     )
-    aprobada = await db.scalar(
-        select(GroupJoinRequest.id)
-        .where(
-            GroupJoinRequest.conversation_id == conversation_id,
-            GroupJoinRequest.user_id == uid,
-            GroupJoinRequest.status == "approved",
-        )
-        .order_by(GroupJoinRequest.created_at.desc(), GroupJoinRequest.id.desc())
-        .limit(1)
-    )
-    if dentro is None or aprobada is None:
+    if dentro is None:
         raise ConflictError(
             "No se pudo entrar. Inténtalo de nuevo.", code="join_request_race"
         )
-    return str(aprobada)
+    if pendiente is None:
+        aprobada = await db.scalar(
+            select(GroupJoinRequest.id)
+            .where(
+                GroupJoinRequest.conversation_id == conversation_id,
+                GroupJoinRequest.user_id == uid,
+                GroupJoinRequest.status == "approved",
+            )
+            .order_by(GroupJoinRequest.created_at.desc(), GroupJoinRequest.id.desc())
+            .limit(1)
+        )
+        if aprobada is not None:
+            return str(aprobada)
+    escrita = await _entrar_en_una_abierta(
+        db, conversation_id, uid, por_enlace=por_enlace, pendiente=pendiente, meter=False
+    )
+    if escrita is None:
+        raise ConflictError(
+            "No se pudo entrar. Inténtalo de nuevo.", code="join_request_race"
+        )
+    return escrita
 
 
 @router.post("/{conversation_id}/join", response_model=TarjetaDeGrupo)
