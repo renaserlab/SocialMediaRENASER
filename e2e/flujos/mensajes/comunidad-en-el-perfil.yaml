@@ -1,0 +1,251 @@
+# Comunidades en el perfil (migracion 0112): como se entra desde el perfil de
+# quien administra.
+#
+#  0. Ana, que ADMINISTRA «Taller E2E», la enseña en su perfil («Mostrar en mi
+#     perfil»). Sigue «Con solicitud», que es como quedan todas las que ya
+#     existian.
+#  1. Beto sale de la comunidad (salir por su cuenta no le apunta como sacado)
+#     y en el perfil de Ana ve la pildora con candado y, al tocarla, «Pedir
+#     unirme».
+#  2. Ana la pasa a «Abierta».
+#  3. Beto ve la pildora sin candado, la hoja dice «Comunidad abierta» y
+#     «Unirme» le mete y le deja dentro del chat de la comunidad.
+#  4. Ana le saca desde la ficha de la comunidad.
+#  5. Aunque sigue abierta, a Beto solo le queda «Pedir unirme» (y lo pide).
+#  6. Ana acepta la solicitud y deja la comunidad como estaba: Beto dentro, con
+#     solicitud y fuera del perfil (grupo-temas.yaml cuenta «Miembros: 2»).
+#
+# Las pildoras se reconocen por su etiqueta accesible, que sale de lo mismo que
+# el icono: «Ver la comunidad X» (icono de comunidad) o «Ver la comunidad X
+# (con solicitud)» (candado). Las capturas lo enseñan.
+#
+# Datos: e2e/datos/30-mensajes.sql. Necesita la 0112 aplicada y la API de la
+# rama; sin ellas «Cómo se entra» no sale en los ajustes.
+appId: host.exp.exponent
+name: "Mensajes: comunidad en el perfil (abierta, con solicitud y sacado)"
+tags:
+  - mensajes
+env:
+  ANA: e2e0a0a0-0000-4000-8000-000000000001
+  TALLER: e2e30000-0000-4000-8000-000000000010
+---
+# ---- 0. Ana la enseña en su perfil (sigue con solicitud) ---------------------
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/ajustes-de-grupo/${TALLER}
+      ESPERAR: "Cómo se entra"
+      REINICIAR: "no"
+- assertVisible: "Editar comunidad"
+- assertVisible:
+    text: "Con solicitud"
+    checked: true
+- assertVisible:
+    text: "Abierta"
+    checked: false
+- assertVisible: "Quien quiera entrar lo pide, también desde tu perfil, y quien administra decide\\."
+- assertVisible:
+    text: "Mostrar en mi perfil"
+    checked: false
+- tapOn: "Mostrar en mi perfil"
+- extendedWaitUntil:
+    visible:
+      text: "Mostrar en mi perfil"
+      checked: true
+    timeout: 15000
+- takeScreenshot: mensajes-comunidad-perfil-ajustes-con-solicitud
+
+# En su propio perfil, Ana ya la ve (es miembro: tocarla la abre).
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${ANA}
+      ESPERAR: "Ana Prueba"
+      REINICIAR: "no"
+- extendedWaitUntil:
+    visible: "Abrir la comunidad Taller E2E \\(con solicitud\\)"
+    timeout: 20000
+
+# ---- 1. Beto sale y la ve con candado ----------------------------------------
+- runFlow:
+    file: ../_comun/iniciar-sesion.yaml
+    env:
+      E2E_EMAIL: ${E2E_EMAIL_B}
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/grupo/${TALLER}
+      ESPERAR: "Miembros: 2"
+      REINICIAR: "no"
+- tapOn: "Salir"
+- extendedWaitUntil:
+    visible: "¿Salir de la comunidad\\?"
+    timeout: 10000
+- tapOn:
+    text: "Salir de la comunidad"
+    below: "¿Salir de la comunidad\\?"
+- extendedWaitUntil:
+    visible: "Chat con Carpinteria E2E\\..*"
+    timeout: 20000
+- assertNotVisible: "Chat con Taller E2E\\..*"
+
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${ANA}
+      ESPERAR: "Ana Prueba"
+      REINICIAR: "no"
+- extendedWaitUntil:
+    visible: "Ver la comunidad Taller E2E \\(con solicitud\\)"
+    timeout: 20000
+- assertNotVisible: "Ver la comunidad Taller E2E"
+- takeScreenshot: mensajes-comunidad-perfil-pildora-con-solicitud
+- tapOn: "Ver la comunidad Taller E2E \\(con solicitud\\)"
+- extendedWaitUntil:
+    visible: "Comunidad con solicitud · 1 grupo · 1 tema"
+    timeout: 15000
+- assertVisible: "Pedir unirte no te mete en la comunidad: quien la administra recibe tu solicitud y decide\\."
+- assertVisible: "Miembros: 1 · Administra Ana Prueba"
+- assertVisible: "Pedir unirme"
+- assertNotVisible: "Unirme"
+- takeScreenshot: mensajes-comunidad-perfil-hoja-con-solicitud
+
+# ---- 2. Ana la abre ------------------------------------------------------------
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/ajustes-de-grupo/${TALLER}
+      ESPERAR: "Cómo se entra"
+      REINICIAR: "no"
+- tapOn: "Abierta"
+- extendedWaitUntil:
+    visible:
+      text: "Abierta"
+      checked: true
+    timeout: 15000
+- assertVisible:
+    text: "Con solicitud"
+    checked: false
+- assertVisible: "Cualquiera entra con un toque, también desde tu perfil\\. Dentro elige a qué grupos entrar\\."
+- assertVisible:
+    text: "Mostrar en mi perfil"
+    checked: true
+- takeScreenshot: mensajes-comunidad-perfil-ajustes-abierta
+
+# ---- 3. Beto entra con un toque desde el perfil de Ana ---------------------------
+- runFlow:
+    file: ../_comun/iniciar-sesion.yaml
+    env:
+      E2E_EMAIL: ${E2E_EMAIL_B}
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${ANA}
+      ESPERAR: "Ana Prueba"
+      REINICIAR: "no"
+- extendedWaitUntil:
+    visible: "Ver la comunidad Taller E2E"
+    timeout: 20000
+- assertNotVisible: "Ver la comunidad Taller E2E \\(con solicitud\\)"
+- takeScreenshot: mensajes-comunidad-perfil-pildora-abierta
+- tapOn: "Ver la comunidad Taller E2E"
+- extendedWaitUntil:
+    visible: "Comunidad abierta · 1 grupo · 1 tema"
+    timeout: 15000
+- assertVisible: "Es una comunidad abierta\\. Al unirte entras directamente: ves General y sus temas, y eliges a qué grupos entrar\\."
+- assertVisible: "Miembros: 1 · Administra Ana Prueba"
+- assertVisible: "Unirme"
+- assertNotVisible: "Pedir unirme"
+- takeScreenshot: mensajes-comunidad-perfil-hoja-abierta
+- tapOn: "Unirme"
+# Dentro: el chat de la comunidad, con su cabecera y el compositor.
+- extendedWaitUntil:
+    visible: "Más opciones del chat"
+    timeout: 20000
+- assertVisible: "Ver la comunidad Taller E2E"
+- assertVisible: "Mensaje"
+- assertNotVisible: "Unirme"
+- takeScreenshot: mensajes-comunidad-perfil-dentro
+
+# ---- 4. Ana le saca -------------------------------------------------------------
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/grupo/${TALLER}
+      ESPERAR: "Miembros: 2"
+      REINICIAR: "no"
+- tapOn: "Sacar a Beto Prueba de la comunidad"
+- extendedWaitUntil:
+    visible: "Dejará de ver la comunidad\\. Lo que escribió se queda\\."
+    timeout: 10000
+- tapOn:
+    text: "Sacar"
+    below: "Dejará de ver la comunidad\\. Lo que escribió se queda\\."
+- extendedWaitUntil:
+    visible: "Miembros: 1"
+    timeout: 15000
+
+# ---- 5. Abierta, pero a Beto solo le queda pedirlo --------------------------------
+- runFlow:
+    file: ../_comun/iniciar-sesion.yaml
+    env:
+      E2E_EMAIL: ${E2E_EMAIL_B}
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: profile/${ANA}
+      ESPERAR: "Ana Prueba"
+      REINICIAR: "no"
+- extendedWaitUntil:
+    visible: "Ver la comunidad Taller E2E \\(con solicitud\\)"
+    timeout: 20000
+- assertNotVisible: "Ver la comunidad Taller E2E"
+- tapOn: "Ver la comunidad Taller E2E \\(con solicitud\\)"
+- extendedWaitUntil:
+    visible: "Comunidad con solicitud · 1 grupo · 1 tema"
+    timeout: 15000
+- assertVisible: "Pedir unirme"
+- assertNotVisible: "Unirme"
+- takeScreenshot: mensajes-comunidad-perfil-hoja-sacado
+- tapOn: "Pedir unirme"
+- extendedWaitUntil:
+    visible: "Solicitud enviada\\. Te avisaremos cuando te acepten\\."
+    timeout: 15000
+
+# ---- 6. Ana acepta y deja la comunidad como estaba ---------------------------------
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/ajustes-de-grupo/${TALLER}
+      ESPERAR: "Cómo se entra"
+      REINICIAR: "no"
+- extendedWaitUntil:
+    visible: "Solicitudes para unirse: 1"
+    timeout: 15000
+- assertVisible: "Lo pidió desde tu perfil"
+- tapOn: "Aceptar"
+- extendedWaitUntil:
+    notVisible: "Solicitudes para unirse: 1"
+    timeout: 15000
+- tapOn: "Con solicitud"
+- extendedWaitUntil:
+    visible:
+      text: "Con solicitud"
+      checked: true
+    timeout: 15000
+- tapOn: "Mostrar en mi perfil"
+- extendedWaitUntil:
+    visible:
+      text: "Mostrar en mi perfil"
+      checked: false
+    timeout: 15000
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/grupo/${TALLER}
+      ESPERAR: "Miembros: 2"
+      REINICIAR: "no"
