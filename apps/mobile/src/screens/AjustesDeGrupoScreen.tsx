@@ -59,6 +59,13 @@ export function AjustesDeGrupoScreen() {
   const [guardando, setGuardando] = useState(false);
   const [fallo, setFallo] = useState<string | null>(null);
 
+  /*
+    En pantalla, el de primer nivel es una «comunidad» y el de dentro un
+    «grupo»: los textos que lo nombran se eligen con `padre`. Sin saberlo
+    todavía, «comunidad», que es lo que son casi todos.
+  */
+  const deDentro = !!info?.padre;
+
   // El nombre del formulario sigue al del grupo mientras no se esté editando.
   const tituloDelGrupo = info?.titulo ?? '';
   useEffect(() => {
@@ -85,18 +92,19 @@ export function AjustesDeGrupoScreen() {
       refrescar();
     } catch (error) {
       const codigo = error instanceof ApiError ? error.code : null;
-      setFallo(t(claveDelFalloDeGrupo(codigo) as TranslationKey));
+      setFallo(t(claveDelFalloDeGrupo(codigo, deDentro) as TranslationKey));
     } finally {
       setGuardando(false);
     }
-  }, [titulo, guardando, tituloDelGrupo, conversationId, t, refrescar]);
+  }, [titulo, guardando, tituloDelGrupo, conversationId, t, refrescar, deDentro]);
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  const tituloDeLaPantalla = t(deDentro ? 'groupCommunities.editTitle' : 'groups.editTitle');
 
   if (info === undefined) {
     return (
       <AppScreen scroll={false}>
-        <AppHeader title={t('groups.editTitle')} onBack={volver} />
+        <AppHeader title={tituloDeLaPantalla} onBack={volver} />
         <StateView state="loading" />
       </AppScreen>
     );
@@ -104,7 +112,7 @@ export function AjustesDeGrupoScreen() {
   if (info === null || !info.esGrupo) {
     return (
       <AppScreen scroll={false}>
-        <AppHeader title={t('groups.editTitle')} onBack={volver} />
+        <AppHeader title={tituloDeLaPantalla} onBack={volver} />
         <StateView state="error" title={t('groups.loadError')} onRetry={refrescar} />
       </AppScreen>
     );
@@ -112,8 +120,11 @@ export function AjustesDeGrupoScreen() {
   if (!info.puedoAdministrar) {
     return (
       <AppScreen scroll={false}>
-        <AppHeader title={t('groups.editTitle')} onBack={volver} />
-        <StateView state="empty" title={t('groups.errorAdminRequired')} />
+        <AppHeader title={tituloDeLaPantalla} onBack={volver} />
+        <StateView
+          state="empty"
+          title={t(deDentro ? 'groupCommunities.errorAdminRequired' : 'groups.errorAdminRequired')}
+        />
       </AppScreen>
     );
   }
@@ -123,13 +134,13 @@ export function AjustesDeGrupoScreen() {
 
   return (
     <AppScreen>
-      <AppHeader title={t('groups.editTitle')} onBack={volver} />
+      <AppHeader title={tituloDeLaPantalla} onBack={volver} />
       <View style={styles.cuerpo}>
         {fallo ? <InlineError message={fallo} /> : null}
 
         <View style={styles.seccion}>
           <Input
-            label={t('groups.titleLabel')}
+            label={t(deDentro ? 'groupCommunities.titleLabel' : 'groups.titleLabel')}
             value={titulo}
             onChangeText={setTitulo}
             maxLength={MAX_TITULO_DE_GRUPO}
@@ -174,7 +185,7 @@ export function AjustesDeGrupoScreen() {
         )}
 
         <Text color={colors.textMuted} style={styles.detalle}>
-          {t('groups.adminCannotLeave')}
+          {t(deDentro ? 'groupCommunities.adminCannotLeave' : 'groups.adminCannotLeave')}
         </Text>
       </View>
     </AppScreen>

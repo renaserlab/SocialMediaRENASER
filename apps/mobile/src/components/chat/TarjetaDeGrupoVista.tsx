@@ -11,6 +11,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 import {
   accionDeTarjeta,
   claveDelFalloDeGrupo,
+  detalleDeTarjeta,
   type TarjetaDeGrupo,
 } from '@/lib/gruposDeChat';
 import { GroupRepository } from '@/repositories/GroupRepository';
@@ -23,19 +24,27 @@ type Props = {
   tarjeta: TarjetaDeGrupo;
   /** El código del enlace, cuando se llegó por él. Sin él, se pide por el perfil. */
   codigo?: string | null;
-  /** Se llama tras pedir entrar o retirar la solicitud, para volver a leer. */
+  /** Se llama tras entrar, pedir entrar o retirar la solicitud, para volver a leer. */
   alCambiar: () => void;
+  /**
+   * Tras entrar con «Unirme»: abre el grupo, como se abre siendo miembro. Quien
+   * la pinta dentro de una hoja lo pasa para cerrarla antes (en iOS nada se
+   * abre encima de un Modal); sin él, se abre el chat desde aquí.
+   */
+  alEntrar?: (tarjeta: TarjetaDeGrupo) => void;
 };
 
 /**
- * La tarjeta de un grupo para quien todavía no está dentro, con lo único que
- * puede hacer: pedir entrar.
+ * La tarjeta de un grupo (en pantalla, una comunidad) para quien todavía no
+ * está dentro: cómo se entra, qué hay dentro, cuántos son y quién lo
+ * administra, con lo que puede hacer.
  *
- * PEDIR NO ES ENTRAR. El botón deja una solicitud y la tarjeta pasa a decir
- * «Solicitud enviada»; quien administra el grupo decide. Por eso el texto del
- * botón es «Pedir unirme» y no «Unirme».
+ * ABIERTO: «Unirme» mete en el acto y abre el grupo. CON SOLICITUD: pedir no
+ * es entrar. El botón deja una solicitud y la tarjeta pasa a decir «Solicitud
+ * enviada»; quien administra el grupo decide. Por eso ahí el texto del botón
+ * es «Pedir unirme» y no «Unirme».
  */
-export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar }: Props) {
+export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar, alEntrar }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
@@ -56,6 +65,9 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar }: Props) {
       } catch (error) {
         const codigoDeError = error instanceof ApiError ? error.code : null;
         setFallo(t(claveDelFalloDeGrupo(codigoDeError) as TranslationKey));
+        // Lo cerraron mientras se miraba: se vuelve a leer y el botón pasa a
+        // «Pedir unirme» solo, junto al texto que explica por qué.
+        if (codigoDeError === 'group_requires_request') alCambiar();
       } finally {
         enCurso.current = false;
         setOcupado(false);
@@ -64,7 +76,16 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar }: Props) {
     [alCambiar, t],
   );
 
+  const abrir = useCallback(
+    (cual: TarjetaDeGrupo) =>
+      router.push({ pathname: '/chat/[id]', params: { id: cual.id, name: cual.titulo } }),
+    [router],
+  );
+
   const accion = accionDeTarjeta(tarjeta);
+  const detalle = detalleDeTarjeta(tarjeta)
+    .map(({ clave, n }) => t(clave as TranslationKey, n === undefined ? undefined : { n }))
+    .join(' · ');
 
   return (
     <View style={[styles.tarjeta, { borderColor: colors.border, backgroundColor: colors.surface }]}>
@@ -77,6 +98,9 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar }: Props) {
         <View style={styles.textos}>
           <Text weight="700" numberOfLines={1}>
             {tarjeta.titulo}
+          </Text>
+          <Text color={colors.textMuted} style={styles.detalle} numberOfLines={1}>
+            {detalle}
           </Text>
           <Text color={colors.textMuted} style={styles.detalle} numberOfLines={1}>
             {t('groups.membersCount', { n: tarjeta.miembros })}
@@ -94,9 +118,7 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar }: Props) {
           label={t('groupJoin.open')}
           variant="secondary"
           icon="message-circle"
-          onPress={() =>
-            router.push({ pathname: '/chat/[id]', params: { id: tarjeta.id, name: tarjeta.titulo } })
-          }
+          onPress={() => abrir(tarjeta)}
         />
       ) : accion === 'esperando' ? (
         <>
@@ -115,6 +137,20 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar }: Props) {
         <Text color={colors.textMuted} style={styles.detalle}>
           {t('groups.errorFull')}
         </Text>
+      ) : accion === 'unirme' ? (
+        <Button
+          label={t('groupJoin.join')}
+          icon="log-in"
+          onPress={() =>
+            void hacer(async () => {
+              // Un 200 es estar dentro (también si ya se estaba): se abre.
+              const dentro = (await GroupRepository.entrar(tarjeta.id, codigo)) ?? tarjeta;
+              (alEntrar ?? abrir)(dentro);
+            })
+          }
+          loading={ocupado}
+          disabled={ocupado}
+        />
       ) : (
         <Button
           label={t('groupJoin.ask')}

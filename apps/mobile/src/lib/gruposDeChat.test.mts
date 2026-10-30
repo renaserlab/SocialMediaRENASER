@@ -182,14 +182,33 @@ test('cada rechazo del servidor tiene su texto, y el desconocido uno genérico',
   const codigos = [...servidor.matchAll(/code="([a-z_]+)"/g)].map((m) => m[1] as string);
   assert.ok(codigos.length >= 12, `solo ${codigos.length} códigos en el servidor`);
   for (const codigo of new Set(codigos)) {
-    const clave = claveDelFalloDeGrupo(codigo);
-    assert.ok(es.includes(`'${clave}':`), `${codigo} → ${clave} no está en es.ts`);
+    for (const deDentro of [false, true]) {
+      const clave = claveDelFalloDeGrupo(codigo, deDentro);
+      assert.ok(es.includes(`'${clave}':`), `${codigo} → ${clave} no está en es.ts`);
+    }
   }
   assert.equal(claveDelFalloDeGrupo('algo_nuevo'), 'groups.errorGeneric');
   assert.equal(claveDelFalloDeGrupo(null), 'groups.errorGeneric');
   // Que te hayan bloqueado y que la persona no exista dicen lo mismo.
   assert.equal(claveDelFalloDeGrupo('group_member_not_allowed'), 'groups.errorMemberNotAllowed');
   assert.doesNotMatch(es.match(/'groups\.errorMemberNotAllowed': '([^']*)'/)?.[1] ?? '', /bloque/i);
+});
+
+test('el rechazo nombra la comunidad o el grupo según de cuál sea', () => {
+  // En pantalla el de primer nivel es una «comunidad» y el de dentro un
+  // «grupo» (30/10/2026): los textos que lo nombran tienen dos versiones.
+  const es = leer('../i18n/es.ts');
+  const texto = (clave: string) => es.match(new RegExp(`'${clave}': '([^']*)'`))?.[1] ?? '';
+  for (const codigo of ['group_is_full', 'group_admin_required', 'group_admin_cannot_leave', 'group_member_not_found']) {
+    assert.match(texto(claveDelFalloDeGrupo(codigo)), /comunidad/, codigo);
+    assert.doesNotMatch(texto(claveDelFalloDeGrupo(codigo)), /grupo/, codigo);
+    assert.match(texto(claveDelFalloDeGrupo(codigo, true)), /grupo/, codigo);
+    assert.doesNotMatch(texto(claveDelFalloDeGrupo(codigo, true)), /comunidad/, codigo);
+  }
+  assert.equal(texto('groups.errorFull'), 'La comunidad está completa.');
+  assert.equal(texto(claveDelFalloDeGrupo('group_is_full', true)), 'El grupo está completo.');
+  // Lo que no depende de cuál sea no cambia.
+  assert.equal(claveDelFalloDeGrupo('algo_nuevo', true), 'groups.errorGeneric');
 });
 
 test('los botones de administrar dependen de lo que dice el servidor', () => {

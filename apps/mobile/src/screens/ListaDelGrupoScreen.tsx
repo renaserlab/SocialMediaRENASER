@@ -288,11 +288,17 @@ export function ListaDelGrupoScreen() {
     await afterSheetClose();
   };
 
-  /** El texto que explica un rechazo del servidor, de temas o de grupos. */
+  /**
+   * El texto que explica un rechazo del servidor, de temas o de grupos.
+   * `deDentro`: el rechazo es de una de sus comunidades (en pantalla, un
+   * «grupo»), no de este (en pantalla, la «comunidad»).
+   */
   const textoDelFallo = useCallback(
-    (error: unknown): string => {
+    (error: unknown, deDentro = false): string => {
       const codigo = error instanceof ApiError ? error.code : null;
-      return t((claveDelFalloDeTemas(codigo) ?? claveDelFalloDeGrupo(codigo)) as TranslationKey);
+      return t(
+        (claveDelFalloDeTemas(codigo) ?? claveDelFalloDeGrupo(codigo, deDentro)) as TranslationKey,
+      );
     },
     [t],
   );
@@ -312,7 +318,9 @@ export function ListaDelGrupoScreen() {
       await tarea();
       toast(hecho, 'check');
     } catch (error) {
-      notify(t('chatMenu.failedTitle'), textoDelFallo(error));
+      // Es en una de sus comunidades, que en pantalla es un «grupo»: «El grupo
+      // está completo», no «La comunidad está completa».
+      notify(t('chatMenu.failedTitle'), textoDelFallo(error, true));
     } finally {
       if (montada.current) setOcupada(null);
       // Pase lo que pase, lo que se pinta es lo que dice el servidor: si la

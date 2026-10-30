@@ -7,6 +7,7 @@ import {
   leerTarjeta,
   leerTarjetas,
   type AjustesDeGrupo,
+  type EntradaDeGrupo,
   type InfoDeConversacion,
   type SolicitudDeGrupo,
   type TarjetaDeGrupo,
@@ -137,14 +138,37 @@ export const GroupRepository = {
   },
 
   /**
-   * Pide entrar. NO mete en el grupo: deja la solicitud a quien lo administra.
-   * `codigo` es el del enlace, cuando se llegó por él.
+   * Pide entrar. En uno con solicitud NO mete en el grupo: deja la solicitud a
+   * quien lo administra. (En uno abierto el servidor mete directamente; para
+   * eso la tarjeta ofrece `entrar`.) `codigo` es el del enlace, cuando se llegó
+   * por él.
    */
   async pedirEntrar(conversationId: string, codigo?: string | null): Promise<void> {
     await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/join-requests`, {
       method: 'POST',
       body: JSON.stringify(codigo ? { code: codigo } : {}),
     });
+  },
+
+  /**
+   * Entra sin pedir: solo en un grupo abierto (`POST /conversations/{id}/join`).
+   * Devuelve su tarjeta tal como queda, ya de miembro.
+   *
+   * `codigo` es el del enlace, cuando se llegó por él, como en `pedirEntrar`:
+   * el servidor deja entrar a quien la ve en un perfil o trae el enlace activo,
+   * y una comunidad que no sale en ningún perfil solo se conoce por el enlace.
+   *
+   * Si es con solicitud el servidor responde 409 `group_requires_request` —se
+   * cerró mientras se miraba— y la pantalla lo cuenta y vuelve a leer. Mete
+   * solo en el grupo, nunca en lo que cuelga de él.
+   */
+  async entrar(conversationId: string, codigo?: string | null): Promise<TarjetaDeGrupo | null> {
+    return leerTarjeta(
+      await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/join`, {
+        method: 'POST',
+        body: JSON.stringify(codigo ? { code: codigo } : {}),
+      }),
+    );
   },
 
   async retirarSolicitud(conversationId: string): Promise<void> {
@@ -173,14 +197,19 @@ export const GroupRepository = {
     );
   },
 
-  /** Enseñar el grupo en el perfil y activar su enlace. Devuelve cómo queda. */
+  /**
+   * Enseñar el grupo en el perfil, activar su enlace y cómo se entra. Devuelve
+   * cómo queda. «En mi perfil» es de quien llama: cada administrador decide
+   * por el suyo.
+   */
   async cambiarAjustes(
     conversationId: string,
-    cambios: { enMiPerfil?: boolean; enlaceActivo?: boolean },
+    cambios: { enMiPerfil?: boolean; enlaceActivo?: boolean; entrada?: EntradaDeGrupo },
   ): Promise<AjustesDeGrupo> {
-    const cuerpo: Record<string, boolean> = {};
+    const cuerpo: Record<string, boolean | string> = {};
     if (cambios.enMiPerfil !== undefined) cuerpo.listed_on_profile = cambios.enMiPerfil;
     if (cambios.enlaceActivo !== undefined) cuerpo.invite_enabled = cambios.enlaceActivo;
+    if (cambios.entrada !== undefined) cuerpo.entrada = cambios.entrada;
     return leerAjustes(
       await apiRequest<unknown>(`${API_V1}/conversations/${conversationId}/group/settings`, {
         method: 'PATCH',

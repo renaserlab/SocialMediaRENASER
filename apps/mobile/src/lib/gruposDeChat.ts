@@ -25,6 +25,13 @@ export type MiembroDeGrupo = {
   administra: boolean;
 };
 
+/**
+ * Cómo se entra a un grupo de primer nivel (en pantalla, una «comunidad»).
+ * `open`: con un toque, desde el perfil o el enlace. `request`: se pide y
+ * decide quien lo administra. Los mismos valores que manda la API (0114).
+ */
+export type EntradaDeGrupo = 'open' | 'request';
+
 /** Cómo está configurada la entrada a un grupo. Solo lo recibe quien lo administra. */
 export type AjustesDeGrupo = {
   /** Sale en «Únete a mi grupo», en el perfil de quien lo administra. */
@@ -32,6 +39,11 @@ export type AjustesDeGrupo = {
   enlaceActivo: boolean;
   /** El código del enlace; `null` hasta que se activa por primera vez. */
   codigo: string | null;
+  /**
+   * Cómo se entra. `null` si el servidor no lo dice: es anterior a la 0114 y
+   * no sabe cambiarlo, así que la pantalla no ofrece un ajuste que no haría nada.
+   */
+  entrada: EntradaDeGrupo | null;
 };
 
 export type InfoDeConversacion = {
@@ -105,6 +117,7 @@ export function leerAjustes(bruto: unknown): AjustesDeGrupo {
     // Un enlace «activo» sin código no se puede compartir: es como apagado.
     enlaceActivo: b.invite_enabled === true && codigo !== null,
     codigo,
+    entrada: b.entrada === 'open' || b.entrada === 'request' ? b.entrada : null,
   };
 }
 
@@ -201,31 +214,43 @@ export function juzgarGrupoNuevo(titulo: string, personas: number): JuicioDeGrup
  * Los códigos son los de `grupos.py` y `vistas.py`. Uno que no se conozca cae
  * en el genérico: mejor «no se pudo» que un código en la cara de alguien.
  */
-export function claveDelFalloDeGrupo(codigo: string | null | undefined): string {
+export function claveDelFalloDeGrupo(
+  codigo: string | null | undefined,
+  /**
+   * El rechazo es de un grupo que cuelga de otro (`info.padre`). En pantalla
+   * el de primer nivel se llama «comunidad» y el de dentro «grupo», así que
+   * los textos que lo nombran tienen dos versiones.
+   */
+  deDentro = false,
+): string {
   switch (codigo) {
     case 'group_member_not_allowed':
       return 'groups.errorMemberNotAllowed';
     case 'group_is_full':
-      return 'groups.errorFull';
+      return deDentro ? 'groupCommunities.errorFull' : 'groups.errorFull';
     case 'group_rate_limited':
       return 'groups.errorRateLimited';
     case 'group_admin_required':
+      return deDentro ? 'groupCommunities.errorAdminRequired' : 'groups.errorAdminRequired';
+    // Los filtros solo existen en el de primer nivel.
     case 'filters_not_allowed':
       return 'groups.errorAdminRequired';
     case 'group_admin_cannot_leave':
-      return 'groups.errorAdminCannotLeave';
+      return deDentro ? 'groupCommunities.errorAdminCannotLeave' : 'groups.errorAdminCannotLeave';
     case 'group_needs_members':
       return 'groups.errorNeedsMembers';
     case 'group_member_not_found':
-      return 'groups.errorMemberGone';
+      return deDentro ? 'groupCommunities.errorMemberGone' : 'groups.errorMemberGone';
     case 'group_not_found':
-      return 'groupJoin.errorNotFound';
+      return deDentro ? 'groupCommunities.errorGone' : 'groupJoin.errorNotFound';
+    case 'group_requires_request':
+      return 'groupJoin.errorNeedsRequest';
     case 'already_member':
-      return 'groupJoin.errorAlreadyMember';
+      return deDentro ? 'groupCommunities.errorAlreadyMember' : 'groupJoin.errorAlreadyMember';
     case 'join_rate_limited':
       return 'groupJoin.errorRateLimited';
     case 'join_request_too_soon':
-      return 'groupJoin.errorTooSoon';
+      return deDentro ? 'groupCommunities.errorTooSoon' : 'groupJoin.errorTooSoon';
     case 'join_request_not_found':
       return 'groupJoin.errorRequestGone';
     case 'group_extras_not_available':
@@ -261,7 +286,16 @@ export type TarjetaDeGrupo = {
   /** `miembro`: ya está dentro. `pendiente`: pidió entrar y espera respuesta. */
   miEstado: 'miembro' | 'pendiente' | 'ninguno';
   lleno: boolean;
+  /** Cómo se entra. Un servidor anterior a la 0114 no lo dice: es con solicitud. */
+  entrada: EntradaDeGrupo;
+  /** Los grupos de dentro (en el código, subgrupos) que siguen vivos. */
+  grupos: number;
+  /** Los temas que siguen vivos. */
+  temas: number;
 };
+
+/** Un recuento que manda el servidor: entero y sin negativos; lo demás, cero. */
+const recuento = (v: unknown): number => (typeof v === 'number' && v > 0 ? Math.floor(v) : 0);
 
 export function leerTarjeta(bruto: unknown): TarjetaDeGrupo | null {
   if (!esObjeto(bruto) || typeof bruto.id !== 'string' || !bruto.id) return null;
@@ -275,10 +309,7 @@ export function leerTarjeta(bruto: unknown): TarjetaDeGrupo | null {
     titulo,
     avatarPath:
       typeof bruto.avatar_path === 'string' && bruto.avatar_path ? bruto.avatar_path : undefined,
-    miembros:
-      typeof bruto.members_count === 'number' && bruto.members_count > 0
-        ? Math.floor(bruto.members_count)
-        : 0,
+    miembros: recuento(bruto.members_count),
     administrador: { id: admin.id, nombre: nombre || usuario },
     miEstado:
       bruto.my_status === 'member'
@@ -287,6 +318,12 @@ export function leerTarjeta(bruto: unknown): TarjetaDeGrupo | null {
           ? 'pendiente'
           : 'ninguno',
     lleno: bruto.is_full === true,
+    // Lo que no sea `open` es con solicitud: es lo que vale por omisión, y lo
+    // único que conoce un servidor anterior. Ofrecer «Unirme» donde solo se
+    // puede pedir terminaría en un 409.
+    entrada: bruto.entrada === 'open' ? 'open' : 'request',
+    grupos: recuento(bruto.groups_count),
+    temas: recuento(bruto.topics_count),
   };
 }
 
@@ -300,15 +337,51 @@ export function leerTarjetas(bruto: unknown): TarjetaDeGrupo[] {
 /**
  * Qué se ofrece en la tarjeta de un grupo a quien la mira.
  *
- * `pedir`: puede pedir entrar. `esperando`: ya lo pidió (y puede retirarlo).
- * `abrir`: ya es miembro. `lleno`: no cabe nadie más, y no se ofrece pedir.
+ * `unirme`: es abierto y se entra con un toque. `pedir`: es con solicitud y
+ * puede pedir entrar. `esperando`: ya lo pidió (y puede retirarlo). `abrir`:
+ * ya es miembro. `lleno`: no cabe nadie más, y no se ofrece ni entrar ni pedir.
  */
-export type AccionDeTarjeta = 'pedir' | 'esperando' | 'abrir' | 'lleno';
+export type AccionDeTarjeta = 'unirme' | 'pedir' | 'esperando' | 'abrir' | 'lleno';
 
 export function accionDeTarjeta(tarjeta: TarjetaDeGrupo): AccionDeTarjeta {
   if (tarjeta.miEstado === 'miembro') return 'abrir';
+  // Una solicitud de cuando era con solicitud sigue siendo suya: se ve y se
+  // puede retirar, aunque ahora sea abierto.
   if (tarjeta.miEstado === 'pendiente') return 'esperando';
-  return tarjeta.lleno ? 'lleno' : 'pedir';
+  if (tarjeta.lleno) return 'lleno';
+  return tarjeta.entrada === 'open' ? 'unirme' : 'pedir';
+}
+
+/** Un trozo del detalle de la tarjeta: la clave de su texto y, si cuenta algo, cuánto. */
+export type TrozoDelDetalle = { clave: string; n?: number };
+
+/**
+ * «Comunidad abierta · 3 grupos · 4 temas»: cómo se entra y qué hay dentro.
+ *
+ * Lo que vale cero no se nombra: «0 grupos» no le dice nada a quien todavía
+ * no ha entrado. Uno va en singular, con su propia clave.
+ */
+export function detalleDeTarjeta(
+  tarjeta: Pick<TarjetaDeGrupo, 'entrada' | 'grupos' | 'temas'>,
+): TrozoDelDetalle[] {
+  const trozos: TrozoDelDetalle[] = [
+    { clave: tarjeta.entrada === 'open' ? 'groupJoin.kindOpen' : 'groupJoin.kindRequest' },
+  ];
+  if (tarjeta.grupos > 0) {
+    trozos.push(
+      tarjeta.grupos === 1
+        ? { clave: 'groupCommunities.countOne' }
+        : { clave: 'groupCommunities.countMany', n: tarjeta.grupos },
+    );
+  }
+  if (tarjeta.temas > 0) {
+    trozos.push(
+      tarjeta.temas === 1
+        ? { clave: 'groupTopics.countOne' }
+        : { clave: 'groupTopics.countMany', n: tarjeta.temas },
+    );
+  }
+  return trozos;
 }
 
 /** Alguien que pidió entrar y espera respuesta. */

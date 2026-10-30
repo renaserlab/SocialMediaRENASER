@@ -49,15 +49,19 @@ export function FotoDelGrupo({ info, alCambiar, alFallar }: Props) {
   const [ocupado, setOcupado] = useState(false);
 
   const grupoId = info.id;
+  // En pantalla el de dentro es un «grupo» y el de primer nivel una «comunidad».
+  const deDentro = info.padre !== null;
 
   const motivo = useCallback(
     (error: unknown): string => {
       // Sin permiso para las fotos o la cámara: el texto ya dice dónde darlo.
       if (error instanceof PermisoDenegadoError) return error.message;
-      if (error instanceof ApiError) return t(claveDelFalloDeGrupo(error.code) as TranslationKey);
+      if (error instanceof ApiError) {
+        return t(claveDelFalloDeGrupo(error.code, deDentro) as TranslationKey);
+      }
       return describeStorageError(error);
     },
-    [t],
+    [t, deDentro],
   );
 
   const elegir = useCallback(
@@ -138,7 +142,7 @@ export function FotoDelGrupo({ info, alCambiar, alFallar }: Props) {
 
       <BottomSheet visible={abierta} onClose={() => setAbierta(false)}>
         <Text weight="800" style={styles.titulo}>
-          {t('groups.photoTitle')}
+          {t(deDentro ? 'groupCommunities.photoTitle' : 'groups.photoTitle')}
         </Text>
         <ListRow
           title={t('profile.pickFromGallery')}
