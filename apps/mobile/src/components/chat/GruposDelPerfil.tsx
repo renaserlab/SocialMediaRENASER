@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import Feather from '@expo/vector-icons/Feather';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { IconoDeGrupos } from '@/components/chat/IconoDeGrupos';
@@ -8,6 +9,7 @@ import { TarjetaDeGrupoVista } from '@/components/chat/TarjetaDeGrupoVista';
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
 import { useTranslation } from '@/i18n/useTranslation';
+import { closeThen } from '@/lib/afterSheetClose';
 import { accionDeTarjeta, type TarjetaDeGrupo } from '@/lib/gruposDeChat';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { GroupRepository } from '@/repositories/GroupRepository';
@@ -34,10 +36,19 @@ const ANCHO_MAXIMO = 220;
  * que deslizar un buen rato para llegar a sus propias publicaciones. Ahora la
  * fila se desplaza de lado y el perfil mide lo mismo con uno que con cien.
  *
- * QUÉ PASA AL TOCAR UNO. Quien ya está dentro abre el grupo, sin paso
- * intermedio. Quien no, ve la tarjeta de siempre en una hoja —foto, cuántos
- * son, quién administra— y desde ahí pide entrar o retira su solicitud. Pedir
- * sigue sin meter a nadie en el grupo: decide quien lo administra.
+ * EN PANTALLA SON COMUNIDADES (30/10/2026): el chat de primer nivel se llama
+ * así desde entonces, y solo esas salen aquí, nunca los grupos de dentro. El
+ * código sigue diciendo «grupo».
+ *
+ * EL ICONO DICE CÓMO SE ENTRA. El de comunidad si es abierta; un candado si es
+ * con solicitud. Así no es el color lo único que lo cuenta, y el lector de
+ * pantalla lo dice con palabras: «(con solicitud)».
+ *
+ * QUÉ PASA AL TOCAR UNO. Quien ya está dentro abre la comunidad, sin paso
+ * intermedio. Quien no, ve la tarjeta de siempre en una hoja —foto, cómo se
+ * entra, qué hay dentro, cuántos son, quién administra—. Si es abierta,
+ * «Unirme» le mete y la abre; si es con solicitud, la pide o retira su
+ * solicitud, y pedir sigue sin meter a nadie: decide quien la administra.
  *
  * SI NO HAY NINGUNO, NO SE PINTA NADA. La lista viene vacía cuando la persona
  * no enseña ningún grupo, cuando hay un bloqueo entre las dos, o cuando el
@@ -74,6 +85,27 @@ export function GruposDelPerfil({ perfilId, esPropio }: Props) {
   const releer = useCallback(() => setVuelta((n) => n + 1), []);
   const cerrarHoja = useCallback(() => setHojaAbierta(false), []);
 
+  /*
+    TRAS «UNIRME», SE ABRE LA COMUNIDAD, como al tocar una de la que ya se es
+    miembro. Pero primero se cierra la hoja y se espera a que acabe de bajar:
+    en iOS nada se abre encima de un Modal, y el chat quedaría debajo.
+    La píldora pasa a «abrir» sin esperar a volver a leer, pero ya con la hoja
+    abajo: antes la vaciaría mientras baja.
+  */
+  const alEntrar = useCallback(
+    (dentro: TarjetaDeGrupo) => {
+      closeThen(cerrarHoja, () => {
+        setTarjetas((previas) =>
+          previas.map((tarjeta) =>
+            tarjeta.id === dentro.id ? { ...dentro, miEstado: 'miembro' } : tarjeta,
+          ),
+        );
+        router.push({ pathname: '/chat/[id]', params: { id: dentro.id, name: dentro.titulo } });
+      });
+    },
+    [cerrarHoja, router],
+  );
+
   const alTocar = useCallback(
     (tarjeta: TarjetaDeGrupo) => {
       if (accionDeTarjeta(tarjeta) === 'abrir') {
@@ -89,7 +121,7 @@ export function GruposDelPerfil({ perfilId, esPropio }: Props) {
   if (tarjetas.length === 0) return null;
 
   // En la hoja solo cabe quien todavía no está dentro. Si mientras estaba
-  // abierta aceptaron la solicitud, la hoja se cierra sola: abrir el grupo
+  // abierta aceptaron la solicitud, la hoja se cierra sola: abrir la comunidad
   // desde una hoja la dejaría encima del chat.
   const elegida = tarjetas.find((tarjeta) => tarjeta.id === elegidaId) ?? null;
   const enLaHoja = elegida && accionDeTarjeta(elegida) !== 'abrir' ? elegida : null;
@@ -107,27 +139,42 @@ export function GruposDelPerfil({ perfilId, esPropio }: Props) {
           contentContainerStyle={styles.fila}
           keyboardShouldPersistTaps="handled"
         >
-          {tarjetas.map((tarjeta) => (
-            <Pulsable
-              key={tarjeta.id}
-              onPress={() => alTocar(tarjeta)}
-              hitSlop={HOLGURA}
-              style={[styles.boton, { borderColor: colors.border }]}
-              accessibilityRole="button"
-              accessibilityLabel={t(
-                accionDeTarjeta(tarjeta) === 'abrir' ? 'groupJoin.chipOpen' : 'groupJoin.chipSee',
-                { grupo: tarjeta.titulo },
-              )}
-              // Lo que antes decía un rótulo encima de las tarjetas, ahora solo
-              // a quien lo necesita oír: que así se ve desde fuera y dónde se cambia.
-              accessibilityHint={esPropio ? t('groupJoin.profileHintOwn') : undefined}
-            >
-              <IconoDeGrupos size={16} color={colors.text} />
-              <Text weight="700" numberOfLines={1} style={styles.nombre}>
-                {tarjeta.titulo}
-              </Text>
-            </Pulsable>
-          ))}
+          {tarjetas.map((tarjeta) => {
+            const conSolicitud = tarjeta.entrada === 'request';
+            const abre = accionDeTarjeta(tarjeta) === 'abrir';
+            return (
+              <Pulsable
+                key={tarjeta.id}
+                onPress={() => alTocar(tarjeta)}
+                hitSlop={HOLGURA}
+                style={[styles.boton, { borderColor: colors.border }]}
+                accessibilityRole="button"
+                accessibilityLabel={t(
+                  abre
+                    ? conSolicitud
+                      ? 'groupJoin.chipOpenRequest'
+                      : 'groupJoin.chipOpen'
+                    : conSolicitud
+                      ? 'groupJoin.chipSeeRequest'
+                      : 'groupJoin.chipSee',
+                  { grupo: tarjeta.titulo },
+                )}
+                // Lo que antes decía un rótulo encima de las tarjetas, ahora solo
+                // a quien lo necesita oír: que así se ve desde fuera y dónde se cambia.
+                accessibilityHint={esPropio ? t('groupJoin.profileHintOwn') : undefined}
+              >
+                {/* El candado ocupa el sitio del icono de comunidad, mismo tamaño. */}
+                {conSolicitud ? (
+                  <Feather name="lock" size={16} color={colors.text} />
+                ) : (
+                  <IconoDeGrupos size={16} color={colors.text} />
+                )}
+                <Text weight="700" numberOfLines={1} style={styles.nombre}>
+                  {tarjeta.titulo}
+                </Text>
+              </Pulsable>
+            );
+          })}
         </ScrollView>
       </SinCambioDeSeccion>
 
@@ -135,9 +182,9 @@ export function GruposDelPerfil({ perfilId, esPropio }: Props) {
         {enLaHoja ? (
           <View style={styles.hoja}>
             <Text color={colors.textMuted} style={styles.ayuda}>
-              {t('groupJoin.explain')}
+              {t(enLaHoja.entrada === 'open' ? 'groupJoin.explainOpen' : 'groupJoin.explain')}
             </Text>
-            <TarjetaDeGrupoVista tarjeta={enLaHoja} alCambiar={releer} />
+            <TarjetaDeGrupoVista tarjeta={enLaHoja} alCambiar={releer} alEntrar={alEntrar} />
           </View>
         ) : null}
       </BottomSheet>

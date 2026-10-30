@@ -284,6 +284,9 @@ export function ChatScreen() {
     primer nivel con temas en el servidor, los agrega a un tema.
   */
   const padre = infoDeConversacion?.padre ?? null;
+  // En pantalla el de dentro se llama «grupo» y el de primer nivel «comunidad»
+  // (30/10/2026): los textos que lo nombran se eligen con esto.
+  const esGrupoDeDentro = padre !== null;
   const temaDelChat = infoDeConversacion?.tema ?? null;
   const puedoBorrarAjenos = esGrupo && infoDeConversacion?.puedoAdministrar === true;
   const disponibilidadDeTemas = useDisponibilidadDeTemas(supabaseEnabled && esGrupo);
@@ -1828,7 +1831,13 @@ export function ChatScreen() {
       }
       const ok = await confirm({
         title: t('chat.deleteTitle'),
-        message: t(ajeno ? 'groupTopics.adminDeleteBody' : 'chat.deleteBody'),
+        message: t(
+          !ajeno
+            ? 'chat.deleteBody'
+            : esGrupoDeDentro
+              ? 'groupCommunities.adminDeleteBody'
+              : 'groupTopics.adminDeleteBody',
+        ),
         confirmLabel: t('common.delete'),
         cancelLabel: t('common.cancel'),
         destructive: true,
@@ -1861,7 +1870,7 @@ export function ChatScreen() {
         );
       }
     },
-    [params.id, aplicar, puedoBorrarAjenos],
+    [params.id, aplicar, puedoBorrarAjenos, esGrupoDeDentro],
   );
 
   /**
@@ -2235,6 +2244,7 @@ export function ChatScreen() {
                 // A quien administra, la cabecera le dice que hay alguien
                 // esperando: tocarla lleva a la ficha, donde se responde.
                 pendientes: infoDeConversacion.pendientes,
+                deDentro: esGrupoDeDentro,
               }
             : undefined
         }
@@ -2485,7 +2495,13 @@ export function ChatScreen() {
       */}
       <BottomSheet visible={opcionesAbiertas} onClose={() => setOpcionesAbiertas(false)}>
         <ListRow
-          title={t(esGrupo ? 'chatMenu.groupInfo' : 'chatMenu.content')}
+          title={t(
+            !esGrupo
+              ? 'chatMenu.content'
+              : esGrupoDeDentro
+                ? 'groupCommunities.menuInfo'
+                : 'chatMenu.groupInfo',
+          )}
           leftIcon={esGrupo ? 'users' : 'grid'}
           onPress={() => void abrirContenido()}
         />

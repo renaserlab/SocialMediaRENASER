@@ -13,6 +13,7 @@ import { confirm } from '@/lib/confirm';
 import { compartirGrupo, enlaceDeGrupo } from '@/lib/enlaces';
 import {
   claveDelFalloDeGrupo,
+  type EntradaDeGrupo,
   type InfoDeConversacion,
   type SolicitudDeGrupo,
 } from '@/lib/gruposDeChat';
@@ -30,16 +31,19 @@ type Props = {
 };
 
 /**
- * Lo que quien administra decide sobre CÓMO SE ENTRA a su grupo: si se enseña
- * en su perfil, el enlace, y las solicitudes que esperan respuesta. La foto
- * se cambia tocándola, en lo alto de la ficha (`FotoDelGrupo`).
+ * Lo que quien administra decide sobre CÓMO SE ENTRA a su grupo (en pantalla,
+ * su comunidad): abierta o con solicitud, si se enseña en su perfil, el
+ * enlace, y las solicitudes que esperan respuesta. La foto se cambia
+ * tocándola, en lo alto de la ficha (`FotoDelGrupo`).
  *
  * SOLO SE PINTA PARA QUIEN ADMINISTRA, y solo si el servidor conoce estas
  * funciones (`info.hayExtras`). Es comodidad: cada cambio se comprueba otra
  * vez en el servidor.
  *
- * NADIE ENTRA SOLO. Ni el perfil ni el enlace meten a nadie: dejan una
- * solicitud que se responde aquí.
+ * ABIERTA O CON SOLICITUD (0114). Abierta: desde el perfil o el enlace se
+ * entra con un toque. Con solicitud: ni el perfil ni el enlace meten a nadie,
+ * dejan una solicitud que se responde aquí. Pasar a con solicitud no saca a
+ * nadie de dentro.
  */
 export function PuertasDelGrupo({ info, alCambiar }: Props) {
   const { colors } = useAppTheme();
@@ -81,13 +85,22 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
         return true;
       } catch (error) {
         const codigo = error instanceof ApiError ? error.code : null;
-        setFallo(t(claveDelFalloDeGrupo(codigo) as TranslationKey));
+        setFallo(t(claveDelFalloDeGrupo(codigo, esComunidad) as TranslationKey));
         return false;
       } finally {
         setOcupado(null);
       }
     },
-    [ocupado, alCambiar, t],
+    [ocupado, alCambiar, t, esComunidad],
+  );
+
+  /** Elegir la que ya está no pregunta nada al servidor. */
+  const cambiarEntrada = useCallback(
+    (entrada: EntradaDeGrupo) => {
+      if (entrada === ajustes?.entrada) return;
+      void hacer('entrada', () => GroupRepository.cambiarAjustes(grupoId, { entrada }));
+    },
+    [ajustes?.entrada, hacer, grupoId],
   );
 
   const compartir = useCallback(() => {
@@ -122,10 +135,16 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
       );
       if (hecho) {
         setSolicitudes((previas) => previas.filter((s) => s.id !== solicitud.id));
-        if (aceptar) toast(t('groupJoin.accepted', { nombre: solicitud.persona.nombre }));
+        if (aceptar) {
+          toast(
+            t(esComunidad ? 'groupCommunities.accepted' : 'groupJoin.accepted', {
+              nombre: solicitud.persona.nombre,
+            }),
+          );
+        }
       }
     },
-    [hacer, grupoId, t],
+    [hacer, grupoId, t, esComunidad],
   );
 
   if (!info.puedoAdministrar || !info.hayExtras || !ajustes) return null;
@@ -184,13 +203,54 @@ export function PuertasDelGrupo({ info, alCambiar }: Props) {
         </View>
       ) : null}
 
-      {/* ---------- Cómo se entra (una comunidad no tiene perfil ni enlace) ---------- */}
+      {/*
+        ---------- Cómo se entra: abierta o con solicitud ----------
+        Solo en la de primer nivel (los grupos de dentro lo eligen en su lista)
+        y solo si el servidor lo conoce: sin él, el ajuste no haría nada.
+      */}
+      {esComunidad || ajustes.entrada === null ? null : (
+        <View style={styles.seccion}>
+          <Text weight="700">{t('groupJoin.entryTitle')}</Text>
+          <View style={styles.envuelve} accessibilityRole="radiogroup">
+            <Chip
+              rol="radio"
+              selected={ajustes.entrada === 'open'}
+              label={t('groupJoin.entryOpen')}
+              disabled={!!ocupado}
+              onPress={() => cambiarEntrada('open')}
+            />
+            {/* El candado, el mismo que lleva en el perfil. */}
+            <Chip
+              rol="radio"
+              selected={ajustes.entrada === 'request'}
+              icon="lock"
+              label={t('groupJoin.entryRequest')}
+              disabled={!!ocupado}
+              onPress={() => cambiarEntrada('request')}
+            />
+          </View>
+          <Text color={colors.textMuted} style={styles.detalle}>
+            {t(
+              ajustes.entrada === 'open' ? 'groupJoin.entryOpenHelp' : 'groupJoin.entryRequestHelp',
+            )}
+          </Text>
+        </View>
+      )}
+
+      {/* ---------- Tu perfil y el enlace (un grupo de dentro no tiene ninguno) ---------- */}
       {esComunidad ? null : (
       <View style={styles.seccion}>
         <Text weight="700">{t('groupJoin.doorsTitle')}</Text>
-        <Text color={colors.textMuted} style={styles.detalle}>
-          {t('groupJoin.doorsHint')}
-        </Text>
+        {/*
+          «Nadie entra solo» solo es verdad con un servidor que no conoce la
+          entrada abierta. Con él, lo que pasa al llegar por aquí lo dice ya la
+          ayuda de «Cómo se entra», justo encima.
+        */}
+        {ajustes.entrada === null ? (
+          <Text color={colors.textMuted} style={styles.detalle}>
+            {t('groupJoin.doorsHint')}
+          </Text>
+        ) : null}
         <View style={styles.envuelve}>
           <Chip
             rol="checkbox"

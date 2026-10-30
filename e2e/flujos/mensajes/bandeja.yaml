@@ -22,9 +22,9 @@ tags:
 - assertVisible: "Chat con Taller E2E\\..*"
 - assertVisible: "Chat con Carpinteria E2E\\..*"
 # Los grupos con temas o comunidades lo anuncian (abren su lista, no el chat).
-- assertVisible: "Chat con Taller E2E\\..*Grupo con temas y comunidades\\."
+- assertVisible: "Chat con Taller E2E\\..*Comunidad con temas y grupos\\."
 - assertVisible: "Buscar por nombre o usuario"
-- assertVisible: "Crear un grupo"
+- assertVisible: "Crear una comunidad"
 - takeScreenshot: mensajes-bandeja
 
 # ---- Buscar --------------------------------------------------------------

@@ -85,6 +85,14 @@ export function GrupoScreen() {
     }, [refrescar]),
   );
 
+  /*
+    EN PANTALLA, EL DE PRIMER NIVEL ES UNA «COMUNIDAD» Y EL DE DENTRO UN
+    «GRUPO» (30/10/2026). Los textos que lo nombran se eligen con `padre`,
+    como ya hacían salir y eliminar. Mientras no se sabe —cargando, o si no
+    se pudo leer— se dice «comunidad», que es lo que son casi todos.
+  */
+  const deDentro = !!info?.padre;
+
   /** Hace una cosa a la vez, y cuenta el rechazo con el texto que le toca. */
   const hacer = useCallback(
     async (clave: string, tarea: () => Promise<unknown>): Promise<boolean> => {
@@ -96,13 +104,13 @@ export function GrupoScreen() {
         return true;
       } catch (error) {
         const codigo = error instanceof ApiError ? error.code : null;
-        setFallo(t(claveDelFalloDeGrupo(codigo) as TranslationKey));
+        setFallo(t(claveDelFalloDeGrupo(codigo, deDentro) as TranslationKey));
         return false;
       } finally {
         setOcupado(null);
       }
     },
-    [ocupado, t],
+    [ocupado, t, deDentro],
   );
 
   const anadir = useCallback(async () => {
@@ -118,8 +126,10 @@ export function GrupoScreen() {
   const sacar = useCallback(
     async (miembro: MiembroDeGrupo) => {
       const seguro = await confirm({
-        title: t('groups.removeTitle', { nombre: miembro.nombre }),
-        message: t('groups.removeBody'),
+        title: t(deDentro ? 'groupCommunities.removeTitle' : 'groups.removeTitle', {
+          nombre: miembro.nombre,
+        }),
+        message: t(deDentro ? 'groupCommunities.removeBody' : 'groups.removeBody'),
         confirmLabel: t('groups.remove'),
         destructive: true,
       });
@@ -128,7 +138,7 @@ export function GrupoScreen() {
         refrescar();
       }
     },
-    [hacer, conversationId, t, refrescar],
+    [hacer, conversationId, t, refrescar, deDentro],
   );
 
   const salir = useCallback(async () => {
@@ -192,11 +202,12 @@ export function GrupoScreen() {
   }, [padre, t, hacer, conversationId, irALaListaDelPadre]);
 
   const volver = () => (router.canGoBack() ? router.back() : router.replace('/'));
+  const tituloDeLaFicha = t(deDentro ? 'groupCommunities.infoTitle' : 'groups.infoTitle');
 
   if (info === undefined) {
     return (
       <AppScreen scroll={false}>
-        <AppHeader title={t('groups.infoTitle')} onBack={volver} />
+        <AppHeader title={tituloDeLaFicha} onBack={volver} />
         <StateView state="loading" />
       </AppScreen>
     );
@@ -204,7 +215,7 @@ export function GrupoScreen() {
   if (info === null || !info.esGrupo) {
     return (
       <AppScreen scroll={false}>
-        <AppHeader title={t('groups.infoTitle')} onBack={volver} />
+        <AppHeader title={tituloDeLaFicha} onBack={volver} />
         <StateView
           state="error"
           title={t('groups.loadError')}
@@ -294,6 +305,7 @@ export function GrupoScreen() {
       {padre ? (
         <View style={[styles.tarjeta, { borderColor: colors.border }]}>
           <ListRow
+            // El padre siempre es de primer nivel: sin nombre, «Comunidad».
             title={t('groupCommunities.ofGroup', { nombre: padre.titulo || t('groups.infoTitle') })}
             subtitle={t('groupCommunities.ofGroupHint')}
             leftIcon="layers"
@@ -360,7 +372,7 @@ export function GrupoScreen() {
             <>
               <Text weight="700">{t('groups.addPeople')}</Text>
               <Text color={colors.textMuted} style={styles.detalle}>
-                {t('groups.errorFull')}
+                {t(deDentro ? 'groupCommunities.errorFull' : 'groups.errorFull')}
               </Text>
             </>
           )}
@@ -405,7 +417,10 @@ export function GrupoScreen() {
                   onPress={() => void sacar(miembro)}
                   disabled={!!ocupado}
                   accessibilityRole="button"
-                  accessibilityLabel={t('groups.removeTitle', { nombre: miembro.nombre })}
+                  accessibilityLabel={t(
+                    deDentro ? 'groupCommunities.removeTitle' : 'groups.removeTitle',
+                    { nombre: miembro.nombre },
+                  )}
                   hitSlop={8}
                   style={styles.sacar}
                 >
@@ -422,7 +437,7 @@ export function GrupoScreen() {
   return (
     <AppScreen scroll={false}>
       <AppHeader
-        title={t('groups.infoTitle')}
+        title={tituloDeLaFicha}
         onBack={volver}
         // Solo para quien administra. El permiso es del servidor; esto evita
         // pintar un botón que respondería 403.

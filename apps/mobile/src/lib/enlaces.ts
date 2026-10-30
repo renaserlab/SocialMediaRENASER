@@ -55,8 +55,8 @@ export const RESPALDOS_ES = {
   'share.postBy': 'Mira esta publicación de {nombre} en Z',
   'share.live': 'Mira esta transmisión en vivo en Z',
   'share.liveBy': 'Mira la transmisión en vivo de {nombre} en Z',
-  'share.group': 'Únete a mi grupo en Z',
-  'share.groupNamed': 'Únete al grupo «{nombre}» en Z',
+  'share.group': 'Únete a mi comunidad en Z',
+  'share.groupNamed': 'Únete a la comunidad «{nombre}» en Z',
 } as const;
 
 const enEspanol: TraductorDeEnlaces = (clave, params) => {
@@ -193,11 +193,12 @@ ${url}` : texto, url };
 }
 
 /**
- * Enlace de invitacion a un grupo: `/grupo/{codigo}`.
+ * Enlace de invitacion a un grupo (en pantalla, una comunidad): `/grupo/{codigo}`.
  *
- * Lleva a la TARJETA del grupo, desde la que se pide entrar. No mete a nadie:
- * quien administra el grupo decide. El codigo es el secreto del enlace, y
- * cambiarlo en la ficha del grupo deja este enlace sin efecto.
+ * Lleva a la TARJETA del grupo. Si es abierto, desde ella se entra con un
+ * toque; si es con solicitud, no mete a nadie: se pide y quien administra el
+ * grupo decide. El codigo es el secreto del enlace, y cambiarlo en la ficha
+ * del grupo deja este enlace sin efecto. La ruta sigue diciendo `grupo`.
  */
 export function enlaceDeGrupo(codigo: string | null | undefined): string | null {
   const base = baseDeLaWeb();

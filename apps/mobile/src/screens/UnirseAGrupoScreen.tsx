@@ -16,10 +16,13 @@ import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
 
 /**
- * A donde lleva el enlace de un grupo: su tarjeta, y el botón de pedir entrar.
+ * A donde lleva el enlace de un grupo (en pantalla, una comunidad): su
+ * tarjeta, y el botón de entrar o de pedir entrar.
  *
- * EL ENLACE NO METE A NADIE. Enseña de qué grupo se trata y deja pedir la
- * entrada; quien lo administra recibe el aviso y decide.
+ * EL ENLACE SIGUE CÓMO SE ENTRA. Si la comunidad es abierta, «Unirme» mete y
+ * la abre. Si es con solicitud, el enlace no mete a nadie: enseña de qué
+ * comunidad se trata y deja pedir la entrada; quien la administra recibe el
+ * aviso y decide.
  *
  * UN ENLACE QUE NO VALE NO DICE POR QUÉ. Desactivado, cambiado, mal copiado o
  * de un grupo cuyo administrador tiene un bloqueo con quien mira: el servidor
@@ -82,7 +85,7 @@ export function UnirseAGrupoScreen() {
       ) : (
         <View style={styles.cuerpo}>
           <Text color={colors.textMuted} style={styles.ayuda}>
-            {t('groupJoin.explain')}
+            {t(tarjeta.entrada === 'open' ? 'groupJoin.explainOpen' : 'groupJoin.explain')}
           </Text>
           <TarjetaDeGrupoVista tarjeta={tarjeta} codigo={codigo} alCambiar={releer} />
         </View>

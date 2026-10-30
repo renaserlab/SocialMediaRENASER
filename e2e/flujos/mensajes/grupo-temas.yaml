@@ -27,13 +27,13 @@ tags:
 - extendedWaitUntil:
     visible: "Tema Avisos, solo lectura\\..*"
     timeout: 20000
-- assertVisible: "General, el chat de todo el grupo\\..*"
+- assertVisible: "General, el chat de toda la comunidad\\..*"
 - assertVisible: "Temas"
-- assertVisible: "Comunidades"
-- assertVisible: "Comunidad Esmaltes\\..*"
-- assertVisible: "Miembros: 2 · 1 tema · 1 comunidad"
+- assertVisible: "Grupos"
+- assertVisible: "Grupo Esmaltes\\..*"
+- assertVisible: "Miembros: 2 · 1 tema · 1 grupo"
 - assertVisible: "Nuevo tema"
-- assertVisible: "Crear comunidad"
+- assertVisible: "Crear grupo"
 - takeScreenshot: mensajes-grupo-lista
 
 # El tema: solo escribe la administracion; con el campo vacio, «Enviar» apagado.
@@ -62,7 +62,7 @@ tags:
 - extendedWaitUntil:
     visible: "Tema Tema Maestro, solo lectura\\..*"
     timeout: 15000
-- assertVisible: "Miembros: 2 · 2 temas · 1 comunidad"
+- assertVisible: "Miembros: 2 · 2 temas · 1 grupo"
 - takeScreenshot: mensajes-grupo-tema-creado
 
 # ...y eliminarlo, para dejar el grupo como estaba.
@@ -82,7 +82,7 @@ tags:
     notVisible: "Tema Tema Maestro, solo lectura\\..*"
     timeout: 15000
 - extendedWaitUntil:
-    visible: "Miembros: 2 · 1 tema · 1 comunidad"
+    visible: "Miembros: 2 · 1 tema · 1 grupo"
     timeout: 15000
 
 # ---- 2. Un grupo en el que Ana es miembro normal ---------------------------
@@ -99,7 +99,7 @@ tags:
 - assertVisible: "Torno"
 - assertVisible: "Unirme"
 - assertNotVisible: "Nuevo tema"
-- assertNotVisible: "Crear comunidad"
+- assertNotVisible: "Crear grupo"
 - takeScreenshot: mensajes-grupo-miembro
 
 # En el tema, un miembro no tiene compositor: solo la barra que lo explica.

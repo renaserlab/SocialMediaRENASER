@@ -6,6 +6,7 @@ import {
   accionDeTarjeta,
   claveDelFalloDeGrupo,
   colorDeAutor,
+  detalleDeTarjeta,
   esCodigoDeGrupo,
   leerAjustes,
   leerInfo,
@@ -269,7 +270,22 @@ test('la tarjeta de un grupo se lee sin fiarse de nada', () => {
     administrador: { id: 'ana', nombre: 'Ana' },
     miEstado: 'ninguno',
     lleno: false,
+    // Un servidor anterior a la 0114 no manda cómo se entra ni qué hay
+    // dentro: con solicitud, como era siempre, y sin recuentos.
+    entrada: 'request',
+    grupos: 0,
+    temas: 0,
   });
+  const nueva = leerTarjeta({ ...TARJETA, entrada: 'open', groups_count: 3, topics_count: 4 });
+  assert.equal(nueva?.entrada, 'open');
+  assert.equal(nueva?.grupos, 3);
+  assert.equal(nueva?.temas, 4);
+  // Lo que no se entiende es con solicitud: ofrecer «Unirme» terminaría en un 409.
+  for (const rara of ['OPEN', 'abierta', null, 1]) {
+    assert.equal(leerTarjeta({ ...TARJETA, entrada: rara })?.entrada, 'request', String(rara));
+  }
+  assert.equal(leerTarjeta({ ...TARJETA, groups_count: -2, topics_count: '4' })?.grupos, 0);
+  assert.equal(leerTarjeta({ ...TARJETA, groups_count: -2, topics_count: '4' })?.temas, 0);
   for (const mala of [null, 'x', {}, { id: ID }, { ...TARJETA, title: ' ' }, { ...TARJETA, admin: null }]) {
     assert.equal(leerTarjeta(mala), null, JSON.stringify(mala));
   }
@@ -286,12 +302,55 @@ test('lo que se ofrece en la tarjeta depende del estado, y pedir no es entrar', 
   // Quien ya está dentro abre el grupo aunque esté lleno.
   assert.equal(con({ my_status: 'member', is_full: true }), 'abrir');
 
+  // Abierta: se entra con un toque, salvo que esté llena. Una solicitud de
+  // cuando era con solicitud se sigue viendo, y se puede retirar.
+  assert.equal(con({ entrada: 'open' }), 'unirme');
+  assert.equal(con({ entrada: 'open', is_full: true }), 'lleno');
+  assert.equal(con({ entrada: 'open', my_status: 'pending' }), 'esperando');
+  assert.equal(con({ entrada: 'open', my_status: 'member' }), 'abrir');
+
   const es = leer('../i18n/es.ts');
   assert.match(es, /'groupJoin\.ask': 'Pedir unirme',/);
-  assert.match(es, /'groupJoin\.explain': '[^']*no te mete en el grupo/);
+  assert.match(es, /'groupJoin\.join': 'Unirme',/);
+  assert.match(es, /'groupJoin\.explain': '[^']*no te mete en la comunidad/);
   const tarjeta = leer('../components/chat/TarjetaDeGrupoVista.tsx');
   assert.match(tarjeta, /GroupRepository\.pedirEntrar\(tarjeta\.id, codigo\)/);
   assert.match(tarjeta, /if \(enCurso\.current\) return;/);
+  // «Unirme» entra por su ruta y, al terminar, abre la comunidad.
+  // Con el código del enlace cuando se llegó por él, como al pedir.
+  assert.match(tarjeta, /await GroupRepository\.entrar\(tarjeta\.id, codigo\)/);
+  assert.match(tarjeta, /\(alEntrar \?\? abrir\)\(dentro\)/);
+  const repositorio = leer('../repositories/GroupRepository.ts');
+  assert.match(
+    repositorio,
+    /`\$\{API_V1\}\/conversations\/\$\{conversationId\}\/join`, \{\s*method: 'POST',\s*body: JSON\.stringify\(codigo \? \{ code: codigo \} : \{\}\),/,
+  );
+});
+
+test('el detalle de la tarjeta dice cómo se entra y qué hay dentro', () => {
+  const claves = (cambios: object) =>
+    detalleDeTarjeta(leerTarjeta({ ...TARJETA, ...cambios })!).map((trozo) =>
+      trozo.n === undefined ? trozo.clave : `${trozo.clave}:${trozo.n}`,
+    );
+  assert.deepEqual(claves({ entrada: 'open', groups_count: 3, topics_count: 4 }), [
+    'groupJoin.kindOpen',
+    'groupCommunities.countMany:3',
+    'groupTopics.countMany:4',
+  ]);
+  // Uno, en singular; cero, no se nombra.
+  assert.deepEqual(claves({ groups_count: 1, topics_count: 1 }), [
+    'groupJoin.kindRequest',
+    'groupCommunities.countOne',
+    'groupTopics.countOne',
+  ]);
+  assert.deepEqual(claves({ topics_count: 2 }), ['groupJoin.kindRequest', 'groupTopics.countMany:2']);
+  assert.deepEqual(claves({ entrada: 'open' }), ['groupJoin.kindOpen']);
+
+  const es = leer('../i18n/es.ts');
+  assert.match(es, /'groupJoin\.kindOpen': 'Comunidad abierta',/);
+  assert.match(es, /'groupJoin\.kindRequest': 'Comunidad con solicitud',/);
+  assert.match(es, /'groupCommunities\.countOne': '1 grupo',/);
+  assert.match(es, /'groupCommunities\.countMany': '\{n\} grupos',/);
 });
 
 test('el código del enlace solo se acepta para quien administra', () => {
@@ -304,7 +363,12 @@ test('el código del enlace solo se acepta para quien administra', () => {
     avatar_path: 'ana/a.jpg',
   };
   const admin = leerInfo({ ...base, can_manage: true });
-  assert.deepEqual(admin?.ajustes, { enMiPerfil: true, enlaceActivo: true, codigo: 'abcdefghijklmnop1234' });
+  assert.deepEqual(admin?.ajustes, {
+    enMiPerfil: true,
+    enlaceActivo: true,
+    codigo: 'abcdefghijklmnop1234',
+    entrada: null,
+  });
   assert.equal(admin?.pendientes, 3);
   assert.equal(admin?.avatarPath, 'ana/a.jpg');
 
@@ -321,7 +385,38 @@ test('el código del enlace solo se acepta para quien administra', () => {
 
   // Un enlace «activo» sin código no se puede compartir.
   assert.equal(leerAjustes({ invite_enabled: true }).enlaceActivo, false);
-  assert.deepEqual(leerAjustes(null), { enMiPerfil: false, enlaceActivo: false, codigo: null });
+  assert.deepEqual(leerAjustes(null), {
+    enMiPerfil: false,
+    enlaceActivo: false,
+    codigo: null,
+    entrada: null,
+  });
+
+  // Cómo se entra (0114). Sin el dato, `null`: la pantalla no ofrece un
+  // ajuste que el servidor no sabe guardar.
+  assert.equal(leerAjustes({ entrada: 'open' }).entrada, 'open');
+  assert.equal(leerAjustes({ entrada: 'request' }).entrada, 'request');
+  assert.equal(leerAjustes({ entrada: 'abierta' }).entrada, null);
+  assert.equal(leerAjustes({}).entrada, null);
+});
+
+test('cómo se entra se elige en los ajustes, solo en la de primer nivel', () => {
+  const puertas = leer('../components/chat/PuertasDelGrupo.tsx');
+  // Dos opciones excluyentes, con el candado en la de solicitud.
+  assert.match(puertas, /\{esComunidad \|\| ajustes\.entrada === null \? null : \(/);
+  assert.match(puertas, /t\('groupJoin\.entryTitle'\)/);
+  assert.match(puertas, /rol="radio"\s+selected=\{ajustes\.entrada === 'open'\}/);
+  assert.match(puertas, /rol="radio"\s+selected=\{ajustes\.entrada === 'request'\}\s+icon="lock"/);
+  assert.match(puertas, /GroupRepository\.cambiarAjustes\(grupoId, \{ entrada \}\)/);
+  // «Mostrar en mi perfil» sigue siendo el mismo chip y el mismo campo.
+  assert.match(puertas, /GroupRepository\.cambiarAjustes\(grupoId, \{ enMiPerfil: !ajustes\.enMiPerfil \}\)/);
+  const repositorio = leer('../repositories/GroupRepository.ts');
+  assert.match(repositorio, /if \(cambios\.entrada !== undefined\) cuerpo\.entrada = cambios\.entrada;/);
+
+  const es = leer('../i18n/es.ts');
+  assert.match(es, /'groupJoin\.entryTitle': 'Cómo se entra',/);
+  assert.match(es, /'groupJoin\.entryOpen': 'Abierta',/);
+  assert.match(es, /'groupJoin\.entryRequest': 'Con solicitud',/);
 });
 
 test('las solicitudes se leen con quién las manda y por dónde llegó', () => {
@@ -424,8 +519,13 @@ test('en el perfil los grupos son una fila de botones pequeños, no tarjetas', (
   // Una sola línea haya los grupos que haya: la fila se desplaza de lado,
   // y arrastrarla no cambia de pestaña.
   assert.match(seccion, /<SinCambioDeSeccion>\s*<ScrollView\s+horizontal/);
-  // Icono y nombre; un nombre largo se corta, no empuja a los demás.
-  assert.match(seccion, /<IconoDeGrupos size=\{16\} color=\{colors\.text\} \/>/);
+  // Icono y nombre; un nombre largo se corta, no empuja a los demás. El
+  // icono es el candado si la comunidad es con solicitud.
+  assert.match(
+    seccion,
+    /\{conSolicitud \? \(\s*<Feather name="lock" size=\{16\} color=\{colors\.text\} \/>\s*\) : \(\s*<IconoDeGrupos size=\{16\} color=\{colors\.text\} \/>\s*\)\}/,
+  );
+  assert.match(seccion, /const conSolicitud = tarjeta\.entrada === 'request';/);
   assert.match(seccion, /numberOfLines=\{1\}/);
   assert.match(seccion, /maxWidth: ANCHO_MAXIMO/);
   // Sin rótulo ni ayuda encima: era lo que ocupaba media pantalla.
@@ -440,8 +540,17 @@ test('en el perfil los grupos son una fila de botones pequeños, no tarjetas', (
     /if \(accionDeTarjeta\(tarjeta\) === 'abrir'\) \{\s*router\.push\(\{ pathname: '\/chat\/\[id\]'/,
   );
   assert.match(seccion, /accionDeTarjeta\(elegida\) !== 'abrir' \? elegida : null/);
-  assert.match(seccion, /<TarjetaDeGrupoVista tarjeta=\{enLaHoja\} alCambiar=\{releer\} \/>/);
-  assert.match(seccion, /t\('groupJoin\.explain'\)/);
+  assert.match(
+    seccion,
+    /<TarjetaDeGrupoVista tarjeta=\{enLaHoja\} alCambiar=\{releer\} alEntrar=\{alEntrar\} \/>/,
+  );
+  assert.match(seccion, /t\(enLaHoja\.entrada === 'open' \? 'groupJoin\.explainOpen' : 'groupJoin\.explain'\)/);
+  // Tras «Unirme», la hoja se cierra y DESPUÉS se abre la comunidad (iOS).
+  assert.match(seccion, /closeThen\(cerrarHoja, \(\) => \{/);
+  // Lo que oye el lector de pantalla: «Ver la comunidad X (con solicitud)».
+  assert.match(seccion, /'groupJoin\.chipSeeRequest'/);
+  assert.match(es, /'groupJoin\.chipSee': 'Ver la comunidad \{grupo\}',/);
+  assert.match(es, /'groupJoin\.chipSeeRequest': 'Ver la comunidad \{grupo\} \(con solicitud\)',/);
 
   // Va justo debajo de la descripción, antes del audio y de lo que aporta.
   const perfil = leer('../screens/ProfileScreen.tsx');
@@ -470,5 +579,8 @@ test('cada rechazo nuevo del servidor tiene su texto', () => {
   }
   // Un bloqueo y un grupo inexistente dicen lo mismo, y no nombran el bloqueo.
   assert.equal(claveDelFalloDeGrupo('group_not_found'), 'groupJoin.errorNotFound');
+  // Entrar directo en una que ya es con solicitud (0114).
+  assert.equal(claveDelFalloDeGrupo('group_requires_request'), 'groupJoin.errorNeedsRequest');
+  assert.match(es, /'groupJoin\.errorNeedsRequest': 'Para entrar en esta comunidad hay que pedirlo\.',/);
   assert.doesNotMatch(es.match(/'groupJoin\.errorNotFound': '([^']*)'/)?.[1] ?? '', /bloque/i);
 });

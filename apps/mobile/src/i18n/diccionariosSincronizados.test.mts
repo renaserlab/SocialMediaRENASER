@@ -153,10 +153,16 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
-    // Comunidades de un grupo: «Comunidades» y «{n} comunidades» se escriben
-    // exactamente igual en portugués.
+    // Los grupos de una comunidad (30/10/2026; antes «comunidades de un
+    // grupo»): «Grupos», «1 grupo», «{n} grupos», «Grupo {nombre}. {detalle}»,
+    // «Grupo de {nombre}» y «Editar grupo» se escriben exactamente igual en
+    // portugués.
     'groupCommunities.title',
+    'groupCommunities.countOne',
     'groupCommunities.countMany',
+    'groupCommunities.rowLabel',
+    'groupCommunities.ofGroup',
+    'groupCommunities.editTitle',
     // Reaccionar y responder: «Responder» y «Foto» se escriben igual en
     // portugués. («Vídeo» ya no: en el castellano del Perú va sin tilde.)
     'chat.reply',
@@ -170,7 +176,6 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'chatSearch.titleOf',
     'groups.actionEdit',
     'groups.adminBadge',
-    'groups.editTitle',
     // Los colores del fondo del chat que se llaman igual en portugués.
     'chatBackground.color.menta',
     'chatBackground.color.lavanda',

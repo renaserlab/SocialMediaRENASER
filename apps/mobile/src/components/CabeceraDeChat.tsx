@@ -129,6 +129,11 @@ type Props = {
     avatarUrl?: string;
     /** Solicitudes para entrar que esperan a quien administra. */
     pendientes?: number;
+    /**
+     * Cuelga de otro: en pantalla es un «grupo» de una comunidad, y la de
+     * primer nivel, una «comunidad». Cambia cómo se anuncia, nada más.
+     */
+    deDentro?: boolean;
   };
   /** Abre la pantalla del grupo (miembros y ajustes). */
   alAbrirGrupo?: () => void;
@@ -204,7 +209,10 @@ export function CabeceraDeChat({
             onPress={alAbrirGrupo}
             disabled={!alAbrirGrupo}
             accessibilityRole={alAbrirGrupo ? 'button' : undefined}
-            accessibilityLabel={t('groups.openGroup', { nombre: grupo.titulo })}
+            accessibilityLabel={t(
+              grupo.deDentro ? 'groupCommunities.openGroup' : 'groups.openGroup',
+              { nombre: grupo.titulo },
+            )}
             hitSlop={8}
             style={styles.persona}
           >
