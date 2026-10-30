@@ -323,6 +323,51 @@ async def test_un_nombre_de_mas_de_80_no_manda_nada(entorno):
         assert await db.scalar(select(func.count()).select_from(Message)) == antes + 1
 
 
+#: Caracteres de control (categoría Unicode `Cc`) en MEDIO del nombre.
+_CON_CONTROL = (
+    "Clase\n3",
+    "Clase\r\n3",
+    "Clase\t3",
+    "Clase\u00003",
+    "\u0000",
+    "Fin\u0000",  # `strip()` no quita NUL: tampoco al final
+    "Campana\u0007",
+    "Borrar\u007f",
+    "C1\u0085medio",
+)
+
+
+@pytest.mark.asyncio
+async def test_un_nombre_con_caracteres_de_control_no_manda_nada(entorno):
+    """Un nombre es una línea: saltos, tabuladores y NUL en medio, 422; pegados
+    a los extremos (lo que deja un teclado), se recortan."""
+    http, sesiones, identidad = entorno
+    async with sesiones() as db:
+        antes = await db.scalar(select(func.count()).select_from(Message))
+    for titulo in _CON_CONTROL:
+        for adjunto in (_adjunto("audio", title=titulo), _adjunto("document", title=titulo)):
+            respuesta = await _enviar(http, identidad, adjunto)
+            assert respuesta.status_code == 422, (titulo, respuesta.text)
+            assert codigo(respuesta) == "attachment_title_invalid", titulo
+    async with sesiones() as db:
+        assert await db.scalar(select(func.count()).select_from(Message)) == antes
+    # En los extremos se recortan, y lo que no es de control pasa: acentos,
+    # emoji con su selector de variante, espacios de ancho cero.
+    enviado = await _enviado(
+        http,
+        identidad,
+        _adjunto("document", title="\n\tTemario\r\n"),
+        _adjunto("audio", title="Respiración 🌬️ 4\u200b7\u200b8"),
+        # En una foto el nombre se ignora antes de mirarlo.
+        _adjunto("image", title="Foto\n"),
+    )
+    assert [a["title"] for a in enviado["attachments"]] == [
+        "Temario",
+        "Respiración 🌬️ 4\u200b7\u200b8",
+        None,
+    ]
+
+
 @pytest.mark.asyncio
 async def test_la_base_de_las_pruebas_tambien_rechaza_un_nombre_vacio_o_largo(entorno):
     """El `CHECK` repetido en el modelo: lo que producción rechaza, aquí también."""
@@ -410,6 +455,23 @@ async def test_la_moderacion_tambien_puede_como_al_borrar(entorno):
     )
     assert respuesta.status_code == 200
     assert respuesta.json()["title"] == "Revisado"
+
+
+@pytest.mark.asyncio
+async def test_ponerle_un_nombre_con_caracteres_de_control_tampoco(entorno):
+    http, sesiones, identidad = entorno
+    enviado = await _enviado(http, identidad, _adjunto("audio", de=BRUNO, title="Antes"), de=BRUNO)
+    mid, aid = enviado["id"], enviado["attachments"][0]["id"]
+    for titulo in _CON_CONTROL:
+        respuesta = await _nombrar(http, identidad, mid, aid, titulo, quien=BRUNO)
+        assert respuesta.status_code == 422, (titulo, respuesta.text)
+        assert codigo(respuesta) == "attachment_title_invalid", titulo
+    assert (await _fila_del_adjunto(sesiones, aid)).title == "Antes"
+    # Quien no puede sigue recibiendo su 403, no el 422: el permiso va antes.
+    ajeno = await _nombrar(http, identidad, mid, aid, "Clase\n3", quien=CARLA)
+    assert (ajeno.status_code, codigo(ajeno)) == (403, "attachment_title_forbidden")
+    recortado = await _nombrar(http, identidad, mid, aid, " Después\n", quien=BRUNO)
+    assert recortado.json()["title"] == "Después"
 
 
 @pytest.mark.asyncio
@@ -1143,6 +1205,8 @@ async def test_sin_la_0113_todo_funciona_como_antes(sin_la_0113):
     # mismo con o sin la migración.
     largo = await _enviar(http, identidad, _adjunto("document", title="x" * 81))
     assert codigo(largo) == "attachment_title_too_long"
+    con_nul = await _enviar(http, identidad, _adjunto("document", title="a\u0000b"))
+    assert codigo(con_nul) == "attachment_title_invalid"
 
     # Un archivo de audio sin la 0113 se lee como nota de voz, así que se
     # valida como nota de voz: sin duración no entra, y con ella sí.
