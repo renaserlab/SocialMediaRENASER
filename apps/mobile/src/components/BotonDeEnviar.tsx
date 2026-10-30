@@ -55,8 +55,8 @@ export function BotonDeEnviar({
   const apagado = !listo || enviando;
   /*
     APAGADO CON COLOR. El apagado era el mismo botón al 35 %: en negro daba un
-    gris, pero con el rosa de `accion` sale un rosa lavado que parece otro
-    estado. Por eso el apagado es `enviarApagado` (el gris `disabled`), opaco.
+    gris, pero con un color de resalte en `accion` (el rosa del 27/10) salía
+    un tono lavado que parecía otro estado. Por eso el apagado es `enviarApagado` (el gris `disabled`), opaco.
     Sin ese token, el botón al 35 % de siempre.
   */
   const grisApagado = !listo && colors.enviarApagado ? colors.enviarApagado : null;

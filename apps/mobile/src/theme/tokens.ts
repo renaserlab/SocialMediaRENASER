@@ -1,7 +1,7 @@
 /**
  * Renaser Social Media — Design Tokens
  * Fuente de verdad del sistema visual: blanco, negro y grises, con color
- * solo en los RESALTES (ver más abajo), como Instagram o TikTok.
+ * solo en los RESALTES (ver más abajo): esmeralda y oro.
  *
  * Ubicación sugerida en tu monorepo:
  *   apps/mobile/src/theme/tokens.ts   (reemplaza el actual)
@@ -138,18 +138,34 @@ const dark = {
    RESALTES — el único sitio donde entra color.
 
    La base sigue en blanco, negro y grises. El color se reserva
-   para lo que «se enciende», como en TikTok: el anillo de una
-   historia nueva, el globo de no leídos, «EN VIVO», el corazón,
-   el «+» de crear y el botón principal (Seguir, Reservar, enviar).
-   Un solo rosa —más oscuro en claro para que la letra blanca
-   encima pase de 4,5:1— y el degradado cian → violeta → rosa del
-   anillo. Elegido el 27/10/2026 entre seis niveles de color sobre
-   capturas de la app real (el «N4»).
+   para lo que «se enciende»: el anillo de una historia nueva, el
+   globo de no leídos, «EN VIVO», el corazón y el «+» de crear.
+
+   ESMERALDA Y ORO (30/10/2026). Sustituyen al rosa del «N4» del
+   27/10 (rosa con anillo cian → violeta → rosa) porque se parecía
+   demasiado a TikTok. Aprobados sobre un lienzo de la app real:
+   - esmeralda #0B5A50 para globos, «EN VIVO», corazón y «+»;
+   - anillo de esmeralda profundo #01302C → esmeralda → oro
+     #C9A24E → oro claro #EBD58F (45°, paradas al 0/35/72/100 %).
+   Los botones (Seguir, Mensaje, Reservar, enviar) y el lápiz de
+   editar perfil vuelven a ser NEGROS, como antes del 27/10: con
+   color competían con los resaltes y ya se reconocen por la forma.
+
+   El modo oscuro no se maquetó. El #0B5A50 se pierde sobre negro
+   (2,6:1), así que sube de luz SIN cambiar de tono: #0F7B6C donde
+   lleva letra blanca encima (globo, «EN VIVO»: 5,2:1, y 4,1:1 sobre
+   negro) y #149F8C para el corazón y el «+» (6,4:1 sobre negro; el
+   «+» blanco encima, 3,3:1). El oro ya brilla sobre negro y cierra
+   el anillo igual que en claro.
 
    El color nunca es lo único que informa: cada elemento ya lleva
    forma, texto o icono (corazón relleno, cifra del globo, «EN VIVO»,
    subrayado del enlace, negrita de la etiqueta, rótulo de la pestaña).
-   `resaltes.test.mts` mide los contrastes.
+   `resaltes.test.mts` mide los contrastes. El oro del anillo no
+   llega a 3:1 sobre blanco —es lo que lo hace luminoso—, así que
+   allí se exige que el aro destaque en al menos media vuelta (en
+   claro, el 65 %) y que su arranque, el color sólido de respaldo,
+   también lo haga.
    ========================================================= */
 
 /** Un color, o varios para un degradado (solo `anillo`). */
@@ -173,7 +189,10 @@ export type Categoria = (typeof CATEGORIAS)[number];
 export type ColorDeCategoria = { color: string; suave: string; sobre: string };
 
 type Resaltes = {
-  /** Botón principal (`Button` primary): Seguir, Reservar, Publicar… y el de enviar del chat. */
+  /**
+   * Botón principal (`Button` primary): Seguir, Reservar, Publicar… y el de enviar del chat.
+   * Neutro desde el 30/10/2026 (la acción base: negro en claro, blanco en oscuro).
+   */
   accion: string;
   /** Texto e icono sobre `accion`. */
   sobreAccion: string;
@@ -225,14 +244,17 @@ type Resaltes = {
   crear?: string;
   /** Tinta sobre `crear` (el `+` de las insignias). */
   sobreCrear?: string;
-  /** Lápiz de editar perfil. */
+  /** Lápiz de editar perfil. Neutro desde el 30/10/2026: el mismo respaldo del componente. */
   editarPerfil?: string;
   sobreEditarPerfil?: string;
   /** Aro del aviso «X está en directo». Paleta OSCURA. */
   aroEnvivo?: string;
   /** Corazón grande del doble toque (sobre la foto). Paleta OSCURA. */
   corazonDobleToque?: string;
-  /** Botón de enviar APAGADO: gris, para que no parezca listo con el rosa lavado. */
+  /**
+   * Botón de enviar APAGADO: gris opaco. Si `accion` lleva color, el botón al
+   * 35 % sale de un tono lavado que parece otro estado en vez de «apagado».
+   */
   enviarApagado?: string;
   sobreEnviarApagado?: string;
 };
@@ -241,17 +263,27 @@ const todasLasCategorias = (c: ColorDeCategoria) =>
   Object.fromEntries(CATEGORIAS.map((nombre) => [nombre, c])) as Record<Categoria, ColorDeCategoria>;
 
 const resaltesClaros: Resaltes = {
-  accion: '#CF1155',
-  sobreAccion: '#FFFFFF',
-  meGusta: '#CF1155',
+  // Botones en negro: la acción base, la misma que antes del 27/10.
+  accion: light.primary,
+  sobreAccion: light.onPrimary,
+  meGusta: '#0B5A50',
   guardado: light.primary,
   republicado: light.primary,
-  aviso: '#CF1155',
+  aviso: '#0B5A50',
   sobreAviso: '#FFFFFF',
-  anillo: ['#0096BC', '#0096BC', '#7442E8', '#CF1155', '#CF1155'],
+  /*
+    El degradado del lienzo MUESTREADO en 12 puntos. `LinearGradient` reparte
+    los colores a partes iguales (StoriesRow no le pasa `locations`), así que
+    los cuatro del lienzo caen en el 0, 36, 73 y 100 % —casi su 0/35/72/100— y
+    los de en medio son su mezcla lineal, la misma que pintaría el degradado.
+    El 45° ya lo da StoriesRow (de abajo-izquierda a arriba-derecha).
+  */
+  anillo: ['#01302C', '#043B35', '#06453E', '#095047', '#0B5A50', '#3A6C50', '#6A7E4F', '#99904F', '#C9A24E', '#D4B364', '#E0C479', '#EBD58F'],
   enlace: light.text,
   mencion: light.text,
-  envivo: '#E3165A',
+  // `envivo`, `aroEnvivo` y `corazonDobleToque` se leen de la paleta OSCURA
+  // (van sobre foto o vídeo); aquí llevan el esmeralda del lienzo por coherencia.
+  envivo: '#0B5A50',
   sobreEnvivo: '#FFFFFF',
   progreso: light.text,
   pestanaActiva: light.primary,
@@ -263,28 +295,36 @@ const resaltesClaros: Resaltes = {
   acentoSuave: 'rgba(0,0,0,0.08)',
   tarjetaRelleno: '#F3F3F3',
   categorias: todasLasCategorias({ color: light.text, suave: '#E6E6E6', sobre: '#FFFFFF' }),
-  crear: '#CF1155',
+  crear: '#0B5A50',
   sobreCrear: '#FFFFFF',
-  editarPerfil: '#CF1155',
-  sobreEditarPerfil: '#FFFFFF',
-  aroEnvivo: '#E3165A',
-  corazonDobleToque: '#FF4785',
+  // El lápiz, negro con el icono del color del fondo: el respaldo de ProfileScreen.
+  editarPerfil: light.text,
+  sobreEditarPerfil: light.background,
+  aroEnvivo: '#0B5A50',
+  corazonDobleToque: '#0B5A50',
   enviarApagado: light.disabled,
   sobreEnviarApagado: '#000000',
 };
 
 const resaltesOscuros: Resaltes = {
-  accion: '#E3165A',
-  sobreAccion: '#FFFFFF',
-  meGusta: '#FF4785',
+  // Botones en blanco con letra negra: la acción base del modo oscuro. Es
+  // también el «Seguir» que va sobre el vídeo del directo.
+  accion: dark.primary,
+  sobreAccion: dark.onPrimary,
+  meGusta: '#149F8C',
   guardado: dark.primary,
   republicado: dark.primary,
-  aviso: '#E3165A',
+  aviso: '#0F7B6C',
   sobreAviso: '#FFFFFF',
-  anillo: ['#3EE0F2', '#3EE0F2', '#9B6BFF', '#FF4785', '#FF4785'],
+  /*
+    Mismo muestreo que en claro, con el tramo esmeralda subido de luz
+    (#0F7B6C → #149F8C): el esmeralda profundo del lienzo no se ve sobre negro.
+    Todo el aro pasa de 4:1 sobre el fondo.
+  */
+  anillo: ['#0F7B6C', '#108474', '#128D7C', '#139684', '#149F8C', '#41A07D', '#6EA16D', '#9CA15E', '#C9A24E', '#D4B364', '#E0C479', '#EBD58F'],
   enlace: dark.text,
   mencion: dark.text,
-  envivo: '#E3165A',
+  envivo: '#0F7B6C',
   sobreEnvivo: '#FFFFFF',
   progreso: dark.text,
   pestanaActiva: dark.primary,
@@ -296,12 +336,12 @@ const resaltesOscuros: Resaltes = {
   acentoSuave: 'rgba(255,255,255,0.14)',
   tarjetaRelleno: '#161616',
   categorias: todasLasCategorias({ color: dark.text, suave: '#2A2A2A', sobre: '#000000' }),
-  crear: '#FF4785',
+  crear: '#149F8C',
   sobreCrear: '#FFFFFF',
-  editarPerfil: '#E3165A',
-  sobreEditarPerfil: '#FFFFFF',
-  aroEnvivo: '#E3165A',
-  corazonDobleToque: '#FF4785',
+  editarPerfil: dark.text,
+  sobreEditarPerfil: dark.background,
+  aroEnvivo: '#0F7B6C',
+  corazonDobleToque: '#149F8C',
   enviarApagado: dark.disabled,
   sobreEnviarApagado: '#FFFFFF',
 };

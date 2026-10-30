@@ -74,5 +74,5 @@ test('nadie rellena con el rojo claro de la paleta oscura', () => {
 test('«EN VIVO» sale de su token de resalte, no del rojo de peligro', () => {
   const capa = leer('./CapaDeContraste.tsx');
   assert.match(capa, /rellenoDeEnVivo = \{\s*fondo: sobreMedio\.envivo,\s*texto: sobreMedio\.sobreEnvivo,\s*\} as const/);
-  // Su contraste (letra blanca sobre el rosa) lo mide `theme/resaltes.test.mts`.
+  // Su contraste (letra blanca sobre el esmeralda) lo mide `theme/resaltes.test.mts`.
 });

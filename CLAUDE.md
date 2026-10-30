@@ -33,8 +33,9 @@ la misma URL (`social-media-renaser.vercel.app`).
 4. **Tokens de tema, nunca hex crudo.** Consumir `@/theme/tokens` y
    `useAppTheme()`. La base es blanco, negro y grises, iconos Feather. El color
    entra SOLO por los tokens de resalte de `tokens.ts` (anillo de historias,
-   globos de aviso, EN VIVO, corazon, «+» de crear y boton principal), al estilo
-   TikTok; el acabado comun (tarjetas, categorias, botones) sale de `estilo` y
+   globos de aviso, EN VIVO, corazon y «+» de crear), en esmeralda y oro; los
+   botones y el lapiz de editar van en negro. El acabado comun (tarjetas,
+   categorias, botones) sale de `estilo` y
    `theme/aspecto.ts`. El color nunca puede ser el unico portador de
    informacion: acompanar con icono, texto o borde.
 5. **`.env` esta en `.gitignore` y contiene claves. No commitearlo jamas.**
