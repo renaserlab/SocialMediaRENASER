@@ -28,7 +28,7 @@ export type MiembroDeGrupo = {
 /**
  * Cómo se entra a un grupo de primer nivel (en pantalla, una «comunidad»).
  * `open`: con un toque, desde el perfil o el enlace. `request`: se pide y
- * decide quien lo administra. Los mismos valores que manda la API (0114).
+ * decide quien lo administra. Los mismos valores que manda la API (0112).
  */
 export type EntradaDeGrupo = 'open' | 'request';
 
@@ -40,8 +40,9 @@ export type AjustesDeGrupo = {
   /** El código del enlace; `null` hasta que se activa por primera vez. */
   codigo: string | null;
   /**
-   * Cómo se entra. `null` si el servidor no lo dice: es anterior a la 0114 y
-   * no sabe cambiarlo, así que la pantalla no ofrece un ajuste que no haría nada.
+   * Cómo se entra. `null` si el servidor no lo dice: es anterior a la 0112, o
+   * la 0112 todavía no está aplicada en la base. No sabe cambiarlo, así que la
+   * pantalla no ofrece un ajuste que no haría nada.
    */
   entrada: EntradaDeGrupo | null;
 };
@@ -286,7 +287,7 @@ export type TarjetaDeGrupo = {
   /** `miembro`: ya está dentro. `pendiente`: pidió entrar y espera respuesta. */
   miEstado: 'miembro' | 'pendiente' | 'ninguno';
   lleno: boolean;
-  /** Cómo se entra. Un servidor anterior a la 0114 no lo dice: es con solicitud. */
+  /** Cómo se entra. Un servidor anterior a la 0112 no lo dice: es con solicitud. */
   entrada: EntradaDeGrupo;
   /** Los grupos de dentro (en el código, subgrupos) que siguen vivos. */
   grupos: number;
@@ -345,9 +346,13 @@ export type AccionDeTarjeta = 'unirme' | 'pedir' | 'esperando' | 'abrir' | 'llen
 
 export function accionDeTarjeta(tarjeta: TarjetaDeGrupo): AccionDeTarjeta {
   if (tarjeta.miEstado === 'miembro') return 'abrir';
-  // Una solicitud de cuando era con solicitud sigue siendo suya: se ve y se
-  // puede retirar, aunque ahora sea abierto.
-  if (tarjeta.miEstado === 'pendiente') return 'esperando';
+  if (tarjeta.miEstado === 'pendiente') {
+    // Lo pidió cuando era con solicitud y después se abrió: no tiene por qué
+    // seguir esperando, `/join` le mete y da su solicitud por buena. Solo si
+    // ya no cabe nadie se queda como estaba, con su solicitud y la opción de
+    // retirarla, que entrar no podría.
+    return tarjeta.entrada === 'open' && !tarjeta.lleno ? 'unirme' : 'esperando';
+  }
   if (tarjeta.lleno) return 'lleno';
   return tarjeta.entrada === 'open' ? 'unirme' : 'pedir';
 }

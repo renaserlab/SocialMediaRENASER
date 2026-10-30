@@ -270,7 +270,7 @@ test('la tarjeta de un grupo se lee sin fiarse de nada', () => {
     administrador: { id: 'ana', nombre: 'Ana' },
     miEstado: 'ninguno',
     lleno: false,
-    // Un servidor anterior a la 0114 no manda cómo se entra ni qué hay
+    // Un servidor anterior a la 0112 no manda cómo se entra ni qué hay
     // dentro: con solicitud, como era siempre, y sin recuentos.
     entrada: 'request',
     grupos: 0,
@@ -302,12 +302,16 @@ test('lo que se ofrece en la tarjeta depende del estado, y pedir no es entrar', 
   // Quien ya está dentro abre el grupo aunque esté lleno.
   assert.equal(con({ my_status: 'member', is_full: true }), 'abrir');
 
-  // Abierta: se entra con un toque, salvo que esté llena. Una solicitud de
-  // cuando era con solicitud se sigue viendo, y se puede retirar.
+  // Abierta: se entra con un toque, salvo que esté llena.
   assert.equal(con({ entrada: 'open' }), 'unirme');
   assert.equal(con({ entrada: 'open', is_full: true }), 'lleno');
-  assert.equal(con({ entrada: 'open', my_status: 'pending' }), 'esperando');
   assert.equal(con({ entrada: 'open', my_status: 'member' }), 'abrir');
+  // Pidió cuando era con solicitud y después se abrió: ya no espera, entra
+  // (`/join` da su solicitud por buena). Si no cabe nadie, sigue con su
+  // solicitud y puede retirarla. Con solicitud, espera como siempre.
+  assert.equal(con({ entrada: 'open', my_status: 'pending' }), 'unirme');
+  assert.equal(con({ entrada: 'open', my_status: 'pending', is_full: true }), 'esperando');
+  assert.equal(con({ entrada: 'request', my_status: 'pending' }), 'esperando');
 
   const es = leer('../i18n/es.ts');
   assert.match(es, /'groupJoin\.ask': 'Pedir unirme',/);
@@ -319,7 +323,10 @@ test('lo que se ofrece en la tarjeta depende del estado, y pedir no es entrar', 
   // «Unirme» entra por su ruta y, al terminar, abre la comunidad.
   // Con el código del enlace cuando se llegó por él, como al pedir.
   assert.match(tarjeta, /await GroupRepository\.entrar\(tarjeta\.id, codigo\)/);
-  assert.match(tarjeta, /\(alEntrar \?\? abrir\)\(dentro\)/);
+  assert.match(
+    tarjeta,
+    /if \(alEntrar\) \{\s*alEntrar\(dentro\);\s*\} else \{\s*alCambiar\(\);\s*abrir\(dentro\);\s*\}\s*\}, false\)/,
+  );
   const repositorio = leer('../repositories/GroupRepository.ts');
   assert.match(
     repositorio,
@@ -392,7 +399,7 @@ test('el código del enlace solo se acepta para quien administra', () => {
     entrada: null,
   });
 
-  // Cómo se entra (0114). Sin el dato, `null`: la pantalla no ofrece un
+  // Cómo se entra (0112). Sin el dato, `null`: la pantalla no ofrece un
   // ajuste que el servidor no sabe guardar.
   assert.equal(leerAjustes({ entrada: 'open' }).entrada, 'open');
   assert.equal(leerAjustes({ entrada: 'request' }).entrada, 'request');
@@ -545,8 +552,13 @@ test('en el perfil los grupos son una fila de botones pequeños, no tarjetas', (
     /<TarjetaDeGrupoVista tarjeta=\{enLaHoja\} alCambiar=\{releer\} alEntrar=\{alEntrar\} \/>/,
   );
   assert.match(seccion, /t\(enLaHoja\.entrada === 'open' \? 'groupJoin\.explainOpen' : 'groupJoin\.explain'\)/);
-  // Tras «Unirme», la hoja se cierra y DESPUÉS se abre la comunidad (iOS).
-  assert.match(seccion, /closeThen\(cerrarHoja, \(\) => \{/);
+  // Tras «Unirme», la hoja se cierra y DESPUÉS se abre la comunidad (iOS), y
+  // también después se vuelve a leer: antes, la hoja se vaciaba al bajar.
+  const alEntrar = seccion.slice(seccion.indexOf('const alEntrar = useCallback('));
+  assert.match(
+    alEntrar.slice(0, 700),
+    /closeThen\(cerrarHoja, \(\) => \{[\s\S]*releer\(\);[\s\S]*router\.push\(/,
+  );
   // Lo que oye el lector de pantalla: «Ver la comunidad X (con solicitud)».
   assert.match(seccion, /'groupJoin\.chipSeeRequest'/);
   assert.match(es, /'groupJoin\.chipSee': 'Ver la comunidad \{grupo\}',/);
@@ -579,7 +591,7 @@ test('cada rechazo nuevo del servidor tiene su texto', () => {
   }
   // Un bloqueo y un grupo inexistente dicen lo mismo, y no nombran el bloqueo.
   assert.equal(claveDelFalloDeGrupo('group_not_found'), 'groupJoin.errorNotFound');
-  // Entrar directo en una que ya es con solicitud (0114).
+  // Entrar directo en una que ya es con solicitud (0112).
   assert.equal(claveDelFalloDeGrupo('group_requires_request'), 'groupJoin.errorNeedsRequest');
   assert.match(es, /'groupJoin\.errorNeedsRequest': 'Para entrar en esta comunidad hay que pedirlo\.',/);
   assert.doesNotMatch(es.match(/'groupJoin\.errorNotFound': '([^']*)'/)?.[1] ?? '', /bloque/i);

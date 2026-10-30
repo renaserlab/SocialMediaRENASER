@@ -30,6 +30,10 @@ type Props = {
    * Tras entrar con «Unirme»: abre el grupo, como se abre siendo miembro. Quien
    * la pinta dentro de una hoja lo pasa para cerrarla antes (en iOS nada se
    * abre encima de un Modal); sin él, se abre el chat desde aquí.
+   *
+   * CON ÉL, VOLVER A LEER ES COSA SUYA: aquí no se llama a `alCambiar`. Releer
+   * mientras la hoja baja la dejaría en blanco —la tarjeta pasa a «abrir» y
+   * deja de caber en ella—, así que lo hace cuando ya ha bajado.
    */
   alEntrar?: (tarjeta: TarjetaDeGrupo) => void;
 };
@@ -54,14 +58,15 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar, alEntrar }: Pr
   const enCurso = useRef(false);
 
   const hacer = useCallback(
-    async (tarea: () => Promise<void>) => {
+    /** `releer`: tras hacerlo, volver a leer. Entrar lo decide por su cuenta. */
+    async (tarea: () => Promise<void>, releer = true) => {
       if (enCurso.current) return;
       enCurso.current = true;
       setOcupado(true);
       setFallo(null);
       try {
         await tarea();
-        alCambiar();
+        if (releer) alCambiar();
       } catch (error) {
         const codigoDeError = error instanceof ApiError ? error.code : null;
         setFallo(t(claveDelFalloDeGrupo(codigoDeError) as TranslationKey));
@@ -143,10 +148,16 @@ export function TarjetaDeGrupoVista({ tarjeta, codigo, alCambiar, alEntrar }: Pr
           icon="log-in"
           onPress={() =>
             void hacer(async () => {
-              // Un 200 es estar dentro (también si ya se estaba): se abre.
+              // Un 200 es estar dentro (también si ya se estaba, o si había
+              // una solicitud de cuando era con solicitud): se abre.
               const dentro = (await GroupRepository.entrar(tarjeta.id, codigo)) ?? tarjeta;
-              (alEntrar ?? abrir)(dentro);
-            })
+              if (alEntrar) {
+                alEntrar(dentro);
+              } else {
+                alCambiar();
+                abrir(dentro);
+              }
+            }, false)
           }
           loading={ocupado}
           disabled={ocupado}

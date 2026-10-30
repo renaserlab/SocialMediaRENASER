@@ -89,8 +89,10 @@ export function GruposDelPerfil({ perfilId, esPropio }: Props) {
     TRAS «UNIRME», SE ABRE LA COMUNIDAD, como al tocar una de la que ya se es
     miembro. Pero primero se cierra la hoja y se espera a que acabe de bajar:
     en iOS nada se abre encima de un Modal, y el chat quedaría debajo.
-    La píldora pasa a «abrir» sin esperar a volver a leer, pero ya con la hoja
-    abajo: antes la vaciaría mientras baja.
+    Todo lo que cambia la tarjeta —la píldora pasa a «abrir» y se vuelve a
+    leer la lista— va también DESPUÉS: con la tarjeta ya de miembro, deja de
+    caber en la hoja, y la vaciaría mientras baja. Por eso la tarjeta no
+    vuelve a leer por su cuenta cuando se le pasa `alEntrar`.
   */
   const alEntrar = useCallback(
     (dentro: TarjetaDeGrupo) => {
@@ -100,10 +102,11 @@ export function GruposDelPerfil({ perfilId, esPropio }: Props) {
             tarjeta.id === dentro.id ? { ...dentro, miEstado: 'miembro' } : tarjeta,
           ),
         );
+        releer();
         router.push({ pathname: '/chat/[id]', params: { id: dentro.id, name: dentro.titulo } });
       });
     },
-    [cerrarHoja, router],
+    [cerrarHoja, releer, router],
   );
 
   const alTocar = useCallback(
