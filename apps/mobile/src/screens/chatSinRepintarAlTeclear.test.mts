@@ -28,6 +28,8 @@ const CHAT = sinComentarios(fuente('screens/ChatScreen.tsx'));
 const TEMA = sinComentarios(fuente('screens/TemaScreen.tsx'));
 const BURBUJA_DE_TEMA = sinComentarios(fuente('components/chat/BurbujaDeTema.tsx'));
 const COMENTARIOS = sinComentarios(fuente('components/ContenidoDeComentarios.tsx'));
+const GRABADORA = sinComentarios(fuente('hooks/useGrabadoraDeVoz.ts'));
+const BOTON_DE_VOZ = sinComentarios(fuente('components/BotonDeNotaDeVoz.tsx'));
 
 /** El cuerpo de un componente de nivel de módulo, hasta el siguiente. */
 function cuerpoDe(codigo: string, inicio: string): string {
@@ -47,6 +49,26 @@ describe('el chat', () => {
     assert.match(redactor, /const \[text, setText\] = useState\(''\);/);
     assert.match(redactor, /onChangeText=\{\(texto\) => \{/);
     assert.match(pantalla, /<RedactorDelChat\b/);
+  });
+
+  it('los campos de nombre (nota de voz, videos) tampoco viven en la pantalla', () => {
+    /*
+      Audios y temas (30/10/2026). La grabadora es un hook de la pantalla: un
+      estado suyo es un estado de la pantalla, y el nombre de la nota de voz
+      la repintaba entera con cada tecla. Ahora el texto lo lleva cada campo,
+      y la grabadora y la pantalla lo guardan en una referencia que leen al
+      enviar.
+    */
+    assert.doesNotMatch(GRABADORA, /useState\(''\)/);
+    assert.doesNotMatch(GRABADORA, /\[nombre, setNombre\]/);
+    assert.match(GRABADORA, /const nombre = useRef\(''\);/);
+    const campo = cuerpoDe(BOTON_DE_VOZ, 'function CampoDeNombreDeLaNota(');
+    assert.match(campo, /const \[texto, setTexto\] = useState\(inicial\);/);
+    assert.match(campo, /onChangeText=\{\(nuevo\) => \{/);
+    const videos = cuerpoDe(CHAT, 'function NombresDeVideos(');
+    assert.match(videos, /useState<Record<string, string>>/);
+    assert.match(videos, /onChangeText=\{\(texto\) => \{/);
+    assert.match(pantalla, /const nombresDeVideos = useRef<Record<string, string>>\(\{\}\);/);
   });
 
   it('`renderItem` es estable y la burbuja está memorizada', () => {

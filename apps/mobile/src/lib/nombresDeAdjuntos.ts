@@ -44,12 +44,25 @@ export function seNombra(kind: string): kind is TipoNombrable {
   return kind === 'audio' || kind === 'video' || kind === 'document';
 }
 
+/** Los caracteres de control (Unicode Cc): saltos de línea, tabuladores, NUL… */
+const CONTROLES = /[\u0000-\u001F\u007F-\u009F]/g;
+
 /**
- * El nombre tal como se guarda: sin espacios de más y sin pasarse del tope.
- * Vacío es `null`, que es «sin nombre» (y en el `PATCH`, borrarlo).
+ * El nombre tal como se guarda: sin caracteres de control, sin espacios de
+ * más y sin pasarse del tope. Vacío es `null`, que es «sin nombre» (y en el
+ * `PATCH`, borrarlo).
+ *
+ * LOS CONTROLES SE VUELVEN ESPACIOS: el servidor rechaza un nombre que los
+ * lleve (422 `attachment_title_invalid`), y llegan sin querer al pegar un
+ * texto con saltos de línea en el campo.
  */
 export function limpiarTitulo(texto: string | null | undefined): string | null {
-  const limpio = (texto ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TITULO_DE_ADJUNTO).trim();
+  const limpio = (texto ?? '')
+    .replace(CONTROLES, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_TITULO_DE_ADJUNTO)
+    .trim();
   return limpio ? limpio : null;
 }
 
@@ -115,16 +128,24 @@ export function iconoDeTarjeta(adjunto: {
 const PREFIJOS_SIN_NOMBRE = ['img_', 'vid_', 'pxl_', 'whatsapp audio'];
 
 /**
+ * Los que pone WhatsApp en Android: `IMG-20261030-WA0001.jpg`,
+ * `VID-…-WA…`, `AUD-…-WA…`, `PTT-…-WA…` (nota de voz) y `DOC-…-WA…`. Una
+ * fecha y un contador: tampoco dicen nada.
+ */
+const DE_WHATSAPP_EN_ANDROID = /^(img|vid|aud|ptt|doc)-\d{8}-wa\d*/i;
+
+/**
  * El nombre con el que empieza el campo de un archivo elegido: el del
  * fichero sin su extensión, con los guiones como espacios y la primera letra
  * en mayúscula (`respiracion-478.mp3` → «Respiracion 478»). Vacío si es de
- * cámara. Siempre se puede cambiar antes de enviar.
+ * cámara o de WhatsApp. Siempre se puede cambiar antes de enviar.
  */
 export function nombrePorDefecto(nombreDelArchivo: string | null | undefined): string {
   const nombre = (nombreDelArchivo ?? '').trim();
   if (!nombre) return '';
   const minusculas = nombre.toLowerCase();
   if (PREFIJOS_SIN_NOMBRE.some((prefijo) => minusculas.startsWith(prefijo))) return '';
+  if (DE_WHATSAPP_EN_ANDROID.test(nombre)) return '';
   // Solo se quita lo que parece una extensión: «Clase 3. Postura» no la tiene.
   const sinExtension = nombre.replace(/\.[A-Za-z0-9]{1,6}$/, '');
   const conEspacios = sinExtension.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -134,10 +155,13 @@ export function nombrePorDefecto(nombreDelArchivo: string | null | undefined): s
 }
 
 /**
- * Los tipos de audio que el servidor acepta como archivo de audio
- * reproducible (mp3, m4a, aac, ogg y wav, contrato §2). Otro audio —amr,
- * flac, wma— se sigue mandando como documento: se descarga en vez de
- * quedarse en un reproductor que quizá no lo sabe abrir.
+ * Los tipos de audio que se mandan como archivo de audio reproducible: mp3,
+ * m4a, aac y wav (contrato §2), los que suenan en los dos teléfonos.
+ *
+ * OGG Y OPUS NO, aunque sean audio: iOS no sabe abrir ese contenedor, y la
+ * burbuja de audio no tiene descarga, así que en un iPhone quedaría un play
+ * que no suena y ninguna forma de sacarlo. Como documento se descargan. Lo
+ * mismo con amr, flac o wma.
  */
 const AUDIOS_REPRODUCIBLES: ReadonlySet<string> = new Set([
   'audio/mpeg',
@@ -147,8 +171,6 @@ const AUDIOS_REPRODUCIBLES: ReadonlySet<string> = new Set([
   'audio/x-m4a',
   'audio/aac',
   'audio/x-aac',
-  'audio/ogg',
-  'audio/opus',
   'audio/wav',
   'audio/x-wav',
   'audio/wave',
@@ -159,9 +181,6 @@ const AUDIO_POR_EXTENSION: Record<string, string> = {
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',
   aac: 'audio/aac',
-  ogg: 'audio/ogg',
-  oga: 'audio/ogg',
-  opus: 'audio/ogg',
   wav: 'audio/wav',
 };
 
@@ -218,6 +237,19 @@ export function conTituloDeAdjunto<
   return cambio ? siguiente : mensajes;
 }
 
+/**
+ * Si un rechazo del servidor es por el nombre de un adjunto. Al enviar, un
+ * mensaje con un nombre que no vale vuelve con uno de estos; se cuenta con el
+ * texto del nombre y no con el genérico de «no se pudo enviar».
+ */
+export function esDelNombre(codigo: string | null | undefined): boolean {
+  return (
+    codigo === 'attachment_title_too_long' ||
+    codigo === 'attachment_title_invalid' ||
+    codigo === 'attachment_title_not_allowed'
+  );
+}
+
 /** El texto de cada rechazo del `PATCH` del nombre. */
 export function claveDelFalloDeNombre(codigo: string | null | undefined): string {
   switch (codigo) {
@@ -227,6 +259,8 @@ export function claveDelFalloDeNombre(codigo: string | null | undefined): string
       return 'attachmentName.errorGone';
     case 'attachment_title_too_long':
       return 'attachmentName.errorTooLong';
+    case 'attachment_title_invalid':
+      return 'attachmentName.errorInvalid';
     case 'attachment_title_not_allowed':
       return 'attachmentName.errorNotAllowed';
     case 'attachment_titles_not_available':

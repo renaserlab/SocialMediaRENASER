@@ -246,7 +246,9 @@ export function PestanasDeContenido({
     tema» los agrega de una vez (`PUT` por lotes). Sin ninguno marcado se
     sale sola. El permiso es del servidor; esto evita ofrecer un 403.
   */
-  const puedeElegir = !!temasDelGrupo?.puedoAdministrar;
+  // Y solo si el servidor contó los temas de la sección: una API sin el `PUT`
+  // por lotes tampoco tiene `views/topics`, y así nunca se ofrece elegir.
+  const puedeElegir = !!temasDelGrupo?.puedoAdministrar && cuentasDeTemas !== null;
   const [seleccion, setSeleccion] = useState<string[]>([]);
   const seleccionando = seleccion.length > 0;
   const [eligiendoTema, setEligiendoTema] = useState(false);

@@ -31,6 +31,11 @@ export type ObjetivoDeNombre = {
   autor: string;
   /** En un grupo el nombre lo ve toda la comunidad, y lo dice la ayuda. */
   esGrupo: boolean;
+  /**
+   * Es un «grupo» de dentro de una comunidad (tiene padre): la ayuda habla
+   * del grupo y no de la comunidad, y ahí no hay temas.
+   */
+  deDentro?: boolean;
 };
 
 type Props = {
@@ -151,7 +156,13 @@ export function HojaDeNombre({ objetivo, onClose, alGuardar }: Props) {
         />
         <View style={styles.pie}>
           <Text color={colors.textMuted} style={styles.ayuda}>
-            {t(objetivo?.esGrupo ? 'attachmentName.help' : 'attachmentName.helpDirect')}
+            {t(
+              !objetivo?.esGrupo
+                ? 'attachmentName.helpDirect'
+                : objetivo.deDentro
+                  ? 'attachmentName.helpGroup'
+                  : 'attachmentName.help',
+            )}
           </Text>
           <Text color={colors.textMuted} style={styles.cuenta}>
             {`${texto.length}/${MAX_TITULO_DE_ADJUNTO}`}
@@ -169,7 +180,7 @@ export function HojaDeNombre({ objetivo, onClose, alGuardar }: Props) {
         <Button label={t('common.cancel')} variant="secondary" onPress={onClose} disabled={guardando} />
         {objetivo?.esGrupo ? (
           <Text color={colors.textMuted} style={[styles.ayuda, styles.quien]}>
-            {t('attachmentName.whoCan')}
+            {t(objetivo.deDentro ? 'attachmentName.whoCanGroup' : 'attachmentName.whoCan')}
           </Text>
         ) : null}
       </View>

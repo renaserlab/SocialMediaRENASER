@@ -125,7 +125,18 @@ function combinar<T extends MensajeFusionable>(
     // Regla 2: un mensaje propio confirmado se come su burbuja optimista.
     // Se busca por CONTENIDO porque es lo unico que comparten: el servidor no
     // sabe nada del identificador temporal que invento la pantalla.
-    if (emparejarPorContenido && !esTemporal(entrante.id) && entrante.sender === 'me') {
+    //
+    // SOLO SI ES LA PRIMERA VEZ QUE LLEGA. Si ya esta en la lista, ya se comio
+    // su burbuja —o la quito `reconciliarEnvio`— y lo que llega es su eco de
+    // tiempo real. Emparejarlo otra vez se llevaria la burbuja del SIGUIENTE
+    // envio con el mismo texto: con varios archivos o dos notas de voz
+    // seguidas, todas sin texto, el segundo desaparecia mientras subia.
+    if (
+      emparejarPorContenido &&
+      !esTemporal(entrante.id) &&
+      entrante.sender === 'me' &&
+      !porId.has(entrante.id)
+    ) {
       for (const [id, candidato] of porId) {
         if (esTemporal(id) && candidato.text === entrante.text) {
           // El primero que encaja, y `Map` conserva el orden de insercion: con

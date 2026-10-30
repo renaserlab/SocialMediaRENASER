@@ -78,8 +78,12 @@ type Props = {
    * «Ponle nombre (opcional)» en la previa (audios y temas, 30/10/2026). Con
    * `alCambiarNombre`, la previa son dos filas: arriba escuchar y tirar,
    * abajo el nombre y enviar (lienzo, «2 · Al enviar una nota de voz»).
+   *
+   * El texto lo lleva el campo (`CampoDeNombreDeLaNota`) y lo deja con
+   * `alCambiarNombre`, que no repinta nada; `leerNombre` es lo que ya había
+   * al volver a la previa tras un envío fallido.
    */
-  nombre?: string;
+  leerNombre?: () => string;
   alCambiarNombre?: (texto: string) => void;
 };
 
@@ -96,7 +100,7 @@ export function BotonDeNotaDeVoz({
   eliminar,
   enviar,
   deshabilitado = false,
-  nombre = '',
+  leerNombre,
   alCambiarNombre,
 }: Props) {
   const { colors } = useAppTheme();
@@ -281,17 +285,10 @@ export function BotonDeNotaDeVoz({
               aparte. Vacío, la nota sale sin nombre, igual que siempre.
             */
             <View style={styles.filaDelNombre}>
-              <Input
-                value={nombre}
-                onChangeText={alCambiarNombre}
-                placeholder={t('voiceName.placeholder')}
-                accessibilityLabel={t('voiceName.label')}
-                maxLength={MAX_TITULO_DE_ADJUNTO}
-                returnKeyType="send"
-                onSubmitEditing={enviar}
-                forma="pastilla"
-                containerStyle={styles.campoDelNombre}
-                style={{ minHeight: 40 }}
+              <CampoDeNombreDeLaNota
+                inicial={leerNombre?.() ?? ''}
+                alCambiar={alCambiarNombre}
+                alEnviar={enviar}
               />
               {botonDeEnviar}
             </View>
@@ -362,6 +359,45 @@ export function BotonDeNotaDeVoz({
         </Pulsable>
       )}
     </>
+  );
+}
+
+/**
+ * El campo «Ponle nombre (opcional)» de la previa.
+ *
+ * LLEVA SU PROPIO TEXTO, como el redactor del chat: si viviera en la
+ * grabadora —que vive en la pantalla— cada tecla repintaría el chat entero.
+ * Cada cambio se deja con `alCambiar`, que no repinta nada, y la grabadora lo
+ * lee al enviar. `inicial` es lo que ya estaba escrito, para cuando la previa
+ * vuelve tras un envío que falló.
+ */
+function CampoDeNombreDeLaNota({
+  inicial,
+  alCambiar,
+  alEnviar,
+}: {
+  inicial: string;
+  alCambiar: (texto: string) => void;
+  alEnviar: () => void;
+}) {
+  const { t } = useTranslation();
+  const [texto, setTexto] = useState(inicial);
+  return (
+    <Input
+      value={texto}
+      onChangeText={(nuevo) => {
+        setTexto(nuevo);
+        alCambiar(nuevo);
+      }}
+      placeholder={t('voiceName.placeholder')}
+      accessibilityLabel={t('voiceName.label')}
+      maxLength={MAX_TITULO_DE_ADJUNTO}
+      returnKeyType="send"
+      onSubmitEditing={alEnviar}
+      forma="pastilla"
+      containerStyle={styles.campoDelNombre}
+      style={{ minHeight: 40 }}
+    />
   );
 }
 

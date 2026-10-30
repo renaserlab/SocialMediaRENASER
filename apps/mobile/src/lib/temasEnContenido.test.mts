@@ -161,7 +161,11 @@ describe('la pantalla usa lo de aquí', () => {
   });
 
   it('elegir varios es solo de quien administra, y va por el PUT por lotes con aviso', () => {
-    assert.match(pestanas, /const puedeElegir = !!temasDelGrupo\?\.puedoAdministrar;/);
+    // Y solo con las cuentas de temas: una API anterior nunca ofrece elegir.
+    assert.match(
+      pestanas,
+      /const puedeElegir = !!temasDelGrupo\?\.puedoAdministrar && cuentasDeTemas !== null;/,
+    );
     assert.match(pestanas, /puedeElegir && !seleccionando \? \(\) => alternar\(mensaje\.id\) : undefined/);
     assert.match(pestanas, /await TemasRepository\.agregarVarios\(grupoId, tema\.id, mensajeIds\)/);
     assert.match(pestanas, /canal\.current\?\.avisar\(\);\s*alAgregar\(tema, agregados\);/);
