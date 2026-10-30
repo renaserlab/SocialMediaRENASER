@@ -88,6 +88,7 @@ from app.core.exceptions import (
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
+    ValidationAppError,
 )
 from app.core.security import AuthUser, get_current_user
 from app.modules.content.schemas import AuthorSummary
@@ -101,12 +102,14 @@ from app.modules.messaging import (
     vistas,
 )
 from app.modules.messaging.models import (
+    ES_NOTA_DE_VOZ,
+    TITULO_DE_ADJUNTO,
     Conversation,
     ConversationMember,
     Message,
     MessageAttachment,
 )
-from app.modules.messaging.schemas import MessageRead
+from app.modules.messaging.schemas import MessageRead, TemaBreve
 from app.modules.profiles.models import Profile
 from app.shared.database import Base, get_db
 from app.shared.identifiers import ensure_uuid
@@ -147,6 +150,16 @@ MAX_NOMBRE = 40
 
 PAGINA_POR_OMISION = 30
 PAGINA_MAXIMA = 60
+
+#: Cuantos mensajes se pueden añadir a un tema de una vez (`PUT …/items`).
+#: Es lo que cabe elegir con holgura en Contenido sin que una sola peticion
+#: tenga que comprobar cientos de mensajes dentro de una transaccion.
+MAX_REFERENCIAS_POR_LOTE = 50
+
+#: De cuantos mensajes se pueden pedir los temas de una vez
+#: (`GET …/topics/of-messages`): una pantalla de chat con holgura, como
+#: `reacciones.MAX_CONSULTA`.
+MAX_MENSAJES_POR_CONSULTA = 100
 
 #: Cuanto texto viaja en `last.excerpt`. Es una linea de la lista de temas.
 MAX_EXTRACTO = 120
@@ -366,6 +379,12 @@ class UltimoDelTema(BaseModel):
     excerpt: str = ""
     #: El tipo del primer adjunto, `link` si el texto lleva una URL, o `text`.
     kind: str = "text"
+    #: Con `kind == "audio"`: si es una nota de voz (`true`, «Nota de voz») o
+    #: un archivo de audio (`false`, «Audio»). `excerpt` va vacio en un
+    #: mensaje sin texto ni nombre y la etiqueta la pone la aplicacion,
+    #: traducida; con solo `kind` no podria distinguir las dos (30/10/2026).
+    #: `false` en lo que no es audio; sin la 0113, todo audio es nota de voz.
+    voice_note: bool = False
     at: datetime
     #: Es un mensaje propio del tema (`true`) o una referencia a General.
     own: bool = False
@@ -418,6 +437,34 @@ class TemaMensaje(MessageRead):
 class PaginaDeTema(BaseModel):
     items: list[TemaMensaje] = Field(default_factory=list)
     has_more: bool = False
+
+
+class ReferenciasNuevas(BaseModel):
+    """`PUT …/topics/{topic_id}/items`: varios mensajes de General a la vez."""
+
+    message_ids: list[str] = Field(min_length=1, max_length=MAX_REFERENCIAS_POR_LOTE)
+
+    @field_validator("message_ids")
+    @classmethod
+    def _sin_repetidos(cls, v: list[str]) -> list[str]:
+        # Un repetido no es inofensivo aunque la clave primaria lo absorba: la
+        # respuesta diria «1 ya estaba» de algo que nunca estuvo, y la
+        # aplicacion contaria mal lo que acaba de hacer. Se comparan en su
+        # forma canonica, que el mismo identificador se escribe de varias.
+        vistos: set[str] = set()
+        for crudo in v:
+            clave = str(UUID(str(crudo))) if _es_uuid(crudo) else str(crudo).lower()
+            if clave in vistos:
+                raise ValueError("Hay mensajes repetidos en la lista.")
+            vistos.add(clave)
+        return v
+
+
+class ReferenciasAnadidas(BaseModel):
+    #: Los que se acaban de añadir.
+    added: int = 0
+    #: Los que ya estaban en el tema (no se tocan: conservan su fecha).
+    already: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -604,18 +651,36 @@ def _nombre_visible(full_name: str | None, username: str | None) -> str:
     return (full_name or "").strip() or username or ""
 
 
-async def _primer_adjunto(db: AsyncSession, message_ids: list[str]) -> dict[str, str]:
-    """El tipo del PRIMER adjunto de cada mensaje, en una consulta."""
+async def _primer_adjunto(
+    db: AsyncSession, message_ids: list[str]
+) -> dict[str, tuple[str, str | None, bool]]:
+    """Tipo, nombre y si es nota de voz (0113) del PRIMER adjunto de cada mensaje. Una consulta.
+
+    Sin la 0113 el nombre es `None` y todo audio es nota de voz: las columnas
+    no se nombran.
+    """
     if not message_ids or not await esquema.hay_adjuntos_de_chat(db):
         return {}
+    con_nombres = await esquema.hay_nombres_de_adjuntos(db)
     filas = await db.execute(
-        select(MessageAttachment.message_id, MessageAttachment.kind)
+        select(
+            MessageAttachment.message_id,
+            MessageAttachment.kind,
+            *((TITULO_DE_ADJUNTO, ES_NOTA_DE_VOZ) if con_nombres else ()),
+        )
         .where(MessageAttachment.message_id.in_(message_ids))
         .order_by(MessageAttachment.sort_order.asc(), MessageAttachment.id.asc())
     )
-    salida: dict[str, str] = {}
-    for mensaje, tipo in filas:
-        salida.setdefault(mensaje, tipo)
+    salida: dict[str, tuple[str, str | None, bool]] = {}
+    for fila in filas:
+        salida.setdefault(
+            fila.message_id,
+            (
+                fila.kind,
+                fila.title if con_nombres else None,
+                bool(fila.voice_note) if con_nombres else fila.kind == "audio",
+            ),
+        )
     return salida
 
 
@@ -855,11 +920,15 @@ async def _leer_temas(
         if tid in elegidos and elegidos[tid][0] in textos:
             mid, cuando, es_propio = elegidos[tid]
             cuerpo, quien = textos[mid]
-            primer = tipos.get(mid)
+            primer, titulo, de_voz = tipos.get(mid, (None, None, False))
             ultimo = UltimoDelTema(
                 sender_name=quien,
-                excerpt=_extracto(cuerpo),
+                # Sin texto, el nombre del archivo (0113): «Respiración 4-7-8»
+                # en vez de una fila que solo dice el tipo. La misma regla que
+                # la bandeja (`lectura._resumen_de_los_sin_texto`).
+                excerpt=_extracto(cuerpo) or _extracto(titulo),
                 kind=primer or ("link" if _ENLACE.search(cuerpo) else "text"),
+                voice_note=primer == "audio" and de_voz,
                 at=cuando,
                 own=es_propio,
             )
@@ -1026,6 +1095,106 @@ async def no_leidos_de_temas(db: AsyncSession, group_id: str, uid: str) -> int:
     return int(total or 0)
 
 
+async def temas_por_mensaje(
+    db: AsyncSession, group_id: str, message_ids: list[str]
+) -> dict[str, list[TemaBreve]]:
+    """En que temas VIVOS esta cada mensaje de General. UNA consulta. Sin la 0108, {}.
+
+    Es lo que pinta la etiqueta bajo cada burbuja (`MessageRead.topics`). Se
+    pide para la PAGINA ENTERA con un `IN`, por el indice
+    `conversation_topic_items_message_idx`, como los adjuntos y las
+    reacciones: una consulta por burbuja convertiria abrir General en treinta
+    viajes a la base.
+
+    EL GRUPO VA EN EL `WHERE` DOS VECES —la referencia y el tema—, y no es
+    redundancia: aunque alguien pidiera aqui mensajes de otra conversacion,
+    los temas de otra comunidad no llegan ni a leerse. Un tema eliminado no
+    cuenta. Cada lista sale en el orden de la lista de temas, para que «En 2
+    temas» los enseñe siempre igual.
+
+    Un mensaje sin temas no sale en el diccionario: quien lo usa pone `[]`.
+    """
+    ids = [str(m) for m in dict.fromkeys(message_ids) if _es_uuid(m)]
+    if not ids or not _es_uuid(group_id) or not await esquema.hay_temas(db):
+        return {}
+    item = ConversationTopicItem
+    filas = await db.execute(
+        select(item.message_id, ConversationTopic.id, ConversationTopic.nombre)
+        .join(ConversationTopic, ConversationTopic.id == item.topic_id)
+        # El mensaje, por su clave primaria: que sea de General y siga vivo.
+        # Un mensaje borrado sale como lapida y una lapida no lleva etiqueta,
+        # igual que no lleva adjuntos; y dentro del tema ya no aparece.
+        .join(Message, Message.id == item.message_id)
+        .where(
+            item.message_id.in_(ids),
+            item.conversation_id == group_id,
+            ConversationTopic.conversation_id == group_id,
+            ConversationTopic.deleted_at.is_(None),
+            Message.conversation_id == group_id,
+            Message.deleted_at.is_(None),
+        )
+        .order_by(
+            ConversationTopic.posicion.asc(),
+            ConversationTopic.created_at.asc(),
+            ConversationTopic.id.asc(),
+        )
+    )
+    salida: dict[str, list[TemaBreve]] = {}
+    for mensaje, tema, nombre in filas:
+        salida.setdefault(str(mensaje), []).append(TemaBreve(id=str(tema), name=nombre))
+    return salida
+
+
+def condicion_en_el_tema(topic_id: str) -> ColumnElement[bool]:
+    """EXISTS: el mensaje (`Message`, de la consulta de fuera) esta en ese tema.
+
+    Para el filtro por tema de Contenido (`vistas.py`). Quien la usa ya
+    comprobo que el tema es de su grupo y esta vivo.
+    """
+    return (
+        select(ConversationTopicItem.message_id)
+        .where(
+            ConversationTopicItem.topic_id == topic_id,
+            ConversationTopicItem.message_id == Message.id,
+        )
+        .correlate(Message)
+        .exists()
+    )
+
+
+def condicion_sin_tema(group_id: str) -> ColumnElement[bool]:
+    """NOT EXISTS: el mensaje no esta en NINGUN tema vivo de ese grupo.
+
+    UNA SOLA DEFINICION para la lista «Sin tema» y para su cuenta: si la cuenta
+    dijera 3 y la lista trajera 4, el numero estaria mintiendo (lo mismo que
+    `vistas._con_enlace`). Un mensaje que solo estaba en un tema eliminado
+    vuelve a estar «sin tema»: ese tema ya no lo ordena. Quien la usa pregunta
+    antes `esquema.hay_temas`.
+    """
+    return ~(
+        select(ConversationTopicItem.message_id)
+        .join(ConversationTopic, ConversationTopic.id == ConversationTopicItem.topic_id)
+        .where(
+            ConversationTopicItem.message_id == Message.id,
+            ConversationTopicItem.conversation_id == group_id,
+            ConversationTopic.deleted_at.is_(None),
+        )
+        .correlate(Message)
+        .exists()
+    )
+
+
+async def tema_vivo_del_grupo(db: AsyncSession, group_id: str, topic_id: str):
+    """El tema, si es de ese grupo y sigue vivo; si no, 404 `topic_not_found`.
+
+    Para quien filtra por tema desde fuera de este fichero. Sin la 0108
+    tampoco hay ninguno: el mismo 404, no un 500.
+    """
+    if not _es_uuid(topic_id) or not await esquema.hay_temas(db):
+        raise NotFoundError("Tema no encontrado.", code="topic_not_found")
+    return await _tema_vivo(db, group_id, topic_id)
+
+
 # --------------------------------------------------------------------------- #
 # Rutas — los temas
 # --------------------------------------------------------------------------- #
@@ -1058,6 +1227,43 @@ async def listar_temas(
         can_manage=vistas.administra(kind, creador, uid),
         topics=await _leer_temas(db, group_id, uid, filas, message_id),
     )
+
+
+@router.get("/{group_id}/topics/of-messages", response_model=dict[str, list[TemaBreve]])
+async def temas_de_los_mensajes(
+    group_id: str,
+    ids: str = Query(default="", max_length=4000),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, list[TemaBreve]]:
+    """En que temas esta cada uno de esos mensajes: `{"<message_id>": [{id, name}]}`.
+
+    PARA REFRESCAR LAS ETIQUETAS de lo que ya esta en pantalla cuando llega
+    el aviso `chat-temas:{grupo}` (alguien añadio o quito un mensaje de un
+    tema), sin volver a pedir el historial. Lo puede pedir cualquier miembro:
+    las etiquetas las ven todos.
+
+    TODOS LOS PEDIDOS SALEN EN LA RESPUESTA, con `[]` si no estan en ningun
+    tema: es lo que le dice a la aplicacion que quite una etiqueta. Y salen
+    igual de vacios los que no son de General de esta comunidad (de otro
+    chat, de otro grupo, borrados o inventados): la respuesta no distingue
+    «no esta en ningun tema» de «no es de aqui», asi que no sirve para
+    averiguar nada de otra conversacion. Un identificador mal escrito se
+    ignora. Las claves van en su forma canonica (minusculas, con guiones),
+    que es como la API escribe los identificadores.
+
+    Hasta `MAX_MENSAJES_POR_CONSULTA` identificadores separados por comas; mas,
+    422. Sin la 0108, todos con `[]`: no hay temas.
+    """
+    await vistas.conversacion_de(db, group_id, current_user.id)
+    pedidos = [p.strip() for p in ids.split(",") if p.strip()]
+    if len(pedidos) > MAX_MENSAJES_POR_CONSULTA:
+        raise ValidationAppError(
+            f"Se pueden consultar hasta {MAX_MENSAJES_POR_CONSULTA} mensajes a la vez."
+        )
+    validos = list(dict.fromkeys(str(UUID(p)) for p in pedidos if _es_uuid(p)))
+    encontrados = await temas_por_mensaje(db, group_id, validos)
+    return {mid: encontrados.get(mid, []) for mid in validos}
 
 
 @router.post(
@@ -1424,6 +1630,10 @@ async def mensajes_del_tema(
     de_sesion = await sesiones.contextos_por_mensaje(db, ids, uid)
     reacciones_de = await reacciones.reacciones_por_mensaje(db, ids, uid)
     citas = await reacciones.respuestas_por_mensaje(db, ids)
+    # En que temas esta cada REFERENCIA (las de General), para que su
+    # etiqueta diga tambien aqui «En 2 temas». Los propios no estan en ninguno:
+    # un tema solo referencia mensajes de General. Sin referencias, ni se pide.
+    de_temas = await temas_por_mensaje(db, group_id, de_referencia)
 
     items: list[TemaMensaje] = []
     for fila in reversed(filas):
@@ -1452,6 +1662,7 @@ async def mensajes_del_tema(
                 booking_context=de_sesion.get(mid),
                 reactions=reacciones_de.get(mid, []),
                 reply_to=citas.get(mid),
+                topics=de_temas.get(mid, []),
                 own=es_propio,
                 added_by=autor,
                 added_at=anadida,
@@ -1513,6 +1724,85 @@ def _exigir_id_de_mensaje(message_id: str) -> None:
         raise NotFoundError(
             "Ese mensaje no está en el chat del grupo.", code="message_not_in_group"
         )
+
+
+@router.put(
+    "/{group_id}/topics/{topic_id}/items",
+    response_model=ReferenciasAnadidas,
+)
+async def anadir_referencias(
+    group_id: str,
+    topic_id: str,
+    payload: ReferenciasNuevas,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReferenciasAnadidas:
+    """Añade VARIOS mensajes de General a un tema de una vez. Sin aviso (D9).
+
+    Es «Agregar N a un tema» de Contenido. LAS MISMAS COMPROBACIONES QUE EL DE
+    UNO (`anadir_referencia`): administrar el grupo, el tema vivo y de este
+    grupo, y cada mensaje de General y vivo.
+
+    TODO O NADA. Si uno solo no vale, 404 `message_not_in_group` y no se añade
+    ninguno: quien eligio quince en la pantalla no puede quedarse con doce
+    dentro sin saber cuales. La misma respuesta para todos los casos, como en
+    el de uno, para que no sirva para averiguar que mensajes existen fuera.
+
+    IDEMPOTENTE: los que ya estaban no se tocan (conservan su fecha y quien los
+    añadio) y se cuentan en `already`. Lo garantiza la clave primaria con
+    `on conflict do nothing`, y el `returning` dice cuales entraron DE VERDAD:
+    si dos personas añaden a la vez, cada una cuenta solo los suyos, sin un
+    `select` previo que deje una ventana.
+
+    Tres consultas sea uno o cincuenta: comprobar los mensajes con un `IN`,
+    insertar todos con un solo `INSERT` y confirmar.
+    """
+    uid = current_user.id
+    await _exigir_administrar(db, group_id, uid)
+    tema = await _tema_vivo(db, group_id, topic_id)
+    for crudo in payload.message_ids:
+        _exigir_id_de_mensaje(crudo)
+    ids = [str(UUID(crudo)) for crudo in payload.message_ids]
+    vivos = {
+        str(mid)
+        for mid in (
+            await db.execute(
+                select(Message.id).where(
+                    Message.id.in_(ids),
+                    # En el WHERE: el mensaje de otra conversacion no se alcanza.
+                    Message.conversation_id == group_id,
+                    Message.deleted_at.is_(None),
+                )
+            )
+        ).scalars()
+    }
+    if len(vivos) != len(ids):
+        raise NotFoundError(
+            "Ese mensaje no está en el chat del grupo.", code="message_not_in_group"
+        )
+
+    inserta = _insert_con_conflicto(db)
+    entraron = (
+        await db.execute(
+            inserta(ConversationTopicItem.__table__)
+            .values(
+                [
+                    {
+                        "topic_id": tema.id,
+                        "message_id": mid,
+                        "conversation_id": group_id,
+                        # La identidad sale del JWT. Nunca de la peticion.
+                        "added_by": uid,
+                    }
+                    for mid in ids
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=["topic_id", "message_id"])
+            .returning(ConversationTopicItem.__table__.c.message_id)
+        )
+    ).scalars().all()
+    await db.commit()
+    return ReferenciasAnadidas(added=len(entraron), already=len(ids) - len(entraron))
 
 
 @router.put(

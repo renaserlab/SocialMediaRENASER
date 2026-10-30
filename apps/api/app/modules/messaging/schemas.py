@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging.etiquetas import EtiquetaBreve
@@ -44,6 +44,35 @@ TIPOS_DE_ADJUNTO = ("image", "video", "document", "audio")
 #: Cuántos archivos caben en un mensaje. Diez es holgado para mandar un puñado
 #: de fotos de una vez y evita que una sola petición encole cien subidas.
 MAX_ADJUNTOS = 10
+
+#: Cuántos caracteres puede tener el nombre de un adjunto (0113). El mismo
+#: número que el `CHECK` de la migración: si aquí fuera mayor, la base
+#: rechazaría el nombre y saldría un 500 en vez del 422 que corresponde.
+MAX_TITULO_DE_ADJUNTO = 80
+
+#: Lo que se acepta CRUDO antes de recortar. No es el tope de verdad —ese es
+#: `MAX_TITULO_DE_ADJUNTO`, después de recortar, con su código propio
+#: (`attachment_title_too_long`)—: solo impide que alguien mande diez
+#: kilobytes de espacios.
+MAX_TITULO_CRUDO = 1000
+
+#: Los tipos que NO llevan nombre: una foto ya tiene el texto del mensaje
+#: (decisión del 30/10/2026). Al enviar se ignora; al ponérselo después, 422.
+TIPOS_SIN_NOMBRE = ("image",)
+
+
+def titulo_recortado(valor: str | None) -> str | None:
+    """El nombre como se guarda: sin espacios en los extremos, y vacío es «sin nombre».
+
+    Solo los EXTREMOS, como dice la spec: lo de dentro es de quien lo escribe.
+    Una cadena vacía no se guarda nunca —el `CHECK` de la 0113 la rechaza—,
+    porque «sin nombre» ya tiene su forma, que es nulo, y dos formas de decir
+    lo mismo acaban en dos pantallas que no se ponen de acuerdo.
+    """
+    if valor is None:
+        return None
+    limpio = valor.strip()
+    return limpio or None
 
 
 class DirectConversationCreate(BaseModel):
@@ -134,6 +163,22 @@ class AttachmentCreate(BaseModel):
     width: int | None = Field(default=None, ge=0)
     height: int | None = Field(default=None, ge=0)
     duration_s: float | None = Field(default=None, ge=0)
+    #: El nombre que le pone quien lo manda (0113). Recortado; vacío es `None`.
+    #: El tope de 80 lo comprueba el router con su código propio
+    #: (`attachment_title_too_long`), no aquí: un `ValueError` de Pydantic
+    #: saldría como un `validation_error` genérico. En una foto se ignora.
+    title: str | None = Field(default=None, max_length=MAX_TITULO_CRUDO)
+    #: Si un `audio` es una nota de voz grabada en el chat (`true`) o un
+    #: archivo de audio elegido del teléfono (`false`). SI NO VIENE, VALE
+    #: `kind == "audio"`: las aplicaciones que ya están en los teléfonos no lo
+    #: mandan, y todo lo que mandan como audio es una nota de voz. En lo que no
+    #: es audio no significa nada y se guarda `false`.
+    voice_note: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def _titulo(cls, v: str | None) -> str | None:
+        return titulo_recortado(v)
 
     @model_validator(mode="after")
     def _tipo_conocido(self) -> "AttachmentCreate":
@@ -142,6 +187,14 @@ class AttachmentCreate(BaseModel):
                 f"Tipo de adjunto no admitido: {self.kind}. "
                 f"Admitidos: {', '.join(TIPOS_DE_ADJUNTO)}."
             )
+        if self.kind in TIPOS_SIN_NOMBRE:
+            # Se ignora y no se rechaza: una aplicación que mande el mismo
+            # formulario para todo no tiene por qué fallar por una foto.
+            self.title = None
+        if self.kind != "audio":
+            self.voice_note = False
+        elif self.voice_note is None:
+            self.voice_note = True
         return self
 
 
@@ -155,8 +208,37 @@ class AttachmentRead(BaseModel):
     width: int | None = None
     height: int | None = None
     duration_s: float | None = None
+    #: El nombre (0113). `None` es «sin nombre», y también mientras la 0113
+    #: espere: sin la columna no hay nombre que devolver.
+    title: str | None = None
+    #: Si es una nota de voz (micrófono) o un archivo de audio (nota musical).
+    #: `false` en todo lo que no es audio. Sin la 0113 vale `kind == "audio"`,
+    #: que era la verdad hasta entonces.
+    voice_note: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TituloDeAdjunto(BaseModel):
+    """`PATCH …/attachments/{id}`: el nombre nuevo, o `null` para quitarlo.
+
+    `title` es OBLIGATORIO aunque admita nulo: un cuerpo vacío por un fallo
+    del cliente no puede borrar el nombre de nadie sin que nadie lo pidiera.
+    """
+
+    title: str | None = Field(max_length=MAX_TITULO_CRUDO)
+
+    @field_validator("title")
+    @classmethod
+    def _titulo(cls, v: str | None) -> str | None:
+        return titulo_recortado(v)
+
+
+class TemaBreve(BaseModel):
+    """Un tema en el que está un mensaje: lo que pinta su etiqueta («# Anuncios»)."""
+
+    id: str
+    name: str
 
 
 class StoryContextRead(BaseModel):
@@ -252,6 +334,11 @@ class ReplyRead(BaseModel):
     sender_name: str = ""
     excerpt: str = ""
     kind: str | None = None
+    #: Con `kind == "audio"`: nota de voz (`true`, «Nota de voz») o archivo de
+    #: audio (`false`, «Audio»), para que la cita sin texto ni nombre diga lo
+    #: que es; la etiqueta la pone la aplicacion, traducida. `false` en lo
+    #: demas; sin la 0113, todo audio es nota de voz.
+    voice_note: bool = False
     deleted: bool = False
 
 
@@ -297,6 +384,15 @@ class MessageRead(BaseModel):
     reactions: list[ReactionRead] = Field(default_factory=list)
     #: A qué mensaje responde, si responde a alguno.
     reply_to: ReplyRead | None = None
+
+    #: Los temas VIVOS en los que está este mensaje, en el orden de la lista de
+    #: temas. Solo se rellena en General de una comunidad con temas (es lo
+    #: único que un tema puede referenciar); vacía en todo lo demás, en un
+    #: mensaje borrado y mientras la 0108 espere. La ven todos los miembros.
+    #:
+    #: Se carga UNA VEZ POR PÁGINA, como los adjuntos y las reacciones
+    #: (`temas.temas_por_mensaje`): nunca una consulta por burbuja.
+    topics: list[TemaBreve] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -357,3 +453,7 @@ class MessagingAvailability(BaseModel):
     topics: bool = False
     #: Un grupo puede tener comunidades (0109).
     subgroups: bool = False
+    #: Los adjuntos guardan su nombre y si un audio es nota de voz (0113). Con
+    #: `false`, la aplicacion no ofrece «Ponerle nombre» ni los campos de
+    #: nombre: el nombre se ignoraria al mandar y ponerlo despues responde 503.
+    attachment_titles: bool = False

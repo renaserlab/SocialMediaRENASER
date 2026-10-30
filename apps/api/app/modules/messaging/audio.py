@@ -69,6 +69,21 @@ def es_audio(adjunto: AttachmentCreate) -> bool:
     return adjunto.kind == KIND_AUDIO
 
 
+def es_nota_de_voz(adjunto: AttachmentCreate, *, con_nombres: bool) -> bool:
+    """Si a este audio se le aplican las reglas de una NOTA DE VOZ.
+
+    Con la 0113, lo dice `voice_note` (que vale `true` si la aplicacion no lo
+    manda: las antiguas solo mandan notas de voz). SIN LA 0113 TODO AUDIO ES
+    NOTA DE VOZ, aunque llegue con `voice_note: false`: no hay donde guardar
+    que no lo es, al leerlo saldra como tal, y el relleno de la 0113 lo
+    marcara como tal. Validarlo como lo que va a ser es lo que impide que
+    quede en la base un «nota de voz» de cuarenta minutos o sin duracion.
+    """
+    if not es_audio(adjunto):
+        return False
+    return bool(adjunto.voice_note) or not con_nombres
+
+
 def hay_audio(adjuntos: list[AttachmentCreate]) -> bool:
     return any(es_audio(a) for a in adjuntos)
 
@@ -103,8 +118,18 @@ async def exigir_esquema_de_audio(
         )
 
 
-def validar_audio(adjuntos: list[AttachmentCreate]) -> None:
-    """Las reglas propias de una nota de voz. 422 con un texto que se entiende.
+def validar_audio(adjuntos: list[AttachmentCreate], *, con_nombres: bool = False) -> None:
+    """Las reglas propias de un audio. 422 con un texto que se entiende.
+
+    UNA NOTA DE VOZ Y UN ARCHIVO DE AUDIO NO SE VALIDAN IGUAL (30/10/2026).
+    Desde la 0113 un mp3 elegido del telefono viaja como `kind: audio` con
+    `voice_note: false`, para que se reproduzca en el chat en vez de
+    descargarse. Lo que se le exige es lo que tiene sentido para un archivo:
+    que sea audio si dice su tipo. Ni duracion obligatoria —el selector de
+    archivos no la conoce, y descargarlo para medirlo es justo lo que no se
+    quiere— ni el tope de cinco minutos, que es de lo razonable de ESCUCHAR en
+    un chat, no del tamaño de una clase grabada. `con_nombres` es si la 0113
+    esta: sin ella todo audio es nota de voz (ver `es_nota_de_voz`).
 
     SE VALIDA AQUI Y NO EN EL ESQUEMA de Pydantic porque son reglas que solo
     valen para `kind: audio`: exigirle `duration_s` a `AttachmentCreate` a secas
@@ -118,6 +143,22 @@ def validar_audio(adjuntos: list[AttachmentCreate]) -> None:
     """
     for adjunto in adjuntos:
         if not es_audio(adjunto):
+            continue
+
+        # El tipo declarado tiene que ser de audio SI VIENE, sea nota o
+        # archivo. Se admite que falte —hay grabadores que no lo informan y el
+        # fichero es bueno igual— pero no que diga otra cosa: `image/png`
+        # marcado como audio solo puede ser un error de quien lo manda o un
+        # intento de colar algo por la puerta que menos se mira. El codigo es
+        # el de siempre aunque sea un archivo: el contrato no pide otro, y la
+        # aplicacion ya sabe leer este.
+        if adjunto.mime_type and not adjunto.mime_type.lower().startswith("audio/"):
+            raise ValidationAppError(
+                "Ese archivo no es un audio.",
+                code="voice_note_bad_type",
+            )
+
+        if not es_nota_de_voz(adjunto, con_nombres=con_nombres):
             continue
 
         if adjunto.duration_s is None:
@@ -137,15 +178,4 @@ def validar_audio(adjuntos: list[AttachmentCreate]) -> None:
             raise ValidationAppError(
                 f"Una nota de voz puede durar hasta {MAX_DURACION_S // 60} minutos.",
                 code="voice_note_too_long",
-            )
-
-        # El tipo declarado tiene que ser de audio SI VIENE. Se admite que falte
-        # —hay grabadores que no lo informan y el fichero es bueno igual— pero no
-        # que diga otra cosa: `image/png` marcado como nota de voz solo puede ser
-        # un error de quien lo manda o un intento de colar algo por la puerta que
-        # menos se mira.
-        if adjunto.mime_type and not adjunto.mime_type.lower().startswith("audio/"):
-            raise ValidationAppError(
-                "Ese archivo no es un audio.",
-                code="voice_note_bad_type",
             )

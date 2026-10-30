@@ -73,6 +73,8 @@ deduce de `kind == "audio"`.
 | Archivos de audio | `POST /conversations/{id}/messages` acepta un adjunto `kind: "audio"` con `voice_note: false` y un tipo `audio/*` (mp3, m4a, aac, ogg, wav), con `duration_s` opcional. Revisar la validación de audio que hoy existe para notas de voz. |
 | Vistas previas | La bandeja (`lectura.py:60-64`) añade `audio` → «Nota de voz» (hoy sale «Archivo»). Con `title`, la vista previa del último mensaje es el título, en la bandeja, en la lista de la comunidad (`subgrupos.py:120-125`) y en los temas (`temas.py:790-880`). |
 | Push | Sin cambios. |
+| `GET /conversations/availability` | Campo nuevo `attachment_titles: bool`, junto a `subgroups`. Vale `true` solo si la 0113 está aplicada. La app esconde «Ponerle nombre» y los campos de nombre cuando es `false`. |
+| `voice_note` en las citas y en la lista de temas | `reply_to` y el `last` de la lista de temas ganan `voice_note: bool`. Con `kind: "audio"` y `excerpt` vacío, la app escribe «Nota de voz» si es `true` y «Audio» si es `false`. `excerpt` lleva el nombre cuando lo hay. |
 
 ## 3. App (`apps/mobile/`)
 
