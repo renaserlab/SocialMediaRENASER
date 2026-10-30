@@ -29,6 +29,12 @@ export type CitaDeMensaje = {
   /** El tipo de su primer adjunto, si tenía alguno. */
   tipo: 'image' | 'video' | 'document' | 'audio' | null;
   eliminado: boolean;
+  /**
+   * Solo en un audio y solo si el servidor lo dice (audios y temas,
+   * 30/10/2026): nota de voz o archivo de audio. Sin el campo (una API
+   * anterior) la cita dice «Audio», como siempre.
+   */
+  notaDeVoz?: boolean;
 };
 
 const esObjeto = (v: unknown): v is Record<string, unknown> =>
@@ -63,6 +69,9 @@ export function leerCita(bruto: unknown): CitaDeMensaje | undefined {
         ? (bruto.kind as CitaDeMensaje['tipo'])
         : null,
     eliminado,
+    ...(!eliminado && bruto.kind === 'audio' && typeof bruto.voice_note === 'boolean'
+      ? { notaDeVoz: bruto.voice_note }
+      : {}),
   };
 }
 
@@ -81,7 +90,8 @@ export function textoDeCita(cita: CitaDeMensaje): { texto: string } | { clave: s
     case 'video':
       return { clave: 'chat.replyVideo' };
     case 'audio':
-      return { clave: 'chat.replyAudio' };
+      // «Nota de voz» o «Audio»: el nombre, si lo tiene, ya viene en el extracto.
+      return cita.notaDeVoz === true ? { clave: 'chat.replyVoiceNote' } : { clave: 'chat.replyAudio' };
     case 'document':
       return { clave: 'chat.replyFile' };
     default:

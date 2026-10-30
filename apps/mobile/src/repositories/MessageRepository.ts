@@ -201,6 +201,13 @@ export type FuncionesDelChat = {
   preferencias: boolean;
   /** El servidor dice quién leyó cada mensaje: la confirmación de lectura. */
   lecturas: boolean;
+  /**
+   * Se les puede poner nombre a los adjuntos (`attachment_titles`, migración
+   * 0113). Sin ella no se ofrece ningún campo de nombre ni «Ponerle nombre»,
+   * y un archivo de audio se manda como documento, igual que antes: una API
+   * anterior rechaza un audio sin duración.
+   */
+  nombres: boolean;
 };
 
 /*
@@ -228,6 +235,7 @@ export const SIN_FUNCIONES: FuncionesDelChat = {
   reacciones: false,
   preferencias: false,
   lecturas: false,
+  nombres: false,
 };
 
 export const MessageRepository = {
@@ -252,6 +260,7 @@ export const MessageRepository = {
         reactions?: boolean;
         preferences?: boolean;
         read_receipts?: boolean;
+        attachment_titles?: boolean;
       };
       return {
         notasDeVoz: dto.voice_notes === true,
@@ -259,6 +268,7 @@ export const MessageRepository = {
         reacciones: dto.reactions === true,
         preferencias: dto.preferences === true,
         lecturas: dto.read_receipts === true,
+        nombres: dto.attachment_titles === true,
       };
     } catch {
       return SIN_FUNCIONES;

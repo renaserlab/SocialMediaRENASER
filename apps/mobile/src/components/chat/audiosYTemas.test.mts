@@ -71,7 +71,11 @@ describe('al enviar', () => {
   it('«Archivo» deja elegir varios, y un audio reproducible va como audio que no es nota de voz', () => {
     const elegir = ENVIO.slice(ENVIO.indexOf('export async function elegirArchivo('));
     assert.match(elegir, /multiple: maximo > 1,/);
-    assert.match(elegir, /const kind = tipoDeArchivoElegido\(asset\.mimeType, asset\.name\);/);
+    // Sin la 0113 (`audios: false`) todo va como documento, como antes.
+    assert.match(
+      elegir,
+      /const kind = audios \? tipoDeArchivoElegido\(asset\.mimeType, asset\.name\) : 'document';/,
+    );
     assert.match(elegir, /\.\.\.\(kind === 'audio' \? \{ voiceNote: false \} : \{\}\),/);
     assert.match(elegir, /sobran: Math\.max\(0, todos\.length - tope\),/);
   });
@@ -94,7 +98,7 @@ describe('al enviar', () => {
     assert.ok(
       elegir.indexOf('setMenuAbierto(false);') < elegir.indexOf('await afterSheetClose();') &&
         elegir.indexOf('await afterSheetClose();') <
-          elegir.indexOf('await elegirArchivo(MAX_ARCHIVOS_DE_UNA_VEZ)'),
+          elegir.indexOf('await elegirArchivo(MAX_ARCHIVOS_DE_UNA_VEZ, { audios: funciones.nombres })'),
       'Con la hoja todavía cerrándose, el selector del sistema no se abre en iOS y falla callado.',
     );
     assert.match(CHAT, /onPress=\{\(\) => void elegirArchivosConNombre\(\)\}/);
@@ -122,7 +126,7 @@ describe('al enviar', () => {
     assert.match(eliminar.slice(0, 400), /setNombre\(''\);/);
     assert.match(BOTON, /placeholder=\{t\('voiceName\.placeholder'\)\}/);
     assert.match(BOTON, /maxLength=\{MAX_TITULO_DE_ADJUNTO\}/);
-    assert.match(CHAT, /alCambiarNombre=\{grabadora\.setNombre\}/);
+    assert.match(CHAT, /alCambiarNombre=\{funciones\.nombres \? grabadora\.setNombre : undefined\}/);
   });
 });
 
@@ -209,5 +213,38 @@ describe('agregar a un tema desde el chat', () => {
     assert.match(listo, /MessageRepository\.nombrarAdjunto\(\s*grupoId,\s*mensajeId,\s*adjuntoSinNombre\.id,\s*nuevo,\s*\)/);
     // Un «no» se dice dentro de la hoja: encima de un Modal no se vería en iOS.
     assert.match(listo, /setFallo\(/);
+  });
+});
+
+describe('sin la 0113 no hay nombres (`attachment_titles`)', () => {
+  const FUNCIONES = MENSAJES.slice(MENSAJES.indexOf('async funciones()'));
+
+  it('se lee de `/availability`, y sin el campo vale `false`', () => {
+    assert.match(FUNCIONES, /nombres: dto\.attachment_titles === true,/);
+    assert.match(MENSAJES, /lecturas: false,\s*nombres: false,\s*\};/);
+  });
+
+  it('sin ella no hay «Ponerle nombre», ni campo en «Agregar a un tema», ni en la nota de voz', () => {
+    assert.match(CHAT, /\{funciones\.nombres &&\s*accionesDe &&\s*puedeNombrar\(/);
+    assert.match(CHAT, /if \(!funciones\.nombres\) return null;\s*const adjunto = adjuntoNombrable\(temasPara\?\.attachments\);/);
+  });
+
+  it('ni en «Enviar N archivos», que entonces manda cada archivo sin nombre y el audio como documento', () => {
+    const hoja = fuente('components/chat/HojaDeEnviarArchivos.tsx');
+    assert.match(CHAT, /conNombres=\{funciones\.nombres\}/);
+    assert.match(hoja, /title: conNombres \? limpiarTitulo\(nombre\) : null,/);
+    assert.equal((hoja.match(/\{conNombres \? \(/g) ?? []).length, 2);
+    assert.match(CHAT, /await elegirArchivo\(MAX_ARCHIVOS_DE_UNA_VEZ, \{ audios: funciones\.nombres \}\)/);
+  });
+
+  it('un video de la galería lleva su campo de nombre, y una foto no', () => {
+    assert.match(
+      CHAT,
+      /\{funciones\.nombres && elegidos\.some\(\(archivo\) => archivo\.kind === 'video'\) \? \(/,
+    );
+    assert.match(CHAT, /videos=\{elegidos\.filter\(\(archivo\) => archivo\.kind === 'video'\)\}/);
+    // Lo escrito se lee al enviar, desde una referencia: teclear no repinta la pantalla.
+    assert.match(CHAT, /archivo\.kind === 'video' && nombresDeVideos\.current\[archivo\.uri\]/);
+    assert.match(CHAT, /nombres\.current = \{ \.\.\.nombres\.current, \[video\.uri\]: texto \};/);
   });
 });

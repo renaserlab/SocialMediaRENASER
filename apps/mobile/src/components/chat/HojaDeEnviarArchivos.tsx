@@ -26,6 +26,11 @@ type Props = {
   onClose: () => void;
   /** Cada archivo ya con su nombre (`title`). Uno por mensaje. */
   alEnviar: (archivos: AdjuntoElegido[]) => void;
+  /**
+   * El servidor sabe guardar nombres (`attachment_titles`, 0113). Sin eso la
+   * hoja no enseña ningún campo y cada archivo sale sin nombre, como antes.
+   */
+  conNombres?: boolean;
 };
 
 type Fila = { archivo: AdjuntoElegido; nombre: string };
@@ -42,7 +47,7 @@ type Fila = { archivo: AdjuntoElegido; nombre: string };
  * La hoja se abre cuando el selector del sistema ya se cerró, y se cierra
  * antes de enviar: lo que se manda se ve en el chat, con su barra de subida.
  */
-export function HojaDeEnviarArchivos({ eleccion, onClose, alEnviar }: Props) {
+export function HojaDeEnviarArchivos({ eleccion, onClose, alEnviar, conNombres = true }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const [filas, setFilas] = useState<Fila[]>([]);
@@ -68,7 +73,12 @@ export function HojaDeEnviarArchivos({ eleccion, onClose, alEnviar }: Props) {
 
   const enviar = () => {
     if (filas.length === 0) return;
-    alEnviar(filas.map(({ archivo, nombre }) => ({ ...archivo, title: limpiarTitulo(nombre) })));
+    alEnviar(
+      filas.map(({ archivo, nombre }) => ({
+        ...archivo,
+        title: conNombres ? limpiarTitulo(nombre) : null,
+      })),
+    );
   };
 
   const uno = filas.length === 1 ? filas[0] : null;
@@ -79,7 +89,7 @@ export function HojaDeEnviarArchivos({ eleccion, onClose, alEnviar }: Props) {
         <Text weight="800" style={styles.titulo}>
           {uno ? t('sendFiles.titleOne') : t('sendFiles.titleMany', { n: filas.length })}
         </Text>
-        {uno ? null : (
+        {uno || !conNombres ? null : (
           <Text color={colors.textMuted} style={styles.ayuda}>
             {t('sendFiles.helpMany')}
           </Text>
@@ -108,23 +118,27 @@ export function HojaDeEnviarArchivos({ eleccion, onClose, alEnviar }: Props) {
                 ) : null}
               </View>
             </View>
-            <Input
-              label={t('sendFiles.nameLabel')}
-              value={uno.nombre}
-              onChangeText={(texto) => cambiar(0, texto)}
-              placeholder={t('sendFiles.namePlaceholder')}
-              maxLength={MAX_TITULO_DE_ADJUNTO}
-              returnKeyType="send"
-              onSubmitEditing={enviar}
-            />
-            <View style={styles.pie}>
-              <Text color={colors.textMuted} style={[styles.ayuda, styles.ayudaDelCampo]}>
-                {t('sendFiles.helpOne')}
-              </Text>
-              <Text color={colors.textMuted} style={styles.cuenta}>
-                {`${uno.nombre.length}/${MAX_TITULO_DE_ADJUNTO}`}
-              </Text>
-            </View>
+            {conNombres ? (
+              <>
+                <Input
+                  label={t('sendFiles.nameLabel')}
+                  value={uno.nombre}
+                  onChangeText={(texto) => cambiar(0, texto)}
+                  placeholder={t('sendFiles.namePlaceholder')}
+                  maxLength={MAX_TITULO_DE_ADJUNTO}
+                  returnKeyType="send"
+                  onSubmitEditing={enviar}
+                />
+                <View style={styles.pie}>
+                  <Text color={colors.textMuted} style={[styles.ayuda, styles.ayudaDelCampo]}>
+                    {t('sendFiles.helpOne')}
+                  </Text>
+                  <Text color={colors.textMuted} style={styles.cuenta}>
+                    {`${uno.nombre.length}/${MAX_TITULO_DE_ADJUNTO}`}
+                  </Text>
+                </View>
+              </>
+            ) : null}
           </>
         ) : (
           <View>
@@ -138,14 +152,16 @@ export function HojaDeEnviarArchivos({ eleccion, onClose, alEnviar }: Props) {
                 >
                   <Sigla archivo={fila.archivo} />
                   <View style={styles.textos}>
-                    <Input
-                      value={fila.nombre}
-                      onChangeText={(texto) => cambiar(indice, texto)}
-                      placeholder={t('sendFiles.namePlaceholder')}
-                      accessibilityLabel={t('sendFiles.nameOf', { archivo })}
-                      maxLength={MAX_TITULO_DE_ADJUNTO}
-                      containerStyle={styles.campo}
-                    />
+                    {conNombres ? (
+                      <Input
+                        value={fila.nombre}
+                        onChangeText={(texto) => cambiar(indice, texto)}
+                        placeholder={t('sendFiles.namePlaceholder')}
+                        accessibilityLabel={t('sendFiles.nameOf', { archivo })}
+                        maxLength={MAX_TITULO_DE_ADJUNTO}
+                        containerStyle={styles.campo}
+                      />
+                    ) : null}
                     <Text color={colors.textMuted} numberOfLines={1} style={styles.peso}>
                       {[archivo, pesoLegible(fila.archivo.bytes)].filter(Boolean).join(' · ')}
                     </Text>

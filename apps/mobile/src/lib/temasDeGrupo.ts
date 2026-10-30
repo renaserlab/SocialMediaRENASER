@@ -75,6 +75,11 @@ export type UltimoMensaje = {
   fechaIso: string | null;
   /** En un tema: lo escribió la administración allí, no viene de General. */
   propio: boolean;
+  /**
+   * Solo en un audio y solo si el servidor lo dice (audios y temas,
+   * 30/10/2026): nota de voz o archivo de audio. Sin el campo, «Audio».
+   */
+  notaDeVoz?: boolean;
 };
 
 export type TemaDeGrupo = {
@@ -180,6 +185,9 @@ export function leerUltimo(bruto: unknown): UltimoMensaje | null {
     tipo,
     fechaIso: typeof bruto.at === 'string' && bruto.at ? bruto.at : null,
     propio: bruto.own === true,
+    ...(tipo === 'audio' && typeof bruto.voice_note === 'boolean'
+      ? { notaDeVoz: bruto.voice_note }
+      : {}),
   };
 }
 
@@ -580,7 +588,10 @@ export function resumenDeUltimo(ultimo: UltimoMensaje): { texto: string } | { cl
     case 'video':
       return { clave: 'chat.replyVideo' };
     case 'audio':
-      return { clave: 'chat.replyAudio' };
+      // «Nota de voz» o «Audio»; con nombre, el extracto ya lo traía.
+      return ultimo.notaDeVoz === true
+        ? { clave: 'chat.replyVoiceNote' }
+        : { clave: 'chat.replyAudio' };
     case 'document':
       return { clave: 'chat.replyFile' };
     default:
