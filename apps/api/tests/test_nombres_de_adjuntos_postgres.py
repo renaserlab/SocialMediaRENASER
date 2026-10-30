@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import threading
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -95,6 +96,36 @@ def _mensaje_pg(pg, conv: str, de: str, *kinds: str) -> tuple[str, list[str]]:
 
 
 _COLUMNAS = "('title', 'voice_note')"
+
+#: Los cuatro `CHECK` de la 0113: el largo del nombre y, desde la
+#: certificación del 30/10/2026, las reglas que antes solo exigía la API.
+CHECKS = (
+    "message_attachments_title_check",
+    "message_attachments_title_sin_control_check",
+    "message_attachments_title_no_en_fotos_check",
+    "message_attachments_voice_note_solo_audio_check",
+)
+
+AUTH_UID_DE_SUPABASE = """
+create or replace function auth.uid() returns uuid
+language sql stable as $$
+  select coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid
+$$
+"""
+
+
+def _checks(pg) -> set[str]:
+    return {
+        fila[0]
+        for fila in _todas(
+            pg,
+            "select conname from pg_constraint "
+            "where conrelid = 'public.message_attachments'::regclass and contype = 'c'",
+        )
+    } & set(CHECKS)
 
 
 def _foto(pg) -> list:
@@ -216,9 +247,11 @@ def test_el_check_del_nombre_cuenta_caracteres(base, pg) -> None:
 @SIN_POSTGRES
 def test_pegarla_dos_veces_deja_lo_mismo_y_no_vuelve_a_marcar_los_archivos(base, pg) -> None:
     antes = _foto(pg)
+    assert _checks(pg) == set(CHECKS)
     _hacer(pg, SQL)
     _hacer(pg, SQL)
     assert _foto(pg) == antes
+    assert _checks(pg) == set(CHECKS)
     # Lo que la API escribe después: un archivo de audio (`voice_note = false`)
     # con nombre. Pegarla otra vez no lo convierte en nota de voz ni le quita
     # el nombre.
@@ -270,6 +303,8 @@ def test_la_vuelta_atras_escrita_funciona_y_si_no_hay_bloqueo_se_rinde(base, pg)
             "select count(*) from information_schema.columns where table_schema = 'public' "
             f"and table_name = 'message_attachments' and column_name in {_COLUMNAS}",
         ) == 0
+        # Ni sus `CHECK` (que la API anterior no conoce).
+        assert _checks(pg) == set()
         # Los adjuntos siguen ahí, todos.
         assert _uno(pg, "select count(*) from public.message_attachments") == len(aplicada[3])
         sin_ella = _foto(pg)
@@ -298,6 +333,99 @@ def test_la_vuelta_atras_escrita_funciona_y_si_no_hay_bloqueo_se_rinde(base, pg)
     finally:
         _hacer(pg, SQL)
     assert _foto(pg) == aplicada
+
+
+def _como(pg, quien: str) -> None:
+    """Dentro de una transacción: ser esa persona, como PostgREST con su sesión."""
+    _hacer(pg, AUTH_UID_DE_SUPABASE)
+    _hacer(pg, "grant usage on schema public to authenticated")
+    _hacer(
+        pg,
+        "select set_config('request.jwt.claims', %s, true)",
+        '{"sub": "%s", "role": "authenticated"}' % quien,
+    )
+    _hacer(pg, "set local role authenticated")
+
+
+def _insertar_directo(pg, mid: str, grupo: str, kind: str, titulo, voz: bool) -> None:
+    _hacer(
+        pg,
+        "insert into public.message_attachments (message_id, conversation_id, storage_path, "
+        "kind, title, voice_note) values (%s, %s, %s, %s, %s, %s)",
+        mid, grupo, f"{grupo}/{BRUNO}/{uuid4()}", kind, titulo, voz,
+    )
+
+
+_SIN_CONTROL = "message_attachments_title_sin_control_check"
+_NO_EN_FOTOS = "message_attachments_title_no_en_fotos_check"
+_SOLO_AUDIO = "message_attachments_voice_note_solo_audio_check"
+
+
+@SIN_POSTGRES
+@pytest.mark.parametrize(
+    ("kind", "titulo", "voz", "checks"),
+    [
+        # Lo que hizo la certificación: una foto con nombre de dos líneas y
+        # marcada como nota de voz. Incumple las tres; PostgreSQL nombra una.
+        ("image", "Dos\nlíneas", True, {_SIN_CONTROL, _NO_EN_FOTOS, _SOLO_AUDIO}),
+        ("document", "Dos\nlíneas", False, {_SIN_CONTROL}),
+        ("audio", "Fin\r\n", True, {_SIN_CONTROL}),
+        ("audio", "Tab\taquí", True, {_SIN_CONTROL}),
+        ("audio", "C1\u0085medio", True, {_SIN_CONTROL}),
+        ("audio", "Borrar\u007f", True, {_SIN_CONTROL}),
+        ("image", "Una foto", False, {_NO_EN_FOTOS}),
+        ("document", None, True, {_SOLO_AUDIO}),
+        ("image", None, True, {_SOLO_AUDIO}),
+        ("video", "Clase", True, {_SOLO_AUDIO}),
+        ("audio", "", True, {"message_attachments_title_check"}),
+    ],
+)
+def test_por_postgrest_tampoco_entra_lo_que_la_api_rechaza(base, pg, kind, titulo, voz, checks) -> None:
+    """La política de INSERT de la 0033 deja a quien envió el mensaje colgarle
+    un adjunto por PostgREST. Las reglas del nombre las para la base."""
+    import psycopg
+
+    mid, _ = _mensaje_pg(pg, base["grupo"], BRUNO)
+    with pg.transaction(force_rollback=True):
+        _como(pg, BRUNO)
+        # Lo correcto entra: el camino llega de verdad hasta los `CHECK`
+        # (permisos y RLS dejan pasar a quien envió el mensaje).
+        _insertar_directo(pg, mid, base["grupo"], "audio", "Respiración 🌬️ 4\u200b7", True)
+        _insertar_directo(pg, mid, base["grupo"], "audio", "Clase 3", False)
+        _insertar_directo(pg, mid, base["grupo"], "image", None, False)
+        with pytest.raises(psycopg.errors.CheckViolation) as error:
+            with pg.transaction():
+                _insertar_directo(pg, mid, base["grupo"], kind, titulo, voz)
+        assert error.value.diag.constraint_name in checks
+
+
+@SIN_POSTGRES
+def test_si_alguna_fila_ya_incumple_una_regla_se_para_y_dice_cual(base, pg) -> None:
+    """Pegarla con filas que ya incumplen (escritas por PostgREST antes de los
+    `CHECK`) no deja la base a medias: se para con un mensaje que dice qué
+    arreglar, y no cambia nada."""
+    import psycopg
+
+    documento, imagen, _video = base["otros"]
+    casos = [
+        ("update public.message_attachments set title = 'a' || chr(10) || 'b' where id = %s",
+         documento, _SIN_CONTROL, "caracteres de control"),
+        ("update public.message_attachments set title = 'Foto' where id = %s",
+         imagen, _NO_EN_FOTOS, "foto(s) tienen nombre"),
+        ("update public.message_attachments set voice_note = true where id = %s",
+         documento, _SOLO_AUDIO, "marcados como nota de voz"),
+    ]
+    for estropear, adjunto, check, mensaje in casos:
+        with pg.transaction(force_rollback=True):
+            antes = _foto(pg)
+            _hacer(pg, f"alter table public.message_attachments drop constraint {check}")
+            _hacer(pg, estropear, adjunto)
+            with pytest.raises(psycopg.errors.RaiseException, match=re.escape(mensaje)):
+                with pg.transaction():
+                    _hacer(pg, SQL)
+            # Ni siquiera el `CHECK` quitado vuelve: no se aplicó nada.
+            assert check not in _checks(pg)
+        assert _foto(pg) == antes
 
 
 # =========================================================================== #

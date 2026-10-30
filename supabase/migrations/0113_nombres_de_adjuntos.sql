@@ -26,6 +26,18 @@
 --   · Relleno: `voice_note = true` en todo `kind = 'audio'` que ya exista.
 --     Hasta hoy TODO audio era una nota de voz (un archivo de audio se
 --     mandaba como `document`), así que es la verdad, no una suposición.
+--   · Las reglas del nombre, TAMBIÉN EN LA BASE, con tres `CHECK` más: sin
+--     caracteres de control, ninguno en una foto, y `voice_note` solo en un
+--     audio. Ver la sección 2 bis.
+--
+-- POR QUÉ LAS REGLAS VAN TAMBIÉN EN LA BASE (certificación del 30/10/2026).
+-- La política de INSERT de la 0033 deja a quien envió un mensaje colgarle un
+-- adjunto directamente por PostgREST, sin pasar por la API. La API rechaza un
+-- nombre con un salto de línea, un nombre en una foto o una «nota de voz» que
+-- es un PDF, pero por PostgREST entraban: la certificación consiguió un 201
+-- insertando una FOTO con un nombre de dos líneas y `voice_note = true`. Esas
+-- filas no rompen nada grave —solo se pintan mal—, pero una regla que solo
+-- vive en la API no es una regla.
 --
 -- POR QUÉ EL RELLENO SOLO CORRE CUANDO LA COLUMNA SE CREA. Una vez pegada, la
 -- API escribe `voice_note = false` en los archivos de audio. Si pegar la
@@ -120,6 +132,89 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
+-- 2 bis. Las reglas del nombre, también en la base
+-- -----------------------------------------------------------------------------
+-- Las mismas que comprueba la API (`router._exigir_titulo_valido`,
+-- `AttachmentCreate`): así una fila insertada por PostgREST tampoco puede
+-- saltárselas.
+--
+--   · `message_attachments_title_sin_control_check`: sin caracteres de
+--     control (Unicode `Cc`: U+0001–U+001F y U+007F–U+009F). Se escriben los
+--     rangos y no `[[:cntrl:]]` a propósito: lo que esa clase cubre fuera de
+--     ASCII depende del idioma de la base, y con el de C se le escaparían los
+--     de U+0080–U+009F (U+0085 es un salto de línea). NUL no hace falta: un
+--     `text` de PostgreSQL no puede contenerlo.
+--   · `message_attachments_title_no_en_fotos_check`: una foto no lleva nombre
+--     (ya tiene el texto del mensaje). Se escribe EN POSITIVO —llevan nombre
+--     el audio, el documento y el video, que es la decisión tal cual— y no
+--     como «`kind <> 'image'` o sin nombre», por dos motivos: un tipo nuevo
+--     que llegue mañana no hereda un nombre sin que nadie lo decida, y la
+--     comprobación de la 0044 (que se puede volver a pegar) trata como
+--     sobrante toda restricción sobre `kind` que no nombre 'audio': con la
+--     forma en negativo, volver a pegar la 0044 abortaría.
+--   · `message_attachments_voice_note_solo_audio_check`: solo un audio puede
+--     ser nota de voz.
+--
+-- ANTES DE CADA UNO SE MIRA SI ALGUNA FILA YA LO INCUMPLE, y si es así se para
+-- con un mensaje que dice cuál y cuántas. Añadir el `CHECK` fallaría igual,
+-- pero con un error que no dice qué hacer. Con lo que hay hoy no debería
+-- saltar ninguno: el relleno solo marca audios y no hay nombres todavía.
+-- Pegarla otra vez vuelve a mirar y a declararlos: lo que la API haya escrito
+-- entretanto ya cumple las tres.
+do $$
+declare
+  malas integer;
+begin
+  select count(*) into malas
+  from public.message_attachments
+  where title ~ '[\u0001-\u001f\u007f-\u009f]';
+  if malas > 0 then
+    raise exception
+      '% adjunto(s) tienen un nombre con caracteres de control. Corrígelos '
+      '(update … set title = null where …) y vuelve a pegar la 0113.', malas;
+  end if;
+
+  select count(*) into malas
+  from public.message_attachments
+  where kind = 'image' and title is not null;
+  if malas > 0 then
+    raise exception
+      '% foto(s) tienen nombre, y una foto no lo lleva. Quítaselo '
+      '(update … set title = null where kind = ''image'') y vuelve a pegar la 0113.', malas;
+  end if;
+
+  select count(*) into malas
+  from public.message_attachments
+  where voice_note and kind <> 'audio';
+  if malas > 0 then
+    raise exception
+      '% adjunto(s) que no son audio están marcados como nota de voz. '
+      'Desmárcalos (update … set voice_note = false where kind <> ''audio'') y '
+      'vuelve a pegar la 0113.', malas;
+  end if;
+end
+$$;
+
+alter table public.message_attachments
+  drop constraint if exists message_attachments_title_sin_control_check;
+alter table public.message_attachments
+  add constraint message_attachments_title_sin_control_check
+  check (title is null or title !~ '[\u0001-\u001f\u007f-\u009f]');
+
+alter table public.message_attachments
+  drop constraint if exists message_attachments_title_no_en_fotos_check;
+alter table public.message_attachments
+  add constraint message_attachments_title_no_en_fotos_check
+  check (title is null or kind in ('audio', 'document', 'video'));
+
+alter table public.message_attachments
+  drop constraint if exists message_attachments_voice_note_solo_audio_check;
+alter table public.message_attachments
+  add constraint message_attachments_voice_note_solo_audio_check
+  check (not voice_note or kind = 'audio');
+
+
+-- -----------------------------------------------------------------------------
 -- 3. Que siga sin poder cambiarse por PostgREST
 -- -----------------------------------------------------------------------------
 -- Si alguien hubiera creado a mano una política de UPDATE, cualquiera podría
@@ -153,9 +248,10 @@ notify pgrst, 'reload schema';
 -- 5. Comprobación
 -- -----------------------------------------------------------------------------
 -- Una fila. Esperado: las dos columnas (`title` nula sin valor por defecto;
--- `voice_note` con `false` y no nula), el `CHECK` del nombre, ninguna política
--- de UPDATE, ningún nombre todavía, y TANTAS notas de voz como audios había
--- (`audios` = `notas_de_voz`; recién pegada, todo audio es nota de voz).
+-- `voice_note` con `false` y no nula), los cuatro `CHECK` (`checks_de_0113` =
+-- 4), ninguna política de UPDATE, ningún nombre todavía, y TANTAS notas de
+-- voz como audios había (`audios` = `notas_de_voz`; recién pegada, todo audio
+-- es nota de voz).
 select
   (select is_nullable
      from information_schema.columns
@@ -171,6 +267,15 @@ select
      from pg_constraint
     where conrelid = 'public.message_attachments'::regclass
       and conname = 'message_attachments_title_check') as check_del_nombre,
+  (select count(*)
+     from pg_constraint
+    where conrelid = 'public.message_attachments'::regclass
+      and conname in (
+        'message_attachments_title_check',
+        'message_attachments_title_sin_control_check',
+        'message_attachments_title_no_en_fotos_check',
+        'message_attachments_voice_note_solo_audio_check'
+      )) as checks_de_0113,
   (select count(*)
      from pg_policies
     where schemaname = 'public'
@@ -191,7 +296,7 @@ select
 -- VERIFICACIÓN A MANO (no se ejecuta sola)
 -- -----------------------------------------------------------------------------
 -- Ningún adjunto que no sea audio quedó como nota de voz (debe devolver cero
--- filas):
+-- filas; el `CHECK` de la sección 2 bis ya lo impide):
 --
 --   select id, kind from public.message_attachments
 --   where voice_note and kind <> 'audio';
@@ -214,6 +319,12 @@ select
 -- nota de voz (se sigue reproduciendo; cambia el icono). La API ANTERIOR no
 -- los conoce, así que con ella no hay nada más que hacer.
 --
+--   alter table public.message_attachments
+--     drop constraint if exists message_attachments_voice_note_solo_audio_check;
+--   alter table public.message_attachments
+--     drop constraint if exists message_attachments_title_no_en_fotos_check;
+--   alter table public.message_attachments
+--     drop constraint if exists message_attachments_title_sin_control_check;
 --   alter table public.message_attachments
 --     drop constraint if exists message_attachments_title_check;
 --   alter table public.message_attachments drop column if exists title;

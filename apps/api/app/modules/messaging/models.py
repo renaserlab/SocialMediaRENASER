@@ -194,6 +194,37 @@ class MessageAttachment(Base):
             "title is null or length(title) between 1 and 80",
             name="message_attachments_title_check",
         ),
+        # Las reglas del nombre que la API ya exige, también en la base (0113):
+        # la política de INSERT de la 0033 deja a quien envió un mensaje
+        # colgarle un adjunto por PostgREST, sin pasar por la API. Los mismos
+        # nombres que en la migración.
+        #
+        # Sin caracteres de control (Unicode `Cc`: U+0001–U+001F y
+        # U+007F–U+009F; NUL no cabe en un `text` de PostgreSQL). Cada motor
+        # con lo que sabe: expresión regular en PostgreSQL —lo que pega la
+        # 0113—, `glob` con un rango de caracteres en SQLite, que no trae
+        # expresiones regulares. Aquí solo se crea la de SQLite (la base de las
+        # pruebas); la otra queda escrita para que el modelo diga lo mismo.
+        CheckConstraint(
+            r"title is null or title !~ '[\u0001-\u001f\u007f-\u009f]'",
+            name="message_attachments_title_sin_control_check",
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "title is null or not (title glob '*[' || char(1) || '-' || char(31) "
+            "|| char(127) || '-' || char(159) || ']*')",
+            name="message_attachments_title_sin_control_check",
+        ).ddl_if(dialect="sqlite"),
+        # Una foto no lleva nombre: lo llevan el audio, el documento y el
+        # video. En positivo, como en la 0113 (que explica por qué).
+        CheckConstraint(
+            "title is null or kind in ('audio', 'document', 'video')",
+            name="message_attachments_title_no_en_fotos_check",
+        ),
+        # Solo un audio puede ser nota de voz.
+        CheckConstraint(
+            "not voice_note or kind = 'audio'",
+            name="message_attachments_voice_note_solo_audio_check",
+        ),
     )
     __mapper_args__ = {"exclude_properties": ["title", "voice_note"]}
 
