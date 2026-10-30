@@ -40,7 +40,7 @@ type Props = {
  * funciones (`info.hayExtras`). Es comodidad: cada cambio se comprueba otra
  * vez en el servidor.
  *
- * ABIERTA O CON SOLICITUD (0114). Abierta: desde el perfil o el enlace se
+ * ABIERTA O CON SOLICITUD (0112). Abierta: desde el perfil o el enlace se
  * entra con un toque. Con solicitud: ni el perfil ni el enlace meten a nadie,
  * dejan una solicitud que se responde aquí. Pasar a con solicitud no saca a
  * nadie de dentro.
