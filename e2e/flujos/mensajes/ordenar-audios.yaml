@@ -1,0 +1,320 @@
+# Audios y temas (migracion 0113): ordenar los audios de General de una
+# comunidad con nombres y temas.
+#
+#  0. Ana, que ADMINISTRA «Taller E2E», abre General: cuatro audios sin nombre
+#     (tres notas de voz y un archivo de audio) se ven como siempre. Mas
+#     arriba, un PDF y un video que ya llegaron con nombre (la tarjeta).
+#  1. «Ponerle nombre» en la nota de voz de 0:03 de Beto (quien administra
+#     puede nombrar lo ajeno): la tarjeta sale con el titulo.
+#  2. «Agregar a un tema» en su nota de voz de 0:05: como no tiene nombre, la
+#     hoja ofrece «Nombre (opcional)»; se escribe, se marca «Avisos» y «Listo».
+#     Bajo la burbuja sale la etiqueta del tema.
+#  3. Otra vez «Agregar a un tema» en esa nota: «Avisos» marcado con «Ya está
+#     aquí · toca para quitarlo», y ya no pide nombre.
+#  4. Contenido › Audios: «Sin tema · 3» lista los que quedan; pulsacion larga
+#     en uno, toque en otro, «Agregar 2 a un tema» › «Avisos». Las cuentas
+#     pasan a «Sin tema · 1» y «Avisos · 3», y en el chat salen sus etiquetas.
+#  5. Beto (miembro) ve los nombres y las etiquetas, y en el menu de un audio
+#     de Ana no tiene «Ponerle nombre» ni «Agregar a un tema» (en el suyo si
+#     puede cambiarle el nombre).
+#
+# EL MENU DE UNA NOTA DE VOZ se abre manteniendo la franja de la hora de su
+# burbuja («Mantén presionado para ver las acciones del mensaje»), no la nota:
+# en el chat `BurbujaDeNotaDeVoz` no recibe `alMantener` (ChatScreen,
+# pintarAdjunto), y mantenerla la reproduce. En Contenido si lo recibe.
+#
+# Datos: e2e/datos/30-mensajes.sql y, encima, los audios, el PDF y el video
+# que siembra ~/.cache/zeta-perf/audios-e2e/sembrar-audios.sh por Storage y
+# la API (cada audio con una duracion distinta: su etiqueta accesible lo
+# distingue). La siguiente siembra lo borra todo (temas incluidos), asi que
+# los demas flujos encuentran «Taller E2E» como siempre. Necesita la 0113 y
+# la API de la rama (`attachment_titles: true`).
+appId: host.exp.exponent
+name: "Mensajes: ordenar audios con nombre y tema (General, Contenido y miembro)"
+tags:
+  - mensajes
+env:
+  TALLER: e2e30000-0000-4000-8000-000000000010
+---
+# ---- 0. General de Taller E2E, como Ana -----------------------------------------
+- runFlow: ../_comun/iniciar-sesion.yaml
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/${TALLER}
+      ESPERAR: "Más opciones del chat"
+      REINICIAR: "no"
+- scrollUntilVisible:
+    element: "Reproducir nota de voz de 0:07"
+    direction: DOWN
+    timeout: 20000
+# Que pare la inercia: un toque mientras la lista se desliza lo usa la lista
+# para frenar y no llega a la burbuja (la pulsacion larga no abria el menu).
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Reproducir nota de voz de 0:03"
+- assertVisible: "Reproducir nota de voz de 0:05"
+- assertVisible: "Reproducir archivo de audio"
+- assertNotVisible: "Clase 1 Respiracion"
+- assertNotVisible: "Está en el tema Avisos\\. Abrir el tema"
+- takeScreenshot: mensajes-audios-sin-nombre
+# Mas arriba, el PDF y el video que llegaron con nombre: la tarjeta.
+- scrollUntilVisible:
+    element: "Programa del taller"
+    direction: UP
+    centerElement: true
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Torno en 6 segundos"
+- takeScreenshot: mensajes-audios-tarjetas-pdf-y-video
+- scrollUntilVisible:
+    element: "Reproducir nota de voz de 0:07"
+    direction: DOWN
+    timeout: 20000
+# Que pare la inercia: un toque mientras la lista se desliza lo usa la lista
+# para frenar y no llega a la burbuja (la pulsacion larga no abria el menu).
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# ---- 1. «Ponerle nombre» en la nota de voz de Beto -----------------------------------
+- longPressOn:
+    text: "Mantén presionado para ver las acciones del mensaje"
+    below: "Reproducir nota de voz de 0:03"
+    above: "Reproducir nota de voz de 0:05"
+- extendedWaitUntil:
+    visible: "Ponerle nombre"
+    timeout: 10000
+- assertVisible: "Agregar a un tema"
+- takeScreenshot: mensajes-audios-menu-de-quien-administra
+- tapOn: "Ponerle nombre"
+- extendedWaitUntil:
+    visible: "Nota de voz de .*"
+    timeout: 10000
+- tapOn:
+    text: "Nombre"
+    below:
+      text: "Nombre"
+- inputText: "Clase 1 Respiracion"
+# El teclado del emulador (render por software) a veces repite una letra
+# («Cllase»): si el campo no dice exactamente esto, se borra y se escribe otra
+# vez (hasta dos veces).
+- runFlow:
+    when:
+      notVisible: "Clase 1 Respiracion"
+    commands:
+      - eraseText: 40
+      - inputText: "Clase 1 Respiracion"
+- runFlow:
+    when:
+      notVisible: "Clase 1 Respiracion"
+    commands:
+      - eraseText: 40
+      - inputText: "Clase 1 Respiracion"
+- assertVisible: "Clase 1 Respiracion"
+- hideKeyboard
+- takeScreenshot: mensajes-audios-hoja-ponerle-nombre
+- tapOn: "Guardar"
+- extendedWaitUntil:
+    visible: "Reproducir Clase 1 Respiracion, 3 segundos"
+    timeout: 15000
+- assertVisible: "Clase 1 Respiracion"
+- assertNotVisible: "Reproducir nota de voz de 0:03"
+
+# ---- 2. «Agregar a un tema» en la suya, con nombre de paso -----------------------------
+- longPressOn:
+    text: "Mantén presionado para ver las acciones del mensaje"
+    below: "Reproducir nota de voz de 0:05"
+    above: "Reproducir archivo de audio"
+- extendedWaitUntil:
+    visible: "Agregar a un tema"
+    timeout: 10000
+- tapOn: "Agregar a un tema"
+- extendedWaitUntil:
+    visible: "Nombre \\(opcional\\)"
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "Avisos"
+    timeout: 15000
+- assertVisible: "Todavía no tiene nombre\\. Así se verá en el chat, en el tema y en Contenido\\."
+- tapOn:
+    text: "Nombre \\(opcional\\)"
+    below:
+      text: "Nombre \\(opcional\\)"
+- inputText: "Meditacion guiada"
+# El teclado del emulador (render por software) a veces repite una letra
+# («Cllase»): si el campo no dice exactamente esto, se borra y se escribe otra
+# vez (hasta dos veces).
+- runFlow:
+    when:
+      notVisible: "Meditacion guiada"
+    commands:
+      - eraseText: 40
+      - inputText: "Meditacion guiada"
+- runFlow:
+    when:
+      notVisible: "Meditacion guiada"
+    commands:
+      - eraseText: 40
+      - inputText: "Meditacion guiada"
+- assertVisible: "Meditacion guiada"
+- hideKeyboard
+- tapOn: "Avisos"
+- extendedWaitUntil:
+    visible: "Ya está aquí · toca para quitarlo"
+    timeout: 15000
+- takeScreenshot: mensajes-audios-hoja-de-temas-con-nombre
+- tapOn: "Listo"
+- extendedWaitUntil:
+    visible: "Reproducir Meditacion guiada, 5 segundos"
+    timeout: 15000
+- extendedWaitUntil:
+    visible: "Está en el tema Avisos\\. Abrir el tema"
+    timeout: 15000
+- takeScreenshot: mensajes-audios-etiqueta-del-tema
+
+# ---- 3. Otra vez: ✓ en «Avisos» y ya no pide nombre --------------------------------------
+- longPressOn:
+    text: "Mantén presionado para ver las acciones del mensaje"
+    below: "Reproducir Meditacion guiada, 5 segundos"
+    above: "Reproducir archivo de audio"
+- extendedWaitUntil:
+    visible: "Agregar a un tema"
+    timeout: 10000
+- assertVisible: "Ir al tema «Avisos»"
+- assertVisible: "Cambiar el nombre"
+- tapOn: "Agregar a un tema"
+- extendedWaitUntil:
+    visible: "Ya está aquí · toca para quitarlo"
+    timeout: 15000
+- assertVisible:
+    text: "Avisos"
+    checked: true
+- assertNotVisible: "Nombre \\(opcional\\)"
+- takeScreenshot: mensajes-audios-hoja-de-temas-marcado
+- tapOn: "Listo"
+- extendedWaitUntil:
+    notVisible: "Ya está aquí · toca para quitarlo"
+    timeout: 10000
+
+# ---- 4. Contenido › Audios: «Sin tema» y agregar dos de una vez --------------------------
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/grupo/${TALLER}
+      ESPERAR: "Miembros: 2"
+      REINICIAR: "no"
+- tapOn: "Audios"
+- extendedWaitUntil:
+    visible: "Sin tema · 3"
+    timeout: 20000
+- assertVisible: "Todos · 4"
+- assertVisible: "Avisos · 1"
+- tapOn: "Sin tema · 3"
+- extendedWaitUntil:
+    visible: "Reproducir nota de voz de 0:07"
+    timeout: 15000
+- assertVisible: "Reproducir Clase 1 Respiracion, 3 segundos"
+- assertVisible: "Reproducir archivo de audio"
+- assertNotVisible: "Reproducir Meditacion guiada, 5 segundos"
+- takeScreenshot: mensajes-audios-contenido-sin-tema
+- longPressOn: "Reproducir archivo de audio"
+- extendedWaitUntil:
+    visible: "1 seleccionado"
+    timeout: 10000
+- tapOn: "Reproducir nota de voz de 0:07"
+- extendedWaitUntil:
+    visible: "2 seleccionados"
+    timeout: 10000
+- takeScreenshot: mensajes-audios-contenido-seleccion
+- tapOn: "Agregar 2 a un tema"
+- extendedWaitUntil:
+    visible: "Agregar a Avisos"
+    timeout: 15000
+- takeScreenshot: mensajes-audios-agregar-2-a-un-tema
+- tapOn: "Agregar a Avisos"
+- extendedWaitUntil:
+    visible: "Sin tema · 1"
+    timeout: 20000
+- assertVisible: "Avisos · 3"
+- assertNotVisible: "2 seleccionados"
+- takeScreenshot: mensajes-audios-contenido-agregados
+
+# De vuelta en el chat: los dos llevan su etiqueta.
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/${TALLER}
+      ESPERAR: "Más opciones del chat"
+      REINICIAR: "no"
+- scrollUntilVisible:
+    element: "Reproducir nota de voz de 0:07"
+    direction: DOWN
+    timeout: 20000
+# Que pare la inercia: un toque mientras la lista se desliza lo usa la lista
+# para frenar y no llega a la burbuja (la pulsacion larga no abria el menu).
+- waitForAnimationToEnd:
+    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      text: "Está en el tema Avisos\\. Abrir el tema"
+      below: "Reproducir nota de voz de 0:07"
+    timeout: 15000
+- assertVisible:
+    text: "Está en el tema Avisos\\. Abrir el tema"
+    below: "Reproducir archivo de audio"
+    above: "Reproducir nota de voz de 0:07"
+- takeScreenshot: mensajes-audios-chat-con-etiquetas
+
+# ---- 5. Beto, miembro: ve nombres y etiquetas, y no puede ordenar lo de Ana ----------------
+- runFlow:
+    file: ../_comun/iniciar-sesion.yaml
+    env:
+      E2E_EMAIL: ${E2E_EMAIL_B}
+- runFlow:
+    file: ../_comun/abrir-app.yaml
+    env:
+      RUTA: chat/${TALLER}
+      ESPERAR: "Más opciones del chat"
+      REINICIAR: "no"
+- scrollUntilVisible:
+    element: "Reproducir nota de voz de 0:07"
+    direction: DOWN
+    timeout: 20000
+# Que pare la inercia: un toque mientras la lista se desliza lo usa la lista
+# para frenar y no llega a la burbuja (la pulsacion larga no abria el menu).
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Meditacion guiada"
+- assertVisible: "Clase 1 Respiracion"
+- assertVisible: "Está en el tema Avisos\\. Abrir el tema"
+- takeScreenshot: mensajes-audios-miembro-ve-nombres-y-etiquetas
+- longPressOn:
+    text: "Mantén presionado para ver las acciones del mensaje"
+    below: "Reproducir Meditacion guiada, 5 segundos"
+    above: "Reproducir archivo de audio"
+- extendedWaitUntil:
+    visible: "Ir al tema «Avisos»"
+    timeout: 10000
+- assertVisible: "Responder"
+- assertNotVisible: "Ponerle nombre"
+- assertNotVisible: "Cambiar el nombre"
+- assertNotVisible: "Agregar a un tema"
+- takeScreenshot: mensajes-audios-menu-de-miembro
+- back
+- extendedWaitUntil:
+    notVisible: "Ir al tema «Avisos»"
+    timeout: 10000
+# Su propio audio (que nombro Ana) si lo puede renombrar; ordenarlo, no.
+- longPressOn:
+    text: "Mantén presionado para ver las acciones del mensaje"
+    below: "Reproducir Clase 1 Respiracion, 3 segundos"
+    above: "Reproducir Meditacion guiada, 5 segundos"
+- extendedWaitUntil:
+    visible: "Cambiar el nombre"
+    timeout: 10000
+- assertNotVisible: "Agregar a un tema"
+- back
+
+# Deja la sesion de Ana, como empiezan los demas flujos.
+- runFlow: ../_comun/iniciar-sesion.yaml
