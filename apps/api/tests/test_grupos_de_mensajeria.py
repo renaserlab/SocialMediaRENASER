@@ -362,8 +362,10 @@ async def test_el_aviso_de_un_grupo_dice_quien_y_en_cual(entorno, avisos_de_grup
     }
     assert "examen" not in str(aviso)
 
+    # Desde el 30/10/2026 el chat padre se llama «comunidad» en la aplicación.
+    assert aviso["nivel"] == "comunidad"
     titulo, cuerpo = push.build_message(aviso["notification_type"], aviso["actor_name"], aviso["grupo"])
-    assert (titulo, cuerpo) == ("Nuevo mensaje", "Bruno envió un mensaje al grupo «Aula 3».")
+    assert (titulo, cuerpo) == ("Nuevo mensaje", "Bruno envió un mensaje a la comunidad «Aula 3».")
 
 
 @pytest.mark.asyncio
@@ -392,14 +394,15 @@ async def test_el_aviso_de_un_chat_de_dos_no_cambia(entorno, avisos_de_grupo):
 def test_el_nombre_del_grupo_es_un_valor_y_no_una_plantilla():
     # Unas llaves en el nombre salen tal cual: no se interpretan.
     _, cuerpo = push.build_message("message_group", "Ana", "{actor} {0} {grupo.__class__}")
-    assert cuerpo == "Ana envió un mensaje al grupo «{actor} {0} {grupo.__class__}»."
-    # Sin nombre —no debería pasar— no se escribe «None».
+    assert cuerpo == "Ana envió un mensaje a la comunidad «{actor} {0} {grupo.__class__}»."
+    # Sin nombre —no debería pasar— no se escribe «None», y el genérico
+    # concuerda con la palabra de la plantilla.
     assert push.build_message("message_group", None, None)[1] == (
-        "Alguien envió un mensaje al grupo «un grupo»."
+        "Alguien envió un mensaje a la comunidad «una comunidad»."
     )
     assert push.build_message("group_added", "Ana", "Aula") == (
-        "Nuevo grupo",
-        "Ana te agregó al grupo «Aula».",
+        "Nueva comunidad",
+        "Ana te agregó a la comunidad «Aula».",
     )
     # Los dos avisos suenan por el canal de los mensajes.
     assert push.CHANNELS["message_group"] == push.CHANNELS["group_added"] == "mensajes"

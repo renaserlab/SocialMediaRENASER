@@ -378,7 +378,10 @@ async def avisar_de_que_los_anadieron(
     a_quienes: list[str],
     titulo: str,
 ) -> None:
-    """«Ana te añadió al grupo «Aula»». NUNCA tumba lo que ya se guardo."""
+    """«Ana te agregó a la comunidad «Aula»» (o «al grupo», si es uno de dentro).
+
+    NUNCA tumba lo que ya se guardo.
+    """
     try:
         encolar_push(
             background,
@@ -389,6 +392,7 @@ async def avisar_de_que_los_anadieron(
             # que es a donde lleva ese tipo en la aplicacion.
             data={"type": avisos.TIPO, "conversationId": conversation_id},
             grupo=titulo,
+            nivel=await avisos.nivel_de(db, conversation_id),
         )
     except Exception:  # noqa: BLE001 - el aviso nunca tumba el alta
         logger.warning("[grupos] no se pudo programar el aviso", exc_info=True)
@@ -525,6 +529,13 @@ async def info_de_la_conversacion(
     # 409): anunciarlos seria ofrecer botones que no hacen nada.
     hay_extras = es_grupo and tema is None and await esquema.hay_puertas_de_grupo(db)
     ajustes = await ajustes_de_grupo.fila_de(db, conversation_id) if hay_extras else None
+    # El codigo del enlace solo viaja hacia quien administra. Y «en mi perfil»
+    # es SUYO (0112): se pregunta solo cuando hay ajustes que enseñar.
+    leidos = (
+        await ajustes_de_grupo.leer_para(db, ajustes, conversation_id, current_user.id)
+        if (puede and hay_extras)
+        else None
+    )
     return InfoDeConversacion(
         id=conversation_id,
         kind=kind,
@@ -534,8 +545,7 @@ async def info_de_la_conversacion(
         members=miembros,
         avatar_path=ajustes.avatar_path if ajustes is not None else None,
         extras_available=hay_extras,
-        # El codigo del enlace solo viaja hacia quien administra.
-        settings=ajustes_de_grupo.leer(ajustes) if (puede and hay_extras) else None,
+        settings=leidos,
         pending_requests=(
             await ajustes_de_grupo.pendientes_de(db, conversation_id)
             if (puede and hay_extras)

@@ -7,21 +7,40 @@ Aqui solo hay LECTURAS Y UTILIDADES sobre `group_settings` y
 
 SIN LA 0104 TODO ESTO DEVUELVE «NADA» SIN TOCAR LA BASE: un grupo sin foto,
 sin enlace y sin solicitudes, que es exactamente lo que habia antes.
+
+COMUNIDADES EN EL PERFIL (30/10/2026, migracion 0112,
+`docs/CONTRATOS_COMUNIDADES_EN_EL_PERFIL.md`). Dos cosas nuevas:
+
+  · `entrada`: `open` (se entra de un toque) o `request` (se pide, como
+    siempre). Sin fila de ajustes, `request`.
+  · «En mi perfil» deja de ser un dato del grupo y pasa a ser de CADA
+    persona (`GroupProfileListing`). `listed_on_profile` conserva su nombre
+    en las respuestas, pero ahora dice si sale en el perfil de QUIEN
+    PREGUNTA. La columna del mismo nombre se sigue escribiendo a la vez, para
+    que volver a la API anterior no pierda ningun perfil.
+
+SIN LA 0112, LO DE ANTES. La API puede llegar antes que la migracion: todo lo
+de aqui pregunta antes `esquema.hay_comunidades_en_el_perfil` (una vez por
+proceso, no por peticion) y, si falta, cada comunidad es `request` y «en mi
+perfil» es la columna `listed_on_profile`, que es exactamente lo que se leia.
 """
 
 from __future__ import annotations
 
 import secrets
+from typing import Literal
 
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import Text, delete, func, literal_column, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.messaging import esquema
 from app.modules.messaging.models import (
+    ENTRADA,
     ConversationMember,
     GroupJoinRequest,
+    GroupProfileListing,
     GroupSettings,
 )
 
@@ -29,12 +48,16 @@ from app.modules.messaging.models import (
 class AjustesLeidos(BaseModel):
     """Como esta configurada la entrada a un grupo. Solo lo ve quien lo administra."""
 
-    #: Sale en «Unete a mi grupo», en el perfil de quien lo administra.
+    #: Sale en el perfil de QUIEN PREGUNTA (0112). Antes decia «en el perfil
+    #: de quien lo administra»; con una sola persona administrando, que es lo
+    #: que hay hoy, es lo mismo.
     listed_on_profile: bool = False
     #: El enlace del grupo esta activo.
     invite_enabled: bool = False
     #: El codigo del enlace. `None` hasta que se activa por primera vez.
     invite_code: str | None = None
+    #: Como se entra (0112): `open`, de un toque; `request`, pidiendolo.
+    entrada: Literal["open", "request"] = "request"
 
 
 def codigo_nuevo() -> str:
@@ -77,14 +100,168 @@ async def asegurar_fila(db: AsyncSession, conversation_id: str) -> GroupSettings
     return fila
 
 
-def leer(fila: GroupSettings | None) -> AjustesLeidos:
+def entrada_leida(valor: str | None) -> Literal["open", "request"]:
+    """`open` solo si la base lo dice. Sin fila, sin la 0112 o con cualquier otra
+    cosa, `request`.
+
+    Lo seguro es lo de siempre: una comunidad de la que no se sabe nada se
+    trata como «con solicitud», nunca como abierta.
+    """
+    return "open" if valor == "open" else "request"
+
+
+def columna_de_entrada(con_la_0112: bool):
+    """Lo que se pone en un `select` para leer como se entra, como `entrada`.
+
+    Sin la 0112, la constante `'request'` en el propio SQL (no un parametro:
+    asyncpg no sabria de que tipo es un parametro suelto en la lista de
+    columnas). Asi cada consulta tiene la misma forma con la columna o sin
+    ella, y nadie nombra una columna que no existe.
+    """
+    if con_la_0112:
+        return ENTRADA.label("entrada")
+    return literal_column("'request'", Text).label("entrada")
+
+
+def leer(
+    fila: GroupSettings | None, *, en_mi_perfil: bool, entrada: str | None
+) -> AjustesLeidos:
+    """Los ajustes tal como los ve quien los pide.
+
+    `en_mi_perfil` y `entrada` son OBLIGATORIOS y sin valor por defecto: desde
+    la 0112 no salen de `fila` (el primero depende de quien pregunta y la
+    segunda no esta en el modelo), y un valor puesto por olvido diria a quien
+    administra algo que no es.
+    """
     if fila is None:
-        return AjustesLeidos()
+        return AjustesLeidos(listed_on_profile=en_mi_perfil, entrada=entrada_leida(entrada))
     return AjustesLeidos(
-        listed_on_profile=bool(fila.listed_on_profile),
+        listed_on_profile=en_mi_perfil,
         invite_enabled=bool(fila.invite_enabled),
         invite_code=fila.invite_code,
+        entrada=entrada_leida(entrada),
     )
+
+
+async def leer_para(
+    db: AsyncSession, fila: GroupSettings | None, conversation_id: str, uid: str
+) -> AjustesLeidos:
+    """Los ajustes de una comunidad como los ve `uid`. UNA consulta como mucho.
+
+    Con la 0112, como se entra y si sale en SU perfil se leen juntos, en una
+    sola sentencia. Sin ella, ninguna: `request` y la columna de siempre, que
+    es lo que respondia esta API antes de la 0112.
+    """
+    if not await esquema.hay_comunidades_en_el_perfil(db):
+        return leer(
+            fila,
+            en_mi_perfil=bool(fila is not None and fila.listed_on_profile),
+            entrada=None,
+        )
+    entrada = (
+        select(ENTRADA)
+        .where(GroupSettings.conversation_id == conversation_id)
+        .scalar_subquery()
+    )
+    suya = (
+        select(GroupProfileListing.user_id)
+        .where(
+            GroupProfileListing.conversation_id == conversation_id,
+            GroupProfileListing.user_id == uid,
+        )
+        .exists()
+    )
+    leido = (await db.execute(select(entrada.label("entrada"), suya.label("suya")))).one()
+    return leer(fila, en_mi_perfil=bool(leido.suya), entrada=leido.entrada)
+
+
+async def poner_entrada(
+    db: AsyncSession, conversation_id: str, entrada: Literal["open", "request"]
+) -> None:
+    """Cambia como se entra. SIN COMMIT. Quien llama ha comprobado que la 0112
+    esta y que la fila de ajustes existe (`asegurar_fila`)."""
+    await db.execute(
+        update(GroupSettings.__table__)
+        .where(GroupSettings.__table__.c.conversation_id == conversation_id)
+        .values(entrada=entrada)
+    )
+
+
+async def esta_en_el_perfil(db: AsyncSession, conversation_id: str, user_id: str) -> bool:
+    """Si esta persona enseña esta comunidad en su perfil, segun la 0112.
+
+    Sin la 0112 (o sin la 0104), `False`: quien pregunta mira antes la columna
+    `listed_on_profile`, que es lo unico que habia.
+
+    Una consulta y no `db.get`: `get` contesta desde el mapa de identidad de la
+    sesion sin preguntar a la base, y `poner_en_mi_perfil` borra con una
+    sentencia que no lo actualiza. Leido despues en la misma peticion, diria
+    que sigue en el perfil.
+    """
+    if not await esquema.hay_puertas_de_grupo(db):
+        return False
+    if not await esquema.hay_comunidades_en_el_perfil(db):
+        return False
+    return (
+        await db.scalar(
+            select(GroupProfileListing.user_id).where(
+                GroupProfileListing.conversation_id == conversation_id,
+                GroupProfileListing.user_id == user_id,
+            )
+        )
+    ) is not None
+
+
+def _insert_con_conflicto(db: AsyncSession):
+    """El `insert` del dialecto, que es el que sabe `on conflict`.
+
+    Igual que `temas._insert_con_conflicto`, y por lo mismo: que dos toques a
+    la vez en «Mostrar en mi perfil» dejen una fila y no un 500 lo da la clave
+    primaria, no una comprobacion previa que deja una ventana entre medias.
+    """
+    nombre = db.get_bind().dialect.name
+    if nombre == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as insert_pg
+
+        return insert_pg
+    if nombre == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as insert_sqlite
+
+        return insert_sqlite
+    raise RuntimeError(
+        f"Dialecto '{nombre}' sin soporte de `on conflict`: «en mi perfil» "
+        "depende de el."
+    )
+
+
+async def poner_en_mi_perfil(
+    db: AsyncSession, conversation_id: str, user_id: str, *, si: bool
+) -> None:
+    """Enseña o deja de enseñar la comunidad en el perfil de ESA persona. SIN COMMIT.
+
+    Solo su fila: quitarla de un perfil no la quita del de nadie mas. Quien
+    llama comprueba antes que la administra y que es de primer nivel, y escribe
+    ademas la columna `listed_on_profile`. Sin la 0112 no hay fila que escribir
+    y esa columna es todo el ajuste, como antes: no hace nada.
+    """
+    if not await esquema.hay_comunidades_en_el_perfil(db):
+        return
+    if si:
+        inserta = _insert_con_conflicto(db)
+        await db.execute(
+            inserta(GroupProfileListing.__table__)
+            .values(conversation_id=conversation_id, user_id=user_id)
+            .on_conflict_do_nothing(index_elements=["conversation_id", "user_id"])
+        )
+    else:
+        await db.execute(
+            delete(GroupProfileListing)
+            .where(
+                GroupProfileListing.conversation_id == conversation_id,
+                GroupProfileListing.user_id == user_id,
+            )
+            .execution_options(synchronize_session=False)
+        )
 
 
 async def avatares_de(db: AsyncSession, conversation_ids: list[str]) -> dict[str, str]:

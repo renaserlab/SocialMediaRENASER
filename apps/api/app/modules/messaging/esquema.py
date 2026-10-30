@@ -427,6 +427,29 @@ async def hay_comunidades(db: AsyncSession) -> bool:
     return _cache["group_subgroups"]
 
 
+async def hay_comunidades_en_el_perfil(db: AsyncSession) -> bool:
+    """Si existen `group_profile_listings` y `group_settings.entrada` (migracion 0112).
+
+    SIN LA 0112: todas las comunidades se leen «con solicitud» y el perfil sale
+    de `group_settings.listed_on_profile`, exactamente como hasta entonces.
+    Cambiar como se entra responde 503 `group_extras_not_available`, y
+    `POST /{id}/join` responde lo mismo que a una con solicitud. La tabla y la
+    columna llegan en la misma migracion, en una sola transaccion: se mira la
+    tabla. Sin la 0104 tampoco puede estar (le añade una columna a su tabla).
+    """
+    if not _sabido("group_profile_listings"):
+        conexion = await db.connection()
+        _cache["group_profile_listings"] = await conexion.run_sync(
+            lambda sync: inspect(sync).has_table("group_profile_listings")
+        )
+        if not _cache["group_profile_listings"] and _caduca("group_profile_listings"):
+            logger.warning(
+                "La migracion 0112 no esta aplicada: todas las comunidades son con "
+                "solicitud y el perfil se lee de group_settings.listed_on_profile."
+            )
+    return _cache["group_profile_listings"]
+
+
 def olvidar() -> None:
     """Solo para los tests: que uno no herede el esquema del anterior.
 

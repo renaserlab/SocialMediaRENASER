@@ -34,7 +34,7 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.messaging import preferencias
+from app.modules.messaging import esquema, preferencias
 from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.profiles.models import Profile
 from app.modules.social_graph.models import UserBlock
@@ -42,16 +42,17 @@ from app.modules.social_graph.models import UserBlock
 #: El tipo del aviso. Tiene su texto y su canal en `notifications/push.py`.
 TIPO = "message"
 
-#: El texto del aviso cuando el mensaje va a un GRUPO: «Ana envió un mensaje
-#: al grupo «Aula»». Es solo el TEXTO: en los datos del aviso el tipo sigue
+#: El texto del aviso cuando el mensaje va a un chat de grupo: «Ana envió un
+#: mensaje a la comunidad «Aula»» (o «al grupo «Valorant»» si es uno de dentro,
+#: o «en el tema «Anuncios»»: ver `nivel_de`). Es solo el TEXTO: en los datos del aviso el tipo sigue
 #: siendo `message`, porque lleva al mismo sitio —la conversación— y la
 #: aplicación decide el destino por ese campo (`rutaDelPush.ts`).
 TIPO_EN_GRUPO = "message_group"
 
-#: «Ana te añadió al grupo «Aula»».
+#: «Ana te agregó a la comunidad «Aula»».
 TIPO_AL_ANADIR = "group_added"
 
-#: «Ana quiere unirse a tu grupo «Aula»». Le llega a quien lo administra.
+#: «Ana quiere unirse a tu comunidad «Aula»». Le llega a quien la administra.
 TIPO_AL_PEDIR_ENTRAR = "group_join_request"
 
 #: A donde lleva ese aviso al tocarlo: a la ficha del grupo, que es donde se
@@ -78,6 +79,57 @@ async def grupo_de(db: AsyncSession, conversation_id: str) -> str | None:
     if fila is None or fila.kind != "group":
         return None
     return (fila.title or "").strip()
+
+
+async def nivel_de(db: AsyncSession, conversation_id: str) -> str:
+    """Dónde pasa lo que se avisa: `comunidad`, `subgrupo` o `tema`.
+
+    Para elegir la palabra del aviso (`push.TEMPLATES_POR_NIVEL`): desde el
+    30/10/2026 la aplicación llama «comunidad» al chat padre y «grupo» a los
+    de dentro, y el chat de un tema se nombra como tema («en el tema
+    «Anuncios»»), no como si el tema fuera una comunidad. El aviso tiene que
+    decir lo mismo que la pantalla que abre.
+
+    UNA CONSULTA, con los dos `EXISTS` juntos; sin la 0108 ni la 0109,
+    ninguna. Solo cuentan los vivos: un tema o un grupo eliminado se queda sin
+    miembros, así que no hay a quién avisar.
+
+    `temas.py` y `subgrupos.py` se importan aquí dentro porque, a través de
+    `grupos.py`, importan este fichero.
+    """
+    preguntas = []
+    if await esquema.hay_temas(db):
+        from app.modules.messaging.temas import ConversationTopic
+
+        preguntas.append(
+            select(ConversationTopic.id)
+            .where(
+                ConversationTopic.chat_id == conversation_id,
+                ConversationTopic.deleted_at.is_(None),
+            )
+            .exists()
+            .label("tema")
+        )
+    if await esquema.hay_comunidades(db):
+        from app.modules.messaging.subgrupos import GroupSubgroup
+
+        preguntas.append(
+            select(GroupSubgroup.conversation_id)
+            .where(
+                GroupSubgroup.conversation_id == conversation_id,
+                GroupSubgroup.deleted_at.is_(None),
+            )
+            .exists()
+            .label("subgrupo")
+        )
+    if not preguntas:
+        return "comunidad"
+    respuesta = (await db.execute(select(*preguntas))).one()._mapping
+    if respuesta.get("tema"):
+        return "tema"
+    if respuesta.get("subgrupo"):
+        return "subgrupo"
+    return "comunidad"
 
 
 async def destinatarios(
