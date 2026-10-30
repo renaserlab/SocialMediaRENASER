@@ -198,11 +198,19 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   const [progreso, setProgreso] = useState(0);
   /**
    * «Ponle nombre (opcional)», lo que se escribe en la previa (audios y
-   * temas, 30/10/2026). Viaja como `title` del adjunto. Vive aquí y no en el
-   * campo para que un envío fallido lo conserve con la grabación, y para que
-   * se vaya con ella al enviarla o tirarla.
+   * temas, 30/10/2026). Viaja como `title` del adjunto.
+   *
+   * EN UNA REFERENCIA Y NO EN EL ESTADO: este hook vive en la pantalla del
+   * chat, y un estado aquí la repintaría entera con cada tecla (la misma
+   * razón por la que el redactor lleva su propio texto). El campo lleva su
+   * texto (`CampoDeNombreDeLaNota`) y lo deja aquí; se lee al enviar. Se
+   * olvida con la nota: al grabar otra, al tirarla y al enviarla.
    */
-  const [nombre, setNombre] = useState('');
+  const nombre = useRef('');
+  const ponerNombre = useCallback((texto: string) => {
+    nombre.current = texto;
+  }, []);
+  const leerNombre = useCallback(() => nombre.current, []);
 
   /*
     Que hay que abandonar lo que se está preparando, en una referencia.
@@ -333,7 +341,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     setMilisegundos(0);
     setProgreso(0);
     setNota(null);
-    setNombre('');
+    nombre.current = '';
     setFase('permiso');
 
     /*
@@ -542,7 +550,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     // acto, y `empezar` ya aguarda a la fila de borrados antes de grabar otra.
     void tirarFichero(nota?.uri);
     setNota(null);
-    setNombre('');
+    nombre.current = '';
     setProgreso(0);
     setMilisegundos(0);
     setFase('inactiva');
@@ -565,7 +573,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     if (fase !== 'lista' && fase !== 'fallida') return;
     if (!nota) return;
     // El nombre va CON la nota, no en otro mensaje: es su `title`.
-    const titulo = limpiarTitulo(nombre);
+    const titulo = limpiarTitulo(nombre.current);
     const pendiente: AdjuntoElegido = titulo ? { ...nota, title: titulo } : nota;
 
     setProgreso(0);
@@ -588,13 +596,13 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     if (!montado.current) return;
     if (confirmado) {
       setNota(null);
-      setNombre('');
+      nombre.current = '';
       setProgreso(0);
       setFase('inactiva');
     } else {
       setFase('fallida');
     }
-  }, [fase, nota, nombre, alEnviar, tirarFichero]);
+  }, [fase, nota, alEnviar, tirarFichero]);
 
   /*
     Al llegar al tope se PARA SOLA y queda en la previa.
@@ -724,9 +732,9 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     nota,
     /** De 0 a 1 mientras se sube. */
     progreso,
-    /** El nombre que se le está poniendo en la previa, y cómo cambiarlo. */
-    nombre,
-    setNombre,
+    /** El nombre de la previa: se deja y se lee, sin repintar la pantalla. */
+    ponerNombre,
+    leerNombre,
     /** El nivel del micrófono (0–1) mientras se graba; `null` si no se mide. */
     nivel,
     empezar,

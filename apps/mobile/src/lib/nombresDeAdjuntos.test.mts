@@ -11,6 +11,7 @@ import {
   claveDelFalloDeAgregarVarios,
   claveDelFalloDeNombre,
   conTituloDeAdjunto,
+  esDelNombre,
   etiquetaDeTemas,
   iconoDeTarjeta,
   idsParaPreguntarTemas,
@@ -70,6 +71,22 @@ describe('el nombre con el que empieza un archivo elegido', () => {
     }
   });
 
+  it('los de WhatsApp en Android también: una fecha y un contador', () => {
+    for (const nombre of [
+      'IMG-20261030-WA0001.jpg',
+      'VID-20261030-WA0003.mp4',
+      'AUD-20261030-WA0002.opus',
+      'PTT-20261030-WA0004.opus',
+      'DOC-20261030-WA0005.pdf',
+      'img-20261030-wa0001.jpeg',
+    ]) {
+      assert.equal(nombrePorDefecto(nombre), '', nombre);
+    }
+    // Lo que solo se les parece conserva su nombre.
+    assert.equal(nombrePorDefecto('DOC-plan-de-clases.pdf'), 'DOC plan de clases');
+    assert.equal(nombrePorDefecto('aud-2026.mp3'), 'Aud 2026');
+  });
+
   it('sin nombre, o con solo guiones, no inventa nada', () => {
     assert.equal(nombrePorDefecto(null), '');
     assert.equal(nombrePorDefecto(''), '');
@@ -88,6 +105,16 @@ describe('el nombre tal como se guarda', () => {
     assert.equal(limpiarTitulo('   '), null);
     assert.equal(limpiarTitulo(undefined), null);
     assert.equal(limpiarTitulo('x'.repeat(200))?.length, MAX_TITULO_DE_ADJUNTO);
+  });
+
+  it('sin caracteres de control: el servidor rechaza un nombre que los lleve', () => {
+    // Pegar un texto con saltos de línea, tabuladores o un NUL en el campo.
+    assert.equal(limpiarTitulo('Meditación\nde la\r\nmañana'), 'Meditación de la mañana');
+    assert.equal(limpiarTitulo('Clase\t3\u0000 · Postura\u007F'), 'Clase 3 · Postura');
+    assert.equal(limpiarTitulo('\u0085Respiración\u009F'), 'Respiración');
+    assert.equal(limpiarTitulo('\n\t\u0000'), null);
+    // Lo que no es de control se queda: tildes, «·», comillas.
+    assert.equal(limpiarTitulo('«Guía» · semana 1'), '«Guía» · semana 1');
   });
 
   it('lo que manda el servidor se lee sin fiarse', () => {
@@ -148,15 +175,20 @@ describe('un archivo elegido con «Archivo»: audio o documento', () => {
     assert.equal(tipoDeArchivoElegido('audio/mpeg', 'a.mp3'), 'audio');
     assert.equal(tipoDeArchivoElegido('audio/x-m4a', 'a.m4a'), 'audio');
     assert.equal(tipoDeArchivoElegido('audio/wav', 'a.wav'), 'audio');
-    assert.equal(tipoDeArchivoElegido('audio/ogg', 'a.ogg'), 'audio');
     assert.equal(tipoDeArchivoElegido('audio/aac', 'a.aac'), 'audio');
   });
 
   it('sin tipo, o con uno genérico, decide la extensión', () => {
     assert.equal(tipoDeArchivoElegido(null, 'respiracion.mp3'), 'audio');
     assert.equal(tipoDeArchivoElegido('application/octet-stream', 'nota.m4a'), 'audio');
-    assert.equal(tipoDeArchivoElegido('application/ogg', 'nota.opus'), 'audio');
     assert.equal(tipoDeArchivoElegido('', 'guia.pdf'), 'document');
+  });
+
+  it('ogg y opus se quedan como documento: iOS no los reproduce y así se descargan', () => {
+    assert.equal(tipoDeArchivoElegido('audio/ogg', 'a.ogg'), 'document');
+    assert.equal(tipoDeArchivoElegido('audio/opus', 'a.opus'), 'document');
+    assert.equal(tipoDeArchivoElegido('application/ogg', 'nota.opus'), 'document');
+    assert.equal(tipoDeArchivoElegido(null, 'nota.oga'), 'document');
   });
 
   it('otro audio, un PDF o un video siguen siendo documentos', () => {
@@ -287,6 +319,15 @@ describe('los textos de cada «no» del servidor existen', () => {
       assert.ok(clave in es, `${codigo} → ${clave}`);
     }
     assert.notEqual(claveDelFalloDeNombre('attachment_title_forbidden'), claveDelFalloDeNombre(null));
+    assert.equal(claveDelFalloDeNombre('attachment_title_invalid'), 'attachmentName.errorInvalid');
+    assert.notEqual(claveDelFalloDeNombre('attachment_title_invalid'), claveDelFalloDeNombre(null));
+  });
+
+  it('al enviar, un rechazo por el nombre se cuenta con el texto del nombre', () => {
+    assert.ok(esDelNombre('attachment_title_too_long'));
+    assert.ok(esDelNombre('attachment_title_invalid'));
+    assert.ok(!esDelNombre('voice_notes_not_available'));
+    assert.ok(!esDelNombre(undefined));
   });
 
   it('agregar varios: el todo o nada tiene su texto, lo demás es de temas', () => {

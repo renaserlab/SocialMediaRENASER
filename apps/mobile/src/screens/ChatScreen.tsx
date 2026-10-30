@@ -82,6 +82,8 @@ import {
   MAX_TITULO_DE_ADJUNTO,
   adjuntoNombrable,
   aplicarTemas,
+  claveDelFalloDeNombre,
+  esDelNombre,
   conTituloDeAdjunto,
   etiquetaDeTemas,
   idsParaPreguntarTemas,
@@ -1246,7 +1248,11 @@ export function ChatScreen() {
     try {
       // Sin la 0113 (`attachment_titles`), un audio va como documento, como antes.
       const eleccion = await elegirArchivo(MAX_ARCHIVOS_DE_UNA_VEZ, { audios: funciones.nombres });
-      if (eleccion.archivos.length > 0) setArchivosPorEnviar(eleccion);
+      if (eleccion.archivos.length === 0) return;
+      // Y al revés: en iOS el selector puede seguir yéndose cuando resuelve, y
+      // una hoja que se presenta encima de él no aparece. Se le da lo mismo.
+      await afterSheetClose();
+      setArchivosPorEnviar(eleccion);
     } catch (error) {
       notify(
         t('common.couldNotOpen'),
@@ -1342,20 +1348,23 @@ export function ChatScreen() {
           codigo === 'voice_notes_not_available';
         notify(
           esFaltaDeMigracion ? t('chat.attachmentsOffTitle') : t('chat.sendFailed'),
-          esFaltaDeMigracion
-            ? /*
-                Se distinguen los dos porque no son lo mismo para quien mira: sin
-                la 0033 no se puede mandar NADA adjunto; sin la 0044 se pueden
-                mandar fotos y solo faltan las notas de voz. Decir «no se pueden
-                enviar archivos» cuando sí se pueden manda a buscar un problema
-                que no existe.
-              */
-              codigo === 'voice_notes_not_available'
-              ? t('chat.voiceNotesOffBody')
-              : t('chat.attachmentsOffBody')
-            : error instanceof Error
-              ? error.message
-              : t('common.checkConnection'),
+          esDelNombre(codigo)
+            ? // El nombre que se le puso no se pudo guardar: se dice por qué.
+              t(claveDelFalloDeNombre(codigo) as TranslationKey)
+            : esFaltaDeMigracion
+              ? /*
+                  Se distinguen los dos porque no son lo mismo para quien mira: sin
+                  la 0033 no se puede mandar NADA adjunto; sin la 0044 se pueden
+                  mandar fotos y solo faltan las notas de voz. Decir «no se pueden
+                  enviar archivos» cuando sí se pueden manda a buscar un problema
+                  que no existe.
+                */
+                codigo === 'voice_notes_not_available'
+                ? t('chat.voiceNotesOffBody')
+                : t('chat.attachmentsOffBody')
+              : error instanceof Error
+                ? error.message
+                : t('common.checkConnection'),
         );
       } finally {
         setEnviando(false);
@@ -1635,9 +1644,11 @@ export function ChatScreen() {
             : t('chat.sendFailed'),
           codigo === 'voice_notes_not_available'
             ? t('chat.voiceNotesOffBody')
-            : error instanceof Error
-              ? error.message
-              : t('common.checkConnection'),
+            : esDelNombre(codigo)
+              ? t(claveDelFalloDeNombre(codigo) as TranslationKey)
+              : error instanceof Error
+                ? error.message
+                : t('common.checkConnection'),
         );
         return false;
       }
@@ -2091,8 +2102,10 @@ export function ChatScreen() {
           ? t('chatViews.you')
           : nombreDelAutor(infoDeConversacion, mensaje.autorId, mensaje.autorNombre) || headerName,
       esGrupo,
+      // En pantalla, el de dentro es un «grupo» y el de primer nivel una «comunidad».
+      deDentro: esGrupoDeDentro,
     });
-  }, [accionesDe, params.id, t, infoDeConversacion, headerName, esGrupo]);
+  }, [accionesDe, params.id, t, infoDeConversacion, headerName, esGrupo, esGrupoDeDentro]);
 
   /** El nombre ya está en el servidor: se pinta en su burbuja sin recargar nada. */
   const alGuardarNombre = useCallback(
@@ -4099,8 +4112,8 @@ function RedactorDelChat({
           deshabilitado={enviando}
           // «Ponle nombre (opcional)» en la previa: viaja como `title`. Sin
           // la 0113 no hay campo, y la nota sale como siempre.
-          nombre={grabadora.nombre}
-          alCambiarNombre={funciones.nombres ? grabadora.setNombre : undefined}
+          leerNombre={grabadora.leerNombre}
+          alCambiarNombre={funciones.nombres ? grabadora.ponerNombre : undefined}
         />
       ) : (
         // El mismo botón redondo que en comentarios: crece cuando hay algo

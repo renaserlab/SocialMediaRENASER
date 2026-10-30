@@ -237,8 +237,9 @@ export async function hacerFoto(): Promise<AdjuntoElegido | null> {
  * cómo se pinta es por dónde se eligió. Alguien que entra por «Archivo» espera
  * ver el nombre del fichero, no una miniatura sin nombre que no puede guardar.
  *
- * SALVO UN AUDIO que se sabe reproducir (mp3, m4a, aac, ogg, wav): ese va como
- * `audio` con `voiceNote: false`, y en el chat se escucha en vez de bajarse.
+ * SALVO UN AUDIO que suena en los dos teléfonos (mp3, m4a, aac, wav; ogg y
+ * opus no, iOS no los abre): ese va como `audio` con `voiceNote: false`, y en
+ * el chat se escucha en vez de bajarse.
  * Ver `tipoDeArchivoElegido`. SOLO CON `audios`, que es tener la 0113 en el
  * servidor (`attachment_titles`): una API anterior rechaza un audio que no
  * es nota de voz porque no trae duración, así que sin ella va como documento,

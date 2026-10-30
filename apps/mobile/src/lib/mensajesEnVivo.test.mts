@@ -270,3 +270,61 @@ describe('completar lo que trajo el tiempo real', () => {
     assert.equal(corteParaCompletar([], new Set()), null);
   });
 });
+
+describe('envíos seguidos sin texto: varios archivos o dos notas de voz', () => {
+  const T1 = '2026-10-30T09:00:01Z';
+  const T2 = '2026-10-30T09:00:02Z';
+  /*
+    Lo que pasaba (revisión del 30/10/2026): «Enviar N archivos» manda un
+    mensaje por archivo, todos sin texto. La burbuja del archivo 2 se pone en
+    cuanto el servidor confirma el 1; después llega el eco de tiempo real del
+    1, y la regla 2 lo emparejaba por texto (vacío) con la burbuja del 2, que
+    desaparecía mientras subía. Igual con dos notas de voz seguidas.
+  */
+  it('el eco de uno ya confirmado no se lleva la burbuja del siguiente', () => {
+    let lista: MensajeFusionable[] = [mio('tmp-1', '')];
+    // El servidor confirma el primero.
+    lista = reconciliarEnvio(lista, 'tmp-1', mio('m1', '', T1));
+    // Sale el segundo: su burbuja provisional.
+    lista = fusionar(lista, [mio('tmp-2', '')]);
+    // Y llega el eco de tiempo real del primero (o el lote que completa adjuntos).
+    lista = fusionar(lista, [mio('m1', '', T1)]);
+    assert.deepEqual(
+      lista.map((m) => m.id),
+      ['m1', 'tmp-2'],
+    );
+    // El segundo se confirma y queda cada uno una vez.
+    lista = reconciliarEnvio(lista, 'tmp-2', mio('m2', '', T2));
+    lista = fusionar(lista, [mio('m2', '', T2)]);
+    assert.deepEqual(
+      lista.map((m) => m.id),
+      ['m1', 'm2'],
+    );
+  });
+
+  it('dos notas de voz seguidas: el eco del primero llega antes que su respuesta', () => {
+    let lista: MensajeFusionable[] = [mio('tmp-1', ''), mio('tmp-2', '')];
+    // El eco del primero entra primero: se come SU burbuja, la más antigua.
+    lista = fusionar(lista, [mio('m1', '', T1)]);
+    assert.deepEqual(
+      lista.map((m) => m.id),
+      ['m1', 'tmp-2'],
+    );
+    // Llega la respuesta del POST del primero: su temporal ya no estaba.
+    lista = reconciliarEnvio(lista, 'tmp-1', mio('m1', '', T1));
+    // Y un segundo eco del primero tampoco toca la del segundo.
+    lista = fusionar(lista, [mio('m1', '', T1)]);
+    assert.deepEqual(
+      lista.map((m) => m.id),
+      ['m1', 'tmp-2'],
+    );
+  });
+
+  it('lo nuevo de verdad sigue comiéndose su burbuja', () => {
+    const lista = fusionar([mio('m1', '', T1), mio('tmp-2', '')], [mio('m2', '', T2)]);
+    assert.deepEqual(
+      lista.map((m) => m.id),
+      ['m1', 'm2'],
+    );
+  });
+});

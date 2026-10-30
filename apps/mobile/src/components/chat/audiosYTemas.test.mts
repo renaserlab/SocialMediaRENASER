@@ -120,13 +120,13 @@ describe('al enviar', () => {
 
   it('la nota de voz lleva el nombre de la previa como su `title`, y se olvida al enviarse o tirarse', () => {
     const enviar = GRABADORA.slice(GRABADORA.indexOf('const enviar = useCallback('));
-    assert.match(enviar, /const titulo = limpiarTitulo\(nombre\);/);
+    assert.match(enviar, /const titulo = limpiarTitulo\(nombre\.current\);/);
     assert.match(enviar, /const pendiente: AdjuntoElegido = titulo \? \{ \.\.\.nota, title: titulo \} : nota;/);
     const eliminar = GRABADORA.slice(GRABADORA.indexOf('const eliminar = useCallback('));
-    assert.match(eliminar.slice(0, 400), /setNombre\(''\);/);
+    assert.match(eliminar.slice(0, 400), /nombre\.current = '';/);
     assert.match(BOTON, /placeholder=\{t\('voiceName\.placeholder'\)\}/);
     assert.match(BOTON, /maxLength=\{MAX_TITULO_DE_ADJUNTO\}/);
-    assert.match(CHAT, /alCambiarNombre=\{funciones\.nombres \? grabadora\.setNombre : undefined\}/);
+    assert.match(CHAT, /alCambiarNombre=\{funciones\.nombres \? grabadora\.ponerNombre : undefined\}/);
   });
 });
 
@@ -246,5 +246,29 @@ describe('sin la 0113 no hay nombres (`attachment_titles`)', () => {
     // Lo escrito se lee al enviar, desde una referencia: teclear no repinta la pantalla.
     assert.match(CHAT, /archivo\.kind === 'video' && nombresDeVideos\.current\[archivo\.uri\]/);
     assert.match(CHAT, /nombres\.current = \{ \.\.\.nombres\.current, \[video\.uri\]: texto \};/);
+  });
+});
+
+describe('revisión del 30/10/2026', () => {
+  it('la hoja de los nombres se abre cuando el selector ya se fue (iOS)', () => {
+    const elegir = CHAT.slice(
+      CHAT.indexOf('const elegirArchivosConNombre = useCallback('),
+      CHAT.indexOf('const quitarElegido'),
+    );
+    const selector = elegir.indexOf('await elegirArchivo(');
+    const espera = elegir.indexOf('await afterSheetClose();', selector);
+    assert.ok(selector > 0 && espera > selector);
+    assert.ok(espera < elegir.indexOf('setArchivosPorEnviar(eleccion);'));
+  });
+
+  it('la ayuda del nombre habla del grupo dentro de un grupo, y de la comunidad arriba', () => {
+    const hoja = fuente('components/chat/HojaDeNombre.tsx');
+    assert.match(hoja, /objetivo\.deDentro\s*\?\s*'attachmentName\.helpGroup'\s*:\s*'attachmentName\.help'/);
+    assert.match(hoja, /objetivo\.deDentro \? 'attachmentName\.whoCanGroup' : 'attachmentName\.whoCan'/);
+    assert.match(CHAT, /deDentro: esGrupoDeDentro,/);
+  });
+
+  it('un envío rechazado por el nombre dice por qué, también una nota de voz', () => {
+    assert.equal((CHAT.match(/esDelNombre\(codigo\)/g) ?? []).length, 2);
   });
 });
