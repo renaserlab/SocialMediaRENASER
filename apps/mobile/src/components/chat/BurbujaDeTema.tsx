@@ -5,6 +5,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { Avatar } from '@/components/Avatar';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
+import { CabeceraDeAdjunto } from '@/components/chat/CabeceraDeAdjunto';
 import { MedioDeChat } from '@/components/chat/MedioDeChat';
 import { RespuestaAHistoria } from '@/components/RespuestaAHistoria';
 import { Text } from '@/components/Text';
@@ -144,7 +145,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
       );
     }
     const proporcion = adjunto.width && adjunto.height ? adjunto.width / adjunto.height : 1;
-    return (
+    const medio = (
       <Pressable
         key={adjunto.id}
         onPress={() => {
@@ -162,6 +163,15 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
       >
         <MedioDeChat adjunto={adjunto} style={StyleSheet.absoluteFill} />
       </Pressable>
+    );
+    // Un video con nombre lleva la tarjeta encima, como en General (audios y
+    // temas, 30/10/2026). Sin nombre, como siempre.
+    if (adjunto.kind !== 'video' || !adjunto.title?.trim()) return medio;
+    return (
+      <View key={adjunto.id} style={styles.videoConNombre}>
+        <CabeceraDeAdjunto adjunto={adjunto} mio={mio} />
+        {medio}
+      </View>
     );
   };
 
@@ -346,6 +356,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
 });
 
 const styles = StyleSheet.create({
+  videoConNombre: { gap: 8 },
   dia: { alignItems: 'center', marginVertical: spacing.md },
   diaTexto: {
     fontSize: 10,

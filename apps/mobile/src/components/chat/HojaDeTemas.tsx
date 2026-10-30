@@ -11,6 +11,11 @@ import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { claveDelFalloDeGrupo } from '@/lib/gruposDeChat';
 import {
+  MAX_TITULO_DE_ADJUNTO,
+  claveDelFalloDeNombre,
+  limpiarTitulo,
+} from '@/lib/nombresDeAdjuntos';
+import {
   MAX_NOMBRE_DE_TEMA,
   MAX_TEMAS_POR_GRUPO,
   claveDelFalloDeTemas,
@@ -18,11 +23,13 @@ import {
   limpiarNombre,
   type TemaDeGrupo,
 } from '@/lib/temasDeGrupo';
+import { MessageRepository } from '@/repositories/MessageRepository';
 import { TemasRepository } from '@/repositories/TemasRepository';
 import { ApiError } from '@/services/api';
 import { avisosDeTemas } from '@/services/realtime';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
+import type { MessageAttachment } from '@/types';
 
 type Props = {
   /** El grupo: General es su chat. */
@@ -30,6 +37,20 @@ type Props = {
   /** El mensaje de General que se agrega o se quita. Sin él, la hoja está cerrada. */
   mensajeId: string | null;
   onClose: () => void;
+  /**
+   * El audio, documento o video del mensaje que todavía NO tiene nombre. Con
+   * él, la hoja ofrece arriba «Nombre (opcional)», que se guarda con «Listo»
+   * (lienzo, «1 · Al agregar a un tema, si aún no tiene nombre»).
+   */
+  adjuntoSinNombre?: MessageAttachment | null;
+  /** Se guardó el nombre: para pintarlo ya en el chat. */
+  alNombrar?: (adjuntoId: string, titulo: string | null) => void;
+  /**
+   * Se agregó o se quitó de un tema. El aviso `chat-temas` no le llega a
+   * quien lo manda (`self: false`): el chat de debajo refresca su etiqueta
+   * con esto.
+   */
+  alCambiarTemas?: () => void;
 };
 
 /**
@@ -48,10 +69,20 @@ type Props = {
  * tenga abierta la lista o ese tema vuelve a preguntar. Agregar no manda push
  * a nadie (D9).
  */
-export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
+export function HojaDeTemas({
+  grupoId,
+  mensajeId,
+  onClose,
+  adjuntoSinNombre = null,
+  alNombrar,
+  alCambiarTemas,
+}: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const visible = !!mensajeId;
+  /** «Nombre (opcional)»: solo si el adjunto todavía no tiene. */
+  const [titulo, setTitulo] = useState('');
+  const [guardandoTitulo, setGuardandoTitulo] = useState(false);
 
   /** `null` mientras se pregunta. */
   const [temas, setTemas] = useState<TemaDeGrupo[] | null>(null);
@@ -90,6 +121,7 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
     setTemas(null);
     setFallo(null);
     setNombre('');
+    setTitulo('');
     TemasRepository.listar(grupoId, { mensajeId })
       .then((leidos) => {
         if (vigente) setTemas(leidos.temas);
@@ -119,6 +151,7 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
       if (estaba) await TemasRepository.quitar(grupoId, tema.id, mensajeId);
       else await TemasRepository.agregar(grupoId, tema.id, mensajeId);
       canal.current?.avisar();
+      alCambiarTemas?.();
     } catch (error) {
       // Lo que se pintó no se guardó: vuelve a como estaba, y se dice.
       marcar(tema.id, estaba);
@@ -158,6 +191,7 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
         marcar(creado.id, true);
       }
       canal.current?.avisar();
+      alCambiarTemas?.();
     } catch (error) {
       setFallo(textoDelFallo(error));
     } finally {
@@ -166,6 +200,37 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
   };
 
   const caben = (temas?.length ?? 0) < MAX_TEMAS_POR_GRUPO;
+
+  /**
+   * «Listo»: si se escribió un nombre, se guarda antes de cerrar (por el
+   * `PATCH`, General es el chat del grupo). Si no se puede, se dice aquí
+   * dentro y la hoja se queda abierta con lo escrito.
+   */
+  const listo = async () => {
+    const nuevo = limpiarTitulo(titulo);
+    if (!adjuntoSinNombre || !mensajeId || !nuevo) {
+      onClose();
+      return;
+    }
+    setGuardandoTitulo(true);
+    setFallo(null);
+    try {
+      const guardado = await MessageRepository.nombrarAdjunto(
+        grupoId,
+        mensajeId,
+        adjuntoSinNombre.id,
+        nuevo,
+      );
+      alNombrar?.(adjuntoSinNombre.id, guardado ? guardado.title ?? null : nuevo);
+      onClose();
+    } catch (error) {
+      setFallo(
+        t(claveDelFalloDeNombre(error instanceof ApiError ? error.code : null) as TranslationKey),
+      );
+    } finally {
+      setGuardandoTitulo(false);
+    }
+  };
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>
@@ -176,6 +241,29 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
         <Text color={colors.textMuted} style={styles.ayuda}>
           {t('groupTopics.addToTopicHelp')}
         </Text>
+
+        {adjuntoSinNombre ? (
+          <View style={styles.campoDeNombre}>
+            <Input
+              label={t('attachmentName.optionalLabel')}
+              value={titulo}
+              onChangeText={(texto) => {
+                setTitulo(texto);
+                setFallo(null);
+              }}
+              maxLength={MAX_TITULO_DE_ADJUNTO}
+              returnKeyType="done"
+            />
+            <View style={styles.pieDelNombre}>
+              <Text color={colors.textMuted} style={styles.ayudaDelNombre}>
+                {t('attachmentName.optionalHelp')}
+              </Text>
+              <Text color={colors.textMuted} style={styles.cuenta}>
+                {`${titulo.length}/${MAX_TITULO_DE_ADJUNTO}`}
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         {temas === null ? (
           <View style={styles.cargando}>
@@ -197,21 +285,33 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: marcado, disabled: !!ocupado }}
                   accessibilityLabel={tema.nombre}
+                  // Lo que hace tocarla, dicho: quien no ve el ✓ sabe que la quita.
+                  accessibilityHint={marcado ? t('groupTopics.alreadyHere') : undefined}
                   style={[styles.fila, { borderBottomColor: colors.border }]}
                 >
-                  <Feather name={tema.icono} size={18} color={colors.text} />
-                  <Text numberOfLines={1} style={styles.nombre}>
-                    {tema.nombre}
-                  </Text>
+                  <View style={[styles.icono, { borderColor: colors.border }]}>
+                    <Feather name={tema.icono} size={18} color={colors.text} />
+                  </View>
+                  <View style={styles.textos}>
+                    <Text weight="600" numberOfLines={1} style={styles.nombre}>
+                      {tema.nombre}
+                    </Text>
+                    {marcado ? (
+                      <Text color={colors.textMuted} numberOfLines={1} style={styles.yaEsta}>
+                        {t('groupTopics.alreadyHere')}
+                      </Text>
+                    ) : null}
+                  </View>
                   {ocupado === tema.id ? (
                     <ActivityIndicator size="small" color={colors.textMuted} />
+                  ) : marcado ? (
+                    // La casilla se dice con su forma, no solo con el color:
+                    // un círculo lleno con el ✓, o uno vacío.
+                    <View style={[styles.marca, { backgroundColor: colors.primary }]}>
+                      <Feather name="check" size={14} color={colors.onPrimary} />
+                    </View>
                   ) : (
-                    // La casilla se dice con su forma, no solo con el color.
-                    <Feather
-                      name={marcado ? 'check-square' : 'square'}
-                      size={20}
-                      color={marcado ? colors.text : colors.textMuted}
-                    />
+                    <View style={[styles.marca, styles.marcaLibre, { borderColor: colors.border }]} />
                   )}
                 </Pressable>
               );
@@ -248,7 +348,12 @@ export function HojaDeTemas({ grupoId, mensajeId, onClose }: Props) {
           </View>
         ) : null}
 
-        <Button label={t('groupTopics.done')} onPress={onClose} disabled={ocupado === 'crear'} />
+        <Button
+          label={t('groupTopics.done')}
+          onPress={() => void listo()}
+          loading={guardandoTitulo}
+          disabled={ocupado === 'crear' || guardandoTitulo}
+        />
       </View>
     </BottomSheet>
   );
@@ -260,13 +365,29 @@ const styles = StyleSheet.create({
   ayuda: { fontSize: 13, lineHeight: 18 },
   cargando: { paddingVertical: spacing.lg, alignItems: 'center' },
   fila: {
-    minHeight: 48,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  nombre: { flex: 1, fontSize: 15 },
+  icono: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textos: { flex: 1, minWidth: 0 },
+  nombre: { fontSize: 15 },
+  yaEsta: { fontSize: 12, lineHeight: 16 },
+  marca: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  marcaLibre: { borderWidth: 2 },
   nuevo: { gap: spacing.sm, marginTop: spacing.xs },
+  campoDeNombre: { gap: spacing.xs },
+  pieDelNombre: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
+  ayudaDelNombre: { flex: 1, fontSize: 12, lineHeight: 16 },
+  cuenta: { fontSize: 12, lineHeight: 16 },
 });

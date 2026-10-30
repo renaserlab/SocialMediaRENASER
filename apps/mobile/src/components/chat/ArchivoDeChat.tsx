@@ -4,6 +4,7 @@ import Feather from '@expo/vector-icons/Feather';
 
 import { Pulsable } from '@/components/Pulsable';
 import { Text } from '@/components/Text';
+import { CabeceraDeAdjunto } from '@/components/chat/CabeceraDeAdjunto';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
 import {
@@ -159,6 +160,61 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
       ? t('chat.downloaded')
       : detalleDeArchivo(adjunto.fileName, adjunto.bytes);
 
+  /** La descarga de la tarjeta: la misma, más pequeña, en su línea fina. */
+  const descargaDeLaTarjeta = disponible ? (
+    <Pulsable
+      onPress={() => void descargar()}
+      disabled={bajando}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={t('chat.downloadFile', { nombre }).trim()}
+      accessibilityState={{ busy: bajando }}
+      style={[styles.boton, styles.botonCompacto, { borderColor: colorTexto }]}
+    >
+      {bajando ? (
+        <ActivityIndicator size="small" color={colorTexto} />
+      ) : (
+        <Feather name={hecho ? 'check' : 'download'} size={16} color={colorTexto} />
+      )}
+    </Pulsable>
+  ) : null;
+
+  /*
+    CON NOMBRE, LA TARJETA (audios y temas, 30/10/2026): el cuadrito con la
+    sigla y el nombre que le pusieron arriba, y debajo una línea fina con el
+    nombre real del archivo, su peso y la descarga. Tocar la cabecera hace lo
+    mismo que tocar el archivo sin nombre: verlo, o bajarlo. Sin nombre, todo
+    sigue como antes, más abajo.
+  */
+  const titulo = adjunto.title?.trim();
+  if (titulo) {
+    return (
+      <View style={[styles.tarjeta, style]}>
+        <Pulsable
+          onPress={alVer ?? (() => void descargar())}
+          onLongPress={alMantener}
+          delayLongPress={400}
+          disabled={!disponible}
+          accessibilityRole={disponible ? 'button' : undefined}
+          accessibilityLabel={
+            disponible
+              ? t(alVer ? 'chat.openFile' : 'chat.downloadFile', { nombre: titulo }).trim()
+              : titulo
+          }
+        >
+          <CabeceraDeAdjunto adjunto={adjunto} mio={mio} pie={pie} />
+        </Pulsable>
+        <View style={[styles.raya, { backgroundColor: colorTexto }]} />
+        <View style={styles.lineaFina}>
+          <Text numberOfLines={1} color={colorTexto} style={[styles.detalle, styles.detalleFino]}>
+            {[nombre, detalle].filter(Boolean).join(' · ')}
+          </Text>
+          {descargaDeLaTarjeta}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.fila, style]}>
       <Pulsable
@@ -243,4 +299,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  botonCompacto: { width: 32, height: 32, borderRadius: 16, borderWidth: 1 },
+  tarjeta: { width: 250, gap: spacing.sm },
+  // La raya se dibuja con la tinta de la burbuja, rebajada: un token, no un
+  // gris escrito a mano que se perdería sobre la burbuja propia.
+  raya: { height: StyleSheet.hairlineWidth, opacity: 0.25, marginBottom: -spacing.xs },
+  lineaFina: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  detalleFino: { flex: 1, minWidth: 0 },
 });

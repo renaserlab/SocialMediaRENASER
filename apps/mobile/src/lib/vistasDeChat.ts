@@ -249,6 +249,82 @@ export function sigueExistiendo(vistas: VistasDeChat, vista: VistaElegida): bool
   return vista.tipo === 'categoria' || vistas.filtros.some((f) => f.id === vista.id);
 }
 
+// ---------------------------------------------------------------------------
+// La fila «Tema» de Contenido (audios y temas, 30/10/2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * Con qué tema se filtra una sección de Contenido: todo, lo que no está en
+ * ningún tema, o lo de un tema. Solo en General de una comunidad con temas.
+ */
+export type FiltroDeTema = { tipo: 'todos' } | { tipo: 'sin' } | { tipo: 'tema'; id: string };
+
+export const FILTRO_DE_TEMA_TODOS: FiltroDeTema = { tipo: 'todos' };
+
+/** Un texto único por filtro: para comparar y como `key` de su botón. */
+export function claveDeFiltroDeTema(filtro: FiltroDeTema): string {
+  return filtro.tipo === 'tema' ? `t:${filtro.id}` : filtro.tipo;
+}
+
+/** Un tema de la fila de filtros, con cuántos mensajes de la sección tiene. */
+export type CuentaDeTema = { id: string; nombre: string; cuantos: number };
+
+export type CuentasDeTemas = {
+  /** Cuántos de la sección no están en ningún tema. */
+  sinTema: number;
+  /** Solo los temas vivos con algo de la sección, en el orden del servidor. */
+  temas: CuentaDeTema[];
+};
+
+/**
+ * Lo que dice `GET /{id}/views/topics?category=…`: `{sin_tema, topics: [{id,
+ * name, count}]}`. `null` si no se entiende: entonces no hay fila «Tema», que
+ * es lo que se ve con una API anterior o fuera de una comunidad.
+ */
+export function leerCuentasDeTemas(bruto: unknown): CuentasDeTemas | null {
+  if (!esObjeto(bruto) || !Array.isArray(bruto.topics)) return null;
+  const vistos = new Set<string>();
+  const temas: CuentaDeTema[] = [];
+  for (const fila of bruto.topics) {
+    if (!esObjeto(fila)) continue;
+    const id = typeof fila.id === 'string' ? fila.id : '';
+    const nombre = typeof fila.name === 'string' ? fila.name.trim() : '';
+    if (!id || !nombre || vistos.has(id)) continue;
+    vistos.add(id);
+    const cuantos = typeof fila.count === 'number' && fila.count > 0 ? Math.floor(fila.count) : 0;
+    temas.push({ id, nombre, cuantos });
+  }
+  const sinTema =
+    typeof bruto.sin_tema === 'number' && bruto.sin_tema > 0 ? Math.floor(bruto.sin_tema) : 0;
+  return { sinTema, temas };
+}
+
+/**
+ * El filtro que vale ahora: el elegido si sigue existiendo y, si el tema
+ * desapareció de la fila (se borró, o ya no tiene nada de esta sección),
+ * «Todos». Sin fila, también «Todos»: no se filtra por algo que no se ve.
+ */
+export function filtroDeTemaVigente(
+  filtro: FiltroDeTema,
+  cuentas: CuentasDeTemas | null,
+): FiltroDeTema {
+  if (!cuentas) return FILTRO_DE_TEMA_TODOS;
+  if (filtro.tipo === 'tema' && !cuentas.temas.some((tema) => tema.id === filtro.id)) {
+    return FILTRO_DE_TEMA_TODOS;
+  }
+  return filtro;
+}
+
+/** Cuántos mensajes tiene una categoría: lo de «Todos · N» en la fila «Tema». */
+export function cuentaDeCategoria(vistas: VistasDeChat, categoria: Categoria): number {
+  return categoria === 'media' ? cuantosDeMedia(vistas) : vistas.cuentas[categoria];
+}
+
+/** La categoría por la que se preguntan las cuentas de la fila, o `null`. */
+export function categoriaDeVista(vista: VistaElegida | null): Categoria | null {
+  return vista && vista.tipo === 'categoria' ? vista.clave : null;
+}
+
 /** El cursor de una página: el instante y el id del último mensaje de la anterior. */
 export type CursorDeVista = { antes: string; antesId: string };
 
@@ -262,11 +338,22 @@ export function parametrosDeVista(
     buscar = '',
     cursor = null,
     limite = MENSAJES_POR_PAGINA_DE_VISTA,
-  }: { buscar?: string; cursor?: CursorDeVista | null; limite?: number } = {},
+    tema = FILTRO_DE_TEMA_TODOS,
+  }: {
+    buscar?: string;
+    cursor?: CursorDeVista | null;
+    limite?: number;
+    /** El filtro de la fila «Tema» (audios y temas, 30/10/2026). */
+    tema?: FiltroDeTema;
+  } = {},
 ): string {
   const partes: [string, string][] = [
     vista.tipo === 'categoria' ? ['category', vista.clave] : ['filter_id', vista.id],
   ];
+  // Uno u otro, nunca los dos: juntos el servidor responde 422
+  // `views_topic_conflict`. «Todos» no manda nada, como antes.
+  if (tema.tipo === 'tema') partes.push(['topic_id', tema.id]);
+  else if (tema.tipo === 'sin') partes.push(['sin_tema', 'true']);
   const texto = buscar.trim().slice(0, MAX_BUSQUEDA_EN_VISTA);
   if (texto) partes.push(['q', texto]);
   if (cursor) {

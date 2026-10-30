@@ -18,6 +18,7 @@ import {
   textoDePermiso,
   type EstadoDePermiso,
 } from '@/lib/permisos';
+import { limpiarTitulo } from '@/lib/nombresDeAdjuntos';
 import type { AdjuntoElegido } from '@/services/messageMedia';
 
 /**
@@ -195,6 +196,13 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
   const [nota, setNota] = useState<AdjuntoElegido | null>(null);
   /** De 0 a 1 mientras se sube. */
   const [progreso, setProgreso] = useState(0);
+  /**
+   * «Ponle nombre (opcional)», lo que se escribe en la previa (audios y
+   * temas, 30/10/2026). Viaja como `title` del adjunto. Vive aquí y no en el
+   * campo para que un envío fallido lo conserve con la grabación, y para que
+   * se vaya con ella al enviarla o tirarla.
+   */
+  const [nombre, setNombre] = useState('');
 
   /*
     Que hay que abandonar lo que se está preparando, en una referencia.
@@ -325,6 +333,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     setMilisegundos(0);
     setProgreso(0);
     setNota(null);
+    setNombre('');
     setFase('permiso');
 
     /*
@@ -533,6 +542,7 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     // acto, y `empezar` ya aguarda a la fila de borrados antes de grabar otra.
     void tirarFichero(nota?.uri);
     setNota(null);
+    setNombre('');
     setProgreso(0);
     setMilisegundos(0);
     setFase('inactiva');
@@ -553,8 +563,10 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
    */
   const enviar = useCallback(async () => {
     if (fase !== 'lista' && fase !== 'fallida') return;
-    const pendiente = nota;
-    if (!pendiente) return;
+    if (!nota) return;
+    // El nombre va CON la nota, no en otro mensaje: es su `title`.
+    const titulo = limpiarTitulo(nombre);
+    const pendiente: AdjuntoElegido = titulo ? { ...nota, title: titulo } : nota;
 
     setProgreso(0);
     setFase('enviando');
@@ -576,12 +588,13 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     if (!montado.current) return;
     if (confirmado) {
       setNota(null);
+      setNombre('');
       setProgreso(0);
       setFase('inactiva');
     } else {
       setFase('fallida');
     }
-  }, [fase, nota, alEnviar, tirarFichero]);
+  }, [fase, nota, nombre, alEnviar, tirarFichero]);
 
   /*
     Al llegar al tope se PARA SOLA y queda en la previa.
@@ -711,6 +724,9 @@ export function useGrabadoraDeVoz({ alEnviar, alAvisar }: Opciones) {
     nota,
     /** De 0 a 1 mientras se sube. */
     progreso,
+    /** El nombre que se le está poniendo en la previa, y cómo cambiarlo. */
+    nombre,
+    setNombre,
     /** El nivel del micrófono (0–1) mientras se graba; `null` si no se mide. */
     nivel,
     empezar,

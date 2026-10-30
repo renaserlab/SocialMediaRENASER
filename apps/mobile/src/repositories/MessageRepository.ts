@@ -1,21 +1,28 @@
 import { apiRequest, API_V1 } from '@/services/api';
 import {
+  AttachmentDto,
   ConversationDto,
   MessageDto,
   toAttachment,
   toConversation,
   toMessage,
 } from '@/mappers/messageMapper';
+import { leerTemasDeMensaje, type TemaDeMensaje } from '@/lib/nombresDeAdjuntos';
 import { rutaDePortada } from '@/lib/mediosDeChat';
 import { respuestaCompartida } from '@/lib/respuestaCompartida';
 import { firmarAdjuntos, type AdjuntoSubido } from '@/services/messageMedia';
 import { profileImageUrl, signMediaUrls } from '@/services/storage';
 import {
+  FILTRO_DE_TEMA_TODOS,
   SIN_VISTAS,
+  leerCuentasDeTemas,
   leerCursor,
   leerVistas,
   parametrosDeVista,
+  type Categoria,
+  type CuentasDeTemas,
   type CursorDeVista,
+  type FiltroDeTema,
   type VistaElegida,
   type VistasDeChat,
 } from '@/lib/vistasDeChat';
@@ -172,6 +179,8 @@ export type MensajeDeVista = {
   mio: boolean;
   autor: { id: string; nombre: string; avatarUrl?: string };
   adjuntos: MessageAttachment[];
+  /** Los temas en los que está (solo en General de una comunidad con temas). */
+  temas: TemaDeMensaje[];
 };
 
 export type PaginaDeVista = {
@@ -311,17 +320,21 @@ export const MessageRepository = {
       cursor,
       signal,
       currentUserId,
+      tema = FILTRO_DE_TEMA_TODOS,
     }: {
       buscar?: string;
       cursor?: CursorDeVista | null;
       signal?: AbortSignal;
       currentUserId?: string | null;
+      /** La fila «Tema» de Contenido: todo, sin tema o un tema. */
+      tema?: FiltroDeTema;
     } = {},
   ): Promise<PaginaDeVista> {
     const dto = await apiRequest<{ items?: MessageDto[] }>(
       `${API_V1}/conversations/${conversationId}/views/messages?${parametrosDeVista(vista, {
         buscar,
         cursor,
+        tema,
       })}`,
       { signal },
     );
@@ -350,9 +363,59 @@ export const MessageRepository = {
           avatarUrl: profileImageUrl(fila.sender?.avatar_path) ?? undefined,
         },
         adjuntos: (fila.attachments ?? []).map((a) => conFirmas(toAttachment(a), firmas)),
+        temas: leerTemasDeMensaje(fila.topics),
       })),
       siguiente: leerCursor(dto),
     };
+  },
+
+  /**
+   * Las cuentas de la fila «Tema» de Contenido para una categoría: cuántos
+   * no están en ningún tema y cuántos hay en cada uno.
+   *
+   * NUNCA LANZA: `null` es «sin fila», que es lo que toca con una API
+   * anterior, fuera de General de una comunidad o si la red falla. Un filtro
+   * que no se puede contar no se ofrece.
+   */
+  async temasDeVista(
+    conversationId: string,
+    categoria: Categoria,
+    signal?: AbortSignal,
+  ): Promise<CuentasDeTemas | null> {
+    try {
+      return leerCuentasDeTemas(
+        await apiRequest<unknown>(
+          `${API_V1}/conversations/${conversationId}/views/topics?category=${encodeURIComponent(categoria)}`,
+          { signal },
+        ),
+      );
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Le pone nombre a un adjunto, se lo cambia o se lo quita (`null`).
+   *
+   * QUIÉN PUEDE lo decide el servidor: quien envió el mensaje y quien
+   * administra la conversación, la misma regla que borrar. Una foto no lleva
+   * nombre (422 `attachment_title_not_allowed`), y sin la 0113 responde 503
+   * `attachment_titles_not_available`. Lanza: quien llama enseña el motivo.
+   *
+   * Devuelve el adjunto como queda, sin firmar: quien llama solo toma su
+   * nombre, la dirección que ya tenía sigue valiendo.
+   */
+  async nombrarAdjunto(
+    conversationId: string,
+    messageId: string,
+    attachmentId: string,
+    titulo: string | null,
+  ): Promise<MessageAttachment | null> {
+    const dto = await apiRequest<AttachmentDto | null>(
+      `${API_V1}/conversations/${conversationId}/messages/${messageId}/attachments/${attachmentId}`,
+      { method: 'PATCH', body: JSON.stringify({ title: titulo }) },
+    );
+    return dto && typeof dto === 'object' && typeof dto.id === 'string' ? toAttachment(dto) : null;
   },
 
   /**

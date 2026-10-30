@@ -137,7 +137,8 @@ type MensajeMinimo = {
   eliminado?: boolean;
   conCita?: boolean;
   conHistoria?: boolean;
-  adjuntos?: readonly { kind: TipoDeMedio }[] | null;
+  /** `title`: el nombre de un video (0113). Con nombre lleva burbuja. */
+  adjuntos?: readonly { kind: TipoDeMedio; title?: string | null }[] | null;
 };
 
 /** Si todo lo que lleva el mensaje son fotos y videos. */
@@ -163,6 +164,9 @@ export function soloLlevaMedios(adjuntos: MensajeMinimo['adjuntos']): boolean {
 export function vaSinMarco(mensaje: MensajeMinimo): boolean {
   if (mensaje.eliminado || mensaje.conCita || mensaje.conHistoria) return false;
   if ((mensaje.texto ?? '').trim()) return false;
+  // Un video con nombre (audios y temas, 30/10/2026) lleva su tarjeta, y el
+  // nombre, como un texto, necesita la burbuja detrás para leerse.
+  if (mensaje.adjuntos?.some((a) => a.kind === 'video' && !!a.title?.trim())) return false;
   return soloLlevaMedios(mensaje.adjuntos);
 }
 

@@ -10,6 +10,7 @@ import {
 import Feather from '@expo/vector-icons/Feather';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
+import { Input } from '@/components/Input';
 import { OndaDeVoz } from '@/components/OndaDeVoz';
 import { Pulsable } from '@/components/Pulsable';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -17,6 +18,7 @@ import type { FaseDeNotaDeVoz } from '@/hooks/useGrabadoraDeVoz';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { haptics } from '@/lib/haptics';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
+import { MAX_TITULO_DE_ADJUNTO } from '@/lib/nombresDeAdjuntos';
 import { formatearDuracion } from '@/lib/notaDeVoz';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -72,6 +74,13 @@ type Props = {
   enviar: () => void;
   /** Sin la migración 0044 esto no se pinta siquiera. Ver `ChatScreen`. */
   deshabilitado?: boolean;
+  /**
+   * «Ponle nombre (opcional)» en la previa (audios y temas, 30/10/2026). Con
+   * `alCambiarNombre`, la previa son dos filas: arriba escuchar y tirar,
+   * abajo el nombre y enviar (lienzo, «2 · Al enviar una nota de voz»).
+   */
+  nombre?: string;
+  alCambiarNombre?: (texto: string) => void;
 };
 
 export function BotonDeNotaDeVoz({
@@ -87,6 +96,8 @@ export function BotonDeNotaDeVoz({
   eliminar,
   enviar,
   deshabilitado = false,
+  nombre = '',
+  alCambiarNombre,
 }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -126,6 +137,25 @@ export function BotonDeNotaDeVoz({
 
   const enPrevia = fase === 'lista' || fase === 'fallida';
   const preparando = fase === 'permiso' || fase === 'guardando';
+  /** La previa lleva su campo de nombre, y el enviar baja con él. */
+  const conNombre = enPrevia && !!alCambiarNombre;
+
+  const botonDeEnviar = (
+    <Pulsable
+      onPress={enviar}
+      accessibilityRole="button"
+      accessibilityLabel={
+        fase === 'fallida' ? t('common.retry') : t('chat.sendRecording')
+      }
+      style={[styles.boton, { backgroundColor: colors.primary }]}
+    >
+      <Feather
+        name={fase === 'fallida' ? 'refresh-cw' : 'send'}
+        size={20}
+        color={colors.onPrimary}
+      />
+    </Pulsable>
+  );
 
   return (
     <>
@@ -197,46 +227,75 @@ export function BotonDeNotaDeVoz({
       ) : null}
 
       {enPrevia ? (
-        <View style={[styles.aviso, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Pulsable
-            onPress={eliminar}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.deleteRecording')}
-            hitSlop={10}
-            escala={ESCALA_AL_PULSAR.icono}
-            style={[styles.accion, styles.circulo, { borderColor: colors.border }]}
-          >
-            <Feather name="trash-2" size={16} color={colors.danger} />
-          </Pulsable>
-          {sonando && uri ? (
-            <NotaSonando uri={uri} duracion={segundos} color={colors.text} alTerminar={() => setSonando(false)} />
-          ) : (
-            <Pulsable
-              onPress={() => setSonando(true)}
-              disabled={!uri}
-              accessibilityRole="button"
-              accessibilityLabel={t('chat.playRecording')}
-              hitSlop={8}
-              escala={ESCALA_AL_PULSAR.icono}
-              style={[styles.play, { borderColor: colors.text, backgroundColor: colors.text }]}
-            >
-              <Feather name="play" size={14} color={colors.background} />
-            </Pulsable>
-          )}
-
-          <Text style={[styles.reloj, { color: colors.text }]}>
-            {formatearDuracion(segundos)}
-          </Text>
-
-          <Text
-            numberOfLines={1}
+        <View style={conNombre ? styles.previa : styles.previaEnFila}>
+          <View
             style={[
-              styles.pista,
-              { color: fase === 'fallida' ? colors.danger : colors.textMuted },
+              styles.aviso,
+              conNombre && styles.avisoEnColumna,
+              { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
-            {fase === 'fallida' ? t('chat.recordingFailed') : t('chat.recordingReady')}
-          </Text>
+            <Pulsable
+              onPress={eliminar}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.deleteRecording')}
+              hitSlop={10}
+              escala={ESCALA_AL_PULSAR.icono}
+              style={[styles.accion, styles.circulo, { borderColor: colors.border }]}
+            >
+              <Feather name="trash-2" size={16} color={colors.danger} />
+            </Pulsable>
+            {sonando && uri ? (
+              <NotaSonando uri={uri} duracion={segundos} color={colors.text} alTerminar={() => setSonando(false)} />
+            ) : (
+              <Pulsable
+                onPress={() => setSonando(true)}
+                disabled={!uri}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.playRecording')}
+                hitSlop={8}
+                escala={ESCALA_AL_PULSAR.icono}
+                style={[styles.play, { borderColor: colors.text, backgroundColor: colors.text }]}
+              >
+                <Feather name="play" size={14} color={colors.background} />
+              </Pulsable>
+            )}
+
+            <Text style={[styles.reloj, { color: colors.text }]}>
+              {formatearDuracion(segundos)}
+            </Text>
+
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.pista,
+                { color: fase === 'fallida' ? colors.danger : colors.textMuted },
+              ]}
+            >
+              {fase === 'fallida' ? t('chat.recordingFailed') : t('chat.recordingReady')}
+            </Text>
+          </View>
+          {conNombre ? (
+            /*
+              EL NOMBRE VIAJA CON LA NOTA, como su `title`: no es un mensaje
+              aparte. Vacío, la nota sale sin nombre, igual que siempre.
+            */
+            <View style={styles.filaDelNombre}>
+              <Input
+                value={nombre}
+                onChangeText={alCambiarNombre}
+                placeholder={t('voiceName.placeholder')}
+                accessibilityLabel={t('voiceName.label')}
+                maxLength={MAX_TITULO_DE_ADJUNTO}
+                returnKeyType="send"
+                onSubmitEditing={enviar}
+                forma="pastilla"
+                containerStyle={styles.campoDelNombre}
+                style={{ minHeight: 40 }}
+              />
+              {botonDeEnviar}
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -285,20 +344,7 @@ export function BotonDeNotaDeVoz({
           <Feather name="square" size={18} color="#FFFFFF" />
         </Pulsable>
       ) : enPrevia ? (
-        <Pulsable
-          onPress={enviar}
-          accessibilityRole="button"
-          accessibilityLabel={
-            fase === 'fallida' ? t('common.retry') : t('chat.sendRecording')
-          }
-          style={[styles.boton, { backgroundColor: colors.primary }]}
-        >
-          <Feather
-            name={fase === 'fallida' ? 'refresh-cw' : 'send'}
-            size={20}
-            color={colors.onPrimary}
-          />
-        </Pulsable>
+        conNombre ? null : botonDeEnviar
       ) : preparando || fase === 'enviando' ? (
         <View style={styles.boton}>
           <ActivityIndicator size="small" color={colors.textMuted} />
@@ -489,6 +535,13 @@ const styles = StyleSheet.create({
   },
   // Mas alta y con mas aire que las otras barras: es la que tiene que verse.
   avisoGrabando: { paddingVertical: spacing.sm + 2, borderWidth: 1.5 },
+  // La previa en una fila (sin nombre) ocupa lo mismo que ocupaba la barra.
+  previaEnFila: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  // Con nombre, dos filas: escuchar y tirar arriba; el nombre y enviar abajo.
+  previa: { flex: 1, gap: spacing.sm },
+  avisoEnColumna: { flex: 0, alignSelf: 'stretch' },
+  filaDelNombre: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  campoDelNombre: { flex: 1, width: undefined },
   grabando: { fontSize: 12, fontWeight: '800' },
   hueco: { flex: 1 },
   circulo: {

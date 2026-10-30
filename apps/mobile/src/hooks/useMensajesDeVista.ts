@@ -3,12 +3,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from '@/i18n/useTranslation';
 import { describeError } from '@/lib/describeError';
 import {
+  FILTRO_DE_TEMA_TODOS,
   MENSAJES_POR_PAGINA_DE_VISTA,
+  claveDeFiltroDeTema,
   claveDeVista,
   crearTurnos,
   fundirPaginas,
   refrescarPrimeraPagina,
   type CursorDeVista,
+  type FiltroDeTema,
   type VistaElegida,
 } from '@/lib/vistasDeChat';
 import { MessageRepository, type MensajeDeVista } from '@/repositories/MessageRepository';
@@ -28,6 +31,11 @@ type Opciones = {
   currentUserId?: string | null;
   /** Algo cambió en la conversación: para que quien llama vuelva a leer las cuentas. */
   alHaberCambios?: () => void;
+  /**
+   * La fila «Tema» de Contenido (audios y temas, 30/10/2026): todo, sin tema
+   * o un tema. Cambiarlo es otra lista, y se pide entera, como otra vista.
+   */
+  tema?: FiltroDeTema;
 };
 
 export type MensajesDeVista = {
@@ -61,7 +69,13 @@ export type MensajesDeVista = {
 export function useMensajesDeVista(
   conversationId: string,
   vista: VistaElegida | null,
-  { buscar = '', huella = '', currentUserId = null, alHaberCambios }: Opciones = {},
+  {
+    buscar = '',
+    huella = '',
+    currentUserId = null,
+    alHaberCambios,
+    tema = FILTRO_DE_TEMA_TODOS,
+  }: Opciones = {},
 ): MensajesDeVista {
   const { t } = useTranslation();
   const [mensajes, setMensajes] = useState<MensajeDeVista[]>([]);
@@ -73,7 +87,17 @@ export function useMensajesDeVista(
 
   const turnos = useRef(crearTurnos()).current;
   const enCurso = useRef<AbortController | null>(null);
-  const clave = vista ? claveDeVista(vista) : '';
+  /*
+    El filtro de tema entra en la clave: con otro tema es otra lista, y una
+    respuesta del tema anterior no puede pintarse encima de la de este. Con
+    «Todos» la clave es la de siempre.
+  */
+  const claveDeTema = claveDeFiltroDeTema(tema);
+  const clave = vista
+    ? claveDeTema === 'todos'
+      ? claveDeVista(vista)
+      : `${claveDeVista(vista)}|${claveDeTema}`
+    : '';
   /** La vista y la búsqueda de ahora mismo, para reconocer respuestas viejas. */
   const loQueSeMira = useRef('');
   loQueSeMira.current = `${clave}|${buscar}`;
@@ -98,6 +122,7 @@ export function useMensajesDeVista(
         buscar,
         signal: control.signal,
         currentUserId,
+        tema,
       })
         .then((pagina) => {
           // Solo cuenta la última petición: si se cambió de pestaña mientras
@@ -178,6 +203,7 @@ export function useMensajesDeVista(
       buscar,
       cursor: siguiente,
       currentUserId,
+      tema,
     })
       .then((pagina) => {
         if (loQueSeMira.current !== pedida) return;
