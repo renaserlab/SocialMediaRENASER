@@ -1148,8 +1148,10 @@ async def send_message(
         a_quien = await avisos.destinatarios(
             db, conversation_id=conversation_id, remitente_id=current_user.id
         )
-        # En un grupo el aviso dice QUIÉN y EN CUÁL: «Ana envió un mensaje al
-        # grupo «Aula»». Los datos son los mismos: lleva a la conversación.
+        # En un grupo el aviso dice QUIÉN y EN CUÁL: «Ana envió un mensaje a la
+        # comunidad «Aula»», «al grupo «Valorant»» si es uno de dentro de una
+        # comunidad, o «en el tema «Anuncios»». Los datos son los mismos: lleva
+        # a la conversación.
         grupo = await avisos.grupo_de(db, conversation_id)
         encolar_push(
             background,
@@ -1158,6 +1160,9 @@ async def send_message(
             actor_name=avisos.nombre_para_el_aviso(profile),
             data=avisos.datos_del_aviso(conversation_id, str(message_id)),
             grupo=grupo,
+            nivel=(
+                await avisos.nivel_de(db, conversation_id) if grupo is not None else "comunidad"
+            ),
         )
     except Exception:  # noqa: BLE001 - el aviso nunca tumba el envio
         logger.warning("[mensajes] no se pudo programar el aviso", exc_info=True)

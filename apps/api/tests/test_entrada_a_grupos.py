@@ -167,7 +167,13 @@ async def test_el_enlace_se_activa_se_desactiva_y_se_cambia(entorno):
     http, _, identidad = entorno
     info = await _info(http)
     assert info["extras_available"] is True
-    assert info["settings"] == {"listed_on_profile": False, "invite_enabled": False, "invite_code": None}
+    # `entrada` llega con la 0112; las que ya existían quedan con solicitud.
+    assert info["settings"] == {
+        "listed_on_profile": False,
+        "invite_enabled": False,
+        "invite_code": None,
+        "entrada": "request",
+    }
 
     activado = (await _ajustar(http, invite_enabled=True)).json()
     codigo = activado["invite_code"]
@@ -218,7 +224,12 @@ async def test_en_el_perfil_salen_solo_los_grupos_que_su_administrador_ensena(en
     assert tarjeta["my_status"] == "none"
     assert tarjeta["is_full"] is False
     # La tarjeta es TODO lo que se enseña: ni miembros, ni mensajes, ni enlace.
-    assert set(tarjeta) == {"id", "title", "avatar_path", "members_count", "admin", "my_status", "is_full"}
+    # Los tres últimos son de la 0112: cómo se entra y cuántos grupos y temas.
+    assert set(tarjeta) == {
+        "id", "title", "avatar_path", "members_count", "admin", "my_status", "is_full",
+        "entrada", "groups_count", "topics_count",
+    }
+    assert (tarjeta["entrada"], tarjeta["groups_count"], tarjeta["topics_count"]) == ("request", 0, 0)
 
     # Quien ya está dentro lo ve como miembro.
     identidad["uid"] = BRUNO
@@ -304,9 +315,11 @@ async def test_pedir_entrar_no_mete_a_nadie_y_avisa_a_quien_administra(entorno, 
     assert aviso["actor_name"] == "David"
     assert aviso["grupo"] == "Aula"
     assert aviso["data"] == {"type": "group_join", "conversationId": GRUPO}
+    # Desde el 30/10/2026 el chat padre se llama «comunidad» en la aplicación.
+    assert aviso["nivel"] == "comunidad"
     assert push.build_message(aviso["notification_type"], aviso["actor_name"], aviso["grupo"]) == (
         "Solicitud para unirse",
-        "David quiere unirse a tu grupo «Aula».",
+        "David quiere unirse a tu comunidad «Aula».",
     )
     assert push.CHANNELS["group_join_request"] == "mensajes"
 
@@ -609,7 +622,10 @@ def test_las_tablas_de_los_modelos_son_las_de_la_migracion(tabla, modelo):
     inicio = sql.index(f"create table if not exists public.{tabla}")
     cuerpo = sql[inicio : sql.index(");", inicio)]
     del_sql = set(re.findall(r"^\s{2}([a-z_]+) ", cuerpo, flags=re.M))
-    assert del_sql == {c.name for c in modelo.__table__.columns}
+    # La 0112 añade `entrada` a `group_settings` con un `alter table`; lo
+    # comprueba `test_comunidades_en_el_perfil.py` contra su propio SQL.
+    despues = {"group_settings": {"entrada"}}.get(tabla, set())
+    assert del_sql | despues == {c.name for c in modelo.__table__.columns}
 
 
 def test_los_codigos_que_se_generan_caben_en_la_restriccion_de_la_tabla():

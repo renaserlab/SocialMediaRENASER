@@ -63,17 +63,20 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     # Un mensaje de chat. SIN EL TEXTO DEL MENSAJE: un push se lee en la
     # pantalla bloqueada. Dice quién escribe; el contenido se lee dentro.
     "message": ("Nuevo mensaje", "{actor} te envió un mensaje."),
-    # El mismo aviso, en un GRUPO: dice quién y en cuál, porque «te envió un
-    # mensaje» sería mentira —no era para ti solo— y sin el nombre del grupo
-    # no se sabe ni dónde mirar. Tampoco lleva el texto del mensaje.
-    "message_group": ("Nuevo mensaje", "{actor} envió un mensaje al grupo «{grupo}»."),
-    # Te han metido en un grupo. Sin esto aparecería en la bandeja sin más.
-    "group_added": ("Nuevo grupo", "{actor} te agregó al grupo «{grupo}»."),
-    # Alguien pide entrar a un grupo que administras. Dice quien y a cual:
-    # la respuesta se da dentro, en la ficha del grupo.
+    # El mismo aviso, en una COMUNIDAD (un chat de grupo de primer nivel): dice
+    # quién y en cuál, porque «te envió un mensaje» sería mentira —no era para
+    # ti solo— y sin el nombre no se sabe ni dónde mirar. Tampoco lleva el
+    # texto del mensaje. Desde el 30/10/2026 la aplicación llama «comunidad» al
+    # padre y «grupo» a los de dentro: ver `TEMPLATES_POR_NIVEL`. El tipo no
+    # cambia: lo leen los teléfonos ya instalados.
+    "message_group": ("Nuevo mensaje", "{actor} envió un mensaje a la comunidad «{grupo}»."),
+    # Te han metido en una comunidad. Sin esto aparecería en la bandeja sin más.
+    "group_added": ("Nueva comunidad", "{actor} te agregó a la comunidad «{grupo}»."),
+    # Alguien pide entrar a una comunidad que administras. Dice quien y a cual:
+    # la respuesta se da dentro, en su ficha.
     "group_join_request": (
         "Solicitud para unirse",
-        "{actor} quiere unirse a tu grupo «{grupo}».",
+        "{actor} quiere unirse a tu comunidad «{grupo}».",
     ),
     # Alguien a quien sigues empezó un directo (`live/avisos.py`). Como en
     # TikTok: el nombre en el cuerpo, para decidir desde la pantalla de bloqueo.
@@ -114,6 +117,37 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "product_suspended": ("Producto suspendido", "Revisa el motivo en Mis productos."),
     "product_photo_rejected": ("Foto no aprobada", "Revisa las fotos de tu producto."),
 }
+
+#: Los avisos de mensajería según DÓNDE pasa lo que avisan (el `nivel`). El de
+#: arriba, en `TEMPLATES`, es el de una comunidad; aquí, los demás. Hasta el
+#: 30/10/2026 la aplicación llamaba «grupo» al padre y «comunidad» a los de
+#: dentro; ahora es al revés, y el aviso tiene que decir lo mismo que la
+#: pantalla que abre. Mismo TIPO y mismo canal: solo cambia la palabra, y con
+#: ella el género («a la comunidad», «al grupo», «en el tema»). Quien lo elige
+#: es quien manda el aviso (`messaging/avisos.nivel_de`).
+#:
+#:   · `subgrupo`: un grupo DE DENTRO de una comunidad (en el código, una
+#:     `subgroup`; ver `messaging/subgrupos.py`).
+#:   · `tema`: el chat de un tema. Solo hay mensajes: a un tema no se añade a
+#:     nadie ni se pide entrar (sus miembros son los de la comunidad). El nombre
+#:     que llega es el del tema, que es el título de su chat.
+TEMPLATES_POR_NIVEL: dict[str, dict[str, tuple[str, str]]] = {
+    "subgrupo": {
+        "message_group": ("Nuevo mensaje", "{actor} envió un mensaje al grupo «{grupo}»."),
+        "group_added": ("Nuevo grupo", "{actor} te agregó al grupo «{grupo}»."),
+        "group_join_request": (
+            "Solicitud para unirse",
+            "{actor} quiere unirse a tu grupo «{grupo}».",
+        ),
+    },
+    "tema": {
+        "message_group": ("Nuevo mensaje", "{actor} envió un mensaje en el tema «{grupo}»."),
+    },
+}
+
+#: Cómo se nombra, sin nombre, lo que el aviso nombra. Con la misma palabra que
+#: el resto del texto: «la comunidad «una comunidad»», nunca «… «un grupo»».
+_SIN_NOMBRE = {"comunidad": "una comunidad", "subgrupo": "un grupo", "tema": "un tema"}
 
 #: Canal de Android por tipo. Permite que el usuario silencie las
 #: interacciones sin perderse un mensaje directo.
@@ -200,22 +234,34 @@ def nombre_visible(full_name: str | None, username: str | None) -> str | None:
 
 
 def build_message(
-    notification_type: str, actor_name: str | None, grupo: str | None = None
+    notification_type: str,
+    actor_name: str | None,
+    grupo: str | None = None,
+    *,
+    nivel: str = "comunidad",
 ) -> tuple[str, str] | None:
     """Título y cuerpo del aviso, o None si el tipo no tiene texto definido.
 
-    `grupo` es el nombre del grupo, para los avisos que hablan de uno. Lo
-    escribe una persona, y por eso entra como VALOR de la plantilla y nunca
-    como plantilla: unas llaves dentro del nombre salen tal cual.
+    `grupo` es el nombre de la comunidad, del grupo o del tema, para los avisos
+    que hablan de uno. Lo escribe una persona, y por eso entra como VALOR de la
+    plantilla y nunca como plantilla: unas llaves dentro del nombre salen tal
+    cual.
+
+    `nivel` (`comunidad`, `subgrupo` o `tema`): dónde pasa, para elegir la
+    palabra (`TEMPLATES_POR_NIVEL`). En los tipos que no tienen texto propio
+    para ese nivel no cambia nada.
     """
-    template = TEMPLATES.get(notification_type)
+    template = TEMPLATES_POR_NIVEL.get(nivel, {}).get(notification_type) or TEMPLATES.get(
+        notification_type
+    )
     if template is None:
         return None
     title, body = template
     # Sin nombre se usa un genérico: es preferible a un aviso que diga
     # «None comentó tu publicación».
+    generico = _SIN_NOMBRE.get(nivel, _SIN_NOMBRE["comunidad"])
     return title, body.format(
-        actor=actor_name or "Alguien", grupo=(grupo or "").strip() or "un grupo"
+        actor=actor_name or "Alguien", grupo=(grupo or "").strip() or generico
     )
 
 
@@ -441,6 +487,7 @@ async def _enviar_con_sesion_propia(
     actor_name: str | None,
     data: dict | None,
     grupo: str | None = None,
+    nivel: str = "comunidad",
 ) -> None:
     """El envío real, ya fuera de la petición y con su propia sesión.
 
@@ -458,7 +505,7 @@ async def _enviar_con_sesion_propia(
     """
     if not user_ids:
         return
-    message = build_message(notification_type, actor_name, grupo)
+    message = build_message(notification_type, actor_name, grupo, nivel=nivel)
     if message is None:
         return
     title, body = message
@@ -493,8 +540,13 @@ def encolar_push(
     actor_name: str | None = None,
     data: dict | None = None,
     grupo: str | None = None,
+    nivel: str = "comunidad",
 ) -> None:
     """Programa el aviso para DESPUÉS de responder. Úsese siempre esto.
+
+    `grupo` y `nivel` solo cuentan en los avisos de mensajería: el nombre de
+    la comunidad, del grupo o del tema, y cuál de los tres es (ver
+    `build_message`).
 
     POR QUE NO SE ENVIA DENTRO DE LA PETICION.
 
@@ -524,6 +576,7 @@ def encolar_push(
         actor_name,
         data,
         grupo,
+        nivel,
     )
 
 

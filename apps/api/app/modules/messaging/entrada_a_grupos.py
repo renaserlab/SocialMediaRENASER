@@ -9,7 +9,8 @@ NADIE ENTRA SOLO. Ni el enlace ni el perfil añaden a nadie: crean una
 SOLICITUD, y solo quien administra la convierte en un miembro. Un enlace que
 metiera directamente seria una puerta abierta para cualquiera a quien se lo
 reenvien, y saltaria la unica regla que tienen los grupos: que alguien
-responde de quien entra.
+responde de quien entra. La excepcion es la que decide quien administra al
+ABRIR su comunidad (0112, ver abajo): esa puerta abierta la eligio el.
 
 QUE SE ENSEÑA A QUIEN NO ES MIEMBRO: la TARJETA. Nombre, foto, cuantos son y
 quien lo administra. Nunca un mensaje, ni la lista de miembros. Y solo de los
@@ -34,6 +35,30 @@ LAS COMUNIDADES DE UN GRUPO (26/10/2026, `subgrupos.py`). A una comunidad
 derecho a pedirlo es SER DEL GRUPO PADRE: una comunidad no tiene enlace ni sale
 en ningun perfil (sus ajustes responden 409 `not_a_top_level_group`). El chat
 de un tema no admite solicitudes: sus miembros son los del grupo.
+
+COMUNIDADES ABIERTAS Y PERFIL POR PERSONA (30/10/2026, migracion 0112,
+`docs/CONTRATOS_COMUNIDADES_EN_EL_PERFIL.md`). Desde aqui la aplicacion llama
+COMUNIDAD al chat de grupo de primer nivel y GRUPO a los de dentro (los
+`subgroups`); en el codigo y en las rutas los nombres no cambian. Lo nuevo:
+
+  · Quien administra una comunidad elige como se entra (`entrada`): `request`,
+    que es lo de siempre y lo que tienen todas las que ya existian, u `open`.
+    A una ABIERTA si se entra solo, de un toque (`POST /{id}/join`), desde su
+    perfil o desde su enlace: quien la abrio decidio de antemano que no hace
+    falta que nadie responda de quien entra. Las demas reglas siguen igual:
+    los bloqueos, el tope de miembros, la espera tras un rechazo y el tope de
+    intentos por hora. Y SOLO a la comunidad (General y sus temas), nunca a sus
+    grupos de dentro: a esos cada uno entra despues, como hasta ahora.
+  · `POST /{id}/join-requests` a una abierta mete directamente y responde
+    `status = "approved"`. Es lo que hace que una version de la aplicacion
+    que no conoce `join`, o el enlace, entren igual en una abierta.
+  · Salir en el perfil es de CADA PERSONA (`GroupProfileListing`): el perfil
+    lee esas filas, y solo las de comunidades que esa persona administra.
+
+SIN LA MIGRACION 0112 todo responde como antes de ella: cada comunidad es «con
+solicitud», el perfil sale de `listed_on_profile` y solo cambiar como se entra
+responde 503 `group_extras_not_available` (`esquema.hay_comunidades_en_el_perfil`,
+una vez por proceso).
 """
 
 from __future__ import annotations
@@ -43,8 +68,9 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -64,6 +90,7 @@ from app.modules.messaging.models import (
     Conversation,
     ConversationMember,
     GroupJoinRequest,
+    GroupProfileListing,
     GroupSettings,
 )
 from app.modules.notifications.push import encolar_push
@@ -91,7 +118,12 @@ _NO_ESTA = "Grupo no encontrado."
 # Esquemas
 # --------------------------------------------------------------------------- #
 class TarjetaDeGrupo(BaseModel):
-    """Lo que ve de un grupo quien todavia no esta dentro."""
+    """Lo que ve de una comunidad quien todavia no esta dentro.
+
+    Los tres ultimos campos son de la 0112. Al final y con valor por defecto:
+    una aplicacion que no los conoce los ignora y la tarjeta le sigue
+    sirviendo igual.
+    """
 
     id: str
     title: str
@@ -101,6 +133,14 @@ class TarjetaDeGrupo(BaseModel):
     #: `member`: ya esta dentro. `pending`: pidio entrar y espera respuesta.
     my_status: Literal["member", "pending", "none"] = "none"
     is_full: bool = False
+    #: Como se entra: `open`, de un toque (`POST /{id}/join`); `request`,
+    #: pidiendolo. Sin ajustes guardados, `request`, que es lo de siempre.
+    entrada: Literal["open", "request"] = "request"
+    #: Cuantos grupos VIVOS hay dentro (los `subgroups`). Solo el numero: de
+    #: cuales son no se dice nada a quien no esta dentro.
+    groups_count: int = 0
+    #: Cuantos temas VIVOS tiene.
+    topics_count: int = 0
 
 
 class SolicitudNueva(BaseModel):
@@ -128,8 +168,11 @@ class AjustesCambiados(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    #: Desde la 0112, «en MI perfil»: el de quien hace el cambio.
     listed_on_profile: bool | None = None
     invite_enabled: bool | None = None
+    #: Como se entra (0112). Opcional: las aplicaciones de antes no lo mandan.
+    entrada: Literal["open", "request"] | None = None
 
 
 class FotoNueva(BaseModel):
@@ -178,14 +221,16 @@ async def hay_bloqueo(db: AsyncSession, uno: str, otro: str) -> bool:
 async def _tarjetas(db: AsyncSession, filas, uid: str) -> list[TarjetaDeGrupo]:
     """Las tarjetas de VARIOS grupos, con un numero de consultas CONSTANTE.
 
-    `filas` trae `id`, `title`, `created_by` y `avatar_path`. Cuantos son, quien
-    administra, si quien mira ya esta dentro y si tiene una solicitud viva se
-    resuelven con un `IN` sobre los identificadores: cuatro consultas, sean dos
-    grupos o veinte.
+    `filas` trae `id`, `title`, `created_by`, `avatar_path` y `entrada`
+    (`None` sin fila de ajustes). Cuantos son, quien administra, si quien mira
+    ya esta dentro, si tiene una solicitud viva y cuantos grupos y temas tiene
+    dentro se resuelven con un `IN` sobre los identificadores: seis consultas,
+    sean dos grupos o veinte (cuatro sin las tablas de la 0108 y la 0109).
     """
     if not filas:
         return []
     ids = [fila.id for fila in filas]
+    grupos_dentro, temas_dentro = await _cuantos_dentro(db, ids)
 
     cuantos = dict(
         (
@@ -255,17 +300,91 @@ async def _tarjetas(db: AsyncSession, filas, uid: str) -> list[TarjetaDeGrupo]:
                     else "none"
                 ),
                 is_full=miembros >= grupos.MAX_MIEMBROS,
+                entrada="open" if fila.entrada == "open" else "request",
+                groups_count=grupos_dentro.get(str(fila.id), 0),
+                topics_count=temas_dentro.get(str(fila.id), 0),
             )
         )
     return salida
 
 
-_COLUMNAS_DE_TARJETA = (
-    Conversation.id,
-    Conversation.title,
-    Conversation.created_by,
-    GroupSettings.avatar_path,
-)
+async def _cuantos_dentro(
+    db: AsyncSession, ids: list[str]
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Cuantos grupos de dentro y cuantos temas VIVOS tiene cada comunidad.
+
+    Una consulta para cada cosa, sean cuantas sean las comunidades. Sin la
+    0109 o sin la 0108 no hay nada que contar y no se pregunta: nombrar una
+    tabla que no existe seria un 500 (`esquema.py`). Los modulos se importan
+    aqui dentro porque los dos importan, directa o indirectamente, este.
+    """
+    grupos_dentro: dict[str, int] = {}
+    temas_dentro: dict[str, int] = {}
+    if await esquema.hay_comunidades(db):
+        from app.modules.messaging.subgrupos import GroupSubgroup
+
+        grupos_dentro = {
+            str(padre): int(n or 0)
+            for padre, n in (
+                await db.execute(
+                    select(GroupSubgroup.parent_id, func.count())
+                    .where(
+                        GroupSubgroup.parent_id.in_(ids),
+                        GroupSubgroup.deleted_at.is_(None),
+                    )
+                    .group_by(GroupSubgroup.parent_id)
+                )
+            ).all()
+        }
+    if await esquema.hay_temas(db):
+        from app.modules.messaging.temas import ConversationTopic
+
+        temas_dentro = {
+            str(grupo): int(n or 0)
+            for grupo, n in (
+                await db.execute(
+                    select(ConversationTopic.conversation_id, func.count())
+                    .where(
+                        ConversationTopic.conversation_id.in_(ids),
+                        ConversationTopic.deleted_at.is_(None),
+                    )
+                    .group_by(ConversationTopic.conversation_id)
+                )
+            ).all()
+        }
+    return grupos_dentro, temas_dentro
+
+
+async def _columnas_de_tarjeta(db: AsyncSession) -> tuple:
+    """Lo que trae cada fila de tarjeta: id, nombre, quien la administra, foto y
+    como se entra. Sin la 0112, `entrada` es la constante `'request'`: la
+    misma forma de fila, sin nombrar una columna que no existe."""
+    return (
+        Conversation.id,
+        Conversation.title,
+        Conversation.created_by,
+        GroupSettings.avatar_path,
+        ajustes_de_grupo.columna_de_entrada(await esquema.hay_comunidades_en_el_perfil(db)),
+    )
+
+
+async def _tarjeta_de(db: AsyncSession, conversation_id: str, uid: str) -> TarjetaDeGrupo:
+    """La tarjeta de UNA comunidad tal como la ve `uid`. 404 si no la hay.
+
+    Sin fila de ajustes tambien hay tarjeta (con `entrada = request`): por eso
+    el `outerjoin`.
+    """
+    fila = (
+        await db.execute(
+            select(*await _columnas_de_tarjeta(db))
+            .outerjoin(GroupSettings, GroupSettings.conversation_id == Conversation.id)
+            .where(Conversation.id == conversation_id)
+        )
+    ).one_or_none()
+    tarjetas = await _tarjetas(db, [fila], uid) if fila is not None else []
+    if not tarjetas:
+        raise NotFoundError(_NO_ESTA, code="group_not_found")
+    return tarjetas[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -277,27 +396,68 @@ async def grupos_de_un_perfil(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[TarjetaDeGrupo]:
-    """«Unete a mi grupo»: los grupos que esta persona enseña en su perfil.
+    """Las comunidades que esta persona enseña en SU perfil.
 
-    Solo los que ADMINISTRA y marco para enseñar. Con un bloqueo entre los dos,
-    o sin la 0104, la lista sale vacia: el perfil no pinta la seccion.
+    Desde la 0112 se leen sus filas de `group_profile_listings`, y de ellas
+    solo las de comunidades DE PRIMER NIVEL que ADMINISTRA hoy: si deja de
+    administrar una, desaparece de su perfil aunque su fila siga ahi, y si la
+    conversacion se borra, la fila se va con ella (`on delete cascade`). Hoy
+    administrar es haberla creado (`vistas.administra`); la condicion va en la
+    consulta y no despues para que el tope cuente solo lo que se enseña.
+
+    SIN LA 0112, LA CONSULTA DE ANTES, tal cual: las que creo y tienen
+    `listed_on_profile`. Es lo que la migracion copia a la tabla al pegarse, asi
+    que el perfil enseña lo mismo antes y despues.
+
+    Con un bloqueo entre los dos, o sin la 0104, la lista sale vacia: el perfil
+    no pinta la seccion. Mismo tope y mismo orden que antes de la 0112.
     """
     ensure_uuid(user_id, "Perfil no encontrado.")
     if not await esquema.hay_puertas_de_grupo(db):
         return []
     if await hay_bloqueo(db, current_user.id, user_id):
         return []
-    filas = (
-        await db.execute(
-            select(*_COLUMNAS_DE_TARJETA)
+    columnas = await _columnas_de_tarjeta(db)
+    if not await esquema.hay_comunidades_en_el_perfil(db):
+        consulta = (
+            select(*columnas)
             .join(GroupSettings, GroupSettings.conversation_id == Conversation.id)
             .where(
                 Conversation.kind == "group",
                 Conversation.created_by == user_id,
                 GroupSettings.listed_on_profile.is_(True),
             )
-            .order_by(Conversation.created_at.desc(), Conversation.id.desc())
-            .limit(MAX_GRUPOS_EN_PERFIL)
+        )
+    else:
+        condiciones = [
+            GroupProfileListing.user_id == user_id,
+            Conversation.kind == "group",
+            Conversation.created_by == user_id,
+        ]
+        # Un grupo de dentro o el chat de un tema no pueden tener fila (sus
+        # ajustes responden 409), pero lo que no puede pasar no se deja en
+        # manos de que no pase: la condicion va dentro de la misma consulta y
+        # no cuesta otra.
+        if await esquema.hay_comunidades(db):
+            from app.modules.messaging import subgrupos
+
+            condiciones.append(subgrupos.condicion_no_es_comunidad(Conversation.id))
+        if await esquema.hay_temas(db):
+            from app.modules.messaging import temas
+
+            condiciones.append(temas.condicion_no_es_chat_de_tema(Conversation.id))
+        consulta = (
+            select(*columnas)
+            .select_from(GroupProfileListing)
+            .join(Conversation, Conversation.id == GroupProfileListing.conversation_id)
+            .outerjoin(GroupSettings, GroupSettings.conversation_id == Conversation.id)
+            .where(*condiciones)
+        )
+    filas = (
+        await db.execute(
+            consulta.order_by(Conversation.created_at.desc(), Conversation.id.desc()).limit(
+                MAX_GRUPOS_EN_PERFIL
+            )
         )
     ).all()
     return await _tarjetas(db, filas, current_user.id)
@@ -318,7 +478,7 @@ async def grupo_de_un_enlace(
         raise NotFoundError(_NO_ESTA, code="group_not_found")
     fila = (
         await db.execute(
-            select(*_COLUMNAS_DE_TARJETA)
+            select(*await _columnas_de_tarjeta(db))
             .join(GroupSettings, GroupSettings.conversation_id == Conversation.id)
             .where(
                 Conversation.kind == "group",
@@ -336,8 +496,188 @@ async def grupo_de_un_enlace(
 
 
 # --------------------------------------------------------------------------- #
-# Pedir entrar
+# Pedir entrar, y entrar en una abierta
 # --------------------------------------------------------------------------- #
+async def _la_puerta(db: AsyncSession, conversation_id: str):
+    """La conversacion y sus ajustes. 404 si no es algo a lo que se pueda llamar.
+
+    Al chat de un tema no se pide entrar ni se entra: se entra a su comunidad.
+    """
+    fila = (
+        await db.execute(
+            select(
+                Conversation.kind,
+                Conversation.created_by,
+                Conversation.title,
+                GroupSettings.listed_on_profile,
+                GroupSettings.invite_code,
+                GroupSettings.invite_enabled,
+                ajustes_de_grupo.columna_de_entrada(
+                    await esquema.hay_comunidades_en_el_perfil(db)
+                ),
+            )
+            .outerjoin(GroupSettings, GroupSettings.conversation_id == Conversation.id)
+            .where(Conversation.id == conversation_id)
+        )
+    ).one_or_none()
+    if fila is None or fila.kind != "group":
+        raise NotFoundError(_NO_ESTA, code="group_not_found")
+    if await grupos.tema_del_chat(db, conversation_id) is not None:
+        raise NotFoundError(_NO_ESTA, code="group_not_found")
+    return fila
+
+
+async def _por_donde_llega(
+    db: AsyncSession, conversation_id: str, fila, code: str | None
+) -> bool:
+    """Si llega por el enlace (`True`) o por un perfil (`False`). 404 si por ninguno.
+
+    Sin enlace, la comunidad tiene que salir en el perfil de quien la
+    administra: con la columna de siempre (la que escribe la API anterior) o
+    con su fila de la 0112 (sin la 0112 solo cuenta la columna). Las dos se escriben juntas; mirar las dos es lo
+    que deja pasar exactamente lo que pasaba antes, y lo que enseña el perfil.
+    La segunda solo se pregunta si la primera no basta.
+    """
+    por_enlace = bool(
+        code
+        and fila.invite_enabled
+        and fila.invite_code
+        # Comparacion de tiempo constante: el codigo es un secreto compartido.
+        and secrets.compare_digest(code, fila.invite_code)
+    )
+    if por_enlace or fila.listed_on_profile:
+        return por_enlace
+    if await ajustes_de_grupo.esta_en_el_perfil(db, conversation_id, fila.created_by):
+        return False
+    raise NotFoundError(_NO_ESTA, code="group_not_found")
+
+
+async def _miembros(db: AsyncSession, conversation_id: str) -> set[str]:
+    return {
+        str(persona)
+        for persona in (
+            await db.scalars(
+                select(ConversationMember.user_id).where(
+                    ConversationMember.conversation_id == conversation_id
+                )
+            )
+        )
+    }
+
+
+async def _ultima_solicitud(db: AsyncSession, conversation_id: str, uid: str):
+    """`(id, status, resolved_at)` de la ultima vez que pidio entrar, o `None`.
+
+    409 `join_request_too_soon` si esa vez se la rechazaron hace menos de
+    `ESPERA_TRAS_RECHAZO`: un «no» vale tambien para una comunidad que despues
+    se abrio. Si no, cualquiera a quien echaron atras entraria abriendo y
+    cerrando la puerta.
+    """
+    previa = (
+        await db.execute(
+            select(
+                GroupJoinRequest.id, GroupJoinRequest.status, GroupJoinRequest.resolved_at
+            )
+            .where(
+                GroupJoinRequest.conversation_id == conversation_id,
+                GroupJoinRequest.user_id == uid,
+            )
+            .order_by(GroupJoinRequest.created_at.desc(), GroupJoinRequest.id.desc())
+            .limit(1)
+        )
+    ).one_or_none()
+    if previa is not None and previa.status == "rejected":
+        resuelta = previa.resolved_at
+        if resuelta is not None and resuelta.tzinfo is None:
+            resuelta = resuelta.replace(tzinfo=timezone.utc)
+        if resuelta is not None and datetime.now(timezone.utc) - resuelta < ESPERA_TRAS_RECHAZO:
+            raise ConflictError(
+                "Ya pediste entrar a este grupo hace poco. Inténtalo más adelante.",
+                code="join_request_too_soon",
+            )
+    return previa
+
+
+async def _exigir_tope_por_hora(db: AsyncSession, uid: str) -> None:
+    """Cuenta TODO lo de la ultima hora: solicitudes y entradas directas.
+
+    Entrar en una abierta tambien deja su fila (aprobada), y cuenta: sin eso,
+    entrar y salir sin parar seria gratis.
+    """
+    recientes = await db.scalar(
+        select(func.count())
+        .select_from(GroupJoinRequest)
+        .where(
+            GroupJoinRequest.user_id == uid,
+            GroupJoinRequest.created_at >= datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+    )
+    if (recientes or 0) >= SOLICITUDES_POR_HORA:
+        raise ConflictError(
+            "Enviaste muchas solicitudes seguidas. Inténtalo más tarde.",
+            code="join_rate_limited",
+        )
+
+
+async def _entrar_en_una_abierta(
+    db: AsyncSession,
+    conversation_id: str,
+    uid: str,
+    *,
+    por_enlace: bool,
+    pendiente: str | None,
+) -> str | None:
+    """Mete a `uid` en una comunidad ABIERTA. Devuelve el id de la solicitud que lo
+    deja escrito, o `None` si otra peticion lo metio en el mismo instante.
+
+    QUEDA ESCRITO COMO UNA SOLICITUD APROBADA, sin `resolved_by` porque no
+    decidio nadie: decidio la comunidad al abrirse. Asi el historial dice como
+    entro cada uno, `POST /join-requests` tiene un id que devolver y el tope por
+    hora lo cuenta. Si tenia una pendiente de cuando la comunidad era con
+    solicitud, es ESA la que se aprueba: no se deja colgando en la lista de
+    quien administra algo que ya no hay que decidir.
+
+    SOLO LA COMUNIDAD Y SUS TEMAS (D5): los temas son parte de ella y sus
+    miembros son los de la comunidad (`grupos.sincronizar_temas`, solo los
+    vivos). En sus grupos de dentro no se mete a nadie: cada uno entra despues.
+
+    Todo en una transaccion: o entra en la comunidad, en sus temas y queda
+    escrito, o nada.
+    """
+    ahora = datetime.now(timezone.utc)
+    try:
+        if pendiente is not None:
+            solicitud = pendiente
+            await db.execute(
+                update(GroupJoinRequest)
+                .where(GroupJoinRequest.id == pendiente, GroupJoinRequest.status == "pending")
+                .values(status="approved", resolved_at=ahora)
+                .execution_options(synchronize_session=False)
+            )
+        else:
+            solicitud = str(uuid4())
+            db.add(
+                GroupJoinRequest(
+                    id=solicitud,
+                    conversation_id=conversation_id,
+                    # La identidad sale del JWT. Nunca de la peticion.
+                    user_id=uid,
+                    status="approved",
+                    source="link" if por_enlace else "profile",
+                    resolved_at=ahora,
+                )
+            )
+        db.add(ConversationMember(conversation_id=conversation_id, user_id=uid))
+        await grupos.sincronizar_temas(db, conversation_id, [uid], dentro=True)
+        await db.commit()
+    except IntegrityError:
+        # Dos toques a la vez: la clave primaria de los miembros deja entrar a
+        # uno. Ya esta dentro, que es lo que se queria.
+        await db.rollback()
+        return None
+    return solicitud
+
+
 @router.post(
     "/{conversation_id}/join-requests",
     response_model=SolicitudLeida,
@@ -363,30 +703,20 @@ async def pedir_entrar(
 
     ES IDEMPOTENTE mientras la solicitud siga viva: pedirlo otra vez devuelve
     la misma, sin avisar de nuevo.
+
+    EN UNA COMUNIDAD ABIERTA (0112) NO SE PIDE: SE ENTRA, como con
+    `POST /{id}/join`, y responde `status = "approved"` con el mismo 201. Es lo
+    que hace que una aplicacion que no conoce `join` —la que ya esta en los
+    telefonos— entre en una abierta con el boton de siempre: ignora la
+    respuesta, vuelve a leer la tarjeta y la ve como miembro. Sin aviso a quien
+    administra: no hay nada que decidir (ver `unirse`). Las comunidades de
+    dentro de un grupo (`subgroups`) siguen como antes: tienen su propia
+    entrada y su propio `…/subgroups/{id}/join`.
     """
     uid = current_user.id
     ensure_uuid(conversation_id, _NO_ESTA)
     await _exigir_puertas(db)
-
-    fila = (
-        await db.execute(
-            select(
-                Conversation.kind,
-                Conversation.created_by,
-                Conversation.title,
-                GroupSettings.listed_on_profile,
-                GroupSettings.invite_code,
-                GroupSettings.invite_enabled,
-            )
-            .outerjoin(GroupSettings, GroupSettings.conversation_id == Conversation.id)
-            .where(Conversation.id == conversation_id)
-        )
-    ).one_or_none()
-    if fila is None or fila.kind != "group":
-        raise NotFoundError(_NO_ESTA, code="group_not_found")
-    # Al chat de un tema no se pide entrar: se entra al grupo.
-    if await grupos.tema_del_chat(db, conversation_id) is not None:
-        raise NotFoundError(_NO_ESTA, code="group_not_found")
+    fila = await _la_puerta(db, conversation_id)
 
     from app.modules.messaging import subgrupos
 
@@ -402,75 +732,31 @@ async def pedir_entrar(
             raise NotFoundError(_NO_ESTA, code="group_not_found")
         por_enlace = False
     else:
-        por_enlace = bool(
-            payload.code
-            and fila.invite_enabled
-            and fila.invite_code
-            # Comparacion de tiempo constante: el codigo es un secreto compartido.
-            and secrets.compare_digest(payload.code, fila.invite_code)
-        )
-        if not (por_enlace or fila.listed_on_profile):
-            raise NotFoundError(_NO_ESTA, code="group_not_found")
+        por_enlace = await _por_donde_llega(db, conversation_id, fila, payload.code)
     if await hay_bloqueo(db, uid, fila.created_by):
         raise NotFoundError(_NO_ESTA, code="group_not_found")
+    abierta = comunidad is None and fila.entrada == "open"
 
-    miembros = set(
-        (
-            await db.execute(
-                select(ConversationMember.user_id).where(
-                    ConversationMember.conversation_id == conversation_id
-                )
-            )
-        ).scalars()
-    )
-    if uid in miembros:
+    miembros = await _miembros(db, conversation_id)
+    if str(uid) in miembros:
         raise ConflictError("Ya estás en este grupo.", code="already_member")
     if len(miembros) >= grupos.MAX_MIEMBROS:
         raise ConflictError("El grupo está completo.", code="group_is_full")
 
-    previas = (
-        await db.execute(
-            select(
-                GroupJoinRequest.id, GroupJoinRequest.status, GroupJoinRequest.resolved_at
-            )
-            .where(
-                GroupJoinRequest.conversation_id == conversation_id,
-                GroupJoinRequest.user_id == uid,
-            )
-            .order_by(GroupJoinRequest.created_at.desc(), GroupJoinRequest.id.desc())
-            .limit(1)
-        )
-    ).one_or_none()
-    ahora = datetime.now(timezone.utc)
-    if previas is not None:
-        if previas.status == "pending":
-            return SolicitudLeida(id=previas.id, status="pending")
-        resuelta = previas.resolved_at
-        if resuelta is not None and resuelta.tzinfo is None:
-            resuelta = resuelta.replace(tzinfo=timezone.utc)
-        if (
-            previas.status == "rejected"
-            and resuelta is not None
-            and ahora - resuelta < ESPERA_TRAS_RECHAZO
-        ):
-            raise ConflictError(
-                "Ya pediste entrar a este grupo hace poco. Inténtalo más adelante.",
-                code="join_request_too_soon",
-            )
+    previa = await _ultima_solicitud(db, conversation_id, uid)
+    pendiente = previa.id if previa is not None and previa.status == "pending" else None
+    if pendiente is not None and not abierta:
+        return SolicitudLeida(id=pendiente, status="pending")
+    if pendiente is None:
+        await _exigir_tope_por_hora(db, uid)
 
-    recientes = await db.scalar(
-        select(func.count())
-        .select_from(GroupJoinRequest)
-        .where(
-            GroupJoinRequest.user_id == uid,
-            GroupJoinRequest.created_at >= ahora - timedelta(hours=1),
+    if abierta:
+        hecha = await _entrar_en_una_abierta(
+            db, conversation_id, uid, por_enlace=por_enlace, pendiente=pendiente
         )
-    )
-    if (recientes or 0) >= SOLICITUDES_POR_HORA:
-        raise ConflictError(
-            "Enviaste muchas solicitudes seguidas. Inténtalo más tarde.",
-            code="join_rate_limited",
-        )
+        if hecha is None:
+            hecha = await _la_que_lo_metio(db, conversation_id, uid)
+        return SolicitudLeida(id=hecha, status="approved")
 
     solicitud = GroupJoinRequest(
         conversation_id=conversation_id,
@@ -500,8 +786,9 @@ async def pedir_entrar(
             ) from None
         return SolicitudLeida(id=viva, status="pending")
 
-    # «Ana quiere unirse a tu grupo «Aula»». La solicitud YA esta guardada: si
-    # el aviso falla, quien administra la vera igual al abrir el grupo.
+    # «Ana quiere unirse a tu comunidad «Aula»» (o «a tu grupo», si es uno de
+    # dentro). La solicitud YA esta guardada: si el aviso falla, quien
+    # administra la vera igual al abrir el grupo.
     try:
         encolar_push(
             background,
@@ -510,11 +797,114 @@ async def pedir_entrar(
             actor_name=await grupos.nombre_de(db, uid),
             data={"type": avisos.DESTINO_DE_SOLICITUD, "conversationId": conversation_id},
             grupo=fila.title or "",
+            nivel="subgrupo" if comunidad is not None else "comunidad",
         )
     except Exception:  # noqa: BLE001 - el aviso nunca tumba la solicitud
         logger.warning("[grupos] no se pudo avisar de la solicitud", exc_info=True)
 
     return SolicitudLeida(id=solicitud.id, status="pending")
+
+
+async def _la_que_lo_metio(db: AsyncSession, conversation_id: str, uid: str) -> str:
+    """Tras perder la carrera de entrar: la solicitud aprobada de la peticion que gano.
+
+    Si ni esta dentro ni hay una aprobada, no entro nadie (el conflicto era
+    otro): 409 `join_request_race`, el mismo que cuando se pierde la de pedir.
+    """
+    dentro = await db.get(
+        ConversationMember, {"conversation_id": conversation_id, "user_id": uid}
+    )
+    aprobada = await db.scalar(
+        select(GroupJoinRequest.id)
+        .where(
+            GroupJoinRequest.conversation_id == conversation_id,
+            GroupJoinRequest.user_id == uid,
+            GroupJoinRequest.status == "approved",
+        )
+        .order_by(GroupJoinRequest.created_at.desc(), GroupJoinRequest.id.desc())
+        .limit(1)
+    )
+    if dentro is None or aprobada is None:
+        raise ConflictError(
+            "No se pudo entrar. Inténtalo de nuevo.", code="join_request_race"
+        )
+    return str(aprobada)
+
+
+@router.post("/{conversation_id}/join", response_model=TarjetaDeGrupo)
+async def unirse(
+    conversation_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    payload: SolicitudNueva | None = Body(default=None),
+) -> TarjetaDeGrupo:
+    """Entra de un toque en una comunidad ABIERTA (0112). Devuelve su tarjeta.
+
+    El cuerpo es opcional: `{"code": …}` cuando se llega por el enlace, como en
+    `join-requests`. Las mismas puertas y los mismos errores que pedir entrar:
+    tiene que salir en el perfil de quien la administra o llegarse con su
+    enlace activo; con un bloqueo entre los dos, el mismo 404 que si no
+    existiera; 409 `group_is_full`, `join_request_too_soon` y
+    `join_rate_limited`. Lo unico propio: con solicitud, 409
+    `group_requires_request` (se pide por `join-requests`).
+
+    SOLO UNA COMUNIDAD, es decir, un chat de grupo de primer nivel. Un grupo de
+    dentro tiene su propia ruta (`…/subgroups/{id}/join`) y el chat de un tema
+    no se toca por separado: 404, sin decir que existen.
+
+    IDEMPOTENTE: quien ya esta dentro recibe 200 con su tarjeta, sin repetir
+    nada. Se mira antes que la puerta: quien esta dentro ya sabe que existe, y
+    que su comunidad haya dejado de salir en el perfil no lo vuelve un 404.
+
+    SIN AVISO A QUIEN ADMINISTRA, a proposito. Una comunidad abierta es la
+    forma de decir «no hace falta que yo responda de quien entra»; un aviso por
+    cada entrada seria ruido, y entrar y salir haria sonar su telefono tantas
+    veces como se quisiera. Lo ve en la lista de miembros.
+    """
+    uid = current_user.id
+    ensure_uuid(conversation_id, _NO_ESTA)
+    await _exigir_puertas(db)
+    fila = await _la_puerta(db, conversation_id)
+
+    from app.modules.messaging import subgrupos
+
+    # Cualquier fila de `group_subgroups`, viva o eliminada: tampoco una
+    # eliminada es una comunidad (`grupos.exigir_primer_nivel`).
+    if await subgrupos.fila_de(db, conversation_id) is not None:
+        raise NotFoundError(_NO_ESTA, code="group_not_found")
+
+    miembros = await _miembros(db, conversation_id)
+    if str(uid) in miembros:
+        return await _tarjeta_de(db, conversation_id, uid)
+
+    por_enlace = await _por_donde_llega(
+        db, conversation_id, fila, payload.code if payload is not None else None
+    )
+    if await hay_bloqueo(db, uid, fila.created_by):
+        raise NotFoundError(_NO_ESTA, code="group_not_found")
+    if fila.entrada != "open":
+        raise ConflictError(
+            "Para entrar en esta comunidad hay que pedirlo.",
+            code="group_requires_request",
+        )
+    if len(miembros) >= grupos.MAX_MIEMBROS:
+        raise ConflictError("El grupo está completo.", code="group_is_full")
+
+    previa = await _ultima_solicitud(db, conversation_id, uid)
+    pendiente = previa.id if previa is not None and previa.status == "pending" else None
+    if pendiente is None:
+        await _exigir_tope_por_hora(db, uid)
+
+    hecha = await _entrar_en_una_abierta(
+        db, conversation_id, uid, por_enlace=por_enlace, pendiente=pendiente
+    )
+    # Perdio la carrera: si otra peticion lo metio, ya esta dentro, que es lo
+    # que se queria. Si no entro nadie, el conflicto era otro.
+    if hecha is None and (
+        await db.get(ConversationMember, {"conversation_id": conversation_id, "user_id": uid})
+    ) is None:
+        raise ConflictError("No se pudo entrar. Inténtalo de nuevo.", code="join_request_race")
+    return await _tarjeta_de(db, conversation_id, uid)
 
 
 @router.delete(
@@ -729,11 +1119,20 @@ async def cambiar_ajustes(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AjustesLeidos:
-    """Enseñar o no el grupo en el perfil, y activar o no su enlace.
+    """Enseñar o no el grupo en el perfil, activar o no su enlace y como se entra.
 
     Activar el enlace por primera vez le crea su codigo. Desactivarlo NO lo
     borra: al volver a activarlo es el mismo enlace, y para cambiarlo esta
     `…/invite/rotate`.
+
+    `listed_on_profile` (0112) es «en MI perfil»: crea o borra la fila de quien
+    llama en `group_profile_listings`, y ademas escribe la columna de siempre,
+    para que volver a la API anterior no quite la comunidad de ningun perfil.
+
+    `entrada` (0112): pasar de abierta a con solicitud no saca a nadie (D6), y
+    de con solicitud a abierta no mete a nadie: quien esperaba respuesta sigue
+    esperando hasta que quien administra decida o hasta que vuelva a tocar el
+    boton, que entonces si entra.
 
     UNA COMUNIDAD NO TIENE ENLACE NI SALE EN EL PERFIL: a ella se llega por ser
     del grupo, y un enlace llevaria a una solicitud que nunca se podria
@@ -742,18 +1141,31 @@ async def cambiar_ajustes(
     await grupos.exigir_grupo_administrado(db, conversation_id, current_user.id)
     await grupos.exigir_primer_nivel(db, conversation_id)
     await _exigir_puertas(db)
+    # Sin la 0112 no hay donde guardar como se entra: 503, el mismo que sin la
+    # 0104, y ANTES de escribir nada. Lo demas funciona como antes de la 0112.
+    if payload.entrada is not None and not await esquema.hay_comunidades_en_el_perfil(db):
+        raise ServiceUnavailableError(
+            "Elegir cómo se entra todavía no está disponible.",
+            code="group_extras_not_available",
+        )
     fila = await ajustes_de_grupo.asegurar_fila(db, conversation_id)
 
     if payload.listed_on_profile is not None:
+        await ajustes_de_grupo.poner_en_mi_perfil(
+            db, conversation_id, current_user.id, si=payload.listed_on_profile
+        )
         fila.listed_on_profile = payload.listed_on_profile
     if payload.invite_enabled is not None:
         if payload.invite_enabled and not fila.invite_code:
             fila.invite_code = ajustes_de_grupo.codigo_nuevo()
         fila.invite_enabled = payload.invite_enabled
+    if payload.entrada is not None:
+        await ajustes_de_grupo.poner_entrada(db, conversation_id, payload.entrada)
     fila.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(fila)
-    return ajustes_de_grupo.leer(fila)
+    # Como los ve quien los cambio: «en mi perfil» es el SUYO.
+    return await ajustes_de_grupo.leer_para(db, fila, conversation_id, current_user.id)
 
 
 @router.post("/{conversation_id}/group/invite/rotate", response_model=AjustesLeidos)
@@ -775,7 +1187,7 @@ async def cambiar_enlace(
     fila.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(fila)
-    return ajustes_de_grupo.leer(fila)
+    return await ajustes_de_grupo.leer_para(db, fila, conversation_id, current_user.id)
 
 
 @router.put("/{conversation_id}/group/photo", status_code=status.HTTP_204_NO_CONTENT)

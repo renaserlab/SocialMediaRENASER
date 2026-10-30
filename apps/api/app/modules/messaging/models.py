@@ -11,6 +11,8 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
+    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -347,9 +349,35 @@ class GroupSettings(Base):
     `avatar_path` es una RUTA del almacenamiento, no la imagen. `invite_code`
     es el secreto del enlace: no sale nunca en una respuesta que no sea para
     quien administra el grupo.
+
+    `entrada` (migracion 0112): como se entra a la comunidad. Sin fila, o con
+    una fila de antes de la 0112, es `request`, que es como se entraba
+    siempre. `listed_on_profile` sigue aqui y se sigue escribiendo, pero desde
+    la 0112 quien la enseña en SU perfil lo dice `GroupProfileListing`: la
+    columna existe para que volver a la API anterior no pierda nada.
+
+    `entrada` ESTA EN LA TABLA PERO NO EN EL MAPEO (`exclude_properties`). La
+    API puede desplegarse antes de que se pegue la 0112, y un
+    `select(GroupSettings)` pide todas las columnas mapeadas: con `entrada`
+    mapeada, leer la foto o los ajustes de cualquier grupo seria un 500
+    mientras faltara la columna. Fuera del mapeo, el ORM no la pide nunca —ni
+    al leer, ni al insertar (la pone el `default` de la base), ni en un
+    `refresh`— y quien la necesita la lee y la escribe por `ENTRADA`
+    (`GroupSettings.__table__.c.entrada`) despues de preguntar
+    `esquema.hay_comunidades_en_el_perfil`. Sigue declarada en la tabla para
+    que la base de las pruebas la tenga, con su `CHECK`.
     """
 
     __tablename__ = "group_settings"
+    __table_args__ = (
+        Column("entrada", Text, nullable=False, server_default="request"),
+        # El mismo nombre que en la 0112: uno que solo viva en el SQL deja
+        # pasar en las pruebas lo que produccion rechaza.
+        CheckConstraint(
+            "entrada in ('open', 'request')", name="group_settings_entrada_check"
+        ),
+    )
+    __mapper_args__ = {"exclude_properties": ["entrada"]}
 
     conversation_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False),
@@ -365,6 +393,44 @@ class GroupSettings(Base):
         Boolean, default=False, server_default="false"
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+#: `group_settings.entrada` (0112): open | request. Una columna de la TABLA,
+#: no un atributo del modelo: ver el docstring de `GroupSettings`.
+ENTRADA = GroupSettings.__table__.c.entrada
+
+
+class GroupProfileListing(Base):
+    """Quien enseña una comunidad en SU perfil (migracion 0112).
+
+    UNA FILA POR (COMUNIDAD, PERSONA), y no una columna de la comunidad: el
+    dia que la administren dos personas, cada una decide si sale en el suyo
+    sin pisar a la otra. Hoy solo puede enseñarla quien la creo.
+
+    La fila de alguien que deja de administrarla se queda, pero no se enseña:
+    `GET /groups/of/{id}` solo lee las de comunidades que esa persona
+    administra. Borrar la conversacion las borra (`on delete cascade`).
+    """
+
+    __tablename__ = "group_profile_listings"
+    __table_args__ = (
+        # El perfil de una persona: sus filas, sin recorrer la tabla.
+        Index("group_profile_listings_user_idx", "user_id"),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
