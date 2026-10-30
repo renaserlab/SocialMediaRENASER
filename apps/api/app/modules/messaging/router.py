@@ -11,6 +11,7 @@ Mensajes tardara segundos en abrirse.
 """
 
 import logging
+import unicodedata
 from datetime import datetime
 from uuid import UUID
 
@@ -452,16 +453,31 @@ async def _exigir_esquema_de_adjuntos(db: AsyncSession) -> None:
         )
 
 
-def _exigir_titulo_que_cabe(titulo: str | None) -> None:
-    """422 `attachment_title_too_long` si el nombre, ya recortado, pasa de 80.
+def _exigir_titulo_valido(titulo: str | None) -> None:
+    """422 si el nombre, ya recortado, tiene caracteres de control o pasa de 80.
 
-    Aqui y no en Pydantic para que el codigo sea el propio y la aplicacion
-    pueda decir «el nombre es demasiado largo» junto al campo, en vez de un
-    error generico de datos. Se comprueba SIEMPRE, este o no la 0113: la misma
-    peticion no puede valer en un servidor y no en otro segun una migracion
-    que quien escribe no ve.
+    Aqui y no en Pydantic para que cada caso tenga su codigo y la aplicacion
+    pueda decir que pasa junto al campo, en vez de un error generico de datos.
+    Se comprueba SIEMPRE, este o no la 0113: la misma peticion no puede valer
+    en un servidor y no en otro segun una migracion que quien escribe no ve.
+
+    LOS CARACTERES DE CONTROL (categoria Unicode `Cc`: `\n`, `\r`, `\t`,
+    `\u0000`…) SE RECHAZAN, `attachment_title_invalid`. Un nombre es una
+    linea: un salto partiria la tarjeta y la fila de la bandeja, un tabulador
+    se pinta distinto en cada sitio, y `\u0000` ni siquiera llega a la base
+    —PostgreSQL no admite NUL en `text` y asyncpg lo convierte en un 500—. Se
+    mira DESPUES de recortar: un salto de linea pegado al final, lo que deja
+    un teclado al pulsar «Listo», se quita sin molestar a nadie; uno en medio
+    no es un descuido que se pueda arreglar por quien lo escribio.
     """
-    if titulo is not None and len(titulo) > MAX_TITULO_DE_ADJUNTO:
+    if titulo is None:
+        return
+    if any(unicodedata.category(letra) == "Cc" for letra in titulo):
+        raise ValidationAppError(
+            "El nombre no puede tener saltos de línea ni caracteres de control.",
+            code="attachment_title_invalid",
+        )
+    if len(titulo) > MAX_TITULO_DE_ADJUNTO:
         raise ValidationAppError(
             f"El nombre puede tener hasta {MAX_TITULO_DE_ADJUNTO} caracteres.",
             code="attachment_title_too_long",
@@ -1109,7 +1125,7 @@ async def send_message(
         con_nombres = await esquema.hay_nombres_de_adjuntos(db)
         audio.validar_audio(payload.attachments, con_nombres=con_nombres)
         for adjunto in payload.attachments:
-            _exigir_titulo_que_cabe(adjunto.title)
+            _exigir_titulo_valido(adjunto.title)
         _validar_rutas(payload.attachments, conversation_id, current_user.id)
     elif not payload.body.strip():
         # Sin la 0033 el esquema todavía exige al menos un carácter en `body`,
@@ -1471,7 +1487,7 @@ async def nombrar_adjunto(
             "Las fotos no llevan nombre: ya tienen el texto del mensaje.",
             code="attachment_title_not_allowed",
         )
-    _exigir_titulo_que_cabe(payload.title)
+    _exigir_titulo_valido(payload.title)
 
     # La TABLA y no la entidad: `title` no está en el mapeo del modelo.
     await db.execute(

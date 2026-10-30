@@ -463,6 +463,65 @@ async def test_en_postgresql_se_manda_y_se_nombra_con_el_check_de_verdad(entorno
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
+async def test_en_postgresql_un_nul_en_el_nombre_es_un_422_y_no_un_500(entorno) -> None:
+    """PostgreSQL no admite NUL en `text`: si el nombre llegara a la base,
+    asyncpg fallaría y saldría un 500 (sin cabeceras CORS). Se para antes,
+    al mandar y al ponerlo después, y no se escribe nada."""
+    http, motor, identidad = entorno
+    grupo = await _grupo(motor)
+
+    async def _mensajes() -> int:
+        async with motor.connect() as c:
+            return int(
+                (
+                    await c.execute(
+                        text(
+                            "select count(*) from public.messages "
+                            "where conversation_id = cast(:g as uuid)"
+                        ),
+                        {"g": grupo},
+                    )
+                ).scalar_one()
+            )
+
+    identidad["uid"] = ANA
+    for titulo in ("Clase\u00003", "\u0000", "Fin\u0000", "Clase\n3"):
+        respuesta = await http.post(
+            f"{API}/{grupo}/messages",
+            json={
+                "body": "",
+                "attachments": [
+                    {"storage_path": f"{grupo}/{ANA}/t.pdf", "kind": "document", "title": titulo}
+                ],
+            },
+        )
+        assert (respuesta.status_code, codigo(respuesta)) == (422, "attachment_title_invalid"), titulo
+    assert await _mensajes() == 0
+
+    mid = await _escrito(motor, grupo, kind="document", titulo="Antes")
+    async with motor.connect() as c:
+        aid = (
+            await c.execute(
+                text("select id::text from public.message_attachments where message_id = cast(:m as uuid)"),
+                {"m": mid},
+            )
+        ).scalar_one()
+    for titulo in ("Clase\u00003", "Fin\u0000"):
+        respuesta = await http.patch(
+            f"{API}/{grupo}/messages/{mid}/attachments/{aid}", json={"title": titulo}
+        )
+        assert (respuesta.status_code, codigo(respuesta)) == (422, "attachment_title_invalid"), titulo
+    async with motor.connect() as c:
+        assert (
+            await c.execute(
+                text("select title from public.message_attachments where id = cast(:a as uuid)"),
+                {"a": aid},
+            )
+        ).scalar_one() == "Antes"
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
 async def test_en_postgresql_agregar_varios_es_todo_o_nada_y_aguanta_dos_a_la_vez(entorno) -> None:
     http, motor, identidad = entorno
     grupo = await _grupo(motor)
