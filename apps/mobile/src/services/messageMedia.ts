@@ -40,6 +40,11 @@ import {
   rutaDePortada,
   seComprime,
 } from '@/lib/mediosDeChat';
+import {
+  MAX_ARCHIVOS_DE_UNA_VEZ,
+  limpiarTitulo,
+  tipoDeArchivoElegido,
+} from '@/lib/nombresDeAdjuntos';
 import { tipoDeContenidoDe } from '@/lib/tiposDeArchivo';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -101,6 +106,16 @@ export type AdjuntoElegido = {
   width: number | null;
   height: number | null;
   durationS: number | null;
+  /**
+   * El nombre que se le pone al enviarlo (0113): el de la nota de voz o el
+   * de cada archivo de «Enviar N archivos». Sin él, sale sin nombre.
+   */
+  title?: string | null;
+  /**
+   * Solo en un audio: `false` para un archivo de audio elegido con
+   * «Archivo». Sin el campo, un audio es una nota de voz, como siempre.
+   */
+  voiceNote?: boolean;
 };
 
 /** Un archivo ya subido, listo para mandarle la ruta al backend. */
@@ -113,6 +128,12 @@ export type AdjuntoSubido = {
   width: number | null;
   height: number | null;
   duration_s: number | null;
+  /**
+   * Nuevos con la 0113, y SOLO SI HAY ALGO QUE DECIR: una API anterior los
+   * ignora, y una nota de voz sin nombre viaja exactamente como antes.
+   */
+  title?: string;
+  voice_note?: boolean;
 };
 
 const AVISO_FOTOS =
@@ -205,30 +226,48 @@ export async function hacerFoto(): Promise<AdjuntoElegido | null> {
 }
 
 /**
- * Un archivo cualquiera: PDF, hoja de cálculo, comprimido...
+ * Archivos cualquiera: PDF, hoja de cálculo, comprimido, audio...
+ *
+ * HASTA DIEZ DE UNA VEZ (audios y temas, 30/10/2026). Cada uno sale después
+ * como su propio mensaje, con su nombre (`HojaDeEnviarArchivos`). El selector
+ * del sistema no sabe de topes, así que se quedan los diez primeros y
+ * `sobran` dice cuántos se dejaron fuera, para contarlo.
  *
  * Se marca como `document` aunque el sistema devuelva una imagen: lo que decide
  * cómo se pinta es por dónde se eligió. Alguien que entra por «Archivo» espera
  * ver el nombre del fichero, no una miniatura sin nombre que no puede guardar.
+ *
+ * SALVO UN AUDIO que se sabe reproducir (mp3, m4a, aac, ogg, wav): ese va como
+ * `audio` con `voiceNote: false`, y en el chat se escucha en vez de bajarse.
+ * Ver `tipoDeArchivoElegido`.
  */
-export async function elegirArchivo(): Promise<AdjuntoElegido | null> {
+export async function elegirArchivo(
+  maximo: number = MAX_ARCHIVOS_DE_UNA_VEZ,
+): Promise<{ archivos: AdjuntoElegido[]; sobran: number }> {
   const resultado = await DocumentPicker.getDocumentAsync({
     type: '*/*',
     copyToCacheDirectory: true,
-    multiple: false,
+    multiple: maximo > 1,
   });
-  if (resultado.canceled) return null;
-  const asset = resultado.assets?.[0];
-  if (!asset) return null;
+  if (resultado.canceled) return { archivos: [], sobran: 0 };
+  const todos = resultado.assets ?? [];
+  const tope = Math.max(1, maximo);
   return {
-    uri: asset.uri,
-    kind: 'document',
-    name: asset.name ?? null,
-    mimeType: asset.mimeType ?? null,
-    bytes: asset.size ?? null,
-    width: null,
-    height: null,
-    durationS: null,
+    archivos: todos.slice(0, tope).map((asset): AdjuntoElegido => {
+      const kind = tipoDeArchivoElegido(asset.mimeType, asset.name);
+      return {
+        uri: asset.uri,
+        kind,
+        name: asset.name ?? null,
+        mimeType: asset.mimeType ?? null,
+        bytes: asset.size ?? null,
+        width: null,
+        height: null,
+        durationS: null,
+        ...(kind === 'audio' ? { voiceNote: false } : {}),
+      };
+    }),
+    sobran: Math.max(0, todos.length - tope),
   };
 }
 
@@ -412,6 +451,22 @@ export async function subirAdjunto(
     width: adjunto.width,
     height: adjunto.height,
     duration_s: adjunto.durationS,
+    ...camposDeNombre(adjunto),
+  };
+}
+
+/**
+ * El nombre y la marca de nota de voz, solo cuando hay algo que decir.
+ *
+ * Una foto no lleva nombre (el servidor lo ignoraría). Un audio dice si es
+ * nota de voz SOLO si no lo es: sin el campo, el servidor entiende que sí,
+ * que es lo que mandan también las versiones que ya están en los teléfonos.
+ */
+function camposDeNombre(adjunto: AdjuntoElegido): Pick<AdjuntoSubido, 'title' | 'voice_note'> {
+  const titulo = adjunto.kind === 'image' ? null : limpiarTitulo(adjunto.title);
+  return {
+    ...(titulo ? { title: titulo } : {}),
+    ...(adjunto.kind === 'audio' && adjunto.voiceNote === false ? { voice_note: false } : {}),
   };
 }
 

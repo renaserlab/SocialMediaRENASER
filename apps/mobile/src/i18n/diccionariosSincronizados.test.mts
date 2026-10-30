@@ -153,6 +153,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // Audios y temas: «{n} segundos» se escribe igual en portugués; es la
+    // duración que dice el lector de pantalla al reproducir un audio con nombre.
+    'chat.spokenSeconds',
     // Los grupos de una comunidad (30/10/2026; antes «comunidades de un
     // grupo»): «Grupos», «1 grupo», «{n} grupos», «Grupo {nombre}. {detalle}»,
     // «Grupo de {nombre}» y «Editar grupo» se escriben exactamente igual en

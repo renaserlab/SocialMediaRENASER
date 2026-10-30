@@ -15,6 +15,7 @@ import { SelectorDePersonas } from '@/components/SelectorDePersonas';
 import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { alCambiarElSilencioDeUnChat } from '@/hooks/useAvisosEnVivo';
+import { useDisponibilidadDeTemas } from '@/hooks/useDisponibilidadDeTemas';
 import { useFuncionesDelChat } from '@/hooks/useFuncionesDelChat';
 import { useInfoDeConversacion } from '@/hooks/useInfoDeConversacion';
 import { type TranslationKey } from '@/i18n';
@@ -64,6 +65,7 @@ export function GrupoScreen() {
   const activo = supabaseEnabled && !!conversationId;
   const { info, refrescar } = useInfoDeConversacion(conversationId, currentUserId, activo);
   const funciones = useFuncionesDelChat(activo);
+  const disponibilidadDeTemas = useDisponibilidadDeTemas(activo);
 
   const [nuevas, setNuevas] = useState<PersonaEtiquetada[]>([]);
   const [ocupado, setOcupado] = useState<string | null>(null);
@@ -451,6 +453,16 @@ export function GrupoScreen() {
         cabecera={cabecera}
         primera={{ clave: 'miembros', etiqueta: t('groups.members'), contenido: miembros }}
         alRefrescar={refrescar}
+        /*
+          AUDIOS Y TEMAS (30/10/2026): en una comunidad de primer nivel con
+          temas, su Contenido es el de General y se filtra por tema; quien
+          administra elige varios y los agrega a un tema de una vez.
+        */
+        temasDelGrupo={
+          disponibilidadDeTemas.temas && !info.padre && !info.tema
+            ? { grupoId: conversationId, puedoAdministrar: info.puedoAdministrar }
+            : null
+        }
       />
     </AppScreen>
   );

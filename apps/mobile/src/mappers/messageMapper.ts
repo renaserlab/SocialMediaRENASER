@@ -1,3 +1,8 @@
+import {
+  leerNotaDeVoz,
+  leerTemasDeMensaje,
+  leerTitulo,
+} from '@/lib/nombresDeAdjuntos';
 import { leerCita, leerReacciones } from '@/lib/reaccionesDeChat';
 import { leerCuenta } from '@/lib/temasDeGrupo';
 import { profileImageUrl } from '@/services/storage';
@@ -63,6 +68,12 @@ export type AttachmentDto = {
   width: number | null;
   height: number | null;
   duration_s: number | null;
+  /**
+   * El nombre (0113) y si un audio es nota de voz. Opcionales como todo lo
+   * nuevo: una API sin la 0113 no los manda, y el adjunto se lee como antes.
+   */
+  title?: string | null;
+  voice_note?: boolean | null;
 };
 
 /**
@@ -119,6 +130,11 @@ export type MessageDto = {
    * manda el campo y el mensaje se pinta como texto, que es lo que es.
    */
   booking_context?: BookingContextDto | null;
+  /**
+   * Los temas en los que está (`[{id, name}]`), solo en General de una
+   * comunidad con temas. Se lee sin fiarse (`leerTemasDeMensaje`).
+   */
+  topics?: unknown;
 };
 
 /** La sesión de la que habla un mensaje, tal y como la manda la API. */
@@ -208,7 +224,17 @@ export function toAttachment(dto: AttachmentDto): MessageAttachment {
     width: dto.width,
     height: dto.height,
     durationS: dto.duration_s,
+    // Una foto no lleva nombre aunque el servidor mandara uno: no se ve en
+    // ningún sitio y no se puede cambiar.
+    title: dto.kind === 'image' ? null : leerTitulo(dto.title),
+    voiceNote: leerNotaDeVoz(dto.kind, dto.voice_note),
   };
+}
+
+/** Los temas de un mensaje, o `undefined` si no está en ninguno. */
+function temasDe(dto: { topics?: unknown }): Message['temas'] {
+  const temas = leerTemasDeMensaje(dto.topics);
+  return temas.length > 0 ? temas : undefined;
 }
 
 /**
@@ -267,6 +293,8 @@ export function toMessage(dto: MessageDto, currentUserId?: string | null): Messa
     sesion: dto.booking_context ? toSesionDelMensaje(dto.booking_context) : undefined,
     reacciones: leerReacciones(dto.reactions),
     respuestaA: leerCita(dto.reply_to),
+    // Una lápida no está en ningún tema que enseñar.
+    temas: dto.deleted_at ? undefined : temasDe(dto),
   };
 }
 

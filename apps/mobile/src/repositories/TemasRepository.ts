@@ -11,6 +11,11 @@ import {
   type TemaDeGrupo,
   type TemasDeGrupo,
 } from '@/lib/temasDeGrupo';
+import {
+  MAX_CONSULTA_DE_TEMAS,
+  leerTemasDeMensajes,
+  type TemaDeMensaje,
+} from '@/lib/nombresDeAdjuntos';
 import { completar, leerDisponibilidadDelChat } from '@/repositories/MessageRepository';
 import type { Message } from '@/types';
 
@@ -57,6 +62,9 @@ export type DisponibilidadDeTemas = { temas: boolean; comunidades: boolean };
 export const SIN_DISPONIBILIDAD: DisponibilidadDeTemas = { temas: false, comunidades: false };
 
 const base = (grupoId: string) => `${API_V1}/conversations/${grupoId}/topics`;
+
+/** Cuántos mensajes acepta de una vez el `PUT` por lotes (contrato §2). */
+export const MAX_MENSAJES_POR_LOTE = 50;
 
 export const TemasRepository = {
   /**
@@ -187,5 +195,48 @@ export const TemasRepository = {
     await apiRequest<void>(`${base(grupoId)}/${temaId}/items/${mensajeId}`, {
       method: 'DELETE',
     });
+  },
+
+  /**
+   * Agrega de una vez varios mensajes de General a un tema (Contenido, «Agregar
+   * N a un tema»). De 1 a 50, sin repetidos.
+   *
+   * TODO O NADA en el servidor: si alguno no es de General de esta comunidad
+   * responde 404 `message_not_in_group` y no agrega ninguno, así que un fallo
+   * nunca deja la selección a medias. Los que ya estaban no cuentan como
+   * error (`already`).
+   */
+  async agregarVarios(
+    grupoId: string,
+    temaId: string,
+    mensajeIds: readonly string[],
+  ): Promise<{ agregados: number; yaEstaban: number }> {
+    const ids = [...new Set(mensajeIds)].slice(0, MAX_MENSAJES_POR_LOTE);
+    const dto = await apiRequest<{ added?: unknown; already?: unknown } | null>(
+      `${base(grupoId)}/${temaId}/items`,
+      { method: 'PUT', body: JSON.stringify({ message_ids: ids }) },
+    );
+    const cuenta = (v: unknown) => (typeof v === 'number' && v > 0 ? Math.floor(v) : 0);
+    return { agregados: cuenta(dto?.added), yaEstaban: cuenta(dto?.already) };
+  },
+
+  /**
+   * En qué temas está cada uno de unos mensajes de General, en UNA petición:
+   * es como el chat refresca las etiquetas cuando alguien avisa por
+   * `chat-temas` (contrato §3). Hasta cien; lo que no venga no está en ninguno.
+   *
+   * LANZA si falla: quien llama se queda con las etiquetas que tenía.
+   */
+  async temasDeMensajes(
+    grupoId: string,
+    mensajeIds: readonly string[],
+  ): Promise<Record<string, TemaDeMensaje[]>> {
+    const ids = [...new Set(mensajeIds)].slice(-MAX_CONSULTA_DE_TEMAS);
+    if (ids.length === 0) return {};
+    return leerTemasDeMensajes(
+      await apiRequest<unknown>(
+        `${base(grupoId)}/of-messages?ids=${ids.map(encodeURIComponent).join(',')}`,
+      ),
+    );
   },
 };

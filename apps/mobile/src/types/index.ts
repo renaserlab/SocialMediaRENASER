@@ -1,4 +1,5 @@
 import type { CitaDeMensaje, ReaccionDeMensaje } from '@/lib/reaccionesDeChat';
+import type { TemaDeMensaje } from '@/lib/nombresDeAdjuntos';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -203,6 +204,17 @@ export type MessageAttachment = {
    * subió. Sin ella, la burbuja saca el fotograma del propio video.
    */
   posterUrl?: string;
+  /**
+   * El nombre que le pusieron (migración 0113), hasta 80 caracteres. Con él
+   * la burbuja empieza con una tarjeta; sin él se ve como siempre. Nunca en
+   * una foto. Opcional: una API anterior no lo manda.
+   */
+  title?: string | null;
+  /**
+   * Solo en un audio: si es una nota de voz (micrófono) o un archivo de audio
+   * (nota musical). Sin el campo del servidor, todo audio es nota de voz.
+   */
+  voiceNote?: boolean;
 };
 
 export type Message = {
@@ -253,6 +265,12 @@ export type Message = {
   storyContext?: MessageStoryContext;
   /** De qué sesión 1:1 habla, si habla de alguna. Ver `MensajeDeSesion`. */
   sesion?: MensajeDeSesion;
+  /**
+   * Los temas en los que está, solo en General de una comunidad con temas
+   * (audios y temas, 30/10/2026). Sin ninguno, no viene: la burbuja no lleva
+   * etiqueta debajo.
+   */
+  temas?: TemaDeMensaje[];
 };
 
 /**

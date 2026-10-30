@@ -14,7 +14,10 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 
 import { Avatar } from '@/components/Avatar';
+import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
+import { Button } from '@/components/Button';
+import { InlineError } from '@/components/InlineError';
 import { ArchivoDeChat } from '@/components/chat/ArchivoDeChat';
 import { MedioDeChat } from '@/components/chat/MedioDeChat';
 import { Chip } from '@/components/Chip';
@@ -25,6 +28,7 @@ import { TextoConEnlaces } from '@/components/TextoConEnlaces';
 import { useMensajesDeVista } from '@/hooks/useMensajesDeVista';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
+import { afterSheetClose } from '@/lib/afterSheetClose';
 import { notify } from '@/lib/confirm';
 import {
   adjuntosDe,
@@ -40,17 +44,31 @@ import { rutaInternaDe } from '@/lib/enlaces';
 import { partirEnEnlaces } from '@/lib/enlacesEnTexto';
 import { pedirSalto } from '@/lib/saltoDeChat';
 import { medioQueEs } from '@/lib/mediosDeChat';
+import { claveDelFalloDeGrupo } from '@/lib/gruposDeChat';
+import { alternarSeleccion, claveDelFalloDeAgregarVarios } from '@/lib/nombresDeAdjuntos';
+import { claveDelFalloDeTemas, type TemaDeGrupo } from '@/lib/temasDeGrupo';
+import { toast } from '@/lib/toast';
 import {
+  FILTRO_DE_TEMA_TODOS,
   SIN_VISTAS,
+  categoriaDeVista,
+  claveDeFiltroDeTema,
+  cuentaDeCategoria,
+  filtroDeTemaVigente,
   huellaDeCriterios,
   opcionesDeMedia,
   seccionesDeContenido,
   vistaDeSeccion,
+  type CuentasDeTemas,
+  type FiltroDeTema,
   type SeccionDeContenido,
   type SoloDeMedia,
   type VistasDeChat,
 } from '@/lib/vistasDeChat';
 import { MessageRepository, type MensajeDeVista } from '@/repositories/MessageRepository';
+import { MAX_MENSAJES_POR_LOTE, TemasRepository } from '@/repositories/TemasRepository';
+import { ApiError } from '@/services/api';
+import { avisosDeTemas } from '@/services/realtime';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
@@ -112,6 +130,13 @@ type Props = {
   primera?: { clave: string; etiqueta: string; contenido: React.ReactElement };
   /** Se tiró hacia abajo: para que quien lo usa refresque también lo suyo. */
   alRefrescar?: () => void;
+  /**
+   * General de una comunidad con temas (audios y temas, 30/10/2026): la fila
+   * «Tema» para filtrar y, para quien administra, elegir varios con una
+   * pulsación larga y agregarlos a un tema de una vez. Sin esto, todo como
+   * antes.
+   */
+  temasDelGrupo?: { grupoId: string; puedoAdministrar: boolean } | null;
 };
 
 /**
@@ -133,6 +158,7 @@ export function PestanasDeContenido({
   cabecera,
   primera,
   alRefrescar,
+  temasDelGrupo = null,
 }: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -177,16 +203,73 @@ export function PestanasDeContenido({
   const soloVigente: SoloDeMedia = opciones.includes(solo) ? solo : opciones[0] ?? 'todo';
 
   const vista = seccion ? vistaDeSeccion(seccion, vistas, soloVigente) : null;
+
+  /*
+    LA FILA «TEMA» (audios y temas, 30/10/2026). Solo en General de una
+    comunidad con temas y en una sección que es una categoría (no en los
+    filtros del grupo): el servidor cuenta por categoría. Sin respuesta o con
+    una API anterior no hay fila, y la sección se ve como siempre.
+  */
+  const categoria = temasDelGrupo ? categoriaDeVista(vista) : null;
+  const [cuentasDeTemas, setCuentasDeTemas] = useState<CuentasDeTemas | null>(null);
+  const [filtroDeTema, setFiltroDeTema] = useState<FiltroDeTema>(FILTRO_DE_TEMA_TODOS);
+  const leerTemasDeLaSeccion = useCallback(() => {
+    if (!conversationId || !categoria) {
+      setCuentasDeTemas(null);
+      return;
+    }
+    void MessageRepository.temasDeVista(conversationId, categoria).then(setCuentasDeTemas);
+  }, [conversationId, categoria]);
+  useEffect(() => {
+    leerTemasDeLaSeccion();
+  }, [leerTemasDeLaSeccion]);
+  // Un tema que desaparece de la fila deja de filtrar: se vuelve a «Todos».
+  const filtroVigente = filtroDeTemaVigente(filtroDeTema, cuentasDeTemas);
+  const hayFilaDeTemas = !!cuentasDeTemas && cuentasDeTemas.temas.length > 0;
+
+  const alHaberCambios = useCallback(() => {
+    leerVistas();
+    leerTemasDeLaSeccion();
+  }, [leerVistas, leerTemasDeLaSeccion]);
+
   const { mensajes, cargando, cargandoMas, refrescando, fallo, cargarMas, refrescar, reintentar } =
     useMensajesDeVista(conversationId, vista, {
       currentUserId,
       huella: seccion?.tipo === 'filtro' ? huellaDeCriterios(seccion.filtro) : '',
-      alHaberCambios: leerVistas,
+      alHaberCambios,
+      tema: hayFilaDeTemas ? filtroVigente : FILTRO_DE_TEMA_TODOS,
     });
 
-  // Al cambiar de pestaña no sigue sonando el audio de la anterior.
+  /*
+    ELEGIR VARIOS, solo quien administra la comunidad: una pulsación larga
+    empieza la selección, cada toque marca o desmarca, y «Agregar N a un
+    tema» los agrega de una vez (`PUT` por lotes). Sin ninguno marcado se
+    sale sola. El permiso es del servidor; esto evita ofrecer un 403.
+  */
+  const puedeElegir = !!temasDelGrupo?.puedoAdministrar;
+  const [seleccion, setSeleccion] = useState<string[]>([]);
+  const seleccionando = seleccion.length > 0;
+  const [eligiendoTema, setEligiendoTema] = useState(false);
+  const alternar = useCallback(
+    (mensajeId: string) =>
+      setSeleccion((actual) =>
+        // El servidor acepta hasta cincuenta de una vez: no se deja pasar.
+        !actual.includes(mensajeId) && actual.length >= MAX_MENSAJES_POR_LOTE
+          ? actual
+          : alternarSeleccion(actual, mensajeId),
+      ),
+    [],
+  );
+  /** La pulsación larga que empieza a elegir, o nada si no se puede. */
+  const mantenerPara = (mensaje: MensajeDeVista) =>
+    puedeElegir && !seleccionando ? () => alternar(mensaje.id) : undefined;
+
+  // Al cambiar de pestaña no sigue sonando el audio de la anterior, ni queda
+  // un filtro de tema ni una selección que eran de la otra.
   useEffect(() => {
     setAudioSonando(null);
+    setFiltroDeTema(FILTRO_DE_TEMA_TODOS);
+    setSeleccion([]);
   }, [abierta]);
 
   const columnas = columnasDeRejilla(width);
@@ -285,7 +368,74 @@ export function PestanasDeContenido({
   const quien = (mensaje: MensajeDeVista) =>
     mensaje.mio ? t('chatViews.you') : mensaje.autor.nombre;
 
-  const botonDeIrAlChat = (mensaje: MensajeDeVista) => (
+  /** El círculo que dice si está elegido: lleno con ✓, o vacío. */
+  const marcaDeSeleccion = (mensajeId: string, encima = false) => {
+    const marcado = seleccion.includes(mensajeId);
+    return (
+      <View
+        pointerEvents="none"
+        style={[
+          styles.marca,
+          encima && styles.marcaEncima,
+          marcado
+            ? { backgroundColor: colors.primary, borderColor: colors.primary }
+            : { backgroundColor: colors.background, borderColor: colors.border },
+        ]}
+      >
+        {marcado ? <Feather name="check" size={13} color={colors.onPrimary} /> : null}
+      </View>
+    );
+  };
+
+  /**
+   * Mientras se elige, una fila entera es un solo toque que la marca. Va
+   * ENCIMA del contenido y como hermana suya (nunca envolviéndolo): en la
+   * web un botón dentro de otro rompe la página, y los de dentro (el play,
+   * la descarga) no deben responder mientras se elige.
+   */
+  const capaDeSeleccion = (mensaje: MensajeDeVista) =>
+    seleccionando ? (
+      <Pressable
+        onPress={() => alternar(mensaje.id)}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: seleccion.includes(mensaje.id) }}
+        accessibilityLabel={t('contentTopics.selectItem', { autor: quien(mensaje) })}
+        style={StyleSheet.absoluteFill}
+      />
+    ) : null;
+
+  /** Los temas de una fila: «# Meditaciones», o «Sin tema» si hay fila y no está en ninguno. */
+  const temasDeLaFila = (mensaje: MensajeDeVista) => {
+    if (!temasDelGrupo) return null;
+    if (mensaje.temas.length === 0) {
+      return hayFilaDeTemas ? (
+        <View style={styles.temasDeLaFila}>
+          <View style={[styles.temaDeLaFila, styles.sinTema, { borderColor: colors.textMuted }]}>
+            <Text weight="600" color={colors.textMuted} style={styles.temaDeLaFilaTexto}>
+              {t('contentTopics.noTopic')}
+            </Text>
+          </View>
+        </View>
+      ) : null;
+    }
+    return (
+      <View style={styles.temasDeLaFila}>
+        {mensaje.temas.map((tema) => (
+          <View
+            key={tema.id}
+            style={[styles.temaDeLaFila, { backgroundColor: colors.tarjetaRelleno }]}
+          >
+            <Feather name="hash" size={11} color={colors.text} />
+            <Text weight="600" numberOfLines={1} style={styles.temaDeLaFilaTexto}>
+              {tema.nombre}
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const botonDeIrAlChat = (mensaje: MensajeDeVista) => seleccionando ? null : (
     <Pressable
       onPress={() => irAlMensaje(mensaje)}
       accessibilityRole="button"
@@ -304,10 +454,19 @@ export function PestanasDeContenido({
       <Pressable
         key={tesela.clave}
         onPress={() => {
+          if (seleccionando) {
+            alternar(tesela.mensaje.id);
+            return;
+          }
           // Fotos y vídeos se ven DENTRO, en el mismo visor que en el chat.
           if (adjunto.url) setAmpliado(tesela);
         }}
-        accessibilityRole="button"
+        onLongPress={mantenerPara(tesela.mensaje)}
+        delayLongPress={400}
+        accessibilityRole={seleccionando ? 'checkbox' : 'button'}
+        accessibilityState={
+          seleccionando ? { checked: seleccion.includes(tesela.mensaje.id) } : undefined
+        }
         accessibilityLabel={esVideo ? t('chat.viewVideo') : t('chat.viewPhoto')}
         style={[
           styles.tesela,
@@ -320,6 +479,7 @@ export function PestanasDeContenido({
           en vez de un cuadro negro.
         */}
         <MedioDeChat adjunto={adjunto} compacto style={StyleSheet.absoluteFill} />
+        {seleccionando ? marcaDeSeleccion(tesela.mensaje.id, true) : null}
       </Pressable>
     );
   };
@@ -338,13 +498,20 @@ export function PestanasDeContenido({
         <Pressable
           // Sin una dirección que abrir, la fila lleva al mensaje.
           onPress={() =>
-            primeraDireccion ? abrirEnlace(primeraDireccion) : irAlMensaje(item.mensaje)
+            seleccionando
+              ? alternar(item.mensaje.id)
+              : primeraDireccion
+                ? abrirEnlace(primeraDireccion)
+                : irAlMensaje(item.mensaje)
           }
+          onLongPress={mantenerPara(item.mensaje)}
+          delayLongPress={400}
           accessibilityRole="button"
           accessibilityLabel={primeraDireccion ? `${nombre}. ${primeraDireccion}` : nombre}
           accessibilityHint={primeraDireccion ? t('chat.openLink') : t('chatViews.goToMessage')}
           style={[styles.fila, { borderBottomColor: colors.border }]}
         >
+          {seleccionando ? marcaDeSeleccion(item.mensaje.id) : null}
           <View style={[styles.sitio, { backgroundColor: colors.surfaceAlt }]}>
             <Text weight="700" color={colors.textMuted} style={styles.inicial}>
               {nombre.charAt(0).toUpperCase()}
@@ -381,16 +548,22 @@ export function PestanasDeContenido({
     if (item.tipo === 'archivo') {
       return (
         <View style={[styles.fila, styles.filaDeArchivo, { borderBottomColor: colors.border }]}>
-          {/* El mismo archivo que en la burbuja, con su botón de descargar. */}
-          <ArchivoDeChat
-            adjunto={item.adjunto}
-            style={styles.archivoAncho}
-            pie={[quien(item.mensaje), fechaLegible(item.mensaje.fechaIso)]
-              .filter(Boolean)
-              .join(' · ')}
-            alVer={verSiEsMedio(item.clave, item.mensaje, item.adjunto)}
-          />
+          {seleccionando ? marcaDeSeleccion(item.mensaje.id) : null}
+          <View style={styles.cuerpo}>
+            {/* El mismo archivo que en la burbuja, con su botón de descargar. */}
+            <ArchivoDeChat
+              adjunto={item.adjunto}
+              style={styles.archivoDeMensaje}
+              pie={[quien(item.mensaje), fechaLegible(item.mensaje.fechaIso)]
+                .filter(Boolean)
+                .join(' · ')}
+              alVer={verSiEsMedio(item.clave, item.mensaje, item.adjunto)}
+              alMantener={mantenerPara(item.mensaje)}
+            />
+            {temasDeLaFila(item.mensaje)}
+          </View>
           {botonDeIrAlChat(item.mensaje)}
+          {capaDeSeleccion(item.mensaje)}
         </View>
       );
     }
@@ -399,6 +572,7 @@ export function PestanasDeContenido({
       return (
         <View style={[styles.filaDeAudio, { borderBottomColor: colors.border }]}>
           <View style={styles.titular}>
+            {seleccionando ? marcaDeSeleccion(item.mensaje.id) : null}
             <Avatar size={24} image={item.mensaje.autor.avatarUrl ?? null} name={item.mensaje.autor.nombre} />
             <Text weight="700" numberOfLines={1} style={styles.autor}>
               {quien(item.mensaje)}
@@ -419,8 +593,11 @@ export function PestanasDeContenido({
               alTerminar={() =>
                 setAudioSonando((actual) => (actual === item.adjunto.id ? null : actual))
               }
+              alMantener={mantenerPara(item.mensaje)}
             />
           </View>
+          {temasDeLaFila(item.mensaje)}
+          {capaDeSeleccion(item.mensaje)}
         </View>
       );
     }
@@ -517,7 +694,9 @@ export function PestanasDeContenido({
       description={
         seccion.tipo === 'filtro'
           ? t('chatViews.emptyFilterBody')
-          : t(VACIO_DE_SECCION[seccion.tipo])
+          : hayFilaDeTemas && filtroVigente.tipo !== 'todos'
+            ? t('contentTopics.emptyFiltered')
+            : t(VACIO_DE_SECCION[seccion.tipo])
       }
     />
   ) : null;
@@ -580,6 +759,53 @@ export function PestanasDeContenido({
         </View>
       ) : null}
 
+      {hayFilaDeTemas && cuentasDeTemas && categoria ? (
+        <View style={styles.filaDeTemas}>
+          <Text weight="700" color={colors.textMuted} style={styles.rotuloDeTemas}>
+            {t('contentTopics.label')}
+          </Text>
+          {/* Deslizar los temas no puede cambiar de sección de la aplicación. */}
+          <SinCambioDeSeccion>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.opcionesDeTema}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View
+                accessibilityRole="radiogroup"
+                accessibilityLabel={t('contentTopics.filterLabel')}
+                style={styles.opcionesDeTemaFila}
+              >
+                {[
+                  {
+                    filtro: FILTRO_DE_TEMA_TODOS,
+                    etiqueta: t('contentTopics.all', { n: cuentaDeCategoria(vistas, categoria) }),
+                  },
+                  {
+                    filtro: { tipo: 'sin' } as FiltroDeTema,
+                    etiqueta: t('contentTopics.none', { n: cuentasDeTemas.sinTema }),
+                  },
+                  ...cuentasDeTemas.temas.map((tema) => ({
+                    filtro: { tipo: 'tema', id: tema.id } as FiltroDeTema,
+                    // El nombre lo puso la comunidad: no hay nada que traducir.
+                    etiqueta: `${tema.nombre} · ${tema.cuantos}`,
+                  })),
+                ].map(({ filtro, etiqueta }) => (
+                  <Chip
+                    key={claveDeFiltroDeTema(filtro)}
+                    rol="radio"
+                    selected={claveDeFiltroDeTema(filtro) === claveDeFiltroDeTema(filtroVigente)}
+                    onPress={() => setFiltroDeTema(filtro)}
+                    label={etiqueta}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+          </SinCambioDeSeccion>
+        </View>
+      ) : null}
+
       {seccion?.tipo === 'filtro' && seccion.filtro.descripcion ? (
         <Text color={colors.textMuted} style={styles.descripcion}>
           {seccion.filtro.descripcion}
@@ -604,8 +830,47 @@ export function PestanasDeContenido({
       ]
     : [];
 
+  /** Ya se agregaron: la hoja se va, y DESPUÉS se dice (iOS no pinta nada encima de una hoja). */
+  const alAgregarVarios = async (tema: TemaDeGrupo, agregados: number) => {
+    setEligiendoTema(false);
+    setSeleccion([]);
+    leerTemasDeLaSeccion();
+    refrescar();
+    await afterSheetClose();
+    toast(
+      agregados === 0
+        ? t('contentTopics.addedNone', { tema: tema.nombre })
+        : agregados === 1
+          ? t('contentTopics.addedOne', { tema: tema.nombre })
+          : t('contentTopics.addedMany', { n: agregados, tema: tema.nombre }),
+    );
+  };
+
   return (
     <>
+      {seleccionando ? (
+        <View
+          style={[
+            styles.barraDeSeleccion,
+            { borderBottomColor: colors.border, backgroundColor: colors.background },
+          ]}
+        >
+          <Pressable
+            onPress={() => setSeleccion([])}
+            accessibilityRole="button"
+            accessibilityLabel={t('contentTopics.exitSelection')}
+            hitSlop={8}
+            style={styles.salirDeSeleccion}
+          >
+            <Feather name="x" size={22} color={colors.text} />
+          </Pressable>
+          <Text weight="800" style={styles.cuantosSeleccionados} accessibilityLiveRegion="polite">
+            {seleccion.length === 1
+              ? t('contentTopics.selectedOne')
+              : t('contentTopics.selectedMany', { n: seleccion.length })}
+          </Text>
+        </View>
+      ) : null}
       <FlatList
         data={filas}
         keyExtractor={(item) => `${item.tipo}:${item.clave}`}
@@ -631,6 +896,31 @@ export function PestanasDeContenido({
         }
       />
 
+      {seleccionando ? (
+        <View
+          style={[
+            styles.pieDeSeleccion,
+            { borderTopColor: colors.border, backgroundColor: colors.background },
+          ]}
+        >
+          <Button
+            label={t('contentTopics.addMany', { n: seleccion.length })}
+            icon="hash"
+            onPress={() => setEligiendoTema(true)}
+          />
+        </View>
+      ) : null}
+
+      {temasDelGrupo && puedeElegir ? (
+        <HojaDeAgregarVarios
+          grupoId={temasDelGrupo.grupoId}
+          visible={eligiendoTema}
+          mensajeIds={seleccion}
+          onClose={() => setEligiendoTema(false)}
+          alAgregar={(tema, agregados) => void alAgregarVarios(tema, agregados)}
+        />
+      ) : null}
+
       <VisorDeAdjunto
         adjunto={ampliado?.adjunto.url ? ampliado.adjunto : null}
         autor={ampliado ? quien(ampliado.mensaje) : ''}
@@ -639,6 +929,140 @@ export function PestanasDeContenido({
         onClose={() => setAmpliado(null)}
       />
     </>
+  );
+}
+
+/**
+ * «Agregar N a un tema»: la lista de temas de la comunidad, y elegir uno los
+ * agrega todos de una vez (`PUT` por lotes, todo o nada).
+ *
+ * TRAS AGREGAR SE AVISA por `chat-temas:{grupo}`, como hace la hoja del chat:
+ * quien tenga General abierto refresca sus etiquetas, y quien tenga la lista
+ * o el tema, lo suyo. El canal se abre al abrir la hoja para que, al elegir,
+ * ya esté unido. Los errores van DENTRO de la hoja (`InlineError`).
+ */
+function HojaDeAgregarVarios({
+  grupoId,
+  visible,
+  mensajeIds,
+  onClose,
+  alAgregar,
+}: {
+  grupoId: string;
+  visible: boolean;
+  mensajeIds: string[];
+  onClose: () => void;
+  alAgregar: (tema: TemaDeGrupo, agregados: number) => void;
+}) {
+  const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  const [temas, setTemas] = useState<TemaDeGrupo[] | null>(null);
+  const [fallo, setFallo] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState<string | null>(null);
+
+  const textoDelFallo = useCallback(
+    (error: unknown): string => {
+      const codigo = error instanceof ApiError ? error.code : null;
+      return t(
+        (claveDelFalloDeAgregarVarios(codigo) ??
+          claveDelFalloDeTemas(codigo) ??
+          claveDelFalloDeGrupo(codigo)) as TranslationKey,
+      );
+    },
+    [t],
+  );
+
+  const canal = React.useRef<{ avisar: () => void; cerrar: () => void } | null>(null);
+  useEffect(() => {
+    if (!visible || !grupoId) return undefined;
+    const abierto = avisosDeTemas(grupoId, () => {});
+    canal.current = abierto;
+    return () => {
+      canal.current = null;
+      abierto.cerrar();
+    };
+  }, [visible, grupoId]);
+
+  useEffect(() => {
+    if (!visible || !grupoId) return undefined;
+    let vigente = true;
+    setTemas(null);
+    setFallo(null);
+    TemasRepository.listar(grupoId)
+      .then((leidos) => {
+        if (vigente) setTemas(leidos.temas);
+      })
+      .catch((error) => {
+        if (!vigente) return;
+        setTemas([]);
+        setFallo(textoDelFallo(error));
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [visible, grupoId, textoDelFallo]);
+
+  const agregar = async (tema: TemaDeGrupo) => {
+    if (ocupado || mensajeIds.length === 0) return;
+    setOcupado(tema.id);
+    setFallo(null);
+    try {
+      const { agregados } = await TemasRepository.agregarVarios(grupoId, tema.id, mensajeIds);
+      canal.current?.avisar();
+      alAgregar(tema, agregados);
+    } catch (error) {
+      setFallo(textoDelFallo(error));
+    } finally {
+      setOcupado(null);
+    }
+  };
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View style={styles.hoja}>
+        <Text weight="800" style={styles.hojaTitulo}>
+          {t('contentTopics.addMany', { n: mensajeIds.length })}
+        </Text>
+        <Text color={colors.textMuted} style={styles.hojaAyuda}>
+          {t('contentTopics.addManyHelp')}
+        </Text>
+        {temas === null ? (
+          <ActivityIndicator style={styles.espera} color={colors.textMuted} />
+        ) : temas.length === 0 && !fallo ? (
+          <Text color={colors.textMuted} style={styles.hojaAyuda}>
+            {t('contentTopics.noTopicsYet')}
+          </Text>
+        ) : (
+          <View>
+            {temas.map((tema) => (
+              <Pressable
+                key={tema.id}
+                onPress={() => void agregar(tema)}
+                disabled={!!ocupado}
+                accessibilityRole="button"
+                accessibilityLabel={t('contentTopics.addTo', { tema: tema.nombre })}
+                accessibilityState={{ disabled: !!ocupado, busy: ocupado === tema.id }}
+                style={[styles.hojaFila, { borderBottomColor: colors.border }]}
+              >
+                <View style={[styles.hojaIcono, { borderColor: colors.border }]}>
+                  <Feather name={tema.icono} size={18} color={colors.text} />
+                </View>
+                <Text weight="600" numberOfLines={1} style={styles.hojaNombre}>
+                  {tema.nombre}
+                </Text>
+                {ocupado === tema.id ? (
+                  <ActivityIndicator size="small" color={colors.textMuted} />
+                ) : (
+                  <Feather name="plus" size={18} color={colors.textMuted} />
+                )}
+              </Pressable>
+            ))}
+          </View>
+        )}
+        <InlineError message={fallo} />
+        <Button label={t('common.cancel')} variant="secondary" onPress={onClose} disabled={!!ocupado} />
+      </View>
+    </BottomSheet>
   );
 }
 
@@ -669,7 +1093,6 @@ const styles = StyleSheet.create({
   tesela: { overflow: 'hidden' },
   // Un archivo en su fila: ocupa el ancho y deja sitio al «ver en el chat».
   filaDeArchivo: { alignItems: 'center' },
-  archivoAncho: { flex: 1, width: undefined },
 
   fila: {
     flexDirection: 'row',
@@ -713,4 +1136,69 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   archivoDeMensaje: { width: undefined, alignSelf: 'stretch' },
+
+  // La fila «Tema» (audios y temas, 30/10/2026).
+  filaDeTemas: { gap: spacing.xs, paddingBottom: spacing.sm },
+  rotuloDeTemas: { fontSize: 12, paddingHorizontal: spacing.md },
+  opcionesDeTema: { paddingHorizontal: spacing.md },
+  opcionesDeTemaFila: { flexDirection: 'row', gap: spacing.xs },
+  temasDeLaFila: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: spacing.xs },
+  temaDeLaFila: {
+    height: 24,
+    maxWidth: 200,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+  },
+  // «Sin tema» se distingue por el borde punteado, no por un color.
+  sinTema: { borderWidth: 1, borderStyle: 'dashed' },
+  temaDeLaFilaTexto: { flexShrink: 1, fontSize: 12, lineHeight: 16 },
+
+  // Elegir varios.
+  marca: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  marcaEncima: { position: 'absolute', top: 6, left: 6 },
+  barraDeSeleccion: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  salirDeSeleccion: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  cuantosSeleccionados: { fontSize: 15 },
+  pieDeSeleccion: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  hoja: { gap: spacing.sm, paddingBottom: spacing.sm },
+  hojaTitulo: { fontSize: 20, lineHeight: 24 },
+  hojaAyuda: { fontSize: 13, lineHeight: 18 },
+  hojaFila: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  hojaIcono: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hojaNombre: { flex: 1, fontSize: 15 },
 });

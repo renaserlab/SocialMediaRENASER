@@ -29,7 +29,14 @@ import { CabeceraDeChat } from '@/components/CabeceraDeChat';
 import { BottomSheet } from '@/components/BottomSheet';
 import { BurbujaDeNotaDeVoz } from '@/components/BurbujaDeNotaDeVoz';
 import { Avatar } from '@/components/Avatar';
+import { CabeceraDeAdjunto } from '@/components/chat/CabeceraDeAdjunto';
 import { DetallesDeMensaje } from '@/components/chat/DetallesDeMensaje';
+import { EtiquetaDeTemas, HojaDeTemasDelMensaje } from '@/components/chat/EtiquetaDeTemas';
+import {
+  HojaDeEnviarArchivos,
+  type ArchivosPorEnviar,
+} from '@/components/chat/HojaDeEnviarArchivos';
+import { HojaDeNombre, type ObjetivoDeNombre } from '@/components/chat/HojaDeNombre';
 import { HojaDeFondoDeChat } from '@/components/chat/HojaDeFondoDeChat';
 import { IndicadorDeEscritura } from '@/components/chat/IndicadorDeEscritura';
 import { MarcaDeEntrega } from '@/components/chat/MarcaDeEntrega';
@@ -70,6 +77,16 @@ import {
 import { REACCIONES_RAPIDAS, esSticker } from '@/lib/stickers';
 import { sePuedeResponder } from '@/lib/deslizarParaResponder';
 import { medioQueEs, soloLlevaMedios, vaSinMarco } from '@/lib/mediosDeChat';
+import {
+  MAX_ARCHIVOS_DE_UNA_VEZ,
+  adjuntoNombrable,
+  aplicarTemas,
+  conTituloDeAdjunto,
+  etiquetaDeTemas,
+  idsParaPreguntarTemas,
+  puedeNombrar,
+  type TemaDeMensaje,
+} from '@/lib/nombresDeAdjuntos';
 import { guardarEnLaGaleria } from '@/services/guardarAdjunto';
 import { profileImageUrl } from '@/services/storage';
 import {
@@ -125,6 +142,7 @@ import { formatTime, toMessageFromRow } from '@/mappers/messageMapper';
 import { registrarSalidaPropia } from '@/navigation/capasAbiertas';
 import { BookingRepository, type Sesion } from '@/repositories/BookingRepository';
 import { GroupRepository } from '@/repositories/GroupRepository';
+import { TemasRepository } from '@/repositories/TemasRepository';
 import {
   MessageRepository,
   MENSAJES_POR_PAGINA,
@@ -144,7 +162,7 @@ import {
   type AdjuntoSubido,
 } from '@/services/messageMedia';
 import { PermisoDenegadoError } from '@/services/storage';
-import { avisosDeReacciones, subscribeToConversation } from '@/services/realtime';
+import { avisosDeReacciones, avisosDeTemas, subscribeToConversation } from '@/services/realtime';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing, type AppPalette, type ThemeMode } from '@/theme/tokens';
@@ -295,6 +313,20 @@ export function ChatScreen() {
     puedoBorrarAjenos && esGrupoDePrimerNivel && disponibilidadDeTemas.temas;
   /** El mensaje de General que se está agregando a un tema (`HojaDeTemas`). */
   const [temasPara, setTemasPara] = useState<Message | null>(null);
+  /*
+    AUDIOS Y TEMAS (30/10/2026). En General de una comunidad con temas, cada
+    mensaje que está en uno lleva debajo su etiqueta, y la ven TODOS los
+    miembros, no solo quien administra. Fuera de ahí no hay etiquetas que
+    pedir ni aviso que escuchar.
+  */
+  const conEtiquetasDeTemas =
+    supabaseEnabled && !!params.id && esGrupoDePrimerNivel && disponibilidadDeTemas.temas;
+  /** Los temas que lista «En N temas» o «Ver en qué temas está». */
+  const [temasDelMensaje, setTemasDelMensaje] = useState<TemaDeMensaje[] | null>(null);
+  /** El adjunto al que se le pone o se le cambia el nombre (`HojaDeNombre`). */
+  const [nombrando, setNombrando] = useState<ObjetivoDeNombre | null>(null);
+  /** Lo elegido con «Archivo», esperando sus nombres (`HojaDeEnviarArchivos`). */
+  const [archivosPorEnviar, setArchivosPorEnviar] = useState<ArchivosPorEnviar | null>(null);
   /*
     EL CHAT DE UN TEMA SE LEE EN SU TEMA. Se llega aquí por un aviso, que
     abre la conversación suelta: se sustituye por el tema, con sus
@@ -1184,6 +1216,9 @@ export function ChatScreen() {
   const elegirCon = useCallback(
     async (accion: () => Promise<AdjuntoElegido[] | AdjuntoElegido | null>) => {
       setMenuAbierto(false);
+      // El selector es una pantalla nativa: encima de una hoja que todavía
+      // se está cerrando no se abre en iOS, y falla sin decir nada.
+      await afterSheetClose();
       try {
         const resultado = await accion();
         if (!resultado) return;
@@ -1197,6 +1232,26 @@ export function ChatScreen() {
     },
     [anadir],
   );
+
+  /**
+   * «Archivo»: hasta diez de una vez, y cada uno sale como SU mensaje con su
+   * nombre (audios y temas, 30/10/2026). Primero se cierra el menú y se
+   * espera a que no esté (`afterSheetClose`); después el selector; y con lo
+   * elegido, la hoja de los nombres. Nada pasa por el redactor.
+   */
+  const elegirArchivosConNombre = useCallback(async () => {
+    setMenuAbierto(false);
+    await afterSheetClose();
+    try {
+      const eleccion = await elegirArchivo(MAX_ARCHIVOS_DE_UNA_VEZ);
+      if (eleccion.archivos.length > 0) setArchivosPorEnviar(eleccion);
+    } catch (error) {
+      notify(
+        t('common.couldNotOpen'),
+        error instanceof PermisoDenegadoError ? error.message : t('chat.pickerFailed'),
+      );
+    }
+  }, [t]);
 
   const quitarElegido = useCallback((indice: number) => {
     setElegidos((previos) => previos.filter((_, i) => i !== indice));
@@ -1340,6 +1395,9 @@ export function ChatScreen() {
               // servidor la devolviera.
               durationS: archivo.durationS,
               url: archivo.uri,
+              // El nombre también: la tarjeta se ve desde el primer instante.
+              title: archivo.title ?? null,
+              voiceNote: archivo.kind === 'audio' ? archivo.voiceNote !== false : undefined,
             })),
           },
         ]),
@@ -1347,6 +1405,61 @@ export function ChatScreen() {
       await enviar(envio, idTemporal);
     },
     [enviando, aplicar, enviar],
+  );
+
+  /**
+   * «Enviar N archivos»: UN MENSAJE POR ARCHIVO, cada uno con su nombre, en
+   * orden y de uno en uno.
+   *
+   * Cada archivo recibe el mismo trato que cualquier envío —burbuja
+   * provisional, barra de subida, reconciliación y, si falla, su propio
+   * «reintentar»— porque pasa por `enviar` con su propio identificador. No
+   * pasa por `mandar`: su cerrojo de «ya se está enviando» dejaría fuera a
+   * todos menos el primero.
+   */
+  const enviarArchivos = useCallback(
+    async (archivos: AdjuntoElegido[]) => {
+      setArchivosPorEnviar(null);
+      if (archivos.length === 0 || !supabaseEnabled) return;
+      // Que la hoja se haya ido antes de que el chat se mueva debajo.
+      await afterSheetClose();
+      for (const archivo of archivos) {
+        const envio: EnvioPendiente = { texto: '', archivos: [archivo] };
+        const idTemporal = nuevoIdTemporal();
+        setEnviando(true);
+        aplicar(
+          fusionar(mensajesRef.current, [
+            {
+              id: idTemporal,
+              text: '',
+              sender: 'me' as const,
+              createdAt: '',
+              estado: 'enviando' as const,
+              progreso: 0,
+              attachments: [
+                {
+                  id: `${idTemporal}-0`,
+                  storagePath: '',
+                  kind: archivo.kind,
+                  fileName: archivo.name,
+                  bytes: archivo.bytes,
+                  width: archivo.width,
+                  height: archivo.height,
+                  durationS: archivo.durationS,
+                  url: archivo.uri,
+                  title: archivo.title ?? null,
+                  voiceNote: archivo.kind === 'audio' ? archivo.voiceNote !== false : undefined,
+                },
+              ],
+            },
+          ]),
+        );
+        // De uno en uno: llegan en el orden en que se eligieron, y la red no
+        // se reparte entre diez subidas a la vez.
+        await enviar(envio, idTemporal);
+      }
+    },
+    [supabaseEnabled, aplicar, enviar],
   );
 
   /** La cita de un mensaje que se va a responder, armada con lo que ya se sabe de él. */
@@ -1466,6 +1579,9 @@ export function ChatScreen() {
                 // nota recién grabada saldría marcando 0:00.
                 durationS: nota.durationS,
                 url: nota.uri,
+                // Y su nombre, si se le puso en la previa.
+                title: nota.title ?? null,
+                voiceNote: true,
               },
             ],
           },
@@ -1901,6 +2017,132 @@ export function ChatScreen() {
     setTemasPara(mensaje);
   }, [accionesDe]);
 
+  // -------------------------------------------------------------------------
+  // Nombres y temas de los mensajes (audios y temas, 30/10/2026)
+  // -------------------------------------------------------------------------
+
+  /** Abre un tema de esta comunidad, con sus referencias. */
+  const abrirTema = useCallback(
+    (tema: TemaDeMensaje) => {
+      if (!params.id) return;
+      router.push({
+        pathname: '/chat/tema/[id]' as never,
+        params: { id: params.id, tema: tema.id, name: tema.nombre },
+      });
+    },
+    [params.id, router],
+  );
+
+  /** «Ir al tema «X»» o «Ver en qué temas está»: tras cerrar el menú, como todo (iOS). */
+  const temasDesdeElMenu = useCallback(async () => {
+    const mensaje = accionesDe;
+    setAccionesDe(null);
+    const etiqueta = etiquetaDeTemas(mensaje?.temas);
+    if (etiqueta.tipo === 'ninguna') return;
+    await afterSheetClose();
+    if (etiqueta.tipo === 'uno') abrirTema(etiqueta.tema);
+    else setTemasDelMensaje(mensaje?.temas ?? null);
+  }, [accionesDe, abrirTema]);
+
+  /** Elegido un tema de «En N temas»: la hoja se va, y después se abre el tema. */
+  const elegirTemaDeLaLista = useCallback(
+    async (tema: TemaDeMensaje) => {
+      setTemasDelMensaje(null);
+      await afterSheetClose();
+      abrirTema(tema);
+    },
+    [abrirTema],
+  );
+
+  /** «Ponerle nombre» / «Cambiar el nombre»: cierra el menú y abre su hoja (iOS). */
+  const nombrarDesdeElMenu = useCallback(async () => {
+    const mensaje = accionesDe;
+    setAccionesDe(null);
+    const adjunto = adjuntoNombrable(mensaje?.attachments);
+    if (!mensaje || !adjunto || !params.id) return;
+    await afterSheetClose();
+    setNombrando({
+      conversacionId: params.id,
+      mensajeId: mensaje.id,
+      adjunto,
+      autor:
+        mensaje.sender === 'me'
+          ? t('chatViews.you')
+          : nombreDelAutor(infoDeConversacion, mensaje.autorId, mensaje.autorNombre) || headerName,
+      esGrupo,
+    });
+  }, [accionesDe, params.id, t, infoDeConversacion, headerName, esGrupo]);
+
+  /** El nombre ya está en el servidor: se pinta en su burbuja sin recargar nada. */
+  const alGuardarNombre = useCallback(
+    (adjuntoId: string, titulo: string | null) => {
+      aplicar(conTituloDeAdjunto(mensajesRef.current, adjuntoId, titulo));
+    },
+    [aplicar],
+  );
+
+  /**
+   * Pregunta en qué temas están los mensajes cargados —o solo los que se
+   * digan— y pone al día sus etiquetas, en UNA petición
+   * (`GET …/topics/of-messages`). Si falla, se quedan las que había.
+   */
+  const refrescarTemas = useCallback(
+    (soloEstos?: string[]) => {
+      if (!conEtiquetasDeTemas || !params.id) return;
+      const ids = soloEstos ?? idsParaPreguntarTemas(mensajesRef.current);
+      if (ids.length === 0) return;
+      TemasRepository.temasDeMensajes(params.id, ids)
+        .then((porMensaje) => {
+          const siguiente = aplicarTemas(mensajesRef.current, ids, porMensaje);
+          // La misma lista es «nada cambió»: el chat no se repinta.
+          if (siguiente !== mensajesRef.current) aplicar(siguiente);
+        })
+        .catch(() => {
+          // Sin respuesta se quedan las etiquetas que había.
+        });
+    },
+    [conEtiquetasDeTemas, params.id, aplicar],
+  );
+
+  /*
+    ALGUIEN AGREGÓ O QUITÓ ALGO DE UN TEMA. Eso no crea ningún mensaje y el
+    canal del chat no se entera: quien lo hace avisa por `chat-temas`, sin
+    contenido, y aquí se pregunta por las etiquetas de lo cargado. Como
+    mucho una pregunta cada segundo largo, como con las reacciones.
+  */
+  useEffect(() => {
+    if (!conEtiquetasDeTemas || !params.id) return undefined;
+    let pendiente: ReturnType<typeof setTimeout> | null = null;
+    const canal = avisosDeTemas(params.id, () => {
+      if (pendiente) return;
+      pendiente = setTimeout(() => {
+        pendiente = null;
+        refrescarTemas();
+      }, 1200);
+    });
+    return () => {
+      if (pendiente) clearTimeout(pendiente);
+      canal.cerrar();
+    };
+  }, [conEtiquetasDeTemas, params.id, refrescarTemas]);
+
+  /*
+    Y AL VOLVER A ESTA PANTALLA. El aviso no le llega a quien lo manda
+    (`self: false`): quien agrega varios desde Contenido, en este mismo
+    teléfono, vuelve aquí y sus etiquetas tienen que estar al día.
+  */
+  const yaTuvoElFocoParaTemas = useRef(false);
+  // Por referencia: que la función cambie (al saber que es una comunidad) no
+  // es volver a la pantalla, y no tiene que preguntar nada.
+  const refrescarTemasAhora = useRef(refrescarTemas);
+  refrescarTemasAhora.current = refrescarTemas;
+  useFocusEffect(
+    useCallback(() => {
+      if (yaTuvoElFocoParaTemas.current) refrescarTemasAhora.current();
+      yaTuvoElFocoParaTemas.current = true;
+    }, []),
+  );
+
   /**
    * Borrar DESDE la hoja. El `afterSheetClose` no es opcional.
    *
@@ -2134,6 +2376,8 @@ export function ChatScreen() {
       setMensajeBuscado,
       setAudioSonando,
       setFotoAmpliada,
+      abrirTema,
+      setTemasDelMensaje,
     }),
     [
       esGrupo,
@@ -2151,6 +2395,7 @@ export function ChatScreen() {
       reintentarDesdeLaBurbuja,
       descartar,
       responderSesion,
+      abrirTema,
     ],
   );
 
@@ -2579,10 +2824,12 @@ export function ChatScreen() {
           leftIcon="camera"
           onPress={() => void elegirCon(hacerFoto)}
         />
+        {/* Hasta diez, cada uno con su nombre y en su propio mensaje. */}
         <ListRow
           title={t('chat.file')}
+          subtitle={t('sendFiles.menuHint')}
           leftIcon="paperclip"
-          onPress={() => void elegirCon(elegirArchivo)}
+          onPress={() => void elegirArchivosConNombre()}
         />
       </BottomSheet>
 
@@ -2636,6 +2883,22 @@ export function ChatScreen() {
             />
           </>
         ) : null}
+        {/*
+          SUS TEMAS, para todos los miembros (audios y temas, 30/10/2026):
+          ir al único, o ver en cuáles está. Lo mismo que tocar su etiqueta.
+        */}
+        {accionesDe && etiquetaDeTemas(accionesDe.temas).tipo !== 'ninguna' ? (
+          <ListRow
+            title={(() => {
+              const etiqueta = etiquetaDeTemas(accionesDe.temas);
+              return etiqueta.tipo === 'uno'
+                ? t('topicChip.goToTopic', { nombre: etiqueta.tema.nombre })
+                : t('topicChip.seeTopics');
+            })()}
+            leftIcon={etiquetaDeTemas(accionesDe.temas).tipo === 'uno' ? 'hash' : 'layers'}
+            onPress={() => void temasDesdeElMenu()}
+          />
+        ) : null}
         {/* Quién lo leyó y quién no. Solo de lo propio, ya enviado, y solo si
             el servidor lo sabe decir. */}
         {accionesDe &&
@@ -2658,6 +2921,26 @@ export function ChatScreen() {
             onPress={() => void agregarATemaDesdeElMenu()}
           />
         ) : null}
+        {/*
+          EL NOMBRE de un audio, documento o video: quien lo envió y quien
+          administra (la misma regla que borrar). Lo decide el servidor.
+        */}
+        {accionesDe &&
+        puedeNombrar({
+          mio: accionesDe.sender === 'me',
+          administra: puedoBorrarAjenos,
+          adjunto: adjuntoNombrable(accionesDe.attachments),
+        }) ? (
+          <ListRow
+            title={t(
+              adjuntoNombrable(accionesDe.attachments)?.title
+                ? 'attachmentName.rename'
+                : 'attachmentName.name',
+            )}
+            leftIcon="edit-3"
+            onPress={() => void nombrarDesdeElMenu()}
+          />
+        ) : null}
         {accionesDe?.sender === 'me' || (accionesDe && puedoBorrarAjenos) ? (
           <ListRow
             title={t('common.delete')}
@@ -2672,6 +2955,33 @@ export function ChatScreen() {
         grupoId={params.id ?? ''}
         mensajeId={temasPara?.id ?? null}
         onClose={() => setTemasPara(null)}
+        // Sin nombre todavía: la hoja ofrece ponérselo al organizarlo.
+        adjuntoSinNombre={(() => {
+          const adjunto = adjuntoNombrable(temasPara?.attachments);
+          return adjunto && !adjunto.title ? adjunto : null;
+        })()}
+        alNombrar={alGuardarNombre}
+        alCambiarTemas={() => {
+          if (temasPara) refrescarTemas([temasPara.id]);
+        }}
+      />
+
+      <HojaDeTemasDelMensaje
+        temas={temasDelMensaje}
+        onClose={() => setTemasDelMensaje(null)}
+        alElegir={(tema) => void elegirTemaDeLaLista(tema)}
+      />
+
+      <HojaDeNombre
+        objetivo={nombrando}
+        onClose={() => setNombrando(null)}
+        alGuardar={alGuardarNombre}
+      />
+
+      <HojaDeEnviarArchivos
+        eleccion={archivosPorEnviar}
+        onClose={() => setArchivosPorEnviar(null)}
+        alEnviar={(archivos) => void enviarArchivos(archivos)}
       />
 
       <DetallesDeMensaje
@@ -2801,6 +3111,10 @@ type LoDelChat = {
   setMensajeBuscado: (id: string | null) => void;
   setAudioSonando: (id: string | null) => void;
   setFotoAmpliada: (adjunto: MessageAttachment | null) => void;
+  /** La etiqueta de un tema lleva a él (audios y temas, 30/10/2026). */
+  abrirTema: (tema: TemaDeMensaje) => void;
+  /** «En N temas» abre la lista. */
+  setTemasDelMensaje: (temas: TemaDeMensaje[] | null) => void;
 };
 
 type PropsDeBurbuja = {
@@ -2859,6 +3173,8 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
     setMensajeBuscado,
     setAudioSonando,
     setFotoAmpliada,
+    abrirTema,
+    setTemasDelMensaje,
   } = chat;
 
   /** El texto de una cita: su extracto, o qué era si no tenía texto. */
@@ -2927,7 +3243,14 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
     const proporcion =
       adjunto.width && adjunto.height ? adjunto.width / adjunto.height : 1;
 
-    return (
+    /*
+      UN VIDEO CON NOMBRE LLEVA LA TARJETA (audios y temas, 30/10/2026): el
+      cuadrito y su nombre encima, dentro de la burbuja, y el video debajo,
+      como siempre. Por eso un video con nombre nunca va sin marco: el
+      nombre necesita un fondo sobre el que leerse (ver `vaSinMarco`).
+    */
+    const titulado = adjunto.kind === 'video' && !!adjunto.title?.trim();
+    const medio = (
       <Pressable
         key={adjunto.id}
         onPress={() => {
@@ -2967,6 +3290,18 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           {contexto.encima}
         </MedioDeChat>
       </Pressable>
+    );
+    if (!titulado) return medio;
+    return (
+      <View key={adjunto.id} style={styles.videoConNombre}>
+        <CabeceraDeAdjunto
+          adjunto={adjunto}
+          mio={mio}
+          // Al ras, el video toca los bordes de la burbuja; el nombre no.
+          style={contexto.forma === 'al_ras' ? styles.cabeceraAlRas : undefined}
+        />
+        {medio}
+      </View>
     );
   };
 
@@ -3515,6 +3850,26 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           </View>
         ) : null}
       </DeslizarParaResponder>
+      {/*
+        LA ETIQUETA DEL TEMA, bajo la burbuja y fuera de ella, del mismo lado
+        (audios y temas, 30/10/2026). La ven todos los miembros. Hermana de la
+        burbuja: nunca un botón dentro de otro.
+      */}
+      {item.temas?.length ? (
+        <EtiquetaDeTemas
+          temas={item.temas}
+          alAbrirTema={abrirTema}
+          alVerTemas={() => setTemasDelMensaje(item.temas ?? null)}
+          style={[
+            styles.etiquetaDeTemas,
+            mine
+              ? styles.etiquetaMia
+              : esGrupo
+                ? styles.etiquetaSuyaDeGrupo
+                : styles.etiquetaSuya,
+          ]}
+        />
+      ) : null}
     </Aparecer>
   );
 });
@@ -3665,6 +4020,9 @@ function RedactorDelChat({
           eliminar={() => grabadora.eliminar()}
           enviar={() => void grabadora.enviar()}
           deshabilitado={enviando}
+          // «Ponle nombre (opcional)» en la previa: viaja como `title`.
+          nombre={grabadora.nombre}
+          alCambiarNombre={grabadora.setNombre}
         />
       ) : (
         // El mismo botón redondo que en comentarios: crece cuando hay algo
@@ -3816,6 +4174,18 @@ const styles = StyleSheet.create({
   // Se estira a lo que mida la burbuja —que puede ensancharla el texto—, y
   // nunca menos que una foto suelta.
   medioAlRas: { alignSelf: 'stretch', borderRadius: 16 },
+  // Un video con nombre: la tarjeta encima y el video debajo.
+  videoConNombre: { alignSelf: 'stretch', gap: spacing.sm },
+  cabeceraAlRas: {
+    paddingHorizontal: RELLENO_H - MARCO_FINO,
+    paddingTop: RELLENO_V - MARCO_FINO,
+  },
+  // La etiqueta del tema, bajo la burbuja. En un grupo, la ajena se corre lo
+  // que ocupa la foto de quien escribe (28) y su hueco (6).
+  etiquetaDeTemas: { marginTop: 4, marginBottom: 2 },
+  etiquetaMia: { alignSelf: 'flex-end' },
+  etiquetaSuya: { alignSelf: 'flex-start' },
+  etiquetaSuyaDeGrupo: { alignSelf: 'flex-start', marginLeft: 34 },
   // Lo que va encima de una foto sin marco: sobre oscuro, se lee con todas.
   sobreMedio: {
     position: 'absolute',

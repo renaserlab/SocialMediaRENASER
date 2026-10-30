@@ -3,6 +3,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
+import { CabeceraDeAdjunto } from '@/components/chat/CabeceraDeAdjunto';
+import { useTranslation } from '@/i18n/useTranslation';
+import { partesDeDuracion } from '@/lib/nombresDeAdjuntos';
 import { formatearDuracion } from '@/lib/notaDeVoz';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -49,36 +52,75 @@ type Props = {
   alPulsar: () => void;
   /** Terminó, o se paró. La pantalla libera el turno. */
   alTerminar: () => void;
+  /** Mantener presionado (en Contenido, elegir para agregar a un tema). */
+  alMantener?: () => void;
 };
+
+/**
+ * Lo que la carátula necesita saber del audio para decirse: su nombre, si lo
+ * tiene, y si es una nota de voz o un archivo de audio.
+ */
+type Identidad = { titulo: string | null; notaDeVoz: boolean };
 
 /** Ancho fijo de la onda. Con anchos variables las burbujas bailan al cargar. */
 const BARRAS = [0.35, 0.6, 0.85, 0.5, 0.95, 0.7, 0.4, 0.8, 0.55, 0.9, 0.45, 0.65, 0.3];
 
-export function BurbujaDeNotaDeVoz({ adjunto, mio, activo, alPulsar, alTerminar }: Props) {
+export function BurbujaDeNotaDeVoz({
+  adjunto,
+  mio,
+  activo,
+  alPulsar,
+  alTerminar,
+  alMantener,
+}: Props) {
   const { colors } = useAppTheme();
   const color = mio ? colors.sobreBurbujaPropia : colors.text;
+  const identidad: Identidad = {
+    titulo: adjunto.title?.trim() || null,
+    notaDeVoz: adjunto.voiceNote !== false,
+  };
+
+  /*
+    CON NOMBRE, LA TARJETA: el cuadrito y el nombre arriba, y debajo el
+    reproductor de siempre (lienzo «Elegida · Tarjeta»). Sin nombre se
+    devuelve el reproductor solo, exactamente como antes. La cabecera es
+    HERMANA del play, no lo envuelve.
+  */
+  const enTarjeta = (reproductor: React.ReactElement) =>
+    identidad.titulo ? (
+      <View style={styles.tarjeta}>
+        <CabeceraDeAdjunto adjunto={adjunto} mio={mio} />
+        {reproductor}
+      </View>
+    ) : (
+      reproductor
+    );
 
   if (activo && adjunto.url) {
-    return (
+    return enTarjeta(
       <NotaSonando
         uri={adjunto.url}
         duracion={adjunto.durationS ?? 0}
         color={color}
+        identidad={identidad}
         cederElTurno={alTerminar}
-      />
+        alMantener={alMantener}
+      />,
     );
   }
 
-  return (
+  return enTarjeta(
     <Caratula
       color={color}
       duracion={adjunto.durationS ?? 0}
       avance={0}
       sonando={false}
+      identidad={identidad}
       // Sin URL firmada todavía no hay nada que reproducir. El botón se pinta
       // igual pero no hace nada: pulsarlo y que no suene nada sería peor.
       alPulsar={adjunto.url ? alPulsar : undefined}
-    />
+      alMantener={alMantener}
+    />,
   );
 }
 
@@ -93,13 +135,17 @@ function NotaSonando({
   uri,
   duracion,
   color,
+  identidad,
   cederElTurno,
+  alMantener,
 }: {
   uri: string;
   duracion: number;
   color: string;
+  identidad: Identidad;
   /** Deja de ser la nota activa. Al llamarlo, la pantalla desmonta esto. */
   cederElTurno: () => void;
+  alMantener?: () => void;
 }) {
   const reproductor = useAudioPlayer({ uri });
   const estado = useAudioPlayerStatus(reproductor);
@@ -152,9 +198,11 @@ function NotaSonando({
       duracion={total > 0 ? Math.max(0, total - actual) : duracion}
       avance={total > 0 ? Math.min(1, actual / total) : 0}
       sonando={estado?.playing ?? true}
+      identidad={identidad}
       // Pulsar mientras suena cede el turno, o sea: para. Es lo mismo que
       // terminar, y por eso comparten camino.
       alPulsar={cederElTurno}
+      alMantener={alMantener}
     />
   );
 }
@@ -165,25 +213,34 @@ function Caratula({
   duracion,
   avance,
   sonando,
+  identidad,
   alPulsar,
+  alMantener,
 }: {
   color: string;
   duracion: number;
   avance: number;
   sonando: boolean;
+  identidad: Identidad;
   alPulsar?: () => void;
+  alMantener?: () => void;
 }) {
   const { colors } = useAppTheme();
+  const { t } = useTranslation();
+  /*
+    Un archivo de audio puede llegar sin duración (no la exige el servidor):
+    entonces no se pinta un «0:00» que mentiría. Una nota de voz la trae
+    siempre, y se pinta como antes.
+  */
+  const conReloj = identidad.notaDeVoz || duracion > 0;
   return (
     <Pressable
       onPress={alPulsar}
-      disabled={!alPulsar}
+      onLongPress={alMantener}
+      delayLongPress={400}
+      disabled={!alPulsar && !alMantener}
       accessibilityRole="button"
-      accessibilityLabel={
-        sonando
-          ? 'Parar la nota de voz'
-          : `Reproducir nota de voz de ${formatearDuracion(duracion)}`
-      }
+      accessibilityLabel={etiquetaDelPlay(t, { sonando, duracion, identidad })}
       style={styles.fila}
       hitSlop={6}
     >
@@ -213,17 +270,62 @@ function Caratula({
         ))}
       </View>
 
-      <Text style={[styles.reloj, { color, opacity: 0.85 }]}>
-        {formatearDuracion(duracion)}
-      </Text>
+      {conReloj ? (
+        <Text style={[styles.reloj, { color, opacity: 0.85 }]}>
+          {formatearDuracion(duracion)}
+        </Text>
+      ) : null}
 
-      {/* Marca que esto es una nota de voz y no un archivo cualquiera. */}
-      <Feather name="mic" size={11} color={colors.textMuted} style={{ opacity: 0.6 }} />
+      {/* Marca si es una nota de voz o un archivo de audio. */}
+      <Feather
+        name={identidad.notaDeVoz ? 'mic' : 'music'}
+        size={11}
+        color={colors.textMuted}
+        style={{ opacity: 0.6 }}
+      />
     </Pressable>
   );
 }
 
+type Traducir = ReturnType<typeof useTranslation>['t'];
+
+/**
+ * Lo que dice el lector de pantalla del play.
+ *
+ * Sin nombre, una nota de voz se anuncia como siempre. Con nombre se dice el
+ * nombre y la duración en palabras («Reproducir Meditación de la mañana, 42
+ * segundos»): «0:42» leído en voz alta no se entiende.
+ */
+function etiquetaDelPlay(
+  t: Traducir,
+  { sonando, duracion, identidad }: { sonando: boolean; duracion: number; identidad: Identidad },
+): string {
+  const { titulo, notaDeVoz } = identidad;
+  if (sonando) return titulo ? t('chat.stopNamed', { nombre: titulo }) : 'Parar la nota de voz';
+  const partes = partesDeDuracion(duracion);
+  if (titulo) {
+    return partes
+      ? t('chat.playNamed', { nombre: titulo, duracion: duracionHablada(t, partes) })
+      : t('chat.playNamedNoDuration', { nombre: titulo });
+  }
+  if (!notaDeVoz) {
+    return partes
+      ? t('chat.playAudioFile', { duracion: duracionHablada(t, partes) })
+      : t('chat.playAudioFileNoDuration');
+  }
+  return `Reproducir nota de voz de ${formatearDuracion(duracion)}`;
+}
+
+/** «42 segundos», «1 segundo», «1 min 15 s». */
+function duracionHablada(t: Traducir, { minutos, segundos }: { minutos: number; segundos: number }): string {
+  if (minutos === 0) {
+    return segundos === 1 ? t('chat.spokenOneSecond') : t('chat.spokenSeconds', { n: segundos });
+  }
+  return t('chat.spokenMinutes', { m: minutos, s: segundos });
+}
+
 const styles = StyleSheet.create({
+  tarjeta: { gap: spacing.sm },
   fila: {
     flexDirection: 'row',
     alignItems: 'center',
