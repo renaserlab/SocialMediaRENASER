@@ -75,6 +75,7 @@ from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import esquema, historias, preferencias, reacciones, sesiones
 from app.modules.messaging.lectura import adjuntos_por_mensaje
 from app.modules.messaging.models import (
+    TITULO_DE_ADJUNTO,
     Conversation,
     ConversationFilter,
     ConversationMember,
@@ -438,6 +439,26 @@ class VistasLeidas(BaseModel):
     max_filters: int = MAX_FILTROS_POR_CONVERSACION
 
 
+class TemaContado(BaseModel):
+    id: str
+    name: str
+    #: Cuantos mensajes vivos de la categoria estan en este tema.
+    count: int = 0
+
+
+class TemasDeLaVista(BaseModel):
+    """`GET /{id}/views/topics`: la fila «Tema» de Contenido, con sus cuentas.
+
+    `sin_tema` es lo que alimenta «Sin tema · N»: los mensajes de la categoria
+    que no estan en ningun tema vivo. `topics` solo trae los temas vivos que
+    tienen ALGO de esa categoria, en el orden de la lista de temas: uno a cero
+    seria un filtro que siempre sale vacio.
+    """
+
+    sin_tema: int = 0
+    topics: list[TemaContado] = Field(default_factory=list)
+
+
 class PaginaDeVista(BaseModel):
     """Una pagina de una vista, de lo mas reciente a lo mas antiguo.
 
@@ -717,6 +738,8 @@ async def mensajes_de_una_vista(
     before: datetime | None = Query(default=None),
     before_id: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=PAGINA_POR_OMISION, ge=1, le=PAGINA_MAXIMA),
+    topic_id: str | None = Query(default=None, max_length=64),
+    sin_tema: bool = Query(default=False),
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PaginaDeVista:
@@ -735,6 +758,19 @@ async def mensajes_de_una_vista(
     UN FILTRO APAGADO, O DE OTRA CONVERSACION, ES UN 404, para todo el mundo
     que no lo administre. No se dice «existe pero no puedes»: eso seria
     confirmar que existe.
+
+    POR TEMA (30/10/2026): `topic_id` deja solo lo que esta en ese tema y
+    `sin_tema=true` solo lo que no esta en ninguno vivo, que es lo que falta
+    por ordenar. Se combinan con la categoria o el filtro («los audios sin
+    tema»), pero no entre si: 422 `views_topic_conflict`. Un tema que no es
+    de este grupo, o eliminado, es 404 `topic_not_found`. Son un `EXISTS` o
+    un `NOT EXISTS` mas en la misma consulta: +0 consultas, y la paginacion
+    sigue contando filas de verdad. Fuera de un grupo con temas (un chat de
+    dos, una comunidad de dentro, sin la 0108) nada esta en un tema: «sin
+    tema» es todo, y un `topic_id` no existe.
+
+    `q` busca tambien en el NOMBRE de los adjuntos (0113): el audio llamado
+    «Respiración 4-7-8» se encuentra escribiendo «respiración».
     """
     kind, creador = await conversacion_de(db, conversation_id, current_user.id)
 
@@ -742,6 +778,11 @@ async def mensajes_de_una_vista(
         raise ValidationAppError(
             "Indica una categoría o un filtro, y solo uno.",
             code="view_selector_invalid",
+        )
+    if topic_id is not None and sin_tema:
+        raise ValidationAppError(
+            "Elige un tema o «Sin tema», no los dos.",
+            code="views_topic_conflict",
         )
 
     if category is not None:
@@ -783,17 +824,34 @@ async def mensajes_de_una_vista(
     if vaciado is not None:
         condiciones.append(Message.created_at > vaciado)
 
+    # Por tema. `temas` se importa aqui dentro: importa este fichero.
+    from app.modules.messaging import temas
+
+    con_temas = kind == "group" and await esquema.hay_temas(db)
+    if topic_id is not None:
+        if not con_temas:
+            raise NotFoundError("Tema no encontrado.", code="topic_not_found")
+        tema = await temas.tema_vivo_del_grupo(db, conversation_id, topic_id)
+        condiciones.append(temas.condicion_en_el_tema(tema.id))
+    elif sin_tema and con_temas:
+        condiciones.append(temas.condicion_sin_tema(conversation_id))
+
     texto = (q or "").strip()
     if texto:
         patron = _patron(texto)
         en_el_texto = Message.body.ilike(patron, escape="\\")
         if con_adjuntos:
-            # Un PDF se busca por su nombre: es lo unico que lo identifica.
+            # Un PDF se busca por su nombre de archivo: es lo unico que lo
+            # identifica. Y desde la 0113, cualquier adjunto por el nombre que
+            # le puso una persona.
+            en_los_nombres = [MessageAttachment.file_name.ilike(patron, escape="\\")]
+            if await esquema.hay_nombres_de_adjuntos(db):
+                en_los_nombres.append(TITULO_DE_ADJUNTO.ilike(patron, escape="\\"))
             en_el_nombre = (
                 select(MessageAttachment.id)
                 .where(
                     MessageAttachment.message_id == Message.id,
-                    MessageAttachment.file_name.ilike(patron, escape="\\"),
+                    or_(*en_los_nombres),
                 )
                 .correlate(Message)
                 .exists()
@@ -845,6 +903,8 @@ async def mensajes_de_una_vista(
     de_sesion = await sesiones.contextos_por_mensaje(db, ids, current_user.id)
     reacciones_de = await reacciones.reacciones_por_mensaje(db, ids, current_user.id)
     citas = await reacciones.respuestas_por_mensaje(db, ids)
+    # Las pildoras de sus temas, tambien de una vez. Solo en un grupo.
+    en_temas = await temas.temas_por_mensaje(db, conversation_id, ids) if con_temas else {}
 
     items = [
         MessageRead(
@@ -860,6 +920,7 @@ async def mensajes_de_una_vista(
             booking_context=de_sesion.get(msg_id),
             reactions=reacciones_de.get(msg_id, []),
             reply_to=citas.get(msg_id),
+            topics=en_temas.get(str(msg_id), []),
         )
         for (
             msg_id,
@@ -896,6 +957,89 @@ async def _nombre_repetido(
 
 
 _NOMBRE_REPETIDO = "Ya hay un filtro con ese nombre en este grupo."
+
+
+@router.get("/{conversation_id}/views/topics", response_model=TemasDeLaVista)
+async def temas_de_una_vista(
+    conversation_id: str,
+    category: str | None = Query(default=None, max_length=16),
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TemasDeLaVista:
+    """Las cuentas de la fila «Tema» de Contenido para UNA categoria.
+
+    `sin_tema` y la de cada tema cuentan MENSAJES vivos de esa categoria
+    (sin `category`, de todas: `all`), con las MISMAS condiciones que la lista
+    (`mensajes_de_una_vista` con `sin_tema` o `topic_id`): si la cuenta dijera
+    3 y la lista trajera 4, el numero estaria mintiendo.
+
+    LO QUE QUIEN PREGUNTA VACIO NO SE LE CUENTA, como en `_cuentas`: es suyo,
+    y un «Sin tema · 12» que al tocarlo trae 9 seria otra mentira.
+
+    DOS CONSULTAS, tenga el grupo dos temas o veinte: la de «sin tema» y la de
+    todos los temas con un `GROUP BY`. Fuera de un grupo con temas no hay
+    temas que contar: todo es «sin tema» y la segunda ni se lanza.
+    """
+    kind, _ = await conversacion_de(db, conversation_id, current_user.id)
+    categoria = category or "all"
+    if categoria not in CATEGORIAS:
+        raise ValidationAppError("Categoría no admitida.", code="view_category_invalid")
+    criterios = _criterios_de_categoria(categoria)
+    con_adjuntos = await esquema.hay_adjuntos_de_chat(db)
+
+    condiciones: list[ColumnElement[bool]] = [
+        Message.conversation_id == conversation_id,
+        Message.deleted_at.is_(None),
+    ]
+    if criterios is not None:
+        condiciones.extend(_condiciones(criterios, con_adjuntos=con_adjuntos))
+    vaciado = await preferencias.vaciado_desde(db, conversation_id, current_user.id)
+    if vaciado is not None:
+        condiciones.append(Message.created_at > vaciado)
+
+    from app.modules.messaging import temas
+
+    con_temas = kind == "group" and await esquema.hay_temas(db)
+    sin_tema = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                *condiciones,
+                *((temas.condicion_sin_tema(conversation_id),) if con_temas else ()),
+            )
+        )
+        or 0
+    )
+    if not con_temas:
+        return TemasDeLaVista(sin_tema=sin_tema)
+
+    tema = temas.ConversationTopic
+    item = temas.ConversationTopicItem
+    # La clave primaria de la referencia es (tema, mensaje): `count(*)` por
+    # tema ya cuenta mensajes distintos. El grupo va en el WHERE del tema y
+    # del mensaje: un tema de otro grupo no se cuenta ni se nombra.
+    filas = await db.execute(
+        select(tema.id, tema.nombre, func.count())
+        .select_from(tema)
+        .join(item, item.topic_id == tema.id)
+        .join(Message, Message.id == item.message_id)
+        .where(
+            tema.conversation_id == conversation_id,
+            tema.deleted_at.is_(None),
+            *condiciones,
+        )
+        .group_by(tema.id, tema.nombre, tema.posicion, tema.created_at)
+        .order_by(tema.posicion.asc(), tema.created_at.asc(), tema.id.asc())
+    )
+    return TemasDeLaVista(
+        sin_tema=sin_tema,
+        topics=[
+            TemaContado(id=str(tid), name=nombre, count=int(total or 0))
+            for tid, nombre, total in filas
+            if total
+        ],
+    )
 
 
 @router.get("/{conversation_id}/filters", response_model=list[FiltroLeido])

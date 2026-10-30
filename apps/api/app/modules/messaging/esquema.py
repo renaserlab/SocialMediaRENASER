@@ -1,4 +1,4 @@
-"""Que migraciones de mensajeria estan aplicadas en ESTA base (0033, 0039, 0044 y 0045).
+"""Que migraciones de mensajeria estan aplicadas en ESTA base (0033, 0039, 0044, 0045… y 0113).
 
 POR QUE EXISTE, y es la misma leccion cara que cuenta
 `app/modules/recommendations/esquema.py`.
@@ -450,6 +450,46 @@ async def hay_comunidades_en_el_perfil(db: AsyncSession) -> bool:
                 "solicitud y el perfil se lee de group_settings.listed_on_profile."
             )
     return _cache["group_profile_listings"]
+
+
+async def hay_nombres_de_adjuntos(db: AsyncSession) -> bool:
+    """Si existen `message_attachments.title` y `.voice_note` (migracion 0113).
+
+    SE PREGUNTA POR LAS COLUMNAS, no por una tabla, porque la 0113 no crea
+    ninguna. El inspector las lista igual en PostgreSQL y en SQLite. Las dos
+    llegan en la misma migracion y en la misma transaccion; se piden las dos
+    porque sale gratis (es la misma lectura del catalogo) y una base con media
+    0113 no es un estado del que fiarse. Sin la 0033 no hay tabla: «no».
+
+    SIN LA 0113: el nombre que mande la aplicacion se ignora al escribir y
+    sale `null` al leer; `voice_note` se deduce de `kind == "audio"`, que es
+    lo que era verdad hasta entonces (un archivo de audio se mandaba como
+    `document`). Poner o cambiar un nombre despues responde 503
+    `attachment_titles_not_available`. Y un audio que llegue como archivo
+    (`voice_note: false`) se guarda y se valida como nota de voz: es lo que
+    dira de el la base cuando se pegue la 0113 (su relleno marca como nota de
+    voz todo `audio` que ya exista), y una fila no puede quedar diciendo algo
+    que no cumple.
+    """
+    if not _sabido("message_attachments.title"):
+
+        def _mirar(sync) -> bool:  # noqa: ANN001
+            try:
+                columnas = {c["name"] for c in inspect(sync).get_columns("message_attachments")}
+            except Exception:  # noqa: BLE001
+                # Sin la tabla (sin la 0033) el inspector lanza: no hay donde
+                # guardar un nombre, y eso es un «no», no un 500.
+                return False
+            return {"title", "voice_note"} <= columnas
+
+        conexion = await db.connection()
+        _cache["message_attachments.title"] = await conexion.run_sync(_mirar)
+        if not _cache["message_attachments.title"] and _caduca("message_attachments.title"):
+            logger.warning(
+                "La migracion 0113 no esta aplicada: los adjuntos no guardan "
+                "nombre y todo audio se lee como nota de voz."
+            )
+    return _cache["message_attachments.title"]
 
 
 def olvidar() -> None:

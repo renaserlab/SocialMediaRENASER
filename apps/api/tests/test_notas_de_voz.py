@@ -401,6 +401,9 @@ async def test_la_aplicacion_puede_preguntar_si_hay_notas_de_voz(entorno):
         # que en esta base tambien estan.
         "topics": True,
         "subgroups": True,
+        # El nombre de los adjuntos y si un audio es nota de voz (0113,
+        # 30/10/2026), que en esta base también está.
+        "attachment_titles": True,
     }
 
 

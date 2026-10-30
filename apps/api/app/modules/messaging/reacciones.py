@@ -50,6 +50,8 @@ from app.core.exceptions import (
 from app.core.security import AuthUser, get_current_user
 from app.modules.messaging import esquema
 from app.modules.messaging.models import (
+    ES_NOTA_DE_VOZ,
+    TITULO_DE_ADJUNTO,
     ConversationMember,
     Message,
     MessageAttachment,
@@ -170,15 +172,33 @@ async def respuestas_por_mensaje(
         return {}
 
     tipos: dict[str, str] = {}
+    # El nombre del primer adjunto (0113), para que la cita de un audio con
+    # nombre diga «Respiración 4-7-8» y no «Audio» (spec del 30/10/2026). Viaja
+    # en `excerpt`, que en un mensaje sin texto iba vacio: las aplicaciones de
+    # antes ya pintan `excerpt` si trae algo, asi que no hace falta otro campo.
+    titulos: dict[str, str] = {}
+    # Y si el primer audio es nota de voz o archivo, para que la aplicacion
+    # diga «Nota de voz» o «Audio». Sin la 0113, todo audio es nota de voz.
+    de_voz: set[str] = set()
     vivos = [fila.original for fila in filas if fila.deleted_at is None]
     if vivos and await esquema.hay_adjuntos_de_chat(db):
+        con_nombres = await esquema.hay_nombres_de_adjuntos(db)
         adjuntos = await db.execute(
-            select(MessageAttachment.message_id, MessageAttachment.kind)
+            select(
+                MessageAttachment.message_id,
+                MessageAttachment.kind,
+                *((TITULO_DE_ADJUNTO, ES_NOTA_DE_VOZ) if con_nombres else ()),
+            )
             .where(MessageAttachment.message_id.in_(vivos))
             .order_by(MessageAttachment.sort_order.asc(), MessageAttachment.id.asc())
         )
-        for mensaje, tipo in adjuntos:
-            tipos.setdefault(mensaje, tipo)
+        for adjunto in adjuntos:
+            if adjunto.message_id not in tipos:
+                tipos[adjunto.message_id] = adjunto.kind
+                if con_nombres and adjunto.title:
+                    titulos[adjunto.message_id] = adjunto.title
+                if adjunto.kind == "audio" and (adjunto.voice_note if con_nombres else True):
+                    de_voz.add(adjunto.message_id)
 
     salida: dict[str, ReplyRead] = {}
     for fila in filas:
@@ -188,8 +208,13 @@ async def respuestas_por_mensaje(
             sender_id=fila.autor,
             sender_name=(fila.full_name or "").strip() or fila.username or "",
             # El texto de un mensaje borrado no viaja, tampoco dentro de una cita.
-            excerpt="" if borrado else _extracto(fila.body),
+            excerpt=(
+                ""
+                if borrado
+                else _extracto(fila.body) or _extracto(titulos.get(fila.original, ""))
+            ),
             kind=None if borrado else tipos.get(fila.original),
+            voice_note=not borrado and fila.original in de_voz,
             deleted=borrado,
         )
     return salida

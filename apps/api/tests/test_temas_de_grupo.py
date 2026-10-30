@@ -597,6 +597,7 @@ async def test_last_es_lo_ultimo_que_llego_al_tema(entorno):
         "sender_name": "Ana",
         "excerpt": "Mira https://renaser.pe",
         "kind": "link",
+        "voice_note": False,
         "at": ultimo["at"],
         "own": True,
     }

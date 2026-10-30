@@ -44,6 +44,8 @@ from app.modules.content.schemas import AuthorSummary
 from app.modules.messaging import ajustes_de_grupo, esquema, preferencias
 from app.modules.messaging.etiquetas import etiquetas_por_conversacion
 from app.modules.messaging.models import (
+    ES_NOTA_DE_VOZ,
+    TITULO_DE_ADJUNTO,
     Conversation,
     ConversationMember,
     Message,
@@ -57,11 +59,38 @@ from app.modules.profiles.models import Profile
 #: falso: si hay mensaje, y quien lo recibio necesita saber que le ha llegado
 #: algo. Texto plano y no un icono: el icono lo pone la pantalla, que es quien
 #: sabe como se ve.
+#:
+#: `audio` faltaba (30/10/2026): una nota de voz salia como «Archivo», que es
+#: falso y no dice que hay algo que escuchar. Con nombre, lo que se lee es el
+#: nombre; un archivo de audio sin nombre dice «Audio» (ver `resumen_de_adjunto`).
 _RESUMEN_SIN_TEXTO = {
     "image": "Foto",
     "video": "Video",
     "document": "Archivo",
+    "audio": "Nota de voz",
 }
+
+#: Un archivo de audio elegido del telefono (`voice_note = false`, 0113) sin
+#: nombre. No es una nota de voz, y llamarlo asi seria decir que alguien hablo
+#: cuando lo que mando es una cancion o una clase grabada (30/10/2026).
+_RESUMEN_DE_UN_ARCHIVO_DE_AUDIO = "Audio"
+
+
+def resumen_de_adjunto(kind: str, titulo: str | None, nota_de_voz: bool) -> str:
+    """Como se resume un mensaje sin texto por su primer adjunto. UNA regla.
+
+    El nombre si lo tiene (0113); si no, lo que es: «Nota de voz» o «Audio»
+    segun `voice_note`, «Foto», «Video» o «Archivo». La usan la bandeja y la
+    lista de la comunidad (`subgrupos._leer`): si cada una tuviera su copia, la
+    misma nota diria una cosa en un sitio y otra en el otro. Sin la 0113 todo
+    audio llega con `nota_de_voz = True` —es lo que era—, asi que dice «Nota
+    de voz» como antes.
+    """
+    if titulo:
+        return titulo
+    if kind == "audio" and not nota_de_voz:
+        return _RESUMEN_DE_UN_ARCHIVO_DE_AUDIO
+    return _RESUMEN_SIN_TEXTO.get(kind, "Archivo")
 
 #: Las tres columnas de `conversation_topics` (0108) que necesita la bandeja
 #: agrupada, por su NOMBRE DEL CONTRATO (`docs/CONTRATOS_TEMAS_Y_COMUNIDADES.md`
@@ -285,9 +314,15 @@ async def adjuntos_por_mensaje(
     Con la lista vacia tampoco se consulta, por la trampa de siempre:
     `columna_uuid.in_([])` acaba «arreglandose» con `or [""]` y esa cadena vacia
     cuela en SQLite pero PostgreSQL la rechaza, convirtiendose en un 404 mudo.
+
+    EL NOMBRE Y SI ES NOTA DE VOZ (0113) VIAJAN EN LA MISMA CONSULTA: dos
+    columnas mas, ninguna consulta de mas. Sin la 0113 no se nombran —seria un
+    500— y salen `title: null` y `voice_note = kind == "audio"`, que era la
+    verdad hasta entonces.
     """
     if not message_ids or not await esquema.hay_adjuntos_de_chat(db):
         return {}
+    con_nombres = await esquema.hay_nombres_de_adjuntos(db)
 
     filas = (
         await db.execute(
@@ -302,6 +337,7 @@ async def adjuntos_por_mensaje(
                 MessageAttachment.width,
                 MessageAttachment.height,
                 MessageAttachment.duration_s,
+                *((TITULO_DE_ADJUNTO, ES_NOTA_DE_VOZ) if con_nombres else ()),
             )
             .where(MessageAttachment.message_id.in_(message_ids))
             # El orden que eligio quien los mando; el id desempata para que dos
@@ -323,6 +359,10 @@ async def adjuntos_por_mensaje(
                 width=fila.width,
                 height=fila.height,
                 duration_s=fila.duration_s,
+                title=fila.title if con_nombres else None,
+                voice_note=(
+                    bool(fila.voice_note) if con_nombres else fila.kind == "audio"
+                ),
             )
         )
     return salida
@@ -335,22 +375,42 @@ async def _resumen_de_los_sin_texto(
 
     Solo se pregunta por los mensajes que de verdad no tienen texto, que son los
     pocos: en una lista normal esta consulta ni llega a lanzarse.
+
+    CON NOMBRE (0113), EL RESUMEN ES EL NOMBRE: «Respiración 4-7-8» dice mas
+    que «Nota de voz», y es justo lo que se pidio para encontrar cada archivo.
+    SOLO EN LOS MENSAJES SIN TEXTO, a proposito: si quien lo mando escribio
+    algo, la fila sigue diciendo lo que escribio, como siempre, y no hace
+    falta preguntar por los adjuntos de cada ultimo mensaje —esta consulta
+    sigue sin lanzarse en una bandeja normal—. Es la misma regla en la lista
+    de la comunidad (`subgrupos._leer`) y en la de temas (`temas._leer_temas`).
     """
     if not message_ids or not await esquema.hay_adjuntos_de_chat(db):
         return {}
+    con_nombres = await esquema.hay_nombres_de_adjuntos(db)
 
     filas = (
         await db.execute(
-            select(MessageAttachment.message_id, MessageAttachment.kind)
+            select(
+                MessageAttachment.message_id,
+                MessageAttachment.kind,
+                *((TITULO_DE_ADJUNTO, ES_NOTA_DE_VOZ) if con_nombres else ()),
+            )
             .where(MessageAttachment.message_id.in_(message_ids))
             .order_by(MessageAttachment.sort_order.asc(), MessageAttachment.id.asc())
         )
     ).all()
 
     salida: dict[str, str] = {}
-    for message_id, kind in filas:
+    for fila in filas:
         # El primero manda: un mensaje con tres fotos se resume como «Foto».
-        salida.setdefault(message_id, _RESUMEN_SIN_TEXTO.get(kind, "Archivo"))
+        salida.setdefault(
+            fila.message_id,
+            resumen_de_adjunto(
+                fila.kind,
+                fila.title if con_nombres else None,
+                bool(fila.voice_note) if con_nombres else fila.kind == "audio",
+            ),
+        )
     return salida
 
 

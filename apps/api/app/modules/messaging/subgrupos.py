@@ -90,7 +90,12 @@ from app.modules.messaging import (
     grupos,
     preferencias,
 )
-from app.modules.messaging.lectura import adjuntos_por_mensaje, no_leidos, ultimos_mensajes
+from app.modules.messaging.lectura import (
+    adjuntos_por_mensaje,
+    no_leidos,
+    resumen_de_adjunto,
+    ultimos_mensajes,
+)
 from app.modules.messaging.models import (
     Conversation,
     ConversationMember,
@@ -637,9 +642,17 @@ async def _leer(
                 tipo = "text"
             resumen = UltimoDeLaComunidad(
                 sender_name=autores.get(str(ultimo.sender_id), ""),
+                # Sin texto, el nombre del archivo si lo tiene (0113), y si no
+                # lo que es («Nota de voz», «Audio», «Foto»…): la misma regla
+                # que la bandeja (`lectura.resumen_de_adjunto`). Ya venia en
+                # los adjuntos de la pagina: ninguna consulta de mas.
                 excerpt=(
                     _extracto(cuerpo)
                     if cuerpo
+                    else resumen_de_adjunto(
+                        primeros[0].kind, primeros[0].title, primeros[0].voice_note
+                    )
+                    if primeros
                     else _RESUMEN_SIN_TEXTO.get(tipo, "Archivo")
                 ),
                 kind=tipo,

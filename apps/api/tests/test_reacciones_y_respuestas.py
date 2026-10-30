@@ -216,6 +216,7 @@ async def test_responder_a_un_mensaje_deja_su_cita(entorno):
         "sender_name": "Bruno",
         "excerpt": "¿A qué hora es la clase?",
         "kind": None,
+        "voice_note": False,
         "deleted": False,
     }
     # Y la ven igual los demás al leer el historial.
@@ -316,8 +317,10 @@ async def test_reacciones_y_citas_no_hacen_una_consulta_por_mensaje(entorno):
     selects = [c for c in consultas if c.lstrip().lower().startswith("select")]
     # Las ocho de siempre (la octava, desde la 0107: desde cuándo quiere ver el
     # chat quien pregunta) más el tipo de adjunto de los citados: nueve, con
-    # treinta citas igual que con una.
-    assert len(selects) <= 9, f"{len(selects)} consultas para 31 mensajes con cita y reacción"
+    # treinta citas igual que con una. Y desde el 30/10/2026, en un GRUPO, los
+    # temas de la página (la etiqueta bajo cada burbuja): diez, también con
+    # treinta mensajes igual que con uno.
+    assert len(selects) <= 10, f"{len(selects)} consultas para 31 mensajes con cita y reacción"
 
 
 # --------------------------------------------------------------------------- #

@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     Uuid,
+    false,
     func,
     text,
 )
@@ -161,9 +162,40 @@ class MessageAttachment(Base):
     `conversation_id` esta repetido aqui —tambien lo sabe el mensaje— porque es
     lo que deja a la politica RLS decidir sin un JOIN, y lo que permite exigir
     que la ruta del fichero y la conversacion del mensaje sean la misma.
+
+    `title` y `voice_note` (migracion 0113) ESTAN EN LA TABLA PERO NO EN EL
+    MAPEO, por lo mismo que `GroupSettings.entrada`: la API puede desplegarse
+    antes de que se pegue la 0113, y con las dos columnas mapeadas cualquier
+    `insert` o `select` del ORM sobre esta tabla —mandar una foto, leer el
+    historial— las pediria y seria un 500 mientras faltaran. Fuera del mapeo
+    el ORM no las nombra nunca; quien las necesita las lee y las escribe por
+    `TITULO_DE_ADJUNTO` y `ES_NOTA_DE_VOZ` despues de preguntar
+    `esquema.hay_nombres_de_adjuntos`. Siguen declaradas para que la base de
+    las pruebas las tenga, con su `CHECK`.
+
+      · `title`: el nombre que le pone una persona («Clase 3 — Respiración»).
+        Nulo es «sin nombre»; nunca la cadena vacia.
+      · `voice_note`: si un `audio` se grabo en el chat (`true`) o es un
+        archivo de audio elegido del telefono (`false`). Solo sirve para el
+        icono (microfono o nota musical) y para que las reglas de una nota de
+        voz —duracion obligatoria, cinco minutos— no se le pidan a un mp3.
     """
 
     __tablename__ = "message_attachments"
+    __table_args__ = (
+        Column("title", Text, nullable=True),
+        # `false()` y no la cadena "false": en SQLite una cadena por defecto se
+        # guarda TAL CUAL en la columna, y una fila escrita por el ORM leeria
+        # 'false' —texto, verdadero en Python— en vez de 0.
+        Column("voice_note", Boolean, nullable=False, server_default=false()),
+        # El mismo nombre que en la 0113. `length` y no `char_length`, que
+        # SQLite no conoce; las dos cuentan caracteres.
+        CheckConstraint(
+            "title is null or length(title) between 1 and 80",
+            name="message_attachments_title_check",
+        ),
+    )
+    __mapper_args__ = {"exclude_properties": ["title", "voice_note"]}
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=_uuid)
     message_id: Mapped[str] = mapped_column(
@@ -195,6 +227,12 @@ class MessageAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+#: `message_attachments.title` y `.voice_note` (0113). Columnas de la TABLA, no
+#: atributos del modelo: ver el docstring de `MessageAttachment`.
+TITULO_DE_ADJUNTO = MessageAttachment.__table__.c.title
+ES_NOTA_DE_VOZ = MessageAttachment.__table__.c.voice_note
 
 
 class MessageStoryContext(Base):

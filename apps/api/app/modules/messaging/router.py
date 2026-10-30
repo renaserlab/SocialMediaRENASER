@@ -53,6 +53,7 @@ from app.modules.messaging.subgrupos import router as subgrupos_router
 from app.modules.messaging.temas import router as temas_router
 from app.modules.messaging.lectura import adjuntos_por_mensaje, leer_conversaciones
 from app.modules.messaging.models import (
+    ES_NOTA_DE_VOZ,
     Conversation,
     ConversationMember,
     DirectConversationPair,
@@ -62,6 +63,8 @@ from app.modules.messaging.models import (
 )
 from app.modules.messaging.schemas import (
     MAX_BUSQUEDA,
+    MAX_TITULO_DE_ADJUNTO,
+    TIPOS_SIN_NOMBRE,
     AttachmentCreate,
     AttachmentRead,
     ConversationRead,
@@ -70,6 +73,7 @@ from app.modules.messaging.schemas import (
     MessageRead,
     MessagingAvailability,
     StoryContextRead,
+    TituloDeAdjunto,
 )
 from app.modules.messaging.vistas import administra
 from app.modules.messaging.vistas import router as vistas_router
@@ -448,6 +452,39 @@ async def _exigir_esquema_de_adjuntos(db: AsyncSession) -> None:
         )
 
 
+def _exigir_titulo_que_cabe(titulo: str | None) -> None:
+    """422 `attachment_title_too_long` si el nombre, ya recortado, pasa de 80.
+
+    Aqui y no en Pydantic para que el codigo sea el propio y la aplicacion
+    pueda decir «el nombre es demasiado largo» junto al campo, en vez de un
+    error generico de datos. Se comprueba SIEMPRE, este o no la 0113: la misma
+    peticion no puede valer en un servidor y no en otro segun una migracion
+    que quien escribe no ve.
+    """
+    if titulo is not None and len(titulo) > MAX_TITULO_DE_ADJUNTO:
+        raise ValidationAppError(
+            f"El nombre puede tener hasta {MAX_TITULO_DE_ADJUNTO} caracteres.",
+            code="attachment_title_too_long",
+        )
+
+
+async def _puede_retocar_el_mensaje(
+    db: AsyncSession, conversation_id: str, remitente: str, uid: str
+) -> bool:
+    """Quien escribio el mensaje, quien administra la conversacion o la moderacion.
+
+    ES LA REGLA DE BORRAR (`borrar_mensaje`), y ponerle nombre a un adjunto
+    usa LA MISMA, en una sola funcion: si un dia cambia quien administra (los
+    co-administradores), cambian las dos a la vez y no puede quedar una
+    persona que borra un audio pero no puede ponerle nombre, o al reves.
+    """
+    return (
+        str(remitente) == str(uid)
+        or await _administra_la_conversacion(db, conversation_id, uid)
+        or await is_admin(db, uid)
+    )
+
+
 async def _leer_una(db: AsyncSession, conversation_id: str, uid: str) -> ConversationRead:
     """Una conversacion concreta, con el mismo camino que el listado.
 
@@ -550,6 +587,10 @@ async def messaging_availability(
         read_receipts=True,
         topics=await esquema.hay_temas(db),
         subgroups=await esquema.hay_comunidades(db),
+        # Con la misma comprobacion cacheada que usa todo lo demas de la 0113:
+        # lo que se anuncia aqui es exactamente lo que el envio y el PATCH van
+        # a aceptar.
+        attachment_titles=await esquema.hay_nombres_de_adjuntos(db),
     )
 
 
@@ -870,6 +911,17 @@ async def list_messages(
     ensure_uuid(conversation_id, "Conversacion no encontrada.")
     await _require_member(db, conversation_id, current_user.id)
 
+    # De que tipo es la conversacion, DENTRO de la consulta de los mensajes:
+    # una subconsulta sin correlacion, que PostgreSQL resuelve una vez (por
+    # clave primaria) y no por fila. Solo sirve para no preguntar por los
+    # temas en un chat de dos, que no puede tenerlos: es lo mas abierto de
+    # la aplicacion y asi no paga una consulta por algo que nunca tendra.
+    tipo_de_chat = (
+        select(Conversation.kind)
+        .where(Conversation.id == conversation_id)
+        .scalar_subquery()
+        .label("tipo_de_chat")
+    )
     consulta = (
         select(
             Message.id,
@@ -881,6 +933,7 @@ async def list_messages(
             Profile.full_name,
             Profile.username,
             Profile.avatar_path,
+            tipo_de_chat,
         )
         .join(Profile, Profile.id == Message.sender_id)
         # LO BORRADO SÍ SALE, y esto es lo que cambió. Antes se filtraba aquí y
@@ -947,6 +1000,15 @@ async def list_messages(
     reacciones_de = await reacciones.reacciones_por_mensaje(db, vivos, current_user.id)
     citas = await reacciones.respuestas_por_mensaje(db, vivos)
 
+    # En que temas esta cada mensaje: la etiqueta bajo la burbuja. También por
+    # lotes, y solo en un grupo —los temas son de General de una comunidad;
+    # en un chat de dos no se pregunta—. Las lapidas no llevan etiqueta.
+    en_temas = (
+        await temas.temas_por_mensaje(db, conversation_id, vivos)
+        if rows and rows[0].tipo_de_chat == "group"
+        else {}
+    )
+
     # Devolvemos en orden cronológico ascendente (más antiguos primero).
     return [
         MessageRead(
@@ -967,6 +1029,7 @@ async def list_messages(
             booking_context=de_sesion.get(msg_id),
             reactions=reacciones_de.get(msg_id, []),
             reply_to=citas.get(msg_id),
+            topics=en_temas.get(str(msg_id), []),
         )
         for (
             msg_id,
@@ -978,6 +1041,7 @@ async def list_messages(
             full_name,
             username,
             avatar_path,
+            _tipo,
         ) in reversed(rows)
     ]
 
@@ -1007,6 +1071,13 @@ async def send_message(
     aplicada —si no, 503 y no la violación de restricción que sería un 500— y
     que traiga duración.
 
+    UN ARCHIVO DE AUDIO TAMBIÉN (30/10/2026): `kind: audio` con
+    `voice_note: false`, para que se escuche en el chat en vez de descargarse,
+    sin las reglas de una nota de voz (ver `audio.validar_audio`). Y cada
+    adjunto puede traer su NOMBRE (`title`, 0113), que se guarda recortado y
+    se ignora en una foto. Sin la 0113 el nombre se ignora y todo audio es
+    nota de voz: ver `esquema.hay_nombres_de_adjuntos`.
+
     Y UNA RESPUESTA A UNA HISTORIA TAMBIEN ENTRA POR AQUI, con `story_id` en el
     cuerpo. No hay un endpoint aparte a propósito: duplicar el envío obligaría a
     mantener dos rutas que hacen exactamente lo mismo con los adjuntos, la
@@ -1024,6 +1095,10 @@ async def send_message(
     await _require_member(db, conversation_id, current_user.id)
     await _exigir_que_pueda_escribir_en_el_tema(db, conversation_id, current_user.id)
 
+    # Si se puede guardar el nombre de cada adjunto y si es nota de voz (0113).
+    # Sin ella el nombre se ignora y todo audio es nota de voz: ver
+    # `esquema.hay_nombres_de_adjuntos`.
+    con_nombres = False
     if payload.attachments:
         await _exigir_esquema_de_adjuntos(db)
         # El orden importa: primero si CABE guardar un audio (503 si la 0044 no
@@ -1031,7 +1106,10 @@ async def send_message(
         # nota de voz mal formada contra una base sin la migración recibiría un
         # «arregla el dato» que no puede arreglar.
         await audio.exigir_esquema_de_audio(db, payload.attachments)
-        audio.validar_audio(payload.attachments)
+        con_nombres = await esquema.hay_nombres_de_adjuntos(db)
+        audio.validar_audio(payload.attachments, con_nombres=con_nombres)
+        for adjunto in payload.attachments:
+            _exigir_titulo_que_cabe(adjunto.title)
         _validar_rutas(payload.attachments, conversation_id, current_user.id)
     elif not payload.body.strip():
         # Sin la 0033 el esquema todavía exige al menos un carácter en `body`,
@@ -1072,6 +1150,14 @@ async def send_message(
                 "height": adjunto.height,
                 "duration_s": adjunto.duration_s,
                 "sort_order": posicion,
+                # Solo si la 0113 esta: nombrar una columna que no existe es
+                # un 500. Van por su nombre de columna (no estan en el mapeo
+                # del modelo, ver `MessageAttachment`).
+                **(
+                    {"title": adjunto.title, "voice_note": bool(adjunto.voice_note)}
+                    if con_nombres
+                    else {}
+                ),
             }
             for posicion, adjunto in enumerate(payload.attachments)
         ]
@@ -1093,6 +1179,12 @@ async def send_message(
                 width=adjunto.width,
                 height=adjunto.height,
                 duration_s=adjunto.duration_s,
+                # Lo mismo que leera el historial despues: sin la 0113, sin
+                # nombre y nota de voz si es audio.
+                title=adjunto.title if con_nombres else None,
+                voice_note=(
+                    bool(adjunto.voice_note) if con_nombres else adjunto.kind == "audio"
+                ),
             )
             for adjunto_id, adjunto in zip(ids, payload.attachments, strict=True)
         ]
@@ -1253,11 +1345,7 @@ async def borrar_mensaje(
         raise NotFoundError("Mensaje no encontrado.")
     remitente, ya_borrado = fila
 
-    if (
-        remitente != current_user.id
-        and not await _administra_la_conversacion(db, conversation_id, current_user.id)
-        and not await is_admin(db, current_user.id)
-    ):
+    if not await _puede_retocar_el_mensaje(db, conversation_id, remitente, current_user.id):
         raise ForbiddenError(
             "Solo puedes borrar los mensajes que has escrito tú.",
             code="message_not_yours",
@@ -1291,6 +1379,120 @@ async def borrar_mensaje(
         .values(deleted_at=func.now())
     )
     await db.commit()
+
+
+@router.patch(
+    "/{conversation_id}/messages/{message_id}/attachments/{attachment_id}",
+    response_model=AttachmentRead,
+)
+async def nombrar_adjunto(
+    conversation_id: str,
+    message_id: str,
+    attachment_id: str,
+    payload: TituloDeAdjunto,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AttachmentRead:
+    """Pone, cambia o quita (`null` o vacío) el nombre de un adjunto (0113).
+
+    QUIÉN PUEDE: LA MISMA REGLA QUE BORRAR (`_puede_retocar_el_mensaje`): quien
+    envió el mensaje, quien administra la conversación y la moderación. Los
+    demás, 403 `attachment_title_forbidden` aunque llamen a la API a mano: la
+    aplicación esconde «Ponerle nombre», pero esconder un botón es comodidad,
+    no permiso. Y `message_attachments` NO TIENE POLÍTICA DE UPDATE (0033), así
+    que por PostgREST nadie puede cambiarlo: esta ruta es el único camino.
+
+    EN ESTE ORDEN, y cada paso por algo:
+      1. pertenecer (403): sin eso, la diferencia entre un 404 y un 403 diría
+         qué identificadores existen en una conversación ajena;
+      2. la 0113 (503 `attachment_titles_not_available`): sin la columna no
+         hay dónde guardarlo, y no es un error del dato;
+      3. el adjunto, de ESE mensaje, de ESTA conversación y vivo (404
+         `attachment_not_found`): un mensaje borrado ya no enseña sus
+         adjuntos, así que tampoco se les pone nombre;
+      4. poder (403 `attachment_title_forbidden`);
+      5. que admita nombre (422 `attachment_title_not_allowed` en una foto) y
+         que quepa (422 `attachment_title_too_long`).
+
+    Devuelve el adjunto como lo leerá el historial. No avisa a nadie ni toca
+    `updated_at` de la conversación: renombrar no es un mensaje nuevo.
+    """
+    uid = current_user.id
+    ensure_uuid(conversation_id, "Conversacion no encontrada.")
+    await _require_member(db, conversation_id, uid)
+    if not await esquema.hay_adjuntos_de_chat(db) or not await esquema.hay_nombres_de_adjuntos(db):
+        raise ServiceUnavailableError(
+            "Todavía no se les puede poner nombre a los archivos.",
+            code="attachment_titles_not_available",
+        )
+
+    no_esta = NotFoundError("Archivo no encontrado.", code="attachment_not_found")
+    try:
+        UUID(message_id)
+        UUID(attachment_id)
+    except (ValueError, AttributeError, TypeError):
+        raise no_esta from None
+    fila = (
+        await db.execute(
+            select(
+                MessageAttachment.id,
+                MessageAttachment.storage_path,
+                MessageAttachment.kind,
+                MessageAttachment.mime_type,
+                MessageAttachment.file_name,
+                MessageAttachment.bytes,
+                MessageAttachment.width,
+                MessageAttachment.height,
+                MessageAttachment.duration_s,
+                ES_NOTA_DE_VOZ,
+                Message.sender_id,
+            )
+            .join(Message, Message.id == MessageAttachment.message_id)
+            .where(
+                MessageAttachment.id == attachment_id,
+                MessageAttachment.message_id == message_id,
+                # La conversación va en el WHERE, en las dos tablas: el adjunto
+                # de otro chat no llega ni a leerse.
+                MessageAttachment.conversation_id == conversation_id,
+                Message.conversation_id == conversation_id,
+                Message.deleted_at.is_(None),
+            )
+        )
+    ).one_or_none()
+    if fila is None:
+        raise no_esta
+    if not await _puede_retocar_el_mensaje(db, conversation_id, fila.sender_id, uid):
+        raise ForbiddenError(
+            "Solo quien envió el mensaje o quien administra puede ponerle nombre.",
+            code="attachment_title_forbidden",
+        )
+    if fila.kind in TIPOS_SIN_NOMBRE:
+        raise ValidationAppError(
+            "Las fotos no llevan nombre: ya tienen el texto del mensaje.",
+            code="attachment_title_not_allowed",
+        )
+    _exigir_titulo_que_cabe(payload.title)
+
+    # La TABLA y no la entidad: `title` no está en el mapeo del modelo.
+    await db.execute(
+        update(MessageAttachment.__table__)
+        .where(MessageAttachment.__table__.c.id == attachment_id)
+        .values(title=payload.title)
+    )
+    await db.commit()
+    return AttachmentRead(
+        id=fila.id,
+        storage_path=fila.storage_path,
+        kind=fila.kind,
+        mime_type=fila.mime_type,
+        file_name=fila.file_name,
+        bytes=fila.bytes,
+        width=fila.width,
+        height=fila.height,
+        duration_s=fila.duration_s,
+        title=payload.title,
+        voice_note=bool(fila.voice_note),
+    )
 
 
 @router.post("/{conversation_id}/read", status_code=status.HTTP_204_NO_CONTENT)
