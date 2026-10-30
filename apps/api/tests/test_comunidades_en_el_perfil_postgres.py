@@ -135,36 +135,39 @@ def _montar(pg, *, hasta: str) -> None:
             cur.execute(ruta.read_text(encoding="utf-8"))
 
 
+_TABLAS = "('group_settings', 'group_profile_listings', 'group_removals')"
+
+
 def _foto(pg) -> list:
     """Todo lo que la 0112 crea o rellena, para comparar antes y después."""
     return [
         _todas(
             pg,
-            "select column_name, column_default, is_nullable, data_type "
+            "select table_name, column_name, column_default, is_nullable, data_type "
             "from information_schema.columns where table_schema = 'public' "
-            "and table_name in ('group_settings', 'group_profile_listings') order by 1, 2",
+            f"and table_name in {_TABLAS} order by 1, 2",
         ),
         _todas(
             pg,
-            "select conrelid::regclass::text, conname, pg_get_constraintdef(oid) from pg_constraint "
-            "where conrelid in ('public.group_settings'::regclass, "
-            "coalesce(to_regclass('public.group_profile_listings'), 'public.group_settings'::regclass)) "
+            "select conrelid::regclass::text, conname, pg_get_constraintdef(c.oid) "
+            "from pg_constraint c join pg_class t on t.oid = c.conrelid "
+            f"where t.relnamespace = 'public'::regnamespace and t.relname in {_TABLAS} "
             "order by 1, 2",
         ),
         _todas(
             pg,
             "select indexname, indexdef from pg_indexes where schemaname = 'public' "
-            "and tablename in ('group_settings', 'group_profile_listings') order by 1",
+            f"and tablename in {_TABLAS} order by 1",
         ),
         _todas(
             pg,
-            "select relname, relrowsecurity from pg_class where oid = "
-            "to_regclass('public.group_profile_listings')",
+            "select relname, relrowsecurity from pg_class where relnamespace = "
+            f"'public'::regnamespace and relkind = 'r' and relname in {_TABLAS} order by 1",
         ),
         _todas(
             pg,
-            "select count(*) from pg_policies where schemaname = 'public' "
-            "and tablename = 'group_profile_listings'",
+            "select tablename, count(*) from pg_policies where schemaname = 'public' "
+            f"and tablename in {_TABLAS} group by 1 order by 1",
         ),
         _todas(
             pg,
@@ -280,23 +283,31 @@ def test_el_check_solo_admite_abierta_o_con_solicitud(base, pg) -> None:
 
 
 @SIN_POSTGRES
-def test_la_tabla_nueva_queda_cerrada_a_la_clave_del_cliente(base, pg) -> None:
+@pytest.mark.parametrize("tabla", ["group_profile_listings", "group_removals"])
+def test_las_tablas_nuevas_quedan_cerradas_a_la_clave_del_cliente(base, pg, tabla) -> None:
     import psycopg
 
-    assert _uno(pg, "select relrowsecurity from pg_class where oid = 'public.group_profile_listings'::regclass")
+    assert _uno(pg, f"select relrowsecurity from pg_class where oid = 'public.{tabla}'::regclass")
     assert _uno(
         pg,
-        "select count(*) from pg_policies where schemaname = 'public' and tablename = 'group_profile_listings'",
+        "select count(*) from pg_policies where schemaname = 'public' and tablename = %s",
+        tabla,
     ) == 0
     # Como `authenticated` (lo que usa PostgREST con la sesión de alguien): o
     # no tiene permiso sobre la tabla, o la RLS sin políticas no le deja ver
     # ninguna fila. Las dos cierran; lo que no puede es leer las que hay.
     with pg.transaction(force_rollback=True):
+        _hacer(
+            pg,
+            f"insert into public.{tabla} (conversation_id, user_id) values (%s, %s) "
+            "on conflict do nothing",
+            base["G2"], CARLA,
+        )
         _hacer(pg, "grant usage on schema public to authenticated")
         _hacer(pg, "set local role authenticated")
         try:
             with pg.transaction():
-                vistas = _uno(pg, "select count(*) from public.group_profile_listings")
+                vistas = _uno(pg, f"select count(*) from public.{tabla}")
         except psycopg.errors.InsufficientPrivilege:
             vistas = 0
         assert vistas == 0
@@ -323,6 +334,29 @@ def test_borrar_la_comunidad_o_la_persona_borra_sus_filas(base, pg) -> None:
         )
         _hacer(pg, "delete from auth.users where id = %s", otra)
         assert _uno(pg, "select count(*) from public.group_profile_listings where user_id = %s", otra) == 0
+    # Las expulsiones: se van con la comunidad y con quien fue sacado; si se
+    # borra quien la sacó, la expulsión sigue valiendo, sin saber quién fue.
+    with pg.transaction(force_rollback=True):
+        echa = str(uuid4())
+        sacada = str(uuid4())
+        _persona(pg, echa, "Fer")
+        _persona(pg, sacada, "Gil")
+        _hacer(
+            pg,
+            "insert into public.group_removals (conversation_id, user_id, removed_by) "
+            "values (%s, %s, %s), (%s, %s, %s)",
+            base["G1"], sacada, echa, base["G2"], CARLA, echa,
+        )
+        _hacer(pg, "delete from auth.users where id = %s", echa)
+        assert _todas(
+            pg, "select removed_by from public.group_removals where user_id in (%s, %s) order by 1",
+            sacada, CARLA,
+        ) == [(None,), (None,)]
+        _hacer(pg, "delete from auth.users where id = %s", sacada)
+        _hacer(pg, "delete from public.conversations where id = %s", base["G2"])
+        assert _uno(
+            pg, "select count(*) from public.group_removals where user_id in (%s, %s)", sacada, CARLA
+        ) == 0
 
 
 @SIN_POSTGRES
@@ -361,6 +395,7 @@ def test_la_vuelta_atras_escrita_funciona_y_si_no_hay_bloqueo_se_rinde(base, pg)
     _hacer(pg, _vuelta_atras())
     try:
         assert _uno(pg, "select to_regclass('public.group_profile_listings')") is None
+        assert _uno(pg, "select to_regclass('public.group_removals')") is None
         assert _uno(
             pg,
             "select count(*) from information_schema.columns where table_schema = 'public' "
@@ -607,6 +642,69 @@ async def test_si_la_fila_y_la_columna_no_coinciden_no_sale_en_postgresql(entorn
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
+async def test_a_quien_saca_quien_administra_la_abierta_le_es_con_solicitud_en_postgresql(
+    entorno,
+) -> None:
+    http, motor, identidad = entorno
+    cid = await _comunidad(motor)
+
+    async def _sacados() -> list[tuple]:
+        async with motor.connect() as c:
+            return [
+                (str(u), str(r) if r else None)
+                for u, r in (
+                    await c.execute(
+                        text(
+                            "select user_id, removed_by from public.group_removals "
+                            "where conversation_id = cast(:c as uuid)"
+                        ),
+                        {"c": cid},
+                    )
+                ).all()
+            ]
+
+    identidad["uid"] = DAVID
+    assert (await http.post(f"{API}/{cid}/join")).status_code == 200
+    # Una fila que ya estaba: sacarlo pasa por el `on conflict do update`.
+    async with motor.begin() as c:
+        await c.execute(
+            text(
+                "insert into public.group_removals (conversation_id, user_id) "
+                "values (cast(:c as uuid), cast(:u as uuid))"
+            ),
+            {"c": cid, "u": DAVID},
+        )
+    identidad["uid"] = ANA
+    assert (await http.delete(f"{API}/{cid}/members/{DAVID}")).status_code == 204
+    assert await _sacados() == [(DAVID, ANA)]
+
+    identidad["uid"] = DAVID
+    tarjeta = next(t for t in (await http.get(f"{API}/groups/of/{ANA}")).json() if t["id"] == cid)
+    assert tarjeta["entrada"] == "request"
+    entrar = await http.post(f"{API}/{cid}/join")
+    assert entrar.status_code == 409
+    assert entrar.json()["error"]["code"] == "group_requires_request"
+    pedida = await http.post(f"{API}/{cid}/join-requests", json={})
+    assert pedida.status_code == 201
+    assert pedida.json()["status"] == "pending"
+    # Para otra persona sigue abierta.
+    identidad["uid"] = CARLA
+    otra = next(t for t in (await http.get(f"{API}/groups/of/{ANA}")).json() if t["id"] == cid)
+    assert otra["entrada"] == "open"
+
+    identidad["uid"] = ANA
+    aceptada = await http.post(f"{API}/{cid}/join-requests/{pedida.json()['id']}/approve")
+    assert aceptada.status_code == 204
+    assert await _sacados() == []
+    # Y si lo vuelve a sacar y lo mete a mano, también se olvida.
+    assert (await http.delete(f"{API}/{cid}/members/{DAVID}")).status_code == 204
+    assert await _sacados() == [(DAVID, ANA)]
+    assert (await http.post(f"{API}/{cid}/members", json={"user_ids": [DAVID]})).status_code == 200
+    assert await _sacados() == []
+
+
+@SIN_POSTGRES
+@pytest.mark.asyncio
 async def test_a_una_con_solicitud_no_se_entra_en_postgresql(entorno) -> None:
     http, motor, identidad = entorno
     cid = await _comunidad(motor, entrada="request")
@@ -623,5 +721,6 @@ def test_la_vuelta_atras_del_fichero_se_puede_leer() -> None:
     """Sin PostgreSQL también: que el bloque exista y diga lo que tiene que decir."""
     vuelta = _vuelta_atras()
     assert re.search(r"drop table if exists public\.group_profile_listings;", vuelta)
+    assert re.search(r"drop table if exists public\.group_removals;", vuelta)
     assert "drop column if exists entrada;" in vuelta
     assert "notify pgrst, 'reload schema';" in vuelta

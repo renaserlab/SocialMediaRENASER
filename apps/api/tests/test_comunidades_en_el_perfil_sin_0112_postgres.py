@@ -72,6 +72,7 @@ def hasta_la_0111(pg):
     for ident, nombre in ((ANA, "Ana"), (BRUNO, "Bruno"), (CARLA, "Carla"), (DAVID, "David")):
         _persona(pg, ident, nombre)
     assert _uno(pg, "select to_regclass('public.group_profile_listings')") is None
+    assert _uno(pg, "select to_regclass('public.group_removals')") is None
     assert _uno(
         pg,
         "select count(*) from information_schema.columns where table_schema = 'public' "
@@ -257,6 +258,10 @@ async def test_sin_la_0112_el_enlace_y_las_solicitudes_como_antes(entorno) -> No
     identidad["uid"] = DAVID
     assert (await http.post(f"{API}/{cid}/join", json={})).json()["my_status"] == "member"
 
+    # Sacar a alguien funciona como siempre: sin la tabla no se apunta nada.
+    identidad["uid"] = ANA
+    assert (await http.delete(f"{API}/{cid}/members/{DAVID}")).status_code == 204
+
 
 @SIN_POSTGRES
 @pytest.mark.asyncio
@@ -292,3 +297,4 @@ async def test_al_pegarla_la_api_la_ve_sin_reiniciar(entorno, hasta_la_0111) -> 
         _hacer(pg, _vuelta_atras())
         esquema.olvidar()
     assert _uno(pg, "select to_regclass('public.group_profile_listings')") is None
+    assert _uno(pg, "select to_regclass('public.group_removals')") is None

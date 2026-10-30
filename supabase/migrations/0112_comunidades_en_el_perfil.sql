@@ -10,6 +10,9 @@
 --      Hoy solo la enseña quien la creó, pero cuando haya co-administración
 --      (spec aparte) cada uno decidirá si sale en el suyo, y no hay que
 --      rehacer el ajuste.
+--   3. Que a quien SACÓ quien la administra no pueda volver a entrar solo en
+--      una abierta: tiene que pedirlo, y decide quien administra (decisión del
+--      30/10/2026). Si no, «abierta» deshacería cada expulsión con un toque.
 --
 -- QUÉ HACE.
 --
@@ -22,6 +25,12 @@
 --   · Relleno: una fila (comunidad, quien la creó) por cada una que hoy sale
 --     en el perfil (`listed_on_profile = true`). Quien la enseñaba la sigue
 --     enseñando, sin tocar nada.
+--   · `group_removals`: una fila por (comunidad, persona) a la que quien la
+--     administra sacó. Para ella la comunidad es «con solicitud» aunque esté
+--     abierta. La borra la API cuando quien administra la vuelve a meter (a
+--     mano o aceptando su solicitud). Salir por cuenta propia no la escribe.
+--     Sin relleno: de las expulsiones de antes no queda rastro, y las
+--     comunidades de antes son todas «con solicitud» de todos modos.
 --
 -- POR QUÉ `listed_on_profile` NO SE BORRA. La API de esta ronda la sigue
 -- escribiendo a la vez que la tabla nueva. Si hay que volver a la API
@@ -51,11 +60,12 @@
 -- menos de un minuto sin reiniciar. La API ANTERIOR funciona igual con ella
 -- aplicada: no lee `entrada` ni la tabla nueva, y `listed_on_profile` sigue ahí.
 --
--- SEGURIDAD. RLS activada y NINGUNA política en la tabla nueva, como
--- `group_settings` y `group_join_requests`: con la clave del cliente no se lee
--- ni se escribe. Quién enseña qué, y a quién, lo resuelve la API —incluidos
--- los bloqueos, que dejan la lista vacía—. Con una política de lectura,
--- cualquiera podría listar por PostgREST qué comunidades enseña cada persona.
+-- SEGURIDAD. RLS activada y NINGUNA política en las dos tablas nuevas, como
+-- `group_settings` y `group_join_requests`: con la clave del cliente no se
+-- leen ni se escriben. Quién enseña qué, y a quién, lo resuelve la API
+-- —incluidos los bloqueos, que dejan la lista vacía—. Con una política de
+-- lectura, cualquiera podría listar por PostgREST qué comunidades enseña cada
+-- persona, o a quién sacaron de cada una.
 --
 -- BLOQUEOS. Añadir la columna y su `CHECK` toma un bloqueo exclusivo de
 -- `group_settings` hasta el final de la transacción: con una tabla tan pequeña
@@ -118,6 +128,28 @@ alter table public.group_profile_listings enable row level security;
 
 
 -- -----------------------------------------------------------------------------
+-- 2 bis. A quién sacó quien la administra
+-- -----------------------------------------------------------------------------
+-- Una fila por persona y comunidad: sacarla otra vez la actualiza (la API
+-- escribe con `on conflict`), no la duplica. `removed_by` es quien la sacó; si
+-- ese perfil se borra, la expulsión sigue valiendo y solo se pierde quién fue.
+create table if not exists public.group_removals (
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  removed_at timestamptz not null default now(),
+  removed_by uuid references public.profiles(id) on delete set null,
+  primary key (conversation_id, user_id)
+);
+
+-- Que borrar un perfil no recorra la tabla buscando sus filas (como en la
+-- tabla de arriba).
+create index if not exists group_removals_user_idx
+  on public.group_removals (user_id);
+
+alter table public.group_removals enable row level security;
+
+
+-- -----------------------------------------------------------------------------
 -- 3. Relleno: quien hoy enseña una comunidad, la sigue enseñando
 -- -----------------------------------------------------------------------------
 -- Hoy solo puede enseñarla quien la creó (`vistas.administra`), así que la
@@ -134,29 +166,32 @@ on conflict do nothing;
 
 
 -- -----------------------------------------------------------------------------
--- 4. Que la tabla nueva quede cerrada: RLS activada y ninguna política
+-- 4. Que las tablas nuevas queden cerradas: RLS activada y ninguna política
 -- -----------------------------------------------------------------------------
 do $$
 declare
+  tabla text;
   con_rls boolean;
   politicas integer;
 begin
-  select relrowsecurity into con_rls
-  from pg_class
-  where oid = 'public.group_profile_listings'::regclass;
-  if not coalesce(con_rls, false) then
-    raise exception 'La 0112 no ha dejado RLS activada en group_profile_listings.';
-  end if;
+  foreach tabla in array array['group_profile_listings', 'group_removals'] loop
+    select relrowsecurity into con_rls
+    from pg_class
+    where oid = ('public.' || tabla)::regclass;
+    if not coalesce(con_rls, false) then
+      raise exception 'La 0112 no ha dejado RLS activada en %.', tabla;
+    end if;
 
-  select count(*) into politicas
-  from pg_policies
-  where schemaname = 'public'
-    and tablename = 'group_profile_listings';
-  if politicas > 0 then
-    raise exception
-      'group_profile_listings tiene % política(s). No debe tener ninguna: estas '
-      'filas solo las lee y las escribe la API.', politicas;
-  end if;
+    select count(*) into politicas
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = tabla;
+    if politicas > 0 then
+      raise exception
+        '% tiene % política(s). No debe tener ninguna: estas filas solo las '
+        'lee y las escribe la API.', tabla, politicas;
+    end if;
+  end loop;
 end
 $$;
 
@@ -170,8 +205,8 @@ notify pgrst, 'reload schema';
 -- -----------------------------------------------------------------------------
 -- 6. Comprobación
 -- -----------------------------------------------------------------------------
--- Una fila. Esperado: la columna con su valor por defecto y su `CHECK`, la
--- tabla con RLS y cero políticas, y TANTAS filas en el perfil como
+-- Una fila. Esperado: la columna con su valor por defecto y su `CHECK`, las
+-- dos tablas con RLS y cero políticas, y TANTAS filas en el perfil como
 -- comunidades enseñadas había (`en_perfil_antes` = `en_perfil_ahora`).
 select
   (select column_default
@@ -190,6 +225,13 @@ select
      from pg_policies
     where schemaname = 'public'
       and tablename = 'group_profile_listings') as politicas,
+  (select relrowsecurity
+     from pg_class
+    where oid = 'public.group_removals'::regclass) as rls_de_expulsiones,
+  (select count(*)
+     from pg_policies
+    where schemaname = 'public'
+      and tablename = 'group_removals') as politicas_de_expulsiones,
   (select count(*)
      from public.group_settings s
      join public.conversations c on c.id = s.conversation_id
@@ -232,8 +274,10 @@ select
 -- comunidades como con solicitud. No se pierde ningún mensaje ni ningún
 -- miembro, y ningún perfil: esa columna se ha seguido escribiendo. Lo que se
 -- pierde es cuáles comunidades eran abiertas (vuelven a ser todas con
--- solicitud, como antes) y la marca por persona.
+-- solicitud, como antes), la marca por persona y a quién habían sacado (da
+-- igual: sin `entrada`, todas vuelven a ser con solicitud para todos).
 --
+--   drop table if exists public.group_removals;
 --   drop table if exists public.group_profile_listings;
 --   alter table public.group_settings
 --     drop constraint if exists group_settings_entrada_check;

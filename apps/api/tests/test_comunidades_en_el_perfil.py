@@ -16,6 +16,10 @@
     desaparece o que deja de administrar se vaya del perfil;
   · que la tarjeta cuente los grupos y los temas vivos sin una consulta por
     tarjeta;
+  · que a quien SACÓ quien administra la abierta le sea con solicitud (su
+    tarjeta dice `request`, `join` responde 409 y pedirlo queda pendiente)
+    hasta que quien administra lo vuelva a meter; y que salir por cuenta
+    propia no cuente;
   · que los avisos digan «comunidad» del padre, «grupo» de los de dentro y
     «tema» del chat de un tema;
   · que SIN LA 0112 (la API desplegada antes de pegarla) todo funcione como
@@ -43,6 +47,7 @@ from app.modules.messaging.models import (
     ConversationMember,
     GroupJoinRequest,
     GroupProfileListing,
+    GroupRemoval,
     GroupSettings,
 )
 from app.modules.notifications import push
@@ -778,6 +783,121 @@ async def test_pasar_a_con_solicitud_no_saca_a_nadie(entorno):
 
 
 # --------------------------------------------------------------------------- #
+# 4 bis. A quien saca quien administra
+# --------------------------------------------------------------------------- #
+async def _sacar(http, identidad, uid: str = DAVID, conv: str = GRUPO) -> None:
+    identidad["uid"] = ANA
+    respuesta = await http.delete(f"{API}/{conv}/members/{uid}")
+    assert respuesta.status_code == 204, respuesta.text
+
+
+async def _sacados(sesiones, conv: str = GRUPO) -> dict[str, str | None]:
+    async with sesiones() as db:
+        return {
+            str(f.user_id): (str(f.removed_by) if f.removed_by else None)
+            for f in (
+                await db.execute(select(GroupRemoval).where(GroupRemoval.conversation_id == conv))
+            ).scalars()
+        }
+
+
+@pytest.mark.asyncio
+async def test_a_quien_saca_quien_administra_la_abierta_le_es_con_solicitud(entorno, avisos):
+    http, sesiones, identidad = entorno
+    codigo_del_enlace = (
+        await _ajustar(http, identidad, listed_on_profile=True, invite_enabled=True, entrada="open")
+    ).json()["invite_code"]
+    identidad["uid"] = DAVID
+    assert (await _unirse(http)).status_code == 200
+    await _sacar(http, identidad)
+    assert await _sacados(sesiones) == {DAVID: ANA}
+    avisos.clear()
+
+    # Su tarjeta dice «con solicitud»: la aplicación enseña el candado y
+    # «Pedir unirme», sin saber nada de expulsiones.
+    tarjeta = (await _perfil(http, identidad))[0]
+    assert (tarjeta["entrada"], tarjeta["my_status"]) == ("request", "none")
+    identidad["uid"] = DAVID
+    assert (await http.get(f"{API}/groups/invite/{codigo_del_enlace}")).json()["entrada"] == "request"
+    for respuesta in (await _unirse(http), await _unirse(http, code=codigo_del_enlace)):
+        assert respuesta.status_code == 409
+        assert codigo(respuesta) == "group_requires_request"
+    assert not await _es_miembro(sesiones, GRUPO, DAVID)
+
+    # Pedirlo deja la solicitud pendiente y avisa a quien administra.
+    pedida = await _pedir(http)
+    assert pedida.status_code == 201
+    assert pedida.json()["status"] == "pending"
+    assert not await _es_miembro(sesiones, GRUPO, DAVID)
+    assert [a["notification_type"] for a in avisos] == ["group_join_request"]
+    assert (await _perfil(http, identidad))[0]["my_status"] == "pending"
+
+    # Para los demás sigue abierta, y quien administra la ve abierta.
+    assert (await _perfil(http, identidad, como=CARLA))[0]["entrada"] == "open"
+    identidad["uid"] = ANA
+    assert (await http.get(f"{API}/{GRUPO}/info")).json()["settings"]["entrada"] == "open"
+
+    # Quien administra acepta: vuelve a estar dentro y la expulsión se olvida.
+    assert (
+        await http.post(f"{API}/{GRUPO}/join-requests/{pedida.json()['id']}/approve")
+    ).status_code == 204
+    assert await _es_miembro(sesiones, GRUPO, DAVID)
+    assert await _sacados(sesiones) == {}
+    # Si después se va por su cuenta, puede volver a entrar solo.
+    identidad["uid"] = DAVID
+    assert (await http.delete(f"{API}/{GRUPO}/members/{DAVID}")).status_code == 204
+    assert (await _perfil(http, identidad))[0]["entrada"] == "open"
+    assert (await _unirse(http)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_si_quien_administra_lo_vuelve_a_meter_a_mano_se_olvida(entorno):
+    http, sesiones, identidad = entorno
+    await _abrir_en_el_perfil(http, identidad)
+    identidad["uid"] = DAVID
+    assert (await _unirse(http)).status_code == 200
+    # Una fila que ya estaba (sin quién): sacarlo la actualiza, no la duplica
+    # ni falla por la clave primaria.
+    async with sesiones() as db:
+        db.add(GroupRemoval(conversation_id=GRUPO, user_id=DAVID, removed_by=None))
+        await db.commit()
+    await _sacar(http, identidad)
+    assert await _sacados(sesiones) == {DAVID: ANA}
+
+    identidad["uid"] = ANA
+    assert (await http.post(f"{API}/{GRUPO}/members", json={"user_ids": [DAVID]})).status_code == 200
+    assert await _sacados(sesiones) == {}
+    identidad["uid"] = DAVID
+    assert (await http.delete(f"{API}/{GRUPO}/members/{DAVID}")).status_code == 204
+    assert (await _unirse(http)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_quien_sale_por_su_cuenta_vuelve_a_entrar_solo(entorno):
+    http, sesiones, identidad = entorno
+    await _abrir_en_el_perfil(http, identidad)
+    identidad["uid"] = BRUNO
+    assert (await http.delete(f"{API}/{GRUPO}/members/{BRUNO}")).status_code == 204
+    assert await _sacados(sesiones) == {}
+    assert (await _perfil(http, identidad, como=BRUNO))[0]["entrada"] == "open"
+    identidad["uid"] = BRUNO
+    respuesta = await _unirse(http)
+    assert respuesta.status_code == 200
+    assert respuesta.json()["my_status"] == "member"
+
+
+@pytest.mark.asyncio
+async def test_sacar_de_un_grupo_de_dentro_no_se_apunta(entorno):
+    """Los grupos de dentro tienen su propia entrada: la regla es de la comunidad."""
+    http, sesiones, identidad = entorno
+    sub = await _subgrupo(http, identidad, "Valorant", "open")
+    identidad["uid"] = BRUNO
+    assert (await http.post(f"{API}/{GRUPO}/subgroups/{sub}/join")).status_code == 204
+    await _sacar(http, identidad, BRUNO, sub)
+    assert await _sacados(sesiones, sub) == {}
+
+
+# --------------------------------------------------------------------------- #
 # 5. Los avisos: «comunidad» del padre, «grupo» de los de dentro
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
@@ -898,8 +1018,10 @@ def test_la_0112_solo_anade():
         r"add constraint group_settings_entrada_check\s+check \(entrada in \('open', 'request'\)\)",
         codigo_sql,
     )
-    assert "create table if not exists public.group_profile_listings" in codigo_sql
-    assert "alter table public.group_profile_listings enable row level security" in codigo_sql
+    for tabla in ("group_profile_listings", "group_removals"):
+        assert f"create table if not exists public.{tabla}" in codigo_sql
+        assert f"alter table public.{tabla} enable row level security" in codigo_sql
+        assert f"'{tabla}'" in codigo_sql  # el bloque que lo comprueba
     assert "create policy" not in codigo_sql
     assert "alter publication" not in codigo_sql
     # `listed_on_profile` se queda: la API anterior la sigue leyendo.
@@ -913,28 +1035,57 @@ def test_la_0112_solo_anade():
     assert "s.listed_on_profile" in relleno and "c.created_by" in relleno
 
 
-def test_el_modelo_dice_lo_mismo_que_la_0112():
+def _cuerpo_de(codigo_sql: str, tabla: str) -> str:
+    inicio = codigo_sql.index(f"create table if not exists public.{tabla}")
+    return codigo_sql[inicio : codigo_sql.index(");", inicio)]
+
+
+@pytest.mark.parametrize(
+    ("tabla", "modelo", "ajenas"),
+    [
+        (
+            "group_profile_listings",
+            GroupProfileListing,
+            {
+                ("conversation_id", "conversations.id", "CASCADE"),
+                ("user_id", "profiles.id", "CASCADE"),
+            },
+        ),
+        (
+            "group_removals",
+            GroupRemoval,
+            {
+                ("conversation_id", "conversations.id", "CASCADE"),
+                ("user_id", "profiles.id", "CASCADE"),
+                ("removed_by", "profiles.id", "SET NULL"),
+            },
+        ),
+    ],
+)
+def test_el_modelo_dice_lo_mismo_que_la_0112(tabla, modelo, ajenas):
     codigo_sql = _sin_comentarios(MIGRACION.read_text(encoding="utf-8"))
-    inicio = codigo_sql.index("create table if not exists public.group_profile_listings")
-    cuerpo = codigo_sql[inicio : codigo_sql.index(");", inicio)]
+    cuerpo = _cuerpo_de(codigo_sql, tabla)
     columnas = set(re.findall(r"^\s{2}([a-z_]+) (?!key)", cuerpo, flags=re.M)) - {"primary"}
-    assert columnas == {c.name for c in GroupProfileListing.__table__.columns}
+    assert columnas == {c.name for c in modelo.__table__.columns}
     assert "primary key (conversation_id, user_id)" in cuerpo
-    assert {c.name for c in GroupProfileListing.__table__.primary_key} == {"conversation_id", "user_id"}
+    assert {c.name for c in modelo.__table__.primary_key} == {"conversation_id", "user_id"}
     # Las mismas claves ajenas, con el mismo `on delete`.
-    ajenas = {
-        (fk.parent.name, fk.target_fullname, fk.ondelete)
-        for fk in GroupProfileListing.__table__.foreign_keys
-    }
-    assert ajenas == {
-        ("conversation_id", "conversations.id", "CASCADE"),
-        ("user_id", "profiles.id", "CASCADE"),
-    }
-    assert "references public.conversations(id) on delete cascade" in cuerpo
-    assert "references public.profiles(id) on delete cascade" in cuerpo
-    # El índice y el `CHECK`, con el mismo nombre.
-    assert "group_profile_listings_user_idx" in codigo_sql
-    assert "group_profile_listings_user_idx" in {i.name for i in GroupProfileListing.__table__.indexes}
+    assert {
+        (fk.parent.name, fk.target_fullname, fk.ondelete) for fk in modelo.__table__.foreign_keys
+    } == ajenas
+    for columna, destino, al_borrar in ajenas:
+        tabla_destino = destino.split(".")[0]
+        assert re.search(
+            rf"{columna} uuid[^,]*references public\.{tabla_destino}\(id\) on delete {al_borrar.lower()}",
+            cuerpo,
+        ), columna
+    # El índice, con el mismo nombre.
+    indice = f"{tabla}_user_idx"
+    assert indice in codigo_sql
+    assert indice in {i.name for i in modelo.__table__.indexes}
+
+
+def test_el_check_de_entrada_esta_en_el_modelo():
     assert "group_settings_entrada_check" in {c.name for c in GroupSettings.__table__.constraints}
 
 
@@ -1008,6 +1159,10 @@ async def test_sin_la_0112_todo_funciona_como_antes(sin_la_0112, avisos):
         assert codigo(respuesta) == "group_extras_not_available"
     async with sesiones() as db:
         assert (await db.get(GroupSettings, GRUPO)).listed_on_profile is True
+
+    # Sacar a alguien funciona como siempre, y no deja rastro.
+    await _sacar(http, identidad, CARLA)
+    assert await _sacados(sesiones) == {}
 
     # Quitarla del perfil escribe la columna, como siempre.
     quitada = await _ajustar(http, identidad, listed_on_profile=False)

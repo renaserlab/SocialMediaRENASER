@@ -435,6 +435,43 @@ class GroupProfileListing(Base):
     )
 
 
+class GroupRemoval(Base):
+    """A quien saco de una comunidad quien la administra (migracion 0112).
+
+    Mientras haya fila, para esa persona la comunidad es «con solicitud»
+    aunque este abierta: puede pedir entrar y decide quien administra, pero no
+    entrar sola (decision del 30/10/2026). Si no, una comunidad abierta
+    desharia cada expulsion con un toque. Salir por cuenta propia no deja
+    fila. La borra la API cuando quien administra la vuelve a meter, a mano o
+    aceptando su solicitud.
+
+    Solo se lee si existe (`esquema.hay_comunidades_en_el_perfil`: llega en la
+    misma migracion que `GroupProfileListing`).
+    """
+
+    __tablename__ = "group_removals"
+    __table_args__ = (Index("group_removals_user_idx", "user_id"),)
+
+    conversation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    removed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    removed_by: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
 class GroupJoinRequest(Base):
     """Alguien pide entrar a un grupo (migracion 0104).
 
