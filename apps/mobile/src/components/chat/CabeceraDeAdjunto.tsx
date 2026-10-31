@@ -37,6 +37,13 @@ export const LADO_DEL_CUADRITO = 40;
  * No es pulsable: va como HERMANO de lo que se toca (el play, la descarga, el
  * video), nunca envolviéndolo. En la web un botón dentro de otro es HTML
  * inválido.
+ *
+ * Y NO SE QUEDA CON EL DEDO (`pointerEvents="none"`, 31/10/2026). Era la parte
+ * más grande de la tarjeta y la única que no respondía: mantener pulsado el
+ * nombre de un audio o de un video no abría el menú del mensaje, porque el
+ * toque acababa en esta vista, que no hace nada con él. Ahora lo atraviesa y
+ * llega a lo que haya debajo: la capa de mantener de la burbuja del chat, o la
+ * tarjeta pulsable del archivo que la envuelve.
  */
 export function CabeceraDeAdjunto({ adjunto, mio, pie, style }: Props) {
   const { colors } = useAppTheme();
@@ -48,7 +55,7 @@ export function CabeceraDeAdjunto({ adjunto, mio, pie, style }: Props) {
   const aspecto = icono ? null : aspectoDeArchivo(adjunto.mimeType, adjunto.fileName);
 
   return (
-    <View style={[styles.fila, style]}>
+    <View style={[styles.fila, style]} pointerEvents="none">
       <View
         style={[
           styles.cuadrito,

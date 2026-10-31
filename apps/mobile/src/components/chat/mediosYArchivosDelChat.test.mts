@@ -189,7 +189,8 @@ describe('un archivo se descarga dentro de la aplicación', () => {
   it('el botón de descargar va AL LADO, no dentro de la fila', () => {
     // En la web cada zona que se toca es un botón, y un botón dentro de otro
     // es HTML inválido.
-    const fila = ARCHIVO.slice(ARCHIVO.indexOf('<View style={[styles.fila, style]}>'));
+    const fila = ARCHIVO.slice(ARCHIVO.indexOf('<View style={[styles.fila, style]} pointerEvents="box-none">'));
+    assert.ok(fila.length < ARCHIVO.length, 'la fila del archivo sin nombre tiene que existir');
     const cierreDeLaFila = fila.indexOf('</Pulsable>');
     const boton = fila.indexOf("<Feather name={hecho ? 'check' : 'download'}");
     assert.ok(cierreDeLaFila > 0 && boton > cierreDeLaFila);

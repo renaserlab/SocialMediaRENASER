@@ -514,6 +514,7 @@ export const es = {
   'chat.viewPhoto': 'Ver foto',
   'chat.viewVideo': 'Ver video',
   'chat.holdForActions': 'Mantén presionado para ver las acciones del mensaje',
+  'chat.messageActions': 'Ver las acciones del mensaje',
   'chat.voiceNotesOffBody': 'Las notas de voz todavía no están disponibles. Puedes seguir escribiendo y mandando archivos con normalidad.',
   'chat.storyReplyTo': 'Respuesta a la historia de {nombre}',
   'chat.storyReplyHint': 'Su historia',

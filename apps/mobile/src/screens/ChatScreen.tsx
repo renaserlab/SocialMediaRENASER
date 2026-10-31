@@ -77,6 +77,7 @@ import {
 import { REACCIONES_RAPIDAS, esSticker } from '@/lib/stickers';
 import { sePuedeResponder } from '@/lib/deslizarParaResponder';
 import { medioQueEs, soloLlevaMedios, vaSinMarco } from '@/lib/mediosDeChat';
+import { mantenerAccesible } from '@/lib/mantenerAccesible';
 import {
   MAX_ARCHIVOS_DE_UNA_VEZ,
   MAX_TITULO_DE_ADJUNTO,
@@ -3243,6 +3244,11 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
     const alMantener = contexto.conAcciones
       ? () => abrirAcciones(contexto.mensaje)
       : undefined;
+    /** Lo mismo, para quien usa lector de pantalla (ver `mantenerAccesible`). */
+    const mantenerParaElLector = mantenerAccesible(alMantener, {
+      pista: t('chat.holdForActions'),
+      etiqueta: t('chat.messageActions'),
+    });
 
     /*
       LA NOTA DE VOZ NO MONTA REPRODUCTOR AQUI. Recibe si es la que está sonando
@@ -3262,6 +3268,7 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           // un archivo; tocar sigue siendo escuchar. Sin esto, la pulsación
           // larga caía en el play (certificación del 30/10/2026).
           alMantener={alMantener}
+          mantenerAbreElMenu
         />
       );
     }
@@ -3287,6 +3294,7 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           mio={mio}
           alVer={medio ? () => setFotoAmpliada({ ...adjunto, kind: medio }) : undefined}
           alMantener={alMantener}
+          mantenerAbreElMenu
           style={{ width: anchoDeMedio }}
         />
       );
@@ -3324,7 +3332,7 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
         delayLongPress={400}
         accessibilityRole="button"
         accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
-        accessibilityHint={alMantener ? t('chat.holdForActions') : undefined}
+        {...mantenerParaElLector}
         style={[
           styles.medio,
           contexto.forma === 'sin_marco' && styles.medioSinMarco,
@@ -3357,7 +3365,13 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
     );
     if (!titulado) return medio;
     return (
-      <View key={adjunto.id} style={[styles.videoConNombre, { width: anchoDeMedio }]}>
+      // `box-none`: el nombre y el hueco no se quedan con el dedo; mantenerlos
+      // llega a la capa de mantener de la burbuja (31/10/2026).
+      <View
+        key={adjunto.id}
+        pointerEvents="box-none"
+        style={[styles.videoConNombre, { width: anchoDeMedio }]}
+      >
         <CabeceraDeAdjunto
           adjunto={adjunto}
           mio={mio}
@@ -3610,23 +3624,64 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           ]}
         >
           {/*
+            LA CAPA DE MANTENER PULSADO (31/10/2026). Lo reportó el
+            usuario: en un audio el menú del mensaje (responder,
+            agregar a un tema, ponerle nombre…) solo se abría desde la
+            franja de la hora, abajo. El nombre del audio, el cuadrito,
+            el relleno de la burbuja, el hueco entre el adjunto y la
+            hora, la línea del nombre de un archivo o su botón de
+            descargar no hacían nada, y parecía que los audios no se
+            podían elegir.
+
+            LA CAUSA: no había nada pulsable que cubriera la burbuja.
+            Respondían solo las piezas que eran `Pressable` por su
+            cuenta (el play, la ficha del archivo, la foto) y el
+            `Pressable` del texto y la hora; lo demás eran vistas
+            sueltas que se quedaban con el dedo sin hacer nada.
+
+            EL ARREGLO es el patrón de la casa para no anidar botones
+            (en la web cada `Pressable` es un `<button>`): una zona
+            pulsable DETRÁS de todo, del tamaño de la burbuja, y lo de
+            encima que no es un botón con `pointerEvents` para que el
+            toque la atraviese. Los botones de dentro siguen siendo los
+            primeros en recibir el dedo: tocar el play sigue sonando,
+            tocar la foto sigue abriéndola, y su propio `onLongPress`
+            abre este mismo menú.
+
+            Sin texto para el lector de pantalla: es solo la superficie
+            del gesto. Lo accesible está en cada pieza (ver
+            `mantenerAccesible`).
+          */}
+          {conAcciones ? (
+            <Pressable
+              onLongPress={() => abrirAcciones(item)}
+              delayLongPress={400}
+              style={StyleSheet.absoluteFill}
+              accessible={false}
+              importantForAccessibility="no"
+              focusable={false}
+            />
+          ) : null}
+          {/*
             DE QUIÉN ES, solo en un grupo y solo en el primer
             mensaje de cada ráfaga ajena: repetir el nombre en
             cinco burbujas seguidas de la misma persona no dice
-            nada.
+            nada. No se queda con el dedo: mantenerlo abre el menú.
           */}
           {conAutor && !sinMarco ? (
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.autorDeGrupo,
-                // Cada persona, su color: se la reconoce antes de leerla.
-                { color: colorDeAutor(item.autorId, mode === 'dark') },
-              ]}
-            >
-              {nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre) ||
-                t('groups.someone')}
-            </Text>
+            <View pointerEvents="none">
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.autorDeGrupo,
+                  // Cada persona, su color: se la reconoce antes de leerla.
+                  { color: colorDeAutor(item.autorId, mode === 'dark') },
+                ]}
+              >
+                {nombreDelAutor(infoDeConversacion, item.autorId, item.autorNombre) ||
+                  t('groups.someone')}
+              </Text>
+            </View>
           ) : null}
           {/*
             A QUÉ MENSAJE RESPONDE (10/10/2026). Tocarla lleva al
@@ -3636,6 +3691,9 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
           {item.respuestaA ? (
             <Pressable
               onPress={() => setMensajeBuscado(item.respuestaA?.id ?? null)}
+              // Tocar la cita lleva al original; mantenerla, al menú.
+              onLongPress={conAcciones ? () => abrirAcciones(item) : undefined}
+              delayLongPress={400}
               accessibilityRole="button"
               accessibilityLabel={t('chat.replyGoTo')}
               style={[
@@ -3675,11 +3733,20 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
             en web.
           */}
           {item.storyContext ? (
-            <RespuestaAHistoria contexto={item.storyContext} mio={mine} />
+            // No es un botón: mantenerla llega a la capa de mantener.
+            <View pointerEvents="none">
+              <RespuestaAHistoria contexto={item.storyContext} mio={mine} />
+            </View>
           ) : null}
 
           {item.attachments?.length ? (
+            /*
+              `box-none`: cada adjunto recibe su toque, pero el hueco
+              entre dos (varias fotos, o un audio y la hora) atraviesa
+              hasta la capa de mantener.
+            */
             <View
+              pointerEvents="box-none"
               style={[
                 styles.adjuntos,
                 sinMarco && styles.adjuntosSinMarco,
@@ -3755,7 +3822,9 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
             arriba, esto debajo.
 
             `onLongPress` sin `onPress`: tocar la burbuja sigue sin
-            hacer nada, como antes.
+            hacer nada, como antes. El resto de la burbuja (relleno,
+            huecos, el nombre de un adjunto) lo cubre la capa de
+            mantener de más arriba.
           */}
           <Pressable
             onLongPress={
@@ -3768,6 +3837,11 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
             accessibilityLabel={
               conAcciones && !sinMarco ? t('chat.holdForActions') : undefined
             }
+            {...mantenerAccesible(
+              conAcciones && !sinMarco ? () => abrirAcciones(item) : undefined,
+              // Sin pista: su etiqueta ya es «Mantén presionado…».
+              { etiqueta: t('chat.messageActions') },
+            )}
           >
             {/*
               Los enlaces se pueden tocar (07/10/2026): el de una
@@ -3856,13 +3930,18 @@ const BurbujaDelChat = memo(function BurbujaDelChat({
             otro genera HTML inválido en la web.
           */}
           {item.reacciones?.length ? (
-            <View style={styles.reacciones}>
+            // El hueco entre reacciones también abre el menú al mantenerlo.
+            <View style={styles.reacciones} pointerEvents="box-none">
               {item.reacciones.map((reaccion) => (
                 <Pressable
                   key={reaccion.emoji}
                   onPress={() =>
                     void reaccionar(item, reaccion.mia ? null : reaccion.emoji)
                   }
+                  // Mantener una reacción abre el menú; sin esto, soltarla
+                  // tras mantenerla la ponía o la quitaba.
+                  onLongPress={conAcciones ? () => abrirAcciones(item) : undefined}
+                  delayLongPress={400}
                   accessibilityRole="button"
                   accessibilityLabel={t('chat.reactionOf', {
                     emoji: reaccion.emoji,
