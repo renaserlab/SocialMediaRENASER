@@ -16,12 +16,15 @@
 #     pasan a «Sin tema · 1» y «Avisos · 3», y en el chat salen sus etiquetas.
 #  5. Beto (miembro) ve los nombres y las etiquetas, y en el menu de un audio
 #     de Ana no tiene «Ponerle nombre» ni «Agregar a un tema» (en el suyo si
-#     puede cambiarle el nombre).
+#     puede cambiarle el nombre). Su video con nombre, en su propia burbuja,
+#     no se sale de ella.
 #
-# EL MENU DE UNA NOTA DE VOZ se abre manteniendo la franja de la hora de su
-# burbuja («Mantén presionado para ver las acciones del mensaje»), no la nota:
-# en el chat `BurbujaDeNotaDeVoz` no recibe `alMantener` (ChatScreen,
-# pintarAdjunto), y mantenerla la reproduce. En Contenido si lo recibe.
+# EL MENU DE UNA NOTA DE VOZ se abre manteniendo pulsada LA NOTA (su
+# reproductor), como una foto o un archivo; tocarla la reproduce. Hasta
+# f613d5e solo se abria desde la franja de la hora y mantenerla la
+# reproducia: el paso 1 comprueba que el menu sale y que no empieza a sonar.
+# Y en el paso 5, el video con nombre de Beto, en SU burbuja, se queda dentro
+# de ella (antes se desbordaba y el mensaje siguiente lo tapaba).
 #
 # Datos: e2e/datos/30-mensajes.sql y, encima, los audios, el PDF y el video
 # que siembra ~/.cache/zeta-perf/audios-e2e/sembrar-audios.sh por Storage y
@@ -78,10 +81,25 @@ env:
     timeout: 3000
 
 # ---- 1. «Ponerle nombre» en la nota de voz de Beto -----------------------------------
-- longPressOn:
-    text: "Mantén presionado para ver las acciones del mensaje"
-    below: "Reproducir nota de voz de 0:03"
-    above: "Reproducir nota de voz de 0:05"
+# Mantener pulsada la NOTA (su reproductor, no la franja de la hora) abre el
+# menu del mensaje, y NO la reproduce. Se mira con la de 0:07, que dura mas
+# que la pulsacion: con la hoja abierta el chat no se puede leer (es un
+# Modal), asi que se cierra y se comprueba que sigue en «Reproducir…».
+- longPressOn: "Reproducir nota de voz de 0:07"
+- extendedWaitUntil:
+    visible: "Ponerle nombre"
+    timeout: 10000
+- assertVisible: "Agregar a un tema"
+- assertVisible: "Responder"
+- takeScreenshot: mensajes-audios-mantener-la-nota-abre-el-menu
+- back
+- extendedWaitUntil:
+    notVisible: "Ponerle nombre"
+    timeout: 10000
+- assertVisible: "Reproducir nota de voz de 0:07"
+- assertNotVisible: "Parar la nota de voz"
+# Y ahora la de Beto, de 0:03, para ponerle nombre (tambien desde la nota).
+- longPressOn: "Reproducir nota de voz de 0:03"
 - extendedWaitUntil:
     visible: "Ponerle nombre"
     timeout: 10000
@@ -122,10 +140,7 @@ env:
 - assertNotVisible: "Reproducir nota de voz de 0:03"
 
 # ---- 2. «Agregar a un tema» en la suya, con nombre de paso -----------------------------
-- longPressOn:
-    text: "Mantén presionado para ver las acciones del mensaje"
-    below: "Reproducir nota de voz de 0:05"
-    above: "Reproducir archivo de audio"
+- longPressOn: "Reproducir nota de voz de 0:05"
 - extendedWaitUntil:
     visible: "Agregar a un tema"
     timeout: 10000
@@ -174,10 +189,7 @@ env:
 - takeScreenshot: mensajes-audios-etiqueta-del-tema
 
 # ---- 3. Otra vez: ✓ en «Avisos» y ya no pide nombre --------------------------------------
-- longPressOn:
-    text: "Mantén presionado para ver las acciones del mensaje"
-    below: "Reproducir Meditacion guiada, 5 segundos"
-    above: "Reproducir archivo de audio"
+- longPressOn: "Reproducir Meditacion guiada, 5 segundos"
 - extendedWaitUntil:
     visible: "Agregar a un tema"
     timeout: 10000
@@ -289,10 +301,7 @@ env:
 - assertVisible: "Clase 1 Respiracion"
 - assertVisible: "Está en el tema Avisos\\. Abrir el tema"
 - takeScreenshot: mensajes-audios-miembro-ve-nombres-y-etiquetas
-- longPressOn:
-    text: "Mantén presionado para ver las acciones del mensaje"
-    below: "Reproducir Meditacion guiada, 5 segundos"
-    above: "Reproducir archivo de audio"
+- longPressOn: "Reproducir Meditacion guiada, 5 segundos"
 - extendedWaitUntil:
     visible: "Ir al tema «Avisos»"
     timeout: 10000
@@ -305,11 +314,30 @@ env:
 - extendedWaitUntil:
     notVisible: "Ir al tema «Avisos»"
     timeout: 10000
-# Su propio audio (que nombro Ana) si lo puede renombrar; ordenarlo, no.
-- longPressOn:
+# Su video con nombre, en SU burbuja: el video queda dentro, con su hora
+# debajo, y la nota siguiente empieza despues (antes se desbordaba y la nota
+# lo tapaba). Las relaciones «below/above» fallan si se solapan.
+- scrollUntilVisible:
+    element: "Ver video"
+    direction: UP
+    centerElement: true
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: "Torno en 6 segundos"
+- assertVisible:
+    text: "Torno en 6 segundos"
+    above: "Ver video"
+- assertVisible:
     text: "Mantén presionado para ver las acciones del mensaje"
-    below: "Reproducir Clase 1 Respiracion, 3 segundos"
-    above: "Reproducir Meditacion guiada, 5 segundos"
+    below: "Ver video"
+    above: "Reproducir Clase 1 Respiracion, 3 segundos"
+- assertVisible:
+    text: "Reproducir Clase 1 Respiracion, 3 segundos"
+    below: "Ver video"
+- takeScreenshot: mensajes-audios-video-propio-dentro-de-su-burbuja
+# Su propio audio (que nombro Ana) si lo puede renombrar; ordenarlo, no.
+- longPressOn: "Reproducir Clase 1 Respiracion, 3 segundos"
 - extendedWaitUntil:
     visible: "Cambiar el nombre"
     timeout: 10000
