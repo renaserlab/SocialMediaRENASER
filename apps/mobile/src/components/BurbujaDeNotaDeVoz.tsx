@@ -5,6 +5,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 import { CabeceraDeAdjunto } from '@/components/chat/CabeceraDeAdjunto';
 import { useTranslation } from '@/i18n/useTranslation';
+import { mantenerAccesible } from '@/lib/mantenerAccesible';
 import { partesDeDuracion } from '@/lib/nombresDeAdjuntos';
 import { formatearDuracion } from '@/lib/notaDeVoz';
 import { radius, spacing } from '@/theme/tokens';
@@ -54,6 +55,11 @@ type Props = {
   alTerminar: () => void;
   /** Mantener presionado (en Contenido, elegir para agregar a un tema). */
   alMantener?: () => void;
+  /**
+   * Mantener presionado abre EL MENÚ DEL MENSAJE (en el chat y en un tema), y
+   * así se le dice al lector de pantalla. En Contenido es elegir, y no se dice.
+   */
+  mantenerAbreElMenu?: boolean;
 };
 
 /**
@@ -72,6 +78,7 @@ export function BurbujaDeNotaDeVoz({
   alPulsar,
   alTerminar,
   alMantener,
+  mantenerAbreElMenu = false,
 }: Props) {
   const { colors } = useAppTheme();
   const color = mio ? colors.sobreBurbujaPropia : colors.text;
@@ -85,10 +92,14 @@ export function BurbujaDeNotaDeVoz({
     reproductor de siempre (lienzo «Elegida · Tarjeta»). Sin nombre se
     devuelve el reproductor solo, exactamente como antes. La cabecera es
     HERMANA del play, no lo envuelve.
+
+    `box-none`: la tarjeta no se queda con el dedo. Lo que cae en el nombre o
+    en el hueco entre el nombre y el play sigue hasta la capa de mantener de la
+    burbuja (31/10/2026); antes moría aquí y el menú no se abría.
   */
   const enTarjeta = (reproductor: React.ReactElement) =>
     identidad.titulo ? (
-      <View style={styles.tarjeta}>
+      <View style={styles.tarjeta} pointerEvents="box-none">
         <CabeceraDeAdjunto adjunto={adjunto} mio={mio} />
         {reproductor}
       </View>
@@ -105,6 +116,7 @@ export function BurbujaDeNotaDeVoz({
         identidad={identidad}
         cederElTurno={alTerminar}
         alMantener={alMantener}
+        mantenerAbreElMenu={mantenerAbreElMenu}
       />,
     );
   }
@@ -120,6 +132,7 @@ export function BurbujaDeNotaDeVoz({
       // igual pero no hace nada: pulsarlo y que no suene nada sería peor.
       alPulsar={adjunto.url ? alPulsar : undefined}
       alMantener={alMantener}
+      mantenerAbreElMenu={mantenerAbreElMenu}
     />,
   );
 }
@@ -138,6 +151,7 @@ function NotaSonando({
   identidad,
   cederElTurno,
   alMantener,
+  mantenerAbreElMenu,
 }: {
   uri: string;
   duracion: number;
@@ -146,6 +160,7 @@ function NotaSonando({
   /** Deja de ser la nota activa. Al llamarlo, la pantalla desmonta esto. */
   cederElTurno: () => void;
   alMantener?: () => void;
+  mantenerAbreElMenu: boolean;
 }) {
   const reproductor = useAudioPlayer({ uri });
   const estado = useAudioPlayerStatus(reproductor);
@@ -203,6 +218,7 @@ function NotaSonando({
       // terminar, y por eso comparten camino.
       alPulsar={cederElTurno}
       alMantener={alMantener}
+      mantenerAbreElMenu={mantenerAbreElMenu}
     />
   );
 }
@@ -216,6 +232,7 @@ function Caratula({
   identidad,
   alPulsar,
   alMantener,
+  mantenerAbreElMenu,
 }: {
   color: string;
   duracion: number;
@@ -224,6 +241,7 @@ function Caratula({
   identidad: Identidad;
   alPulsar?: () => void;
   alMantener?: () => void;
+  mantenerAbreElMenu: boolean;
 }) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
@@ -241,6 +259,11 @@ function Caratula({
       disabled={!alPulsar && !alMantener}
       accessibilityRole="button"
       accessibilityLabel={etiquetaDelPlay(t, { sonando, duracion, identidad })}
+      // Con lector de pantalla, el menú del mensaje también se abre desde aquí.
+      {...mantenerAccesible(mantenerAbreElMenu ? alMantener : undefined, {
+        pista: t('chat.holdForActions'),
+        etiqueta: t('chat.messageActions'),
+      })}
       style={styles.fila}
       hitSlop={6}
     >

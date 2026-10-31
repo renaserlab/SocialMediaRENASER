@@ -486,6 +486,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'chat.viewPhoto': 'Ver foto',
   'chat.viewVideo': 'Ver vídeo',
   'chat.holdForActions': 'Mantenha pressionado para ver as ações da mensagem',
+  'chat.messageActions': 'Ver as ações da mensagem',
   'chat.voiceNotesOffBody': 'As notas de voz ainda não estão disponíveis. Você pode continuar escrevendo e enviando arquivos normalmente.',
   'chat.storyReplyTo': 'Resposta ao story de {nombre}',
   'chat.storyReplyHint': 'O story dele',

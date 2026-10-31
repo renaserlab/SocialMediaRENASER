@@ -7,6 +7,7 @@ import { Text } from '@/components/Text';
 import { CabeceraDeAdjunto } from '@/components/chat/CabeceraDeAdjunto';
 import { useTranslation } from '@/i18n/useTranslation';
 import { confirm, notify } from '@/lib/confirm';
+import { mantenerAccesible } from '@/lib/mantenerAccesible';
 import {
   MAX_BYTES_A_CARPETA,
   aspectoDeArchivo,
@@ -30,6 +31,11 @@ type Props = {
   alVer?: () => void;
   /** Mantener presionado: el menú del mensaje. */
   alMantener?: () => void;
+  /**
+   * Mantener presionado abre EL MENÚ DEL MENSAJE (en el chat y en un tema), y
+   * así se le dice al lector de pantalla. En Contenido es elegir, y no se dice.
+   */
+  mantenerAbreElMenu?: boolean;
   /**
    * Una línea más bajo el peso. En la pestaña «Archivos» dice quién lo mandó
    * y cuándo; en la burbuja eso ya lo dice el propio mensaje.
@@ -72,10 +78,35 @@ const descargados = new Set<string>();
  * El recuadro y el botón van como HERMANOS, no uno dentro de otro: en la web
  * cada zona que se toca es un botón, y un botón dentro de otro es HTML
  * inválido.
+ *
+ * MANTENER PULSADO, EN CUALQUIER PARTE (31/10/2026). Lo pidió el usuario: en
+ * un archivo solo abría el menú del mensaje la ficha; el botón de descargar, la
+ * línea del nombre del archivo y los huecos no. Peor aún, mantener el botón de
+ * descargar DESCARGABA al soltar (un `Pressable` sin `onLongPress` da el toque
+ * por bueno aunque dure). Ahora:
+ *
+ *  - los dos botones llevan `onLongPress`: tocar descarga o abre, como antes;
+ *    mantener abre el menú;
+ *  - lo que no es un botón (la raya, la línea del nombre, los huecos) no se
+ *    queda con el dedo (`pointerEvents`), y el toque llega a lo de debajo: la
+ *    capa de mantener de la burbuja del chat.
  */
-export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, style }: Props) {
+export function ArchivoDeChat({
+  adjunto,
+  mio = false,
+  alVer,
+  alMantener,
+  mantenerAbreElMenu = false,
+  pie,
+  style,
+}: Props) {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
+  /** Lo que el lector de pantalla necesita para abrir el menú desde aquí. */
+  const mantenerParaElLector = mantenerAccesible(mantenerAbreElMenu ? alMantener : undefined, {
+    pista: t('chat.holdForActions'),
+    etiqueta: t('chat.messageActions'),
+  });
   /** De 0 a 1 mientras baja; `null` si no está bajando. */
   const [avance, setAvance] = useState<number | null>(null);
   const [hecho, setHecho] = useState(() => descargados.has(adjunto.storagePath));
@@ -164,11 +195,14 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
   const descargaDeLaTarjeta = disponible ? (
     <Pulsable
       onPress={() => void descargar()}
+      onLongPress={alMantener}
+      delayLongPress={400}
       disabled={bajando}
       hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={t('chat.downloadFile', { nombre }).trim()}
       accessibilityState={{ busy: bajando }}
+      {...mantenerParaElLector}
       style={[styles.boton, styles.botonCompacto, { borderColor: colorTexto }]}
     >
       {bajando ? (
@@ -189,7 +223,7 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
   const titulo = adjunto.title?.trim();
   if (titulo) {
     return (
-      <View style={[styles.tarjeta, style]}>
+      <View style={[styles.tarjeta, style]} pointerEvents="box-none">
         <Pulsable
           onPress={alVer ?? (() => void descargar())}
           onLongPress={alMantener}
@@ -201,14 +235,17 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
               ? t(alVer ? 'chat.openFile' : 'chat.downloadFile', { nombre: titulo }).trim()
               : titulo
           }
+          {...mantenerParaElLector}
         >
           <CabeceraDeAdjunto adjunto={adjunto} mio={mio} pie={pie} />
         </Pulsable>
-        <View style={[styles.raya, { backgroundColor: colorTexto }]} />
-        <View style={styles.lineaFina}>
-          <Text numberOfLines={1} color={colorTexto} style={[styles.detalle, styles.detalleFino]}>
-            {[nombre, detalle].filter(Boolean).join(' · ')}
-          </Text>
+        <View style={[styles.raya, { backgroundColor: colorTexto }]} pointerEvents="none" />
+        <View style={styles.lineaFina} pointerEvents="box-none">
+          <View style={styles.detalleFino} pointerEvents="none">
+            <Text numberOfLines={1} color={colorTexto} style={styles.detalle}>
+              {[nombre, detalle].filter(Boolean).join(' · ')}
+            </Text>
+          </View>
           {descargaDeLaTarjeta}
         </View>
       </View>
@@ -216,7 +253,7 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
   }
 
   return (
-    <View style={[styles.fila, style]}>
+    <View style={[styles.fila, style]} pointerEvents="box-none">
       <Pulsable
         onPress={alVer ?? (() => void descargar())}
         onLongPress={alMantener}
@@ -228,6 +265,7 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
             ? t(alVer ? 'chat.openFile' : 'chat.downloadFile', { nombre }).trim()
             : nombre
         }
+        {...mantenerParaElLector}
         style={styles.cuerpo}
       >
         <View style={[styles.recuadro, { backgroundColor: TONOS[aspecto.tono] }]}>
@@ -259,11 +297,14 @@ export function ArchivoDeChat({ adjunto, mio = false, alVer, alMantener, pie, st
       {disponible ? (
         <Pulsable
           onPress={() => void descargar()}
+          onLongPress={alMantener}
+          delayLongPress={400}
           disabled={bajando}
           hitSlop={6}
           accessibilityRole="button"
           accessibilityLabel={t('chat.downloadFile', { nombre }).trim()}
           accessibilityState={{ busy: bajando }}
+          {...mantenerParaElLector}
           style={[styles.boton, { borderColor: colorTexto }]}
         >
           {bajando ? (

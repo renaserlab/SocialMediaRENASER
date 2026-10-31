@@ -483,6 +483,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'chat.viewPhoto': 'View photo',
   'chat.viewVideo': 'View video',
   'chat.holdForActions': 'Press and hold to see the message actions',
+  'chat.messageActions': 'See the message actions',
   'chat.voiceNotesOffBody': 'Voice notes are not available yet. You can keep writing and sending files as usual.',
   'chat.storyReplyTo': 'Reply to {nombre}\'s story',
   'chat.storyReplyHint': 'Their story',

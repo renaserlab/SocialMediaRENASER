@@ -13,6 +13,7 @@ import { TextoConEnlaces } from '@/components/TextoConEnlaces';
 import { type TranslationKey } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
 import { colorDeAutor, miembroDe, nombreDelAutor, type InfoDeConversacion } from '@/lib/gruposDeChat';
+import { mantenerAccesible } from '@/lib/mantenerAccesible';
 import { medioQueEs } from '@/lib/mediosDeChat';
 import { textoDeCita } from '@/lib/reaccionesDeChat';
 import type { MensajeDeTema } from '@/repositories/TemasRepository';
@@ -74,6 +75,10 @@ function diaDe(mensaje?: MensajeDeTema): string | null {
  * NINGÚN PULSABLE DENTRO DE OTRO. En la web cada uno es un `<button>`: los
  * adjuntos, el texto, las reacciones y el enlace de abajo son HERMANOS.
  *
+ * MANTENER PULSADO, EN CUALQUIER PARTE DE LA BURBUJA (31/10/2026), igual que en
+ * el chat: una capa pulsable detrás de todo y lo que no es un botón sin
+ * quedarse con el dedo. Ver el comentario de la capa en `ChatScreen`.
+ *
  * MEMORIZADA (28/10/2026): solo se pinta cuando cambia algo de lo que recibe.
  * Sin esto, cada tecla en el campo del tema repintaba todas las burbujas a la
  * vista. Quien la pinta le da referencias estables y, de la nota que suena,
@@ -110,6 +115,11 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
   const conAutor = !mio && !agrupado;
   const colorDelTexto = mio ? colors.sobreBurbujaPropia : colors.text;
   const mantener = alMantener ? () => alMantener(mensaje) : undefined;
+  /** Lo mismo, para quien usa lector de pantalla (ver `mantenerAccesible`). */
+  const mantenerParaElLector = mantenerAccesible(mantener, {
+    pista: t('chat.holdForActions'),
+    etiqueta: t('chat.messageActions'),
+  });
 
   const quienLoAgrego = !mensaje.anadidoPor
     ? null
@@ -129,6 +139,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
           alTerminar={alParar}
           // Mantener presionado abre el menú, como en General; tocar, escuchar.
           alMantener={mantener}
+          mantenerAbreElMenu
         />
       );
     }
@@ -142,6 +153,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
           mio={mio}
           alVer={medio ? () => alVerAdjunto({ ...adjunto, kind: medio }) : undefined}
           alMantener={mantener}
+          mantenerAbreElMenu
           style={{ width: anchoDeMedio }}
         />
       );
@@ -157,7 +169,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
         delayLongPress={400}
         accessibilityRole="button"
         accessibilityLabel={adjunto.kind === 'video' ? t('chat.viewVideo') : t('chat.viewPhoto')}
-        accessibilityHint={mantener ? t('chat.holdForActions') : undefined}
+        {...mantenerParaElLector}
         style={[
           styles.medio,
           { width: anchoDeMedio, aspectRatio: Math.min(Math.max(proporcion, 0.6), 1.9) },
@@ -172,7 +184,11 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
     return (
       // Con el ancho del video: medido por su contenido, un nombre largo lo
       // ensancharía más que el video (ver el mismo arreglo en `ChatScreen`).
-      <View key={adjunto.id} style={[styles.videoConNombre, { width: anchoDeMedio }]}>
+      <View
+        key={adjunto.id}
+        pointerEvents="box-none"
+        style={[styles.videoConNombre, { width: anchoDeMedio }]}
+      >
         <CabeceraDeAdjunto adjunto={adjunto} mio={mio} />
         {medio}
       </View>
@@ -222,13 +238,26 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
               },
             ]}
           >
+            {/* La capa de mantener: la burbuja entera abre el menú (ver arriba). */}
+            {mantener && !mensaje.eliminado ? (
+              <Pressable
+                onLongPress={mantener}
+                delayLongPress={400}
+                style={StyleSheet.absoluteFill}
+                accessible={false}
+                importantForAccessibility="no"
+                focusable={false}
+              />
+            ) : null}
             {conAutor ? (
-              <Text
-                numberOfLines={1}
-                style={[styles.autor, { color: colorDeAutor(mensaje.autorId, mode === 'dark') }]}
-              >
-                {nombre}
-              </Text>
+              <View pointerEvents="none">
+                <Text
+                  numberOfLines={1}
+                  style={[styles.autor, { color: colorDeAutor(mensaje.autorId, mode === 'dark') }]}
+                >
+                  {nombre}
+                </Text>
+              </View>
             ) : null}
 
             {mensaje.eliminado ? (
@@ -243,6 +272,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
                 {/* A qué responde, como cita. Aquí no lleva a ningún sitio: se lee. */}
                 {mensaje.respuestaA ? (
                   <View
+                    pointerEvents="none"
                     style={[
                       styles.cita,
                       { borderLeftColor: colorDeAutor(mensaje.respuestaA.autorId, mode === 'dark') },
@@ -266,11 +296,15 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
                 ) : null}
 
                 {mensaje.storyContext ? (
-                  <RespuestaAHistoria contexto={mensaje.storyContext} mio={mio} />
+                  <View pointerEvents="none">
+                    <RespuestaAHistoria contexto={mensaje.storyContext} mio={mio} />
+                  </View>
                 ) : null}
 
                 {mensaje.attachments?.length ? (
-                  <View style={styles.adjuntos}>{mensaje.attachments.map(pintarAdjunto)}</View>
+                  <View style={styles.adjuntos} pointerEvents="box-none">
+                    {mensaje.attachments.map(pintarAdjunto)}
+                  </View>
                 ) : null}
 
                 {/* El texto y la hora: mantener presionado abre las acciones. */}
@@ -279,6 +313,8 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
                   delayLongPress={400}
                   accessibilityRole={mantener ? 'button' : undefined}
                   accessibilityLabel={mantener ? t('chat.holdForActions') : undefined}
+                  // Sin pista: su etiqueta ya es «Mantén presionado…».
+                  {...mantenerAccesible(mantener, { etiqueta: t('chat.messageActions') })}
                 >
                   {mensaje.text ? (
                     <TextoConEnlaces
@@ -296,7 +332,7 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
                 </Pressable>
 
                 {mensaje.reacciones?.length ? (
-                  <View style={styles.reacciones}>
+                  <View style={styles.reacciones} pointerEvents="box-none">
                     {mensaje.reacciones.map((reaccion) => (
                       <Pressable
                         key={reaccion.emoji}
@@ -305,7 +341,9 @@ export const BurbujaDeTema = memo(function BurbujaDeTema({
                             ? () => alReaccionar(mensaje, reaccion.mia ? null : reaccion.emoji)
                             : undefined
                         }
-                        disabled={!alReaccionar}
+                        onLongPress={mantener}
+                        delayLongPress={400}
+                        disabled={!alReaccionar && !mantener}
                         accessibilityRole={alReaccionar ? 'button' : undefined}
                         accessibilityLabel={t('chat.reactionOf', {
                           emoji: reaccion.emoji,

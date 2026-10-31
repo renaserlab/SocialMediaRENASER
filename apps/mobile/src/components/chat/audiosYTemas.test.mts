@@ -134,12 +134,16 @@ describe('la tarjeta', () => {
   it('sin nombre, la nota de voz se ve exactamente como antes', () => {
     assert.match(
       VOZ,
-      /identidad\.titulo \? \(\s*<View style=\{styles\.tarjeta\}>\s*<CabeceraDeAdjunto adjunto=\{adjunto\} mio=\{mio\} \/>\s*\{reproductor\}\s*<\/View>\s*\) : \(\s*reproductor\s*\)/,
+      /identidad\.titulo \? \(\s*<View style=\{styles\.tarjeta\} pointerEvents="box-none">\s*<CabeceraDeAdjunto adjunto=\{adjunto\} mio=\{mio\} \/>\s*\{reproductor\}\s*<\/View>\s*\) : \(\s*reproductor\s*\)/,
     );
   });
 
   it('el documento con nombre: la cabecera es hermana de la descarga, no la envuelve', () => {
-    const tarjeta = ARCHIVO.slice(ARCHIVO.indexOf('if (titulo) {'), ARCHIVO.indexOf('<View style={[styles.fila, style]}>'));
+    const tarjeta = ARCHIVO.slice(
+      ARCHIVO.indexOf('if (titulo) {'),
+      ARCHIVO.indexOf('<View style={[styles.fila, style]} pointerEvents="box-none">'),
+    );
+    assert.ok(tarjeta.length > 0, 'la tarjeta y la fila tienen que existir, en ese orden');
     assert.ok(tarjeta.indexOf('</Pulsable>') < tarjeta.indexOf('{descargaDeLaTarjeta}'));
     assert.match(tarjeta, /\[nombre, detalle\]\.filter\(Boolean\)\.join\(' · '\)/);
   });
@@ -293,7 +297,10 @@ describe('certificación en el emulador (30/10/2026)', () => {
       CHAT,
       /contexto\.forma === 'al_ras' && !titulado\s*\?\s*\{ minWidth: anchoDeMedio \}\s*:\s*\{ width: anchoDeMedio \}/,
     );
-    assert.match(CHAT, /<View key=\{adjunto\.id\} style=\{\[styles\.videoConNombre, \{ width: anchoDeMedio \}\]\}>/);
+    assert.match(
+      CHAT,
+      /<View\s+key=\{adjunto\.id\}\s+pointerEvents="box-none"\s+style=\{\[styles\.videoConNombre, \{ width: anchoDeMedio \}\]\}\s*>/,
+    );
     assert.match(CHAT, /videoConNombre: \{ gap: spacing\.sm \},/);
     assert.match(
       fuente('components/chat/BurbujaDeTema.tsx'),
