@@ -8,7 +8,7 @@ import { StateView } from '@/components/StateView';
 import { Text } from '@/components/Text';
 import { VideoTile } from '@/components/VideoTile';
 import { assets } from '@/data/assets';
-import { GRID_GAP, GRID_COLUMNS, gridItemSize } from '@/lib/gridLayout';
+import { GRID_GAP, GRID_COLUMNS, gridItemHeight, gridItemSize } from '@/lib/gridLayout';
 import { miniaturaDePublicacion } from '@/lib/miniaturaDePublicacion';
 import { spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -53,7 +53,9 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
   const router = useRouter();
 
   /*
-    El lado de cada celda se calcula midiendo el contenedor, en pixeles.
+    El ancho de cada celda se calcula midiendo el contenedor, en pixeles, y el
+    alto sale de el con la proporcion de la cuadricula (3:4, vertical, la de
+    Instagram; ver `GRID_TILE_ASPECT_RATIO`).
 
     Antes se definia con un ancho en porcentaje y la altura deducida de la
     proporcion, y eso no se resuelve igual en el navegador que en el movil: en
@@ -63,6 +65,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
   */
   const [anchoCuadricula, setAnchoCuadricula] = useState(0);
   const lado = gridItemSize(anchoCuadricula);
+  const alto = gridItemHeight(lado);
 
   if (error) {
     // Con reintento: antes se pintaba solo el texto y no habia nada que pulsar.
@@ -115,7 +118,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
                   key={`hueco-${i}`}
                   style={[
                     styles.tile,
-                    { width: lado, height: lado, backgroundColor: colors.surfaceAlt },
+                    { width: lado, height: alto, backgroundColor: colors.surfaceAlt },
                   ]}
                 />
               ))
@@ -152,7 +155,7 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
                     */
                     style={[
                       styles.tile,
-                      { width: lado, height: lado, backgroundColor: colors.surfaceAlt },
+                      { width: lado, height: alto, backgroundColor: colors.surfaceAlt },
                     ]}
                     onPress={() => router.push(`/post/${post.id}` as never)}
                     accessibilityRole="button"
@@ -187,7 +190,14 @@ export function ProfileGallery({ gallery, loading, error, emptyHint, onRetry }: 
                               : assets[post.imageKey!]
                           }
                           style={StyleSheet.absoluteFill}
+                          /*
+                            Llena la celda y recorta lo que sobra repartido a
+                            los dos lados, como Instagram: con la celda 3:4 una
+                            foto vertical se ve casi entera y una apaisada
+                            conserva su centro.
+                          */
                           contentFit="cover"
+                          contentPosition="center"
                           /*
                             En disco, como el resto de fotos de publicacion. Un
                             perfil trae hasta sesenta miniaturas; guardarlas

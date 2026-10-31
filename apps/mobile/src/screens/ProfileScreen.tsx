@@ -52,7 +52,7 @@ import {
   type PickedMedia,
 } from '@/services/storage';
 import { useTranslation } from '@/i18n/useTranslation';
-import { GRID_COLUMNS, GRID_GAP, gridItemSize } from '@/lib/gridLayout';
+import { GRID_COLUMNS, GRID_GAP, gridItemHeight, gridItemSize } from '@/lib/gridLayout';
 import { useAppStore } from '@/store/useAppStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { radius, spacing, type Categoria } from '@/theme/tokens';
@@ -1436,14 +1436,15 @@ export function ProfileScreen() {
  * y tres filas de cuadricula. Ni texto inventado ni cifras a cero, que se leen
  * como datos reales y equivocados.
  *
- * El lado de las celdas se mide igual que en la galeria de verdad
- * (`gridItemSize`), asi que al llegar las publicaciones ocupan exactamente
- * estos huecos y nada se mueve.
+ * Las celdas se miden igual que en la galeria de verdad (`gridItemSize` y
+ * `gridItemHeight`, verticales 3:4), asi que al llegar las publicaciones
+ * ocupan exactamente estos huecos y nada se mueve.
  */
 function EsqueletoDePerfil() {
   const { colors } = useAppTheme();
   const [ancho, setAncho] = useState(0);
   const lado = gridItemSize(ancho);
+  const alto = gridItemHeight(lado);
   const hueco = { backgroundColor: colors.surfaceAlt };
 
   return (
@@ -1475,7 +1476,7 @@ function EsqueletoDePerfil() {
         {lado === 0
           ? null
           : Array.from({ length: GRID_COLUMNS * 3 }, (_, i) => (
-              <View key={i} style={[{ width: lado, height: lado }, hueco]} />
+              <View key={i} style={[{ width: lado, height: alto }, hueco]} />
             ))}
       </View>
     </View>
