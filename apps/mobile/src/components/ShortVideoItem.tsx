@@ -276,6 +276,15 @@ function ShortVideoItemBase({
           muted={muted}
           nativeControls={false}
           active={active}
+          /*
+            El muro reproduce solo, como TikTok: el circulo de play sobra
+            mientras el video se prepara. Sin esto, el SIGUIENTE video, montado
+            de antemano para que no haya tiron, se veia con un play enorme
+            encima al deslizar hacia el, y el activo lo volvia a ensenar un
+            instante mientras cargaba. Con esto solo hay portada hasta el
+            primer fotograma, y el circulo solo aparece si alguien pausa.
+          */
+          hidePlayButton
           // Controles propios: un toque pausa o reanuda y abajo hay una barra
           // arrastrable. Los del sistema taparian el video con su botonera.
           shortsControls
