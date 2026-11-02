@@ -163,6 +163,48 @@ async def hay_destacado_de_directo(db: AsyncSession) -> bool:
     return _cache["live_spotlights"]
 
 
+#: Las columnas que la 0114 añade a `live_spotlights`. Se exigen TODAS: con
+#: una a medias, guardar el rótulo escribiría en una columna que no existe a
+#: mitad de la transacción y se perdería también el texto.
+COLUMNAS_DEL_ROTULO_EDITABLE = (
+    "banner_x",
+    "banner_y",
+    "banner_scale",
+    "banner_rotation",
+    "banner_color",
+    "banner_background",
+    "banner_font",
+)
+
+
+async def hay_rotulo_editable(db: AsyncSession) -> bool:
+    """Si `live_spotlights` tiene las columnas de la 0114.
+
+    SIN LA 0114 el rótulo funciona como hasta hoy: se pone, se cambia y se
+    quita, y se pinta en su sitio de siempre, en blanco y sobre velo. Lo único
+    que no hay es dónde guardar dónde está, cuánto mide, cuánto gira y de qué
+    color es, así que moverlo responde 503 y la aplicación no lo ofrece. Se
+    degrada lo nuevo, nunca lo que ya había.
+    """
+    if "live_spotlights.banner_layout" not in _cache:
+        conexion = await db.connection()
+
+        def _mirar(sync) -> bool:
+            inspector = inspect(sync)
+            if not inspector.has_table("live_spotlights"):
+                return False
+            hay = {c["name"] for c in inspector.get_columns("live_spotlights")}
+            return all(columna in hay for columna in COLUMNAS_DEL_ROTULO_EDITABLE)
+
+        _cache["live_spotlights.banner_layout"] = await conexion.run_sync(_mirar)
+        if not _cache["live_spotlights.banner_layout"]:
+            logger.warning(
+                "La migracion 0114 no esta aplicada: el rotulo de los directos "
+                "no se puede mover, girar ni cambiar de color."
+            )
+    return _cache["live_spotlights.banner_layout"]
+
+
 async def hay_grabaciones_de_directo(db: AsyncSession) -> bool:
     """Si existe `live_recordings` (migracion 0101).
 

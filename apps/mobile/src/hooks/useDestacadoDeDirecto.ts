@@ -10,6 +10,7 @@ import {
   destacadoVacio,
   sinDestacado,
   type EstiloDeRotulo,
+  type Presentacion,
   type Repaso,
 } from '@/live/destacado';
 import { LiveRepository, type DestacadoDeEmision } from '@/repositories/LiveRepository';
@@ -42,7 +43,22 @@ export type DestacadoEnPantalla = {
   /** `true` si se hizo. El fallo ya se ha contado por `alFallar`. */
   fijar: (mensajeId: string) => Promise<boolean>;
   soltar: () => Promise<boolean>;
-  ponerRotulo: (texto: string, estilo: EstiloDeRotulo) => Promise<boolean>;
+  /**
+   * Pone o cambia el rótulo. Con `presentacion` —solo si el servidor la
+   * guarda (`destacado.rotuloEditable`)— también su sitio y su aspecto.
+   */
+  ponerRotulo: (
+    texto: string,
+    estilo: EstiloDeRotulo,
+    presentacion?: Presentacion | null,
+    /** `false` desde la hoja, que no lo mueve: se queda donde esté. */
+    conPosicion?: boolean,
+  ) => Promise<boolean>;
+  /**
+   * Lo que se manda al SOLTAR el texto. No espera a otros gestos ni los
+   * frena: si se suelta otra vez antes de que conteste, se manda la última.
+   */
+  moverRotulo: (disposicion: { x: number; y: number; tamano: number; giro: number }) => Promise<boolean>;
   quitarRotulo: () => Promise<boolean>;
   /**
    * Algo cambió por otro camino —se ha escondido el mensaje fijado—: se vuelve
@@ -181,13 +197,9 @@ export function useDestacadoDeDirecto({
     }, REINTENTO_DEL_AVISO_MS);
   }, []);
 
-  /** Un gesto: se manda, se pinta LO QUE CONTESTA EL SERVIDOR y se avisa. */
-  const gesto = useCallback(
+  /** Manda, pinta LO QUE CONTESTA EL SERVIDOR y avisa a la sala. */
+  const mandar = useCallback(
     async (accion: () => Promise<DestacadoDeEmision>): Promise<boolean> => {
-      // El freno de la doble pulsación, igual que en el escenario.
-      if (enVuelo.current) return false;
-      enVuelo.current = true;
-      setOcupado(true);
       try {
         aplicar(await accion());
         avisar();
@@ -198,13 +210,40 @@ export function useDestacadoDeDirecto({
         // se vuelve a preguntar en vez de dejar en pantalla lo que ya no es.
         repaso.current?.pedir();
         return false;
+      }
+    },
+    [aplicar, avisar, contarFallo],
+  );
+
+  /** Un gesto de botón: con el freno de la doble pulsación. */
+  const gesto = useCallback(
+    async (accion: () => Promise<DestacadoDeEmision>): Promise<boolean> => {
+      // El freno de la doble pulsación, igual que en el escenario.
+      if (enVuelo.current) return false;
+      enVuelo.current = true;
+      setOcupado(true);
+      try {
+        return await mandar(accion);
       } finally {
         enVuelo.current = false;
         if (vigente.current) setOcupado(false);
       }
     },
-    [aplicar, avisar, contarFallo],
+    [mandar],
   );
+
+  /*
+    SOLTAR EL TEXTO NO PASA POR EL FRENO. Es un gesto con el dedo, no un botón:
+    nadie lo «pulsa dos veces», y perder un soltar porque otro aún no había
+    contestado dejaría el texto saltando a donde estaba. Tampoco van dos a la
+    vez —la respuesta vieja podría llegar después y pisar a la nueva—: si se
+    suelta mientras otro va de camino, se apunta y al volver se manda el
+    ÚLTIMO.
+  */
+  const siguienteSitio = useRef<{ x: number; y: number; tamano: number; giro: number } | null>(
+    null,
+  );
+  const moviendo = useRef<Promise<boolean> | null>(null);
 
   const fijar = useCallback(
     (mensajeId: string) => gesto(() => LiveRepository.fijarMensaje(emisionId, mensajeId)),
@@ -215,9 +254,35 @@ export function useDestacadoDeDirecto({
     [emisionId, gesto],
   );
   const ponerRotulo = useCallback(
-    (texto: string, estilo: EstiloDeRotulo) =>
-      gesto(() => LiveRepository.ponerRotulo(emisionId, texto, estilo)),
+    (
+      texto: string,
+      estilo: EstiloDeRotulo,
+      presentacion: Presentacion | null = null,
+      conPosicion = true,
+    ) => gesto(() => LiveRepository.ponerRotulo(emisionId, texto, estilo, presentacion, conPosicion)),
     [emisionId, gesto],
+  );
+  const moverRotulo = useCallback(
+    (disposicion: { x: number; y: number; tamano: number; giro: number }) => {
+      siguienteSitio.current = disposicion;
+      if (moviendo.current) return moviendo.current;
+      const vuelta = (async () => {
+        let hecho = true;
+        try {
+          while (siguienteSitio.current) {
+            const ahora = siguienteSitio.current;
+            siguienteSitio.current = null;
+            hecho = await mandar(() => LiveRepository.moverRotulo(emisionId, ahora));
+          }
+          return hecho;
+        } finally {
+          moviendo.current = null;
+        }
+      })();
+      moviendo.current = vuelta;
+      return vuelta;
+    },
+    [emisionId, mandar],
   );
   const quitarRotulo = useCallback(
     () => gesto(() => LiveRepository.quitarRotulo(emisionId)),
@@ -236,6 +301,7 @@ export function useDestacadoDeDirecto({
     fijar,
     soltar,
     ponerRotulo,
+    moverRotulo,
     quitarRotulo,
     cambioPorFuera,
   };

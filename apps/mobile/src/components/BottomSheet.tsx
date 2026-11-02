@@ -23,6 +23,12 @@ type BottomSheetProps = {
    * Los formularios —que son casi todas las hojas— no tocan nada.
    */
   desplazable?: boolean;
+  /**
+   * El velo de detrás. Por defecto, el del tema. Una hoja que edita algo que
+   * se está viendo DETRÁS —el texto del directo, que cambia al momento— pide
+   * uno más suave para que se vea lo que se cambia.
+   */
+  colorDelVelo?: string;
 };
 
 export function BottomSheet({
@@ -30,6 +36,7 @@ export function BottomSheet({
   onClose,
   children,
   desplazable = true,
+  colorDelVelo,
 }: BottomSheetProps) {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -70,7 +77,7 @@ export function BottomSheet({
       <SinTecladoDelante style={styles.modalContainer} ventanaPropia>
         {/* Overlay backdrop */}
         <Pressable
-          style={[styles.backdrop, { backgroundColor: colors.overlay }]}
+          style={[styles.backdrop, { backgroundColor: colorDelVelo ?? colors.overlay }]}
           onPress={onClose}
           accessibilityLabel="Cerrar panel"
           accessibilityRole="button"

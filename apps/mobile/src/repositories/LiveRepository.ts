@@ -1,4 +1,11 @@
-import { leerDestacado, type Destacado, type EstiloDeRotulo } from '@/live/destacado';
+import {
+  cuerpoDeLaDisposicion,
+  cuerpoDelRotulo,
+  leerDestacado,
+  type Destacado,
+  type EstiloDeRotulo,
+  type Presentacion,
+} from '@/live/destacado';
 import { leerEscenario, type Escenario } from '@/live/escenario';
 import { leerGrabacion, type Grabacion } from '@/live/grabacion';
 import {
@@ -517,16 +524,39 @@ export const LiveRepository = {
     );
   },
 
-  /** Poner o cambiar el texto que quien emite ensena sobre la imagen. */
+  /**
+   * Poner o cambiar el texto que quien emite ensena sobre la imagen.
+   *
+   * Con `presentacion` (servidor con la 0114) se manda tambien donde esta, su
+   * tamano, su giro, su color, su fondo y su letra. Sin ella, lo de siempre.
+   */
   async ponerRotulo(
     emisionId: string,
     texto: string,
     estilo: EstiloDeRotulo,
+    presentacion: Presentacion | null = null,
+    conPosicion = true,
   ): Promise<DestacadoDeEmision> {
     return aDestacado(
       await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight/banner`, {
         method: 'PUT',
-        body: JSON.stringify({ text: texto, style: estilo }),
+        body: JSON.stringify(cuerpoDelRotulo(texto, estilo, presentacion, conPosicion)),
+      }),
+    );
+  },
+
+  /**
+   * Donde quedo el rotulo, su tamano y su giro: lo que se manda al SOLTARLO.
+   * Mientras se arrastra no se manda nada.
+   */
+  async moverRotulo(
+    emisionId: string,
+    disposicion: { x: number; y: number; tamano: number; giro: number },
+  ): Promise<DestacadoDeEmision> {
+    return aDestacado(
+      await apiRequest<unknown>(`${API_V1}/live/sessions/${emisionId}/spotlight/banner/layout`, {
+        method: 'PATCH',
+        body: JSON.stringify(cuerpoDeLaDisposicion(disposicion)),
       }),
     );
   },

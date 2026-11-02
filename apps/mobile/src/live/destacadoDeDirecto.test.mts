@@ -6,6 +6,7 @@ import {
   ESTILOS_DE_ROTULO,
   ESTILO_POR_OMISION,
   MAXIMO_DE_ROTULO,
+  PRESENTACION_POR_OMISION,
   accionesDeMensaje,
   avisoDeDestacado,
   claveDelFalloDeDestacado,
@@ -101,9 +102,15 @@ test('un texto que no dice nada no se manda', () => {
 test('la respuesta vacia del servidor se lee como «nada destacado»', () => {
   assert.deepEqual(
     leerDestacado({ pinned: null, banner: null, can_manage: true }, aMensaje),
-    { fijado: null, rotulo: null, puedeGestionar: true },
+    // Un servidor sin la 0114 no dice `banner_layout`: no se puede mover.
+    { fijado: null, rotulo: null, puedeGestionar: true, rotuloEditable: false },
   );
-  assert.deepEqual(destacadoVacio(), { fijado: null, rotulo: null, puedeGestionar: false });
+  assert.deepEqual(destacadoVacio(), {
+    fijado: null,
+    rotulo: null,
+    puedeGestionar: false,
+    rotuloEditable: false,
+  });
 });
 
 test('se leen el mensaje fijado y el rotulo', () => {
@@ -117,8 +124,15 @@ test('se leen el mensaje fijado y el rotulo', () => {
   );
   assert.deepEqual(leido, {
     fijado: { id: 'm1', cuerpo: 'hola' },
-    rotulo: { texto: 'Sorteo a las 8', estilo: 'pulse', puestoEnIso: '2026-10-09T10:00:00Z' },
+    rotulo: {
+      texto: 'Sorteo a las 8',
+      estilo: 'pulse',
+      puestoEnIso: '2026-10-09T10:00:00Z',
+      // Un rótulo de antes de la 0114 se pinta como siempre.
+      presentacion: PRESENTACION_POR_OMISION,
+    },
     puedeGestionar: false,
+    rotuloEditable: false,
   });
 });
 
@@ -437,6 +451,8 @@ test('cada codigo que el servidor puede devolver tiene texto en los tres idiomas
   assert.deepEqual([...codigos].sort(), [
     'live_message_hidden',
     'live_spotlight_closed',
+    'live_spotlight_layout_not_available',
+    'live_spotlight_no_banner',
     'live_spotlight_not_available',
     'live_spotlight_rate_limited',
   ]);
@@ -451,17 +467,25 @@ test('cada codigo que el servidor puede devolver tiene texto en los tres idiomas
 
 /* ---------------------------------------------------------- el cableado --- */
 
-test('el repositorio habla con las cinco rutas del servidor', () => {
+test('el repositorio habla con las seis rutas del servidor', () => {
   const repositorio = sinComentarios(leer('../repositories/LiveRepository.ts'));
-  for (const ruta of ['/spotlight`', '/spotlight/pin`', '/spotlight/banner`']) {
+  for (const ruta of ['/spotlight`', '/spotlight/pin`', '/spotlight/banner`', '/spotlight/banner/layout`']) {
     assert.ok(repositorio.includes(ruta), ruta);
   }
   assert.match(repositorio, /spotlight\/pin`,\s*\{\s*method: 'PUT',\s*body: JSON\.stringify\(\{ message_id: mensajeId \}\)/);
-  assert.match(repositorio, /spotlight\/banner`,\s*\{\s*method: 'PUT',\s*body: JSON\.stringify\(\{ text: texto, style: estilo \}\)/);
+  assert.match(
+    repositorio,
+    /spotlight\/banner`,\s*\{\s*method: 'PUT',\s*body: JSON\.stringify\(cuerpoDelRotulo\(texto, estilo, presentacion, conPosicion\)\)/,
+  );
+  assert.match(
+    repositorio,
+    /spotlight\/banner\/layout`,\s*\{\s*method: 'PATCH',\s*body: JSON\.stringify\(cuerpoDeLaDisposicion\(disposicion\)\)/,
+  );
   assert.equal((repositorio.match(/spotlight\/(?:pin|banner)`,\s*\{\s*method: 'DELETE'/g) ?? []).length, 2);
-  for (const ruta of ['/spotlight"', '/spotlight/pin"', '/spotlight/banner"']) {
+  for (const ruta of ['/spotlight"', '/spotlight/pin"', '/spotlight/banner"', '/spotlight/banner/layout"']) {
     assert.ok(rutas.includes(`"/sessions/{session_id}${ruta}`), ruta);
   }
+  assert.match(rutas, /@router\.patch\(\s*"\/sessions\/\{session_id\}\/spotlight\/banner\/layout"/);
 });
 
 test('el aviso de difusion usa el topico y la carga de las reglas', () => {
