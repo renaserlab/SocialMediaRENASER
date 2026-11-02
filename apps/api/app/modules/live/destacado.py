@@ -22,15 +22,48 @@ LAS REGLAS, y por qué:
     con un tope corto: va encima de un vídeo, en un teléfono.
   * NADA DE ESTO TOCA LA EMISIÓN. Si la tabla no existe todavía, el router
     contesta 503 a lo de destacar y lo demás sigue igual.
+
+EL RÓTULO SE MUEVE Y SE VISTE (02/11/2026, migración 0114). Quien gestiona la
+emisión lo arrastra, lo gira, le cambia el tamaño y elige su color, su fondo y
+su letra. Lo que se guarda es la PRESENTACIÓN (`Presentacion`):
+
+  * DÓNDE, en fracciones de la pantalla (el centro del texto). Nulo = el sitio
+    de siempre, debajo de la cabecera. Cada teléfono encaja ese punto en su
+    propia zona libre: el servidor no sabe cuánto miden las pantallas, y no
+    tiene por qué.
+  * CUÁNTO MIDE (70–240 %, de cinco en cinco) y CUÁNTO GIRA (-180–180°).
+  * CÓMO SE VE, por nombre: un color de una paleta cerrada, uno de tres fondos
+    y una de tres letras. Qué color es «oro» lo decide la aplicación.
+
+SIN LA 0114 NO SE ROMPE NADA. Las columnas no están en el modelo de la tabla
+(`LiveSpotlight`) a propósito: leerlo pediría columnas que la base puede no
+tener todavía, y se caería todo lo destacado. Se leen y escriben aparte
+(`_presentaciones`), solo si `esquema.hay_rotulo_editable` dice que están. Sin
+ellas el texto se pone y se quita como siempre y se pinta como siempre.
+
+LA FECHA DEL RÓTULO (`banner_at`) ES LA DE SU TEXTO. Cambia cuando cambian el
+texto o su movimiento, que es cuando la sala lo ve ENTRAR otra vez. Moverlo o
+cambiarle el color no lo vuelve a presentar: no la toca.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import (
+    Column,
+    Float,
+    MetaData,
+    SmallInteger,
+    Table,
+    Text,
+    Uuid,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError
@@ -47,6 +80,135 @@ ESTILO_POR_OMISION = "slide"
 MAXIMO_DE_ROTULO = 80
 
 _UNIDOR = "\u200d"
+
+#: Los colores del rótulo. NOMBRES, no colores: qué tinta es cada uno lo
+#: deciden los tokens de la aplicación. Una paleta cerrada y no una rueda: los
+#: ocho se leen sobre vídeo y siguen la marca. Coincide con el CHECK de la 0114.
+COLORES = ("blanco", "negro", "esmeralda", "oro", "rojo", "azul", "amarillo", "rosa")
+#: Lo que lleva detrás: nada (con sombra), un velo o un relleno del color.
+FONDOS = ("ninguno", "velo", "solido")
+#: La letra: la de la aplicación, una condensada y una de máquina de escribir.
+LETRAS = ("clasica", "fuerte", "maquina")
+
+COLOR_POR_OMISION = "blanco"
+FONDO_POR_OMISION = "velo"
+LETRA_POR_OMISION = "clasica"
+
+#: El tamaño, en tanto por ciento del de siempre. Coincide con el CHECK.
+TAMANO_MINIMO = 70
+TAMANO_MAXIMO = 240
+PASO_DE_TAMANO = 5
+TAMANO_POR_OMISION = 100
+
+#: El giro, en grados enteros.
+GIRO_MAXIMO = 180
+GIRO_POR_OMISION = 0
+
+#: Con cuántos decimales se devuelve dónde está. Una diezmilésima de una
+#: pantalla de mil puntos es una décima de punto: más no se ve, y la base
+#: (`real`) devolvería 0.30000001 donde se guardó 0.3.
+DECIMALES_DE_POSICION = 4
+
+
+@dataclass(frozen=True)
+class Presentacion:
+    """Dónde está el rótulo, cuánto mide, cuánto gira y cómo se ve.
+
+    Los valores por omisión son los del rótulo de antes de la 0114: es lo que
+    se ve sin la migración y en las filas que nunca se movieron.
+    """
+
+    x: float | None = None
+    y: float | None = None
+    scale: int = TAMANO_POR_OMISION
+    rotation: int = GIRO_POR_OMISION
+    color: str = COLOR_POR_OMISION
+    background: str = FONDO_POR_OMISION
+    font: str = LETRA_POR_OMISION
+
+
+PRESENTACION_POR_OMISION = Presentacion()
+
+#: Campo de la API -> columna de la 0114.
+COLUMNA_DE = {
+    "x": "banner_x",
+    "y": "banner_y",
+    "scale": "banner_scale",
+    "rotation": "banner_rotation",
+    "color": "banner_color",
+    "background": "banner_background",
+    "font": "banner_font",
+}
+
+# Las columnas de la 0114, declaradas aparte y en su propio `MetaData`: así
+# `LiveSpotlight` no las pide nunca —sin la migración, leerlo fallaría— y
+# `create_all` no intenta crear la tabla dos veces.
+_presentaciones = Table(
+    "live_spotlights",
+    MetaData(),
+    Column("session_id", Uuid(as_uuid=False), primary_key=True),
+    Column("banner_x", Float),
+    Column("banner_y", Float),
+    Column("banner_scale", SmallInteger),
+    Column("banner_rotation", SmallInteger),
+    Column("banner_color", Text),
+    Column("banner_background", Text),
+    Column("banner_font", Text),
+)
+
+
+def _fraccion(valor: object) -> float | None:
+    if valor is None:
+        return None
+    return round(float(valor), DECIMALES_DE_POSICION)
+
+
+def _de_la_lista(valor: object, permitidos: tuple[str, ...], omision: str) -> str:
+    # La base no deja guardar otro, pero si un día se ampliara la lista allí
+    # antes que aquí, lo desconocido se pinta como lo de siempre en vez de
+    # devolver algo que esta versión no sabe pintar.
+    return valor if isinstance(valor, str) and valor in permitidos else omision
+
+
+async def leer_presentacion(db: AsyncSession, session_id: str) -> Presentacion:
+    """La presentación guardada. Llamar solo con la 0114 aplicada."""
+    fila = (
+        await db.execute(
+            select(_presentaciones).where(_presentaciones.c.session_id == session_id)
+        )
+    ).mappings().first()
+    if fila is None:
+        return PRESENTACION_POR_OMISION
+    x, y = _fraccion(fila["banner_x"]), _fraccion(fila["banner_y"])
+    if x is None or y is None:
+        x = y = None
+    return Presentacion(
+        x=x,
+        y=y,
+        scale=int(fila["banner_scale"] if fila["banner_scale"] is not None else TAMANO_POR_OMISION),
+        rotation=int(fila["banner_rotation"] if fila["banner_rotation"] is not None else GIRO_POR_OMISION),
+        color=_de_la_lista(fila["banner_color"], COLORES, COLOR_POR_OMISION),
+        background=_de_la_lista(fila["banner_background"], FONDOS, FONDO_POR_OMISION),
+        font=_de_la_lista(fila["banner_font"], LETRAS, LETRA_POR_OMISION),
+    )
+
+
+async def _guardar_presentacion(
+    db: AsyncSession, session_id: str, cambios: dict[str, object]
+) -> None:
+    """Escribe en las columnas de la 0114 lo que venga en `cambios`.
+
+    La fila tiene que existir ya en la base: por eso se vacía antes lo que el
+    ORM tenga pendiente (la fila recién creada de un primer rótulo).
+    """
+    if not cambios:
+        return
+    await db.flush()
+    await db.execute(
+        update(_presentaciones)
+        .where(_presentaciones.c.session_id == session_id)
+        .values({COLUMNA_DE[campo]: valor for campo, valor in cambios.items()})
+    )
 
 
 def _ahora() -> datetime:
@@ -150,21 +312,91 @@ async def soltar(db: AsyncSession, *, sesion: LiveSession) -> bool:
 
 
 async def poner_rotulo(
-    db: AsyncSession, *, sesion: LiveSession, por: str, texto: str, estilo: str
+    db: AsyncSession,
+    *,
+    sesion: LiveSession,
+    por: str,
+    texto: str,
+    estilo: str,
+    presentacion: dict[str, object] | None = None,
 ) -> LiveSpotlight:
-    """Pone o cambia el rótulo. `texto` llega ya limpio y validado."""
+    """Pone o cambia el rótulo. `texto` llega ya limpio y validado.
+
+    `presentacion` son los campos de la 0114 que mandó quien escribe, ya
+    validados; los que no vienen se quedan como estaban (o como por omisión si
+    es un rótulo nuevo). Pasarlo solo con la 0114 aplicada: sin ella, quien
+    llama lo deja en `None` y el texto se pone como siempre.
+    """
     _exigir_en_directo(sesion)
+    estilo = estilo if estilo in ESTILOS else ESTILO_POR_OMISION
     destacado = await _fila_para_escribir(db, sesion)
+    # Un texto NUEVO —u otro movimiento— vuelve a entrar en la sala, y la sala
+    # lo sabe por la fecha. El mismo texto con otro color no entra otra vez.
+    es_otro = (
+        destacado.banner_text is None
+        or destacado.banner_text != texto
+        or destacado.banner_style != estilo
+    )
     destacado.banner_text = texto
-    destacado.banner_style = estilo if estilo in ESTILOS else ESTILO_POR_OMISION
+    destacado.banner_style = estilo
     destacado.banner_by = por
-    destacado.banner_at = _ahora()
+    if es_otro or destacado.banner_at is None:
+        destacado.banner_at = _ahora()
     destacado.updated_at = _ahora()
+    if presentacion:
+        await _guardar_presentacion(db, sesion.id, presentacion)
     return destacado
 
 
-async def quitar_rotulo(db: AsyncSession, *, sesion: LiveSession) -> bool:
-    """Quita el rótulo. Devuelve si había alguno."""
+async def mover_rotulo(
+    db: AsyncSession,
+    *,
+    sesion: LiveSession,
+    x: float,
+    y: float,
+    scale: int,
+    rotation: int,
+) -> LiveSpotlight:
+    """Lo que se manda al SOLTAR el texto: dónde queda, cuánto mide y cuánto gira.
+
+    Solo con la 0114 aplicada (lo comprueba el router). No toca el texto ni su
+    fecha: moverlo no lo vuelve a presentar.
+    """
+    _exigir_en_directo(sesion)
+    # El mismo cerrojo que al poner: que quitarlo a la vez no deje una posición
+    # guardada en un rótulo que ya no está.
+    await db.scalar(
+        select(LiveSession.id).where(LiveSession.id == sesion.id).with_for_update()
+    )
+    destacado = await db.get(LiveSpotlight, sesion.id)
+    if destacado is None or destacado.banner_text is None:
+        raise ConflictError(
+            "No hay ningún texto en pantalla que mover.",
+            code="live_spotlight_no_banner",
+        )
+    destacado.updated_at = _ahora()
+    await _guardar_presentacion(
+        db,
+        sesion.id,
+        {
+            "x": round(x, DECIMALES_DE_POSICION),
+            "y": round(y, DECIMALES_DE_POSICION),
+            "scale": scale,
+            "rotation": rotation,
+        },
+    )
+    return destacado
+
+
+async def quitar_rotulo(
+    db: AsyncSession, *, sesion: LiveSession, con_presentacion: bool = False
+) -> bool:
+    """Quita el rótulo. Devuelve si había alguno.
+
+    Con la 0114 (`con_presentacion`) también vuelve su presentación a la de por
+    omisión: el próximo texto empieza donde empezaron siempre, no donde se dejó
+    el anterior. «Deshacer» manda la presentación entera, así que no la pierde.
+    """
     destacado = await db.get(LiveSpotlight, sesion.id)
     if destacado is None or destacado.banner_text is None:
         return False
@@ -172,6 +404,8 @@ async def quitar_rotulo(db: AsyncSession, *, sesion: LiveSession) -> bool:
     destacado.banner_by = None
     destacado.banner_at = None
     destacado.updated_at = _ahora()
+    if con_presentacion:
+        await _guardar_presentacion(db, sesion.id, asdict(PRESENTACION_POR_OMISION))
     return True
 
 

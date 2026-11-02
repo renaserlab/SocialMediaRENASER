@@ -1,15 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Platform,
   Pressable,
   Share,
   StyleSheet,
   TextInput,
   View,
+  type LayoutChangeEvent,
   type TextStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 
@@ -25,9 +27,14 @@ import {
 } from '@/components/live/ChatDeDirecto';
 import { DescargaDeGrabacion } from '@/components/live/DescargaDeGrabacion';
 import { EscenarioDeVideo } from '@/components/live/EscenarioDeVideo';
-import { HojaDeRotulo } from '@/components/live/HojaDeRotulo';
+import {
+  AvisoDeRotuloQuitado,
+  CapaDelRotulo,
+  DURACION_DEL_AVISO_DE_QUITADO_MS,
+  type GeometriaDelRotulo,
+} from '@/components/live/CapaDelRotulo';
+import { HojaDeRotulo, type BorradorDeRotulo } from '@/components/live/HojaDeRotulo';
 import { MensajeFijado } from '@/components/live/MensajeFijado';
-import { RotuloDeDirecto } from '@/components/live/RotuloDeDirecto';
 import { FinDeDirecto } from '@/components/live/FinDeDirecto';
 import { HojaDeCalidad } from '@/components/live/HojaDeCalidad';
 import { HojaDeEfectos } from '@/components/live/HojaDeEfectos';
@@ -50,6 +57,14 @@ import {
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
 import { elegirPistasDeEscenario } from '@/live/escenario';
+import {
+  ESTILO_POR_OMISION,
+  PRESENTACION_POR_OMISION,
+  claveDelRotulo,
+  limpiarRotulo,
+  type Rotulo,
+} from '@/live/destacado';
+import { papeleraEn, zonaLibre, type Caja, type Medida } from '@/live/rotuloEnPantalla';
 import { volverA } from '@/navigation/salirDelTramite';
 import {
   LiveRepository,
@@ -522,6 +537,29 @@ export function LiveScreen() {
   const [hojaDeCalidad, setHojaDeCalidad] = useState(false);
   const [hojaDeInvitados, setHojaDeInvitados] = useState(false);
   const [hojaDeRotulo, setHojaDeRotulo] = useState(false);
+  /*
+    El rótulo mientras se edita: lo que se ve al momento detrás de la hoja. La
+    sala no lo ve hasta «Actualizar el texto»; cerrar sin actualizar lo tira.
+  */
+  const [borrador, setBorrador] = useState<BorradorDeRotulo | null>(null);
+  /** Veces que se ha cambiado el movimiento en la hoja: cada una se ve entrar. */
+  const [entradasDelBorrador, setEntradasDelBorrador] = useState(0);
+  const claveAlAbrirLaHoja = useRef('');
+  const ultimoBorrador = useRef<BorradorDeRotulo | null>(null);
+  const [altoDeLaHoja, setAltoDeLaHoja] = useState(0);
+  const [altoDelTeclado, setAltoDelTeclado] = useState(0);
+  /** El host está arrastrando o pellizcando el texto: la cabecera se apaga. */
+  const [moviendoRotulo, setMoviendoRotulo] = useState(false);
+  /** El rótulo recién quitado, para «Deshacer». */
+  const [rotuloQuitado, setRotuloQuitado] = useState<Rotulo | null>(null);
+  /** Lo que miden la pantalla útil, la cabecera y el chat: de ahí sale la zona libre. */
+  const [medidasDeLaSala, setMedidasDeLaSala] = useState<{
+    lienzo: Caja | null;
+    cabecera: Caja | null;
+    fila: number | null;
+    chat: number | null;
+  }>({ lienzo: null, cabecera: null, fila: null, chat: null });
+  const insets = useSafeAreaInsets();
   /** La emision termino CON ESTA PERSONA DELANTE, no antes de que entrara. */
   const [terminoMirando, setTerminoMirando] = useState(false);
 
@@ -732,6 +770,109 @@ export function LiveScreen() {
   const { fijado, rotulo } = destacar.destacado;
   /** Quien puede fijar y poner rotulo. Lo dice el servidor, no la ficha. */
   const puedeDestacar = destacar.disponible && destacar.destacado.puedeGestionar;
+  /** Y moverlo, girarlo y vestirlo: con la 0114 en el servidor. */
+  const puedeMoverRotulo = puedeDestacar && destacar.destacado.rotuloEditable;
+
+  /*
+    EL RÓTULO SUELTO (02/11/2026). Se pinta en una capa propia por encima de la
+    imagen y por debajo de los botones (`CapaDelRotulo`), dentro de la ZONA
+    LIBRE: de la cabecera al chat, medida en este teléfono.
+  */
+  const medirParte = useCallback(
+    <K extends 'lienzo' | 'cabecera' | 'fila' | 'chat'>(
+      parte: K,
+      valor: (typeof medidasDeLaSala)[K],
+    ) => {
+      setMedidasDeLaSala((antes) =>
+        JSON.stringify(antes[parte]) === JSON.stringify(valor) ? antes : { ...antes, [parte]: valor },
+      );
+    },
+    [],
+  );
+  const geometriaDelRotulo = useMemo<GeometriaDelRotulo | null>(() => {
+    const { lienzo, cabecera, fila, chat } = medidasDeLaSala;
+    if (!lienzo || !cabecera || fila === null || chat === null) return null;
+    // La cabecera y el chat se miden en la columna; la capa del rótulo cuenta
+    // desde su propia esquina. Hoy coinciden (la capa ocupa la columna
+    // entera), pero así no depende de cómo se reparta el relleno.
+    const enLaCapa: Caja = { ...cabecera, x: cabecera.x - lienzo.x, y: cabecera.y - lienzo.y };
+    const medida: Medida = { ancho: lienzo.ancho, alto: lienzo.alto };
+    return {
+      lienzo: medida,
+      zona: zonaLibre({ cabecera: enLaCapa, bordeDelChat: fila + chat - lienzo.y }),
+      papelera: papeleraEn(medida, enLaCapa),
+    };
+  }, [medidasDeLaSala]);
+
+  const abrirHojaDeRotulo = useCallback(() => {
+    const puesto = destacar.destacado.rotulo;
+    claveAlAbrirLaHoja.current = puesto ? claveDelRotulo(puesto) : 'nuevo';
+    setEntradasDelBorrador(0);
+    setBorrador({
+      texto: puesto?.texto ?? '',
+      estilo: puesto?.estilo ?? ESTILO_POR_OMISION,
+      presentacion: puesto?.presentacion ?? { ...PRESENTACION_POR_OMISION },
+    });
+    setRotuloQuitado(null);
+    setHojaDeRotulo(true);
+  }, [destacar.destacado.rotulo]);
+
+  // Cerrar sin actualizar descarta lo cambiado, como siempre.
+  const cerrarHojaDeRotulo = useCallback(() => {
+    setHojaDeRotulo(false);
+    setBorrador(null);
+  }, []);
+
+  const cambiarBorrador = useCallback(
+    (nuevo: BorradorDeRotulo, opciones?: { entra?: boolean }) => {
+      setBorrador(nuevo);
+      if (opciones?.entra) setEntradasDelBorrador((n) => n + 1);
+    },
+    [],
+  );
+
+  /** Quitarlo —papelera o «Quitar»— y ofrecer deshacerlo. */
+  const quitarElRotulo = useCallback(async () => {
+    const antes = destacar.destacado.rotulo;
+    const hecho = await destacar.quitarRotulo();
+    if (hecho && antes) setRotuloQuitado(antes);
+    return hecho;
+  }, [destacar]);
+
+  const deshacerQuitado = useCallback(async () => {
+    const vuelve = rotuloQuitado;
+    if (!vuelve) return;
+    const hecho = await destacar.ponerRotulo(
+      vuelve.texto,
+      vuelve.estilo,
+      destacar.destacado.rotuloEditable ? vuelve.presentacion : null,
+    );
+    if (hecho) setRotuloQuitado(null);
+  }, [destacar, rotuloQuitado]);
+
+  // «Texto quitado · Deshacer» dura seis segundos.
+  useEffect(() => {
+    if (!rotuloQuitado) return;
+    const id = setTimeout(() => setRotuloQuitado(null), DURACION_DEL_AVISO_DE_QUITADO_MS);
+    return () => clearTimeout(id);
+  }, [rotuloQuitado]);
+
+  // Con la hoja abierta, el teclado la empuja hacia arriba: el texto que
+  // tenga que subir para verse sube también eso.
+  useEffect(() => {
+    if (!hojaDeRotulo) {
+      setAltoDelTeclado(0);
+      return;
+    }
+    const alMostrar = Keyboard.addListener('keyboardDidShow', (evento) =>
+      setAltoDelTeclado(evento.endCoordinates.height),
+    );
+    const alOcultar = Keyboard.addListener('keyboardDidHide', () => setAltoDelTeclado(0));
+    return () => {
+      alMostrar.remove();
+      alOcultar.remove();
+    };
+  }, [hojaDeRotulo]);
   const fijarDesdeElChat = useMemo(
     () => ({
       disponible: puedeDestacar,
@@ -815,6 +956,45 @@ export function LiveScreen() {
   const enDirecto = emision.estado === 'live';
   const terminada = emision.estado === 'ended';
 
+  /*
+    Lo que enseña la capa del rótulo: lo publicado o, con la hoja abierta, el
+    borrador. El borrador mantiene la clave con que se abrió —escribir no lo
+    hace entrar en cada letra— y solo cambia al elegir otro movimiento.
+  */
+  const editandoRotulo = hojaDeRotulo && puedeDestacar && borrador !== null;
+  // Al cerrar, la hoja se funde con lo último que tenía: sin esto desaparecería
+  // de golpe en vez de fundirse.
+  if (borrador) ultimoBorrador.current = borrador;
+  const borradorDeLaHoja = borrador ?? ultimoBorrador.current;
+  const textoDelBorrador = borrador ? limpiarRotulo(borrador.texto) : '';
+  const rotuloEnPantalla: Rotulo | null = !destacar.disponible
+    ? null
+    : editandoRotulo && borrador
+      ? textoDelBorrador
+        ? {
+            texto: textoDelBorrador,
+            estilo: borrador.estilo,
+            puestoEnIso: null,
+            presentacion: borrador.presentacion,
+          }
+        : null
+      : rotulo;
+  const claveEnPantalla = editandoRotulo
+    ? entradasDelBorrador === 0
+      ? claveAlAbrirLaHoja.current
+      : `${claveAlAbrirLaHoja.current}|${entradasDelBorrador}`
+    : claveDelRotulo(rotulo);
+  // Dónde empieza la hoja, en puntos de la pantalla útil (la hoja llega hasta
+  // el borde de abajo del teléfono, y no pasa del 80 % de su alto).
+  const lienzo = medidasDeLaSala.lienzo;
+  const techoDeLaHoja =
+    editandoRotulo && lienzo && altoDeLaHoja > 0
+      ? lienzo.alto +
+        insets.bottom -
+        Math.min(altoDeLaHoja, 0.8 * (lienzo.alto + insets.top + insets.bottom)) -
+        altoDelTeclado
+      : null;
+
   return (
     <View style={estilos.fondo}>
       {/*
@@ -843,34 +1023,45 @@ export function LiveScreen() {
         <SinTecladoDelante style={estilos.columna}>
           {/*
             Cabecera: quien emite, cuanta gente mira y el estado. El TITULO ya
-            no va aqui: va abajo, junto al chat (`TemaDeDirecto`).
+            no va aqui: va abajo, junto al chat (`TemaDeDirecto`). Se mide: la
+            zona libre del rotulo empieza debajo. Mientras se mueve el texto,
+            se apaga (alli arriba aparece la papelera).
           */}
-          <CabeceraDeDirecto
-            emision={emision}
-            viendo={viendo}
-            sobreImagen={hayImagen}
-            alSalir={salir}
-            alFallar={setAviso}
-            /*
-              QUIEN EMITE NO TIENE DOS BOTONES ROJOS, TIENE UNO. Antes veía
-              la insignia «EN VIVO» y, debajo, «Terminar»: dos píldoras
-              iguales, una encima de la imagen que quiere enseñar. Ahora la
-              insignia ES el botón: conserva el punto de «en directo» y dice
-              lo que hace al tocarla. Quien mira sigue viendo «EN VIVO».
-            */
-            insignia={
-              puedeGestionar && emision.estado === 'live' ? (
-                <BotonDeTerminar
-                  texto={t('live.end')}
-                  etiqueta={t('live.endBroadcast')}
-                  alPulsar={terminar}
-                  desactivado={vista.ocupado}
-                />
-              ) : (
-                <Insignia estado={emision.estado} />
-              )
-            }
-          />
+          <View
+            style={moviendoRotulo ? estilos.cabeceraApagada : null}
+            pointerEvents={moviendoRotulo ? 'none' : 'auto'}
+            onLayout={(evento: LayoutChangeEvent) => {
+              const { x, y, width, height } = evento.nativeEvent.layout;
+              medirParte('cabecera', { x, y, ancho: width, alto: height });
+            }}
+          >
+            <CabeceraDeDirecto
+              emision={emision}
+              viendo={viendo}
+              sobreImagen={hayImagen}
+              alSalir={salir}
+              alFallar={setAviso}
+              /*
+                QUIEN EMITE NO TIENE DOS BOTONES ROJOS, TIENE UNO. Antes veía
+                la insignia «EN VIVO» y, debajo, «Terminar»: dos píldoras
+                iguales, una encima de la imagen que quiere enseñar. Ahora la
+                insignia ES el botón: conserva el punto de «en directo» y dice
+                lo que hace al tocarla. Quien mira sigue viendo «EN VIVO».
+              */
+              insignia={
+                puedeGestionar && emision.estado === 'live' ? (
+                  <BotonDeTerminar
+                    texto={t('live.end')}
+                    etiqueta={t('live.endBroadcast')}
+                    alPulsar={terminar}
+                    desactivado={vista.ocupado}
+                  />
+                ) : (
+                  <Insignia estado={emision.estado} />
+                )
+              }
+            />
+          </View>
 
           {avisoDeConexion ? (
             <View style={estilos.avisoSobreImagen} accessibilityLiveRegion="polite">
@@ -878,24 +1069,6 @@ export function LiveScreen() {
                 {avisoDeConexion}
               </Text>
             </View>
-          ) : null}
-
-          {/*
-            El texto de quien emite. Arriba, bajo la cabecera: es donde menos
-            estorba —ni tapa el chat ni la cara de quien habla en el centro— y
-            donde se mira al entrar. Quien gestiona lo toca para cambiarlo.
-          */}
-          {destacar.disponible && rotulo ? (
-            <RotuloDeDirecto
-              rotulo={rotulo}
-              reduceMotion={reduceMotion}
-              etiqueta={t('live.bannerA11y', {
-                nombre: emision.anfitrionNombre,
-                texto: rotulo.texto,
-              })}
-              alPulsar={puedeDestacar ? () => setHojaDeRotulo(true) : undefined}
-              pista={puedeDestacar ? t('live.bannerEditHint') : undefined}
-            />
           ) : null}
 
           {/* Empezar la emision programada. Terminarla va en la cabecera. */}
@@ -993,9 +1166,60 @@ export function LiveScreen() {
             ) : null}
           </View>
 
-          {/* Abajo: el chat a la izquierda y los controles de quien emite a la derecha. */}
-          <View style={estilos.filaInferior} pointerEvents="box-none">
-            <View style={estilos.ladoDelChat}>
+          {/*
+            El texto de quien emite, suelto sobre la imagen. Va DESPUÉS del
+            hueco —por encima de lo que se pinta en lugar de la imagen, como el
+            cartel de «el video no está disponible», que si no lo tapaba y se
+            quedaba con el toque— y ANTES de la fila del chat y los botones,
+            que quedan por encima. Con la cabecera no se cruza: su zona empieza
+            debajo. Tocarlo abre la hoja; quien gestiona además lo arrastra, lo
+            pellizca y lo gira. La sala lo ve moverse cuando se suelta.
+          */}
+          <CapaDelRotulo
+            rotulo={rotuloEnPantalla}
+            clave={claveEnPantalla}
+            geometria={geometriaDelRotulo}
+            puedeMover={puedeMoverRotulo && enDirecto}
+            puedeEditar={puedeDestacar && enDirecto}
+            editando={editandoRotulo}
+            techoDeLaHoja={techoDeLaHoja}
+            reduceMotion={reduceMotion}
+            etiqueta={
+              rotuloEnPantalla
+                ? t('live.bannerA11y', {
+                    nombre: emision.anfitrionNombre,
+                    texto: rotuloEnPantalla.texto,
+                  })
+                : ''
+            }
+            pista={
+              puedeMoverRotulo
+                ? t('live.bannerMoveHint')
+                : puedeDestacar
+                  ? t('live.bannerEditHint')
+                  : undefined
+            }
+            alTocar={abrirHojaDeRotulo}
+            alSoltar={destacar.moverRotulo}
+            alTirar={quitarElRotulo}
+            alCambiarGesto={setMoviendoRotulo}
+            alMedirLienzo={(medida) => medirParte('lienzo', medida)}
+          />
+
+          {/*
+            Abajo: el chat a la izquierda y los controles de quien emite a la
+            derecha. Se miden: la zona libre del rotulo acaba encima del chat
+            (con el mensaje fijado, si lo hay).
+          */}
+          <View
+            style={estilos.filaInferior}
+            pointerEvents="box-none"
+            onLayout={(evento: LayoutChangeEvent) => medirParte('fila', evento.nativeEvent.layout.y)}
+          >
+            <View
+              style={estilos.ladoDelChat}
+              onLayout={(evento: LayoutChangeEvent) => medirParte('chat', evento.nativeEvent.layout.y)}
+            >
               {/* El mensaje fijado: encima del chat, para que no se lo lleve. */}
               {destacar.disponible && fijado ? (
                 <MensajeFijado
@@ -1053,7 +1277,7 @@ export function LiveScreen() {
                   etiqueta={t('live.bannerButton')}
                   activo={Boolean(rotulo)}
                   desactivado={false}
-                  alPulsar={() => setHojaDeRotulo(true)}
+                  alPulsar={abrirHojaDeRotulo}
                 />
               ) : null}
               {/*
@@ -1115,6 +1339,15 @@ export function LiveScreen() {
               {emision.estado === 'scheduled' ? t('live.chatOpensLater') : t('live.chatClosed')}
             </Text>
           )}
+
+          {/* «Texto quitado · Deshacer»: solo para quien lo quitó, seis segundos. */}
+          {rotuloQuitado && puedeDestacar && enDirecto ? (
+            <AvisoDeRotuloQuitado
+              arriba={(geometriaDelRotulo?.zona.arriba ?? 56) + spacing.md}
+              ocupado={destacar.ocupado}
+              alDeshacer={() => void deshacerQuitado()}
+            />
+          ) : null}
         </SinTecladoDelante>
       </SafeAreaView>
 
@@ -1131,11 +1364,20 @@ export function LiveScreen() {
         escena={escena}
         anfitrionId={emision.anfitrionId}
       />
-      <HojaDeRotulo
-        visible={hojaDeRotulo && puedeDestacar}
-        alCerrar={() => setHojaDeRotulo(false)}
-        destacar={destacar}
-      />
+      {borradorDeLaHoja ? (
+        <HojaDeRotulo
+          visible={editandoRotulo}
+          alCerrar={cerrarHojaDeRotulo}
+          destacar={destacar}
+          borrador={borradorDeLaHoja}
+          alCambiar={cambiarBorrador}
+          alQuitar={() => {
+            cerrarHojaDeRotulo();
+            void quitarElRotulo();
+          }}
+          alMedirAlto={setAltoDeLaHoja}
+        />
+      ) : null}
       <HojaDeCalidad
         visible={hojaDeCalidad && calidad.estado.opciones.length > 0}
         alCerrar={() => setHojaDeCalidad(false)}
@@ -1232,6 +1474,8 @@ const estilos = StyleSheet.create({
     gap: spacing.sm,
   },
   filaInferior: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, flexShrink: 1 },
+  // Mientras se mueve el texto: arriba está la papelera, y la cabecera se aparta.
+  cabeceraApagada: { opacity: 0.12 },
   ladoDelChat: { flex: 1, minWidth: 0, flexShrink: 1 },
   ladoDeAcciones: { gap: spacing.sm, alignItems: 'center' },
   columnaDeControles: { gap: spacing.sm, paddingBottom: spacing.xs },

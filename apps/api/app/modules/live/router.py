@@ -58,6 +58,7 @@ from app.modules.live.models import (
 from app.modules.live.schemas import (
     REACCIONES,
     LiveAvailability,
+    LiveBannerLayout,
     LiveBannerRead,
     LiveBannerWrite,
     LiveCredential,
@@ -992,6 +993,11 @@ async def sumar_reacciones(
 # («lo destacado cambio») y cada aplicacion vuelve a preguntar aqui. La difusion
 # no lleva el texto ni el mensaje —cualquiera puede mandar una falsa—: lo unico
 # que consigue es que se pregunte, y la respuesta siempre sale de la tabla.
+#
+# EL ROTULO SE MUEVE Y SE VISTE con la 0114: el PUT acepta ademas donde esta,
+# cuanto mide, cuanto gira y como se ve, y el PATCH `/banner/layout` es lo que
+# manda la aplicacion al SOLTAR el texto. Sin la 0114 el PUT ignora esos campos,
+# el PATCH contesta 503 y la lectura dice `banner_layout: false`.
 
 
 async def _exigir_destacado(db: AsyncSession) -> None:
@@ -1014,15 +1020,16 @@ async def _leer_destacado(
 ) -> LiveSpotlightRead:
     """Lo destacado de la emision, tal y como lo puede ver quien pregunta."""
     puede = await _puede_gestionar(db, uid, sesion)
+    editable = await esquema.hay_rotulo_editable(db)
 
     # Fuera del directo no hay nada que ensenar: lo que se fijo en una emision
     # no es un cartel que se quede colgado en su ficha cuando termina.
     if sesion.status != "live":
-        return LiveSpotlightRead(can_manage=False)
+        return LiveSpotlightRead(can_manage=False, banner_layout=editable)
 
     fila: LiveSpotlight | None = await destacado.fila(db, sesion.id)
     if fila is None:
-        return LiveSpotlightRead(can_manage=puede)
+        return LiveSpotlightRead(can_manage=puede, banner_layout=editable)
 
     fijado: LiveMessageRead | None = None
     if fila.pinned_message_id:
@@ -1049,14 +1056,29 @@ async def _leer_destacado(
                 hidden=False,
             )
 
-    rotulo = (
-        LiveBannerRead(
-            text=fila.banner_text, style=fila.banner_style, set_at=fila.banner_at
+    rotulo: LiveBannerRead | None = None
+    if fila.banner_text:
+        # Sin la 0114, la presentacion de siempre: se pinta como hasta hoy.
+        presentacion = (
+            await destacado.leer_presentacion(db, sesion.id)
+            if editable
+            else destacado.PRESENTACION_POR_OMISION
         )
-        if fila.banner_text
-        else None
+        rotulo = LiveBannerRead(
+            text=fila.banner_text,
+            style=fila.banner_style,
+            set_at=fila.banner_at,
+            x=presentacion.x,
+            y=presentacion.y,
+            scale=presentacion.scale,
+            rotation=presentacion.rotation,
+            color=presentacion.color,
+            background=presentacion.background,
+            font=presentacion.font,
+        )
+    return LiveSpotlightRead(
+        pinned=fijado, banner=rotulo, can_manage=puede, banner_layout=editable
     )
-    return LiveSpotlightRead(pinned=fijado, banner=rotulo, can_manage=puede)
 
 
 async def _para_destacar(
@@ -1128,10 +1150,62 @@ async def poner_rotulo(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LiveSpotlightRead:
-    """Pone o cambia el texto que quien emite ensena sobre la imagen."""
+    """Pone o cambia el texto que quien emite ensena sobre la imagen.
+
+    Con la 0114 acepta tambien su presentacion (donde, tamano, giro, color,
+    fondo y letra); lo que no venga se queda como estaba. Sin ella esos campos
+    se ignoran y el texto se pone como siempre.
+    """
     sesion = await _para_destacar(db, session_id, current_user.id, con_limite=True)
+    presentacion = (
+        payload.presentacion() if await esquema.hay_rotulo_editable(db) else None
+    )
     await destacado.poner_rotulo(
-        db, sesion=sesion, por=current_user.id, texto=payload.text, estilo=payload.style
+        db,
+        sesion=sesion,
+        por=current_user.id,
+        texto=payload.text,
+        estilo=payload.style,
+        presentacion=presentacion,
+    )
+    await db.commit()
+    return await _leer_destacado(db, sesion, current_user.id)
+
+
+@router.patch(
+    "/sessions/{session_id}/spotlight/banner/layout", response_model=LiveSpotlightRead
+)
+async def mover_rotulo(
+    session_id: str,
+    payload: LiveBannerLayout,
+    current_user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LiveSpotlightRead:
+    """Donde queda el rotulo, cuanto mide y cuanto gira: lo que se manda al
+    SOLTARLO. Mientras se arrastra no se manda nada; la sala lo ve moverse a su
+    sitio cuando llega esto."""
+    # Primero quien puede y si la base sabe guardarlo; despues el tope. Asi un
+    # 503 no gasta turnos del tope de la emision.
+    sesion = await _para_destacar(db, session_id, current_user.id, con_limite=False)
+    if not await esquema.hay_rotulo_editable(db):
+        raise ServiceUnavailableError(
+            "Mover el texto de una transmisión todavía no está disponible.",
+            code="live_spotlight_layout_not_available",
+        )
+    # Cuenta para el mismo tope que poner o fijar: cada soltar hace que toda la
+    # sala vuelva a preguntar.
+    if not limites.destacados.permitido(sesion.id):
+        raise ConflictError(
+            "Cambiaste lo destacado demasiadas veces seguidas. Espera un momento.",
+            code="live_spotlight_rate_limited",
+        )
+    await destacado.mover_rotulo(
+        db,
+        sesion=sesion,
+        x=payload.x,
+        y=payload.y,
+        scale=payload.scale,
+        rotation=payload.rotation,
     )
     await db.commit()
     return await _leer_destacado(db, sesion, current_user.id)
@@ -1147,7 +1221,9 @@ async def quitar_rotulo(
 ) -> LiveSpotlightRead:
     """Quita el rotulo. Si no habia ninguno, no pasa nada."""
     sesion = await _para_destacar(db, session_id, current_user.id, con_limite=False)
-    await destacado.quitar_rotulo(db, sesion=sesion)
+    await destacado.quitar_rotulo(
+        db, sesion=sesion, con_presentacion=await esquema.hay_rotulo_editable(db)
+    )
     await db.commit()
     return await _leer_destacado(db, sesion, current_user.id)
 

@@ -1,8 +1,34 @@
 """Esquemas de las transmisiones en vivo."""
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.modules.live.destacado import (
+    COLOR_POR_OMISION,
+    COLORES,
+    FONDO_POR_OMISION,
+    FONDOS,
+    GIRO_MAXIMO,
+    GIRO_POR_OMISION,
+    LETRA_POR_OMISION,
+    LETRAS,
+    PASO_DE_TAMANO,
+    TAMANO_MAXIMO,
+    TAMANO_MINIMO,
+    TAMANO_POR_OMISION,
+)
+
+#: Dónde va el centro del rótulo: una fracción de la pantalla. Sin `NaN` ni
+#: infinitos, que pasarían por número.
+Fraccion = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+#: El tamaño: tanto por ciento, de cinco en cinco.
+Tamano = Annotated[
+    int, Field(ge=TAMANO_MINIMO, le=TAMANO_MAXIMO, multiple_of=PASO_DE_TAMANO)
+]
+#: El giro: grados enteros.
+Giro = Annotated[int, Field(ge=-GIRO_MAXIMO, le=GIRO_MAXIMO)]
 
 #: Los cinco tipos de reaccion. Un catalogo corto es lo que hace que la fila se
 #: lea de un vistazo; con veinte, elegir cuesta mas que reaccionar. Tiene que
@@ -284,13 +310,100 @@ class LiveBannerWrite(BaseModel):
             raise ValueError(f"Estilo no reconocido: '{v}'.")
         return v
 
+    # ----- La presentacion (0114). Todo opcional: lo que no viene se queda
+    # como estaba. Sin la 0114 se ignora y el texto se pone como siempre. -----
+
+    #: El centro del texto, en fracciones de la pantalla. `null` en las dos =
+    #: el sitio de siempre. Van juntas.
+    x: Fraccion | None = None
+    y: Fraccion | None = None
+    scale: Tamano | None = None
+    rotation: Giro | None = None
+    color: str | None = None
+    background: str | None = None
+    font: str | None = None
+
+    @field_validator("color")
+    @classmethod
+    def _color_conocido(cls, v: str | None) -> str | None:
+        if v is not None and v not in COLORES:
+            raise ValueError(f"Color no reconocido: '{v}'.")
+        return v
+
+    @field_validator("background")
+    @classmethod
+    def _fondo_conocido(cls, v: str | None) -> str | None:
+        if v is not None and v not in FONDOS:
+            raise ValueError(f"Fondo no reconocido: '{v}'.")
+        return v
+
+    @field_validator("font")
+    @classmethod
+    def _letra_conocida(cls, v: str | None) -> str | None:
+        if v is not None and v not in LETRAS:
+            raise ValueError(f"Letra no reconocida: '{v}'.")
+        return v
+
+    @model_validator(mode="after")
+    def _el_centro_va_entero(self) -> "LiveBannerWrite":
+        # Un punto con una sola coordenada no es un sitio: o vienen las dos o
+        # ninguna, y o las dos son un número o las dos son nulas.
+        vino_x = "x" in self.model_fields_set
+        vino_y = "y" in self.model_fields_set
+        if vino_x != vino_y or (self.x is None) != (self.y is None):
+            raise ValueError("La posición lleva siempre las dos coordenadas: x e y.")
+        return self
+
+    def presentacion(self) -> dict[str, object]:
+        """Los campos de la presentacion que vinieron, listos para guardar.
+
+        Un `null` explicito en tamano, giro, color, fondo o letra vuelve al de
+        por omision; en la posicion, al sitio de siempre.
+        """
+        from app.modules.live import destacado
+
+        omision = destacado.PRESENTACION_POR_OMISION
+        cambios: dict[str, object] = {}
+        for campo in destacado.COLUMNA_DE:
+            if campo not in self.model_fields_set:
+                continue
+            valor = getattr(self, campo)
+            if valor is None and campo not in ("x", "y"):
+                valor = getattr(omision, campo)
+            elif isinstance(valor, float):
+                valor = round(valor, destacado.DECIMALES_DE_POSICION)
+            cambios[campo] = valor
+        return cambios
+
+
+class LiveBannerLayout(BaseModel):
+    """Lo que se manda al SOLTAR el rotulo: donde queda, cuanto mide y gira.
+
+    Todo obligatorio: es la foto de como quedo, no un cambio parcial.
+    """
+
+    x: Fraccion
+    y: Fraccion
+    scale: Tamano
+    rotation: Giro
+
 
 class LiveBannerRead(BaseModel):
     text: str
     style: str
-    #: Cuando se puso. La aplicacion lo usa para saber si es OTRO rotulo —y
-    #: volver a animar su entrada— o el mismo que ya estaba ensenando.
+    #: Cuando se puso ESTE texto. La aplicacion lo usa para saber si es OTRO
+    #: rotulo —y volver a animar su entrada— o el mismo que ya estaba
+    #: ensenando. Moverlo o cambiarle el color no la cambia.
     set_at: datetime | None = None
+    #: La presentacion (0114). Sin la migracion, la de siempre: centrado bajo
+    #: la cabecera, al 100 %, recto, en blanco, sobre velo y letra clasica.
+    x: float | None = None
+    y: float | None = None
+    scale: int = TAMANO_POR_OMISION
+    rotation: int = GIRO_POR_OMISION
+    color: str = COLOR_POR_OMISION
+    background: str = FONDO_POR_OMISION
+    font: str = LETRA_POR_OMISION
 
 
 class LiveSpotlightRead(BaseModel):
@@ -306,3 +419,6 @@ class LiveSpotlightRead(BaseModel):
     #: Si quien pregunta puede fijar y poner rotulo. Lo decide el servidor y se
     #: vuelve a comprobar en cada escritura.
     can_manage: bool = False
+    #: Si este servidor guarda donde esta el rotulo y como se ve (0114). Sin
+    #: ella la aplicacion no ofrece moverlo ni vestirlo.
+    banner_layout: bool = False

@@ -182,9 +182,13 @@ async def test_sin_nada_destacado_llega_todo_a_nulo_y_no_ausente(entorno):
     http, _sesiones, identidad = entorno
     sesion_id = await _emision(http)
 
-    assert await _ver(http, sesion_id) == {"pinned": None, "banner": None, "can_manage": True}
+    assert await _ver(http, sesion_id) == {
+        "pinned": None, "banner": None, "can_manage": True, "banner_layout": False
+    }
     identidad["uid"] = CARLA
-    assert await _ver(http, sesion_id) == {"pinned": None, "banner": None, "can_manage": False}
+    assert await _ver(http, sesion_id) == {
+        "pinned": None, "banner": None, "can_manage": False, "banner_layout": False
+    }
 
 
 @pytest.mark.asyncio
@@ -495,7 +499,9 @@ async def test_al_terminar_no_queda_nada_destacado_a_la_vista_y_se_puede_retirar
     assert (await http.post(f"{LIVE}/sessions/{sesion_id}/end")).status_code == 200
 
     # Lo destacado no es un cartel que se quede colgado en la ficha.
-    assert await _ver(http, sesion_id) == {"pinned": None, "banner": None, "can_manage": False}
+    assert await _ver(http, sesion_id) == {
+        "pinned": None, "banner": None, "can_manage": False, "banner_layout": False
+    }
     # Ya no se puede destacar nada nuevo...
     cerrado = await _fijar(http, sesion_id, mensaje_id)
     assert cerrado.status_code == 409

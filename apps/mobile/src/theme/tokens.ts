@@ -394,6 +394,71 @@ export const estilo: Estilo = {
   radioTarjetas: 16,
 };
 
+/* =========================================================
+   EL RÓTULO DEL DIRECTO (aprobado el 02/11/2026).
+
+   El texto que quien emite pone encima de la imagen. Va SIEMPRE sobre
+   vídeo, así que no cambia con el tema de la persona: igual que
+   `sobreMedio`, se lee sobre oscuro.
+
+   UNA PALETA CERRADA DE OCHO, no una rueda: con una rueda salen colores
+   que no se leen encima de un vídeo. El servidor guarda el NOMBRE
+   (`blanco`, `oro`…); qué tinta es cada uno se decide aquí.
+
+   Cada color tiene tres tintas:
+   - `texto`: la letra cuando va sin fondo o sobre velo. Clara para que
+     se lea sobre oscuro (el esmeralda y el rojo suben de luz, como hace
+     el modo oscuro con los resaltes).
+   - `relleno`: el fondo «sólido».
+   - `sobreRelleno`: la letra encima del sólido, 4,5 a 1 como mínimo
+     (`rotuloDeDirecto.test.mts` lo mide).
+   Esmeralda y oro son los de la marca (resaltes en oscuro y el oro del
+   anillo). El negro va con velo CLARO detrás y sombra clara sin fondo:
+   negro sobre negro no se leería.
+   ========================================================= */
+export const rotuloDeDirecto = {
+  colores: {
+    blanco: { texto: '#FFFFFF', relleno: '#FFFFFF', sobreRelleno: '#0A0A0A' },
+    negro: { texto: '#0A0A0A', relleno: '#0A0A0A', sobreRelleno: '#FFFFFF' },
+    esmeralda: { texto: '#149F8C', relleno: '#0F7B6C', sobreRelleno: '#FFFFFF' },
+    oro: { texto: '#C9A24E', relleno: '#C9A24E', sobreRelleno: '#0A0A0A' },
+    rojo: { texto: '#FF5A4F', relleno: '#C62828', sobreRelleno: '#FFFFFF' },
+    azul: { texto: '#5B9BFF', relleno: '#1F5FD1', sobreRelleno: '#FFFFFF' },
+    amarillo: { texto: '#FFD60A', relleno: '#FFD60A', sobreRelleno: '#0A0A0A' },
+    rosa: { texto: '#FF6FAE', relleno: '#FF6FAE', sobreRelleno: '#0A0A0A' },
+  },
+  /** El velo de siempre detrás del texto, y su borde. */
+  velo: 'rgba(0,0,0,0.78)',
+  bordeDelVelo: 'rgba(255,255,255,0.14)',
+  /** El velo detrás de la letra NEGRA: claro. */
+  veloClaro: 'rgba(255,255,255,0.84)',
+  bordeDelVeloClaro: 'rgba(0,0,0,0.12)',
+  /** Borde fino del relleno sólido, para que se recorte sobre su mismo color. */
+  bordeDelRelleno: 'rgba(255,255,255,0.14)',
+  /** «Sin fondo»: una sombra detrás de cada letra. Clara si la letra es negra. */
+  sombra: 'rgba(0,0,0,0.9)',
+  sombraClara: 'rgba(255,255,255,0.95)',
+  /** Las guías del imán al centro, mientras se arrastra. */
+  guia: '#149F8C',
+  /** La zona por donde se puede llevar, mientras se arrastra. */
+  zonaBorde: 'rgba(255,255,255,0.38)',
+  zonaRelleno: 'rgba(255,255,255,0.035)',
+  zonaTexto: 'rgba(255,255,255,0.6)',
+  /** El marco discontinuo que le dice al host que el texto se puede tocar. */
+  marcoDelHost: 'rgba(255,255,255,0.55)',
+  /** La papelera de arriba y su letrero. Encendida va en rojo de peligro. */
+  papelera: 'rgba(0,0,0,0.62)',
+  bordeDeLaPapelera: 'rgba(255,255,255,0.32)',
+  letreroDeLaPapelera: 'rgba(0,0,0,0.7)',
+  /** «Texto quitado · Deshacer». */
+  avisoQuitado: 'rgba(17,17,17,0.95)',
+  /**
+   * El velo de la hoja de editar el texto. Más suave que el de las demás
+   * hojas: el host tiene que ver detrás, al momento, lo que está cambiando.
+   */
+  veloDeLaHoja: 'rgba(0,0,0,0.3)',
+} as const;
+
 /* ---------- Alias semánticos (opcional, estilo Figma prompt) ---------- */
 export const tokenNames = {
   'surface/primary': 'surface',

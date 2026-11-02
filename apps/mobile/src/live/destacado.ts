@@ -37,9 +37,177 @@ export const MAXIMO_DE_ROTULO = 80;
 export type Rotulo = {
   texto: string;
   estilo: EstiloDeRotulo;
-  /** Cuándo se puso. Con el texto y el estilo, dice si es OTRO rótulo. */
+  /**
+   * Cuándo se puso ESTE texto. Con el texto y el estilo, dice si es OTRO
+   * rótulo. Moverlo o cambiarle el color no la cambia (el servidor solo la
+   * mueve cuando cambian el texto o el estilo).
+   */
   puestoEnIso: string | null;
+  /** Dónde está, cuánto mide, cuánto gira y cómo se ve (migración 0114). */
+  presentacion: Presentacion;
 };
+
+/* ------------------------------------------------------------------------- *
+ * LA PRESENTACIÓN DEL RÓTULO (02/11/2026, migración 0114)
+ *
+ * El host —o la administración— arrastra el texto, lo pellizca para cambiarle
+ * el tamaño, lo gira y elige su color, su fondo y su letra. Coincide con
+ * `destacado.py` y con los CHECK de la 0114; `destacadoDeDirecto.test.mts`
+ * vigila que sigan diciendo lo mismo.
+ * ------------------------------------------------------------------------- */
+
+/** Nombres, no colores: qué tinta es cada uno lo dice `theme/tokens.ts`. */
+export const COLORES_DE_ROTULO = [
+  'blanco',
+  'negro',
+  'esmeralda',
+  'oro',
+  'rojo',
+  'azul',
+  'amarillo',
+  'rosa',
+] as const;
+export type ColorDeRotulo = (typeof COLORES_DE_ROTULO)[number];
+
+/** Sin fondo (con sombra), velo, o relleno del color. */
+export const FONDOS_DE_ROTULO = ['ninguno', 'velo', 'solido'] as const;
+export type FondoDeRotulo = (typeof FONDOS_DE_ROTULO)[number];
+
+/** La de la aplicación (Inter 800), una condensada (Anton) y una de máquina (Courier Prime). */
+export const LETRAS_DE_ROTULO = ['clasica', 'fuerte', 'maquina'] as const;
+export type LetraDeRotulo = (typeof LETRAS_DE_ROTULO)[number];
+
+/** El tamaño, en tanto por ciento del de siempre, de cinco en cinco. */
+export const TAMANO_MINIMO = 70;
+export const TAMANO_MAXIMO = 240;
+export const PASO_DE_TAMANO = 5;
+export const TAMANO_POR_OMISION = 100;
+/** El giro, en grados enteros, de -180 a 180. */
+export const GIRO_MAXIMO = 180;
+
+export type Presentacion = {
+  /**
+   * El CENTRO del texto, en fracciones de la pantalla (0 a 1). `null` en las
+   * dos: el sitio de siempre, debajo de la cabecera y centrado. Cada teléfono
+   * encaja el punto en SU zona libre (`live/rotuloEnPantalla.ts`).
+   */
+  x: number | null;
+  y: number | null;
+  tamano: number;
+  giro: number;
+  color: ColorDeRotulo;
+  fondo: FondoDeRotulo;
+  letra: LetraDeRotulo;
+};
+
+/** Cómo se pintaba el rótulo antes de la 0114, y como se pinta sin ella. */
+export const PRESENTACION_POR_OMISION: Presentacion = {
+  x: null,
+  y: null,
+  tamano: TAMANO_POR_OMISION,
+  giro: 0,
+  color: 'blanco',
+  fondo: 'velo',
+  letra: 'clasica',
+};
+
+function deLaLista<T extends string>(valor: unknown, lista: readonly T[], omision: T): T {
+  return typeof valor === 'string' && (lista as readonly string[]).includes(valor)
+    ? (valor as T)
+    : omision;
+}
+
+function fraccion(valor: unknown): number | null {
+  return typeof valor === 'number' && Number.isFinite(valor) && valor >= 0 && valor <= 1
+    ? valor
+    : null;
+}
+
+/**
+ * La presentación que manda el servidor, sin fiarse de ella.
+ *
+ * Lo que esta versión no conoce —un color nuevo, un tamaño fuera de rango, un
+ * servidor sin la 0114 que no manda nada— se pinta como siempre: un servidor
+ * más nuevo no puede dejar a nadie sin ver el rótulo. Una posición con una
+ * sola coordenada no es un sitio: va al de siempre.
+ */
+export function leerPresentacion(bruto: unknown): Presentacion {
+  if (!bruto || typeof bruto !== 'object' || Array.isArray(bruto)) {
+    return { ...PRESENTACION_POR_OMISION };
+  }
+  const dto = bruto as Record<string, unknown>;
+  const x = fraccion(dto.x);
+  const y = fraccion(dto.y);
+  const enSuSitio = x !== null && y !== null;
+  const tamano =
+    typeof dto.scale === 'number' &&
+    Number.isInteger(dto.scale) &&
+    dto.scale >= TAMANO_MINIMO &&
+    dto.scale <= TAMANO_MAXIMO
+      ? dto.scale
+      : TAMANO_POR_OMISION;
+  const giro =
+    typeof dto.rotation === 'number' &&
+    Number.isFinite(dto.rotation) &&
+    Math.abs(dto.rotation) <= GIRO_MAXIMO
+      ? Math.round(dto.rotation)
+      : 0;
+  return {
+    x: enSuSitio ? x : null,
+    y: enSuSitio ? y : null,
+    tamano,
+    giro,
+    color: deLaLista(dto.color, COLORES_DE_ROTULO, PRESENTACION_POR_OMISION.color),
+    fondo: deLaLista(dto.background, FONDOS_DE_ROTULO, PRESENTACION_POR_OMISION.fondo),
+    letra: deLaLista(dto.font, LETRAS_DE_ROTULO, PRESENTACION_POR_OMISION.letra),
+  };
+}
+
+/**
+ * Lo que se manda al poner o cambiar el rótulo (PUT `/spotlight/banner`).
+ *
+ * `conPosicion: false` deja fuera dónde está: es lo que manda la hoja, que no
+ * lo mueve. Si el host acaba de soltarlo y la hoja se abrió antes de que
+ * llegara la respuesta, mandar la posición de la hoja lo devolvería al sitio
+ * de antes. «Deshacer» sí la manda: lo pone donde estaba.
+ */
+export function cuerpoDelRotulo(
+  texto: string,
+  estilo: EstiloDeRotulo,
+  presentacion: Presentacion | null,
+  conPosicion = true,
+): Record<string, unknown> {
+  // Sin presentación —un servidor sin la 0114— se manda lo de siempre.
+  if (!presentacion) return { text: texto, style: estilo };
+  return {
+    text: texto,
+    style: estilo,
+    ...(conPosicion ? { x: presentacion.x, y: presentacion.y } : null),
+    scale: presentacion.tamano,
+    rotation: presentacion.giro,
+    color: presentacion.color,
+    background: presentacion.fondo,
+    font: presentacion.letra,
+  };
+}
+
+/**
+ * Lo que se manda al SOLTAR el texto (PATCH `/spotlight/banner/layout`): dónde
+ * quedó, cuánto mide y cuánto gira. Siempre con un sitio concreto.
+ */
+export function cuerpoDeLaDisposicion(disposicion: {
+  x: number;
+  y: number;
+  tamano: number;
+  giro: number;
+}): { x: number; y: number; scale: number; rotation: number } {
+  return {
+    x: disposicion.x,
+    y: disposicion.y,
+    scale: disposicion.tamano,
+    rotation: disposicion.giro,
+  };
+}
 
 function esEstilo(valor: unknown): valor is EstiloDeRotulo {
   return typeof valor === 'string' && (ESTILOS_DE_ROTULO as readonly string[]).includes(valor);
@@ -121,10 +289,15 @@ export type Destacado<Mensaje> = {
   rotulo: Rotulo | null;
   /** Si quien pregunta puede fijar y poner rótulo. */
   puedeGestionar: boolean;
+  /**
+   * Si el servidor guarda dónde está el rótulo y cómo se ve (0114). Sin eso
+   * no se ofrece arrastrarlo, girarlo ni vestirlo: se pinta como siempre.
+   */
+  rotuloEditable: boolean;
 };
 
 export function destacadoVacio<Mensaje>(): Destacado<Mensaje> {
-  return { fijado: null, rotulo: null, puedeGestionar: false };
+  return { fijado: null, rotulo: null, puedeGestionar: false, rotuloEditable: false };
 }
 
 /** El rótulo, o `null` si aquello no lo es o viene vacío. */
@@ -138,6 +311,7 @@ export function leerRotulo(bruto: unknown): Rotulo | null {
     // servidor más nuevo no puede dejar a nadie sin ver el rótulo.
     estilo: esEstilo(dto.style) ? dto.style : ESTILO_POR_OMISION,
     puestoEnIso: typeof dto.set_at === 'string' && dto.set_at !== '' ? dto.set_at : null,
+    presentacion: leerPresentacion(dto),
   };
 }
 
@@ -178,6 +352,8 @@ export function leerDestacado<Mensaje>(
     fijado: pareceUnMensaje(dto.pinned) ? aMensaje(dto.pinned as never) : null,
     rotulo: leerRotulo(dto.banner),
     puedeGestionar: dto.can_manage === true,
+    // Un servidor anterior a la 0114 no lo manda: no se puede mover.
+    rotuloEditable: dto.banner_layout === true,
   };
 }
 
@@ -331,6 +507,8 @@ const TEXTO_DEL_FALLO: Record<string, string> = {
   live_spotlight_closed: 'live.spotlightClosed',
   live_spotlight_rate_limited: 'live.spotlightTooFast',
   live_spotlight_not_available: 'live.spotlightUnavailable',
+  live_spotlight_layout_not_available: 'live.bannerLayoutUnavailable',
+  live_spotlight_no_banner: 'live.bannerGone',
   live_message_hidden: 'live.pinHidden',
 };
 

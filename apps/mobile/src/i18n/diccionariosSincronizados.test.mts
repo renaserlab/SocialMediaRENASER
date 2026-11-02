@@ -73,6 +73,8 @@ const TRADUCCIONES: Array<[string, Diccionario]> = [
  */
 const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
+    // El rótulo del directo (02/11/2026): «Color» es la misma palabra.
+    'live.bannerColor',
     // Temas de un grupo: «General» es el nombre del chat de todo el grupo, y
     // en inglés se llama igual (es como lo llama Telegram).
     'groupTopics.general',
@@ -153,6 +155,15 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'proveedorProductos.editar.opcionValorAyuda',
   ]),
   pt: new Set<string>([
+    // El rótulo del directo (02/11/2026): «Letra», «Giro», «Esmeralda»,
+    // «Azul», «Rosa», «Sólido» y «Máquina» se escriben igual en portugués.
+    'live.bannerFont',
+    'live.bannerRotation',
+    'live.bannerColorEmerald',
+    'live.bannerColorBlue',
+    'live.bannerColorPink',
+    'live.bannerBackgroundSolid',
+    'live.bannerFontTypewriter',
     // Audios y temas: «{n} segundos» se escribe igual en portugués; es la
     // duración que dice el lector de pantalla al reproducir un audio con nombre.
     'chat.spokenSeconds',
