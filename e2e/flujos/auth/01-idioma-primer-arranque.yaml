@@ -2,7 +2,7 @@
 # una vez elegido no vuelve a preguntar.
 #
 # OJO: `clearState` borra TODO lo de Expo Go (idioma, sesion, cache del bundle).
-# Al terminar deja el idioma en Castellano y la sesion cerrada; los demas flujos
+# Al terminar deja el idioma en Español y la sesion cerrada; los demas flujos
 # entran con iniciar-sesion, asi que no les afecta.
 appId: host.exp.exponent
 name: auth/idioma-primer-arranque
@@ -15,7 +15,7 @@ tags:
     env:
       ESPERAR: "(Idioma|Language)"
 - assertVisible: "Elige el idioma de la aplicación"
-- assertVisible: "Castellano"
+- assertVisible: "Español"
 - assertVisible: "English"
 - assertVisible: "Português"
 - assertVisible: "Continuar"

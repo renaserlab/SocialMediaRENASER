@@ -1,4 +1,4 @@
-# Idioma: Castellano → English → Português → Castellano desde Ajustes, y en
+# Idioma: Español → English → Português → Español desde Ajustes, y en
 # cada uno cambian los textos clave de Ajustes, la barra de pestañas y el
 # perfil. Las capturas (`-en`, `-pt`) sirven para buscar textos sin traducir.
 #
@@ -27,7 +27,7 @@ onFlowComplete:
       RUTA: settings
       ESPERAR: "Idioma de la App"
       REINICIAR: "no"
-- assertVisible: "Castellano"
+- assertVisible: "Español"
 
 # ---- English ---------------------------------------------------------------
 - tapOn: "Idioma de la App"
@@ -146,7 +146,7 @@ onFlowComplete:
 - assertVisible: "Avaliações"
 - takeScreenshot: perfil-ajustes-perfil-pt
 
-# ---- De vuelta a Castellano --------------------------------------------------
+# ---- De vuelta a Español --------------------------------------------------
 - runFlow:
     file: ../_comun/abrir-app.yaml
     env:
@@ -157,14 +157,14 @@ onFlowComplete:
 - extendedWaitUntil:
     visible: "Escolha o idioma do aplicativo"
     timeout: 10000
-- tapOn: "Castellano"
+- tapOn: "Español"
 - tapOn: "Continuar"
 - extendedWaitUntil:
     visible: "Idioma de la App"
     timeout: 10000
 - assertVisible: "Configuración"
 - assertVisible: "Modo Oscuro"
-- assertVisible: "Castellano"
+- assertVisible: "Español"
 - evalScript: ${output.enCastellano = true}
 - tapOn: "Volver"
 - extendedWaitUntil:

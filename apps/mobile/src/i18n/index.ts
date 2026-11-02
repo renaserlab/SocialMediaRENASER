@@ -14,7 +14,7 @@ const DICTIONARIES: Record<Language, Partial<Record<TranslationKey, string>>> = 
 };
 
 export const LANGUAGE_NAMES: Record<Language, string> = {
-  es: 'Castellano',
+  es: 'Español',
   en: 'English',
   pt: 'Português',
 };

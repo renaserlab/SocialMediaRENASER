@@ -1,7 +1,7 @@
 # Contesta la pantalla de idioma del primer arranque (si esta a la vista).
 #
 # Parametros (env, opcionales):
-#   IDIOMA   Castellano (por omision) | English | Português
+#   IDIOMA   Español (por omision) | English | Português
 #
 # El titulo sale en el idioma del sistema hasta que se elige: «Idioma» o
 # «Language»; el boton, «Continuar» o «Continue».
@@ -13,10 +13,10 @@ tags:
     when:
       visible: "(Idioma|Language)"
     commands:
-      - tapOn: ${IDIOMA || 'Castellano'}
+      - tapOn: ${IDIOMA || 'Español'}
       # El aviso rojo de LogBox cae justo encima de «Continuar».
       - runFlow: quitar-ruido.yaml
       - tapOn: "(Continuar|Continue)"
       - extendedWaitUntil:
-          notVisible: "(Castellano|English|Português)"
+          notVisible: "(Español|English|Português)"
           timeout: 15000

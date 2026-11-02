@@ -27,16 +27,17 @@ function clavesCon(patron: RegExp, salvo: ReadonlySet<string> = new Set()): stri
   );
 }
 
-describe('el idioma se llama «castellano»', () => {
+describe('el idioma se llama «español»', () => {
   it('así sale en el selector de idioma y en la configuración', () => {
     // `LANGUAGE_NAMES.es` es lo que pintan la pantalla de idioma y la fila
     // «Idioma» de la configuración; `lang.spanish`, lo que se lee en un curso.
-    assert.match(INDICE, /^\s*es: 'Castellano',\r?$/m);
-    assert.equal(es['lang.spanish'], 'Castellano');
+    // Se llamaba «Castellano» hasta el 02/11/2026; el usuario pidió «Español».
+    assert.match(INDICE, /^\s*es: 'Español',\r?$/m);
+    assert.equal(es['lang.spanish'], 'Español');
   });
 
-  it('ningún texto lo llama «español»', () => {
-    assert.deepEqual(clavesCon(/\bespañol/i), []);
+  it('ningún texto lo llama «castellano»', () => {
+    assert.deepEqual(clavesCon(/\bcastellano/i), []);
   });
 });
 

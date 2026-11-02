@@ -12,9 +12,9 @@ tags:
     file: ../../_comun/abrir-app.yaml
     env:
       RUTA: language
-      ESPERAR: "Castellano"
+      ESPERAR: "Español"
       REINICIAR: "no"
-- tapOn: "Castellano"
+- tapOn: "Español"
 - tapOn: "(Continuar|Continue)"
 - extendedWaitUntil:
     notVisible: "Português"

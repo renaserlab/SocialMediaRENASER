@@ -1403,7 +1403,7 @@ export const es = {
     'Aquí encontrarás respuesta a lo que más nos preguntan. Si tu caso no está, escríbenos: contestamos a todos los mensajes.',
   'support.directContact': 'Contacto directo',
   'support.responseWindow': '48 horas hábiles',
-  'support.responseTime': 'Respondemos en un plazo máximo de {plazo}. Atendemos en castellano.',
+  'support.responseTime': 'Respondemos en un plazo máximo de {plazo}. Atendemos en español.',
   'support.writeToSupport': 'Escribir a soporte',
   'support.writeToUsAt': 'Escríbenos a',
   'support.beforeWriting': 'Antes de escribir',
@@ -1450,7 +1450,7 @@ export const es = {
   'support.q7a1':
     'Un iPhone o un teléfono Android reciente, o cualquier navegador actualizado. Basta con una cuenta creada con tu correo electrónico.',
   'support.q7a2':
-    'La app está en castellano, inglés y portugués; puedes cambiar el idioma en Configuración. Algunas funciones, como subir videos, necesitan conexión estable.',
+    'La app está en español, inglés y portugués; puedes cambiar el idioma en Configuración. Algunas funciones, como subir videos, necesitan conexión estable.',
 
   // Sala del directo
   'live.reactionHeart': 'corazón',
@@ -1827,7 +1827,7 @@ export const es = {
   'preview.mainCategoryHint': 'Es donde se encuentra el curso. Elige una.',
 
   // Nombres de idioma (etiqueta de la ficha, no el selector)
-  'lang.spanish': 'Castellano',
+  'lang.spanish': 'Español',
   'lang.english': 'Inglés',
   'lang.portuguese': 'Portugués',
 
