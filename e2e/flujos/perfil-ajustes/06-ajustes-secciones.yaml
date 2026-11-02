@@ -34,7 +34,7 @@ tags:
 - assertVisible: "Modo Oscuro"
 - assertVisible: "Actualmente: (Claro|Oscuro)"
 - assertVisible: "Idioma de la App"
-- assertVisible: "Castellano"
+- assertVisible: "Español"
 - assertVisible: "Cuenta & Membresía"
 - assertVisible: "Ana Prueba"
 - assertVisible: ${E2E_EMAIL}

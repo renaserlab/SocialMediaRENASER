@@ -1,5 +1,5 @@
 # Cierra la sesion desde Ajustes y vuelve a la raiz (muro sin cuenta). Si la
-# raiz pide idioma (nadie lo eligio aun en este dispositivo), elige Castellano.
+# raiz pide idioma (nadie lo eligio aun en este dispositivo), elige Español.
 # Si no habia sesion, no hace nada (y se queda en Ajustes).
 #
 # Parametros (env, opcionales):
