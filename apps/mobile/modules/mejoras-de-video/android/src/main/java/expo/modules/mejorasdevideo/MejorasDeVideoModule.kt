@@ -8,19 +8,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 import live.hms.video.error.HMSException
 import live.hms.video.sdk.HMSActionResultListener
 import live.hms.video.sdk.HMSSDK
-import live.hms.videofilters.HMSVideoFilter
 
 /**
- * «Mejorar» del directo en Android: el filtro de video de 100ms
- * (`HMSVideoFilter`) sobre la cámara de quien emite.
+ * «Mejorar» del directo en Android: un complemento de video propio
+ * ([FiltroDeMejoras]) sobre la cámara de quien emite, que retoca en la GPU.
  *
- * POR QUÉ HACE FALTA ESTE MÓDULO. El paquete de React Native de 100ms trae el
- * filtro escrito en JavaScript (`HMSVideoFilterPlugin.ts`), pero no lo exporta
- * y su parte nativa no lo implementa: no hay forma de encenderlo desde la
- * aplicación. Esto es el puente, y nada más.
+ * POR QUÉ HACE FALTA ESTE MÓDULO. El paquete de React Native de 100ms no deja
+ * poner complementos de video desde JavaScript, salvo el fondo virtual. Esto
+ * es el puente, y nada más.
  *
- * LA MISMA SALA. El filtro se engancha a la instancia de `HMSSDK` que ya está
- * emitiendo, la que el puente de 100ms guarda en `HMSManager.hmsCollection`
+ * LA MISMA SALA. El complemento se engancha a la instancia de `HMSSDK` que ya
+ * está emitiendo, la que el puente de 100ms guarda en `HMSManager.hmsCollection`
  * con el identificador que conoce JavaScript (`HMSSDK.id`). No se construye
  * ningún SDK aquí.
  *
@@ -37,20 +35,16 @@ import live.hms.videofilters.HMSVideoFilter
  *   con la casa real. Por eso `encender` se niega si hay otro complemento.
  * - **Sin pista de video, `addPlugin` lo deja pendiente** para cuando la haya,
  *   además de contestar con un error. Se comprueba la pista ANTES, para que no
- *   aparezca un filtro que nadie pidió.
- * - **`addPlugin` ya llama a `init()`** del filtro (la guía de 100ms lo llama
- *   también a mano; eso crearía dos hilos). Y los valores que llegan antes de
- *   `init()` se pierden en silencio: JavaScript ajusta DESPUÉS de encender.
- * - **Los ajustes son de 0 a 1** (decimales; la guía dice enteros). El filtro
- *   los guarda como porcentaje entero truncando: por eso `aDecimal` suma una
- *   milésima, para que 0,29 no se quede en 28.
- * - **Tiene defectos propios**: devuelve la imagen en espejo y, si no da
- *   abasto, se va quedando atrás (segundos). Por eso nunca se engancha solo:
- *   va dentro de `FiltroArreglado` (ver allí el porqué de cada uno).
+ *   aparezca un efecto que nadie pidió.
+ * - **`addPlugin` ya llama a `init()`** del complemento: no se llama a mano.
+ * - **Los fps de `addPlugin` no frenan nada**: el SDK los anota pero no los usa.
+ *   Al complemento le llega cada fotograma de la cámara.
+ * - **El filtro de 100ms (`HMSVideoFilter`) no sirve en directo**: se quedaba
+ *   segundos atrás y devolvía la imagen en espejo. Ver [FiltroDeMejoras].
  */
 class MejorasDeVideoModule : Module() {
   /** El filtro de ahora y la instancia del SDK a la que está enganchado. */
-  @Volatile private var filtro: FiltroArreglado? = null
+  @Volatile private var filtro: FiltroDeMejoras? = null
   @Volatile private var sdkDelFiltro: HMSSDK? = null
 
   override fun definition() = ModuleDefinition {
@@ -89,7 +83,7 @@ class MejorasDeVideoModule : Module() {
     }
     // Una instancia nueva del SDK (se volvió a entrar) pide un filtro nuevo: el
     // de antes lee la cámara de una sala que ya no existe.
-    val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: FiltroArreglado(HMSVideoFilter(sdk))
+    val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: FiltroDeMejoras()
     filtro = actual
     sdkDelFiltro = sdk
 
@@ -113,14 +107,16 @@ class MejorasDeVideoModule : Module() {
     rubor: Double?,
     suavidad: Double?,
   ): Boolean {
-    val actual = filtro?.filtro ?: return false
-    // `null` = ese filtro no se toca. Llamar a un ajuste mete su filtro en la
-    // cadena aunque sea con el valor neutro, y cada uno cuesta una pasada más.
-    if (brillo != null) actual.setBrightness(aDecimal(brillo))
-    if (contraste != null) actual.setContrast(aDecimal(contraste))
-    if (nitidez != null) actual.setSharpness(aDecimal(nitidez))
-    if (rubor != null) actual.setRedness(aDecimal(rubor))
-    if (suavidad != null) actual.setSmoothness(aDecimal(suavidad))
+    val actual = filtro ?: return false
+    // `null` = ese ajuste se queda como está.
+    val antes = actual.ajustes
+    actual.ajustes = Ajustes(
+      suavidad = suavidad?.let(::deCeroAUno) ?: antes.suavidad,
+      luz = brillo?.let(::deCeroAUno) ?: antes.luz,
+      contraste = contraste?.let(::deCeroAUno) ?: antes.contraste,
+      nitidez = nitidez?.let(::deCeroAUno) ?: antes.nitidez,
+      rubor = rubor?.let(::deCeroAUno) ?: antes.rubor,
+    )
     return true
   }
 
@@ -158,7 +154,7 @@ class MejorasDeVideoModule : Module() {
     )
   }
 
-  private fun olvidar(quitado: FiltroArreglado) {
+  private fun olvidar(quitado: FiltroDeMejoras) {
     if (filtro === quitado) {
       filtro = null
       sdkDelFiltro = null
@@ -180,16 +176,15 @@ class MejorasDeVideoModule : Module() {
     }
   }
 
-  /** De 0 a 1, con una milésima de más: el filtro trunca a porcentaje entero. */
-  private fun aDecimal(valor: Double): Float =
-    (valor.coerceIn(0.0, 1.0) + 0.001).toFloat().coerceAtMost(1f)
+  /** De 0 (sin efecto) a 1; lo que no es un número, sin efecto. */
+  private fun deCeroAUno(valor: Double): Float =
+    if (valor.isNaN()) 0f else valor.coerceIn(0.0, 1.0).toFloat()
 
   private companion object {
     /**
-     * Lo que recomienda 100ms para este filtro, y lo que usa ya el fondo virtual.
-     * Ojo: el SDK 2.9.84 lo anota pero no frena nada con él (ver
-     * `UnFotogramaALaVez`).
+     * Lo que se le declara al SDK. Solo lo anota (2.9.84 no frena nada con
+     * él): el complemento retoca todos los fotogramas de la cámara.
      */
-    const val FOTOGRAMAS_POR_SEGUNDO = 15
+    const val FOTOGRAMAS_POR_SEGUNDO = 30
   }
 }

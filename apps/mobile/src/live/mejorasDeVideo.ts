@@ -2,17 +2,18 @@
  * «MEJORAR»: PIEL SUAVE, LUZ, CONTRASTE, NITIDEZ Y RUBOR EN LA CÁMARA DE QUIEN
  * EMITE (aprobado el 02/11/2026, maqueta «Efectos de cámara» v4).
  *
- * SON LOS FILTROS DE 100ms, SIN TERCEROS. En Android los aplica
- * `HMSVideoFilter` (artefacto `live.100ms:video-filters`) a los fotogramas
- * ANTES de codificarlos: lo que ve quien emite es lo que reciben los demás. El
- * paquete de React Native de 100ms no los ofrece, así que el puente es un
- * módulo propio (`modules/mejoras-de-video`). En iOS no se ofrece todavía.
+ * SIN TERCEROS. En Android los aplica un complemento de video propio que
+ * retoca en la GPU (`modules/mejoras-de-video`), enganchado al SDK de 100ms,
+ * a los fotogramas ANTES de codificarlos: lo que ve quien emite es lo que
+ * reciben los demás. El filtro de 100ms (`HMSVideoFilter`) se probó y se
+ * descartó: se quedaba segundos atrás y devolvía la imagen en espejo. En iOS
+ * no se ofrece todavía.
  *
  * ESTE FICHERO NO SABE DE QUÉ SDK SE TRATA. Habla con un
  * `ComplementoDeMejoras` de tres verbos —encender, ajustar, apagar— y guarda
  * las reglas que el complemento no tiene:
  *
- *   - Cada efecto va de 0 a 100 y 0 es SIN EFECTO: el valor neutro del SDK.
+ *   - Cada efecto va de 0 a 100 y 0 es SIN EFECTO: el valor neutro del filtro.
  *     Cuánto es 100 en cada plataforma lo dicen `ESCALA_ANDROID` y
  *     `ESCALA_IOS`, y es lo único que hay que tocar para afinarlo.
  *   - Una operación a la vez, y manda LA ÚLTIMA: arrastrar la barra no deja
@@ -192,26 +193,26 @@ export type ParametrosDeFiltro = {
 type Escala = { parametro: keyof ParametrosDeFiltro; neutro: number; maximo: number };
 
 /**
- * ANDROID (`HMSVideoFilter`, 2.9.84). Cada ajuste va de 0 a 1 y el filtro lo
- * convierte a un porcentaje entero que reparte sobre su rango de GPUImage
- * (leído en sus clases): brillo −1…1 SUMADO a cada canal, contraste 0…2,
- * nitidez −4…4, rojo ×1…×1,5 y desenfoque 0…1.
+ * ANDROID: el retoque propio en la GPU (`RetocadorGpu.kt`, en el módulo
+ * `mejoras-de-video`). Cada ajuste va de 0 (sin efecto) a 1:
  *
- * - **Piel suave** 0 → 0,8: lo que propone la maqueta. OJO: en Android es un
- *   desenfoque gaussiano de TODA la imagen, no solo de la piel.
- * - **Luz** 0,5 → 0,8 (+0,3 sobre el neutro, lo de la maqueta). En GPUImage
- *   son +0,6 sumados a cada canal: hay que mirarlo en un teléfono.
- * - **Contraste** 0,5 → 0,7: ×1 → ×1,4.
- * - **Nitidez** 0,5 → 0,625: de 0 a 1 en la escala de GPUImage, una máscara
- *   de enfoque marcada sin llegar a dibujar halos.
- * - **Rubor** 0 → 0,4: el rojo ×1 → ×1,2. También es de toda la imagen.
+ * - **Piel suave** 0 → 0,8: cuánto se mezcla la piel con su versión alisada.
+ *   Solo lo que parece piel, y respetando los bordes (ojos, labios, pelo).
+ * - **Luz** 0 → 0,6: una curva que aclara sombras y medios sin quemar los
+ *   blancos (el gris medio pasa de 0,5 a 0,65).
+ * - **Contraste** 0 → 0,4: ×1 → ×1,4 alrededor del gris medio.
+ * - **Nitidez** 0 → 1: máscara de enfoque con los 4 vecinos, la misma de
+ *   GPUImage con nitidez 1 (lo que daba el filtro de 100ms al máximo).
+ * - **Rubor** 0 → 0,2: el rojo ×1 → ×1,2, solo sobre la piel.
+ *
+ * Los máximos son un punto de partida: se afinan aquí mirándolo en un teléfono.
  */
 export const ESCALA_ANDROID: Readonly<Record<IdDeMejora, Escala>> = {
   piel: { parametro: 'smoothness', neutro: 0, maximo: 0.8 },
-  luz: { parametro: 'brightness', neutro: 0.5, maximo: 0.8 },
-  contraste: { parametro: 'contrast', neutro: 0.5, maximo: 0.7 },
-  nitidez: { parametro: 'sharpness', neutro: 0.5, maximo: 0.625 },
-  rubor: { parametro: 'redness', neutro: 0, maximo: 0.4 },
+  luz: { parametro: 'brightness', neutro: 0, maximo: 0.6 },
+  contraste: { parametro: 'contrast', neutro: 0, maximo: 0.4 },
+  nitidez: { parametro: 'sharpness', neutro: 0, maximo: 1 },
+  rubor: { parametro: 'redness', neutro: 0, maximo: 0.2 },
 };
 
 /**
@@ -251,14 +252,12 @@ export function parametrosDeIos(valores: ValoresDeMejora): ParametrosDeFiltro {
 }
 
 /**
- * Lo que se le manda al filtro de Android, y qué filtros quedan ya en su
- * cadena.
+ * Lo que se le manda al filtro de Android, y qué efectos se le han mandado ya.
  *
- * En `HMSVideoFilter` un filtro ENTRA en la cadena la primera vez que se le da
- * un valor, aunque sea el neutro, y cada uno es una pasada más por fotograma.
- * Así que un efecto en 0 que nunca se tocó no se manda (`null`); uno que ya se
- * mandó, sí, aunque vuelva a 0, para que deje de notarse. `tocados` vuelve a
- * empezar cada vez que se enciende el filtro: al encenderse nace vacío.
+ * Un efecto en 0 que nunca se tocó no se manda (`null`: el filtro lo deja como
+ * está, y nace en 0); uno que ya se mandó, sí, aunque vuelva a 0, para que
+ * deje de notarse. `tocados` vuelve a empezar cada vez que se enciende el
+ * filtro: al encenderse nace todo en 0.
  */
 export function ajusteDeAndroid(
   valores: ValoresDeMejora,

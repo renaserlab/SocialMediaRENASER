@@ -321,8 +321,8 @@ NATIVO_POR_VERSION['1.2.3'] = NATIVO_POR_VERSION['1.2.2'] as (typeof NATIVO_POR_
 
 // 1.2.4: dependencias, plugins y permisos iguales que 1.2.3. Sube porque entra
 // el PRIMER módulo nativo propio, `modules/mejoras-de-video` (solo Android):
-// el puente al filtro de video de 100ms (`live.100ms:video-filters`) para
-// «Mejorar» en la transmisión. No está en `package.json` —Expo lo enlaza desde
+// «Mejorar» en la transmisión, un complemento de video propio sobre el SDK de
+// 100ms que retoca en la GPU. No está en `package.json` —Expo lo enlaza desde
 // la carpeta `modules/`—, así que lo vigila la prueba de MODULOS_PROPIOS.
 NATIVO_POR_VERSION['1.2.4'] = NATIVO_POR_VERSION['1.2.3'] as (typeof NATIVO_POR_VERSION)[string];
 

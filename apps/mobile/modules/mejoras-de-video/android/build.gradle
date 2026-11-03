@@ -1,11 +1,12 @@
-// «Mejorar» del directo: el filtro de video de 100ms (piel suave, luz,
-// contraste, nitidez y rubor) enganchado a la MISMA instancia del SDK que usa
-// la sala. Solo Android: en iOS este módulo no existe (`expo-module.config.json`).
+// «Mejorar» del directo: un complemento de video propio (piel suave, luz,
+// contraste, nitidez y rubor) que retoca la cámara en la GPU, enganchado a la
+// MISMA instancia del SDK de 100ms que usa la sala. Solo Android: en iOS este
+// módulo no existe (`expo-module.config.json`).
 //
-// LAS TRES VERSIONES DE 100ms VAN JUNTAS. `video-filters` se compila contra el
-// `android-sdk` de su mismo número, y es el que trae `react-native-hms` 1.12.3
-// (`sdk-versions.json`: 2.9.84). Si se sube `react-native-hms`, se suben aquí
-// las dos; `mejorasCableado.test.mts` falla si se separan.
+// EL SDK DE 100ms VA EN LA MISMA VERSIÓN QUE EL DE `react-native-hms` 1.12.3
+// (`sdk-versions.json`: 2.9.84): de él salen la interfaz de los complementos y
+// las clases de WebRTC con que se pinta. Si se sube `react-native-hms`, se sube
+// aquí; `mejorasCableado.test.mts` falla si se separan.
 plugins {
   id 'com.android.library'
   id 'expo-module-gradle-plugin'
@@ -28,6 +29,4 @@ dependencies {
   // de fondos de 100ms (`@100mslive/react-native-video-plugin`).
   implementation project(':100mslive_react-native-hms')
   implementation 'live.100ms:android-sdk:2.9.84'
-  // El filtro. Trae, de 100ms, GPUImage 2.1.0 (Maven Central) para pintar.
-  implementation 'live.100ms:video-filters:2.9.84'
 }

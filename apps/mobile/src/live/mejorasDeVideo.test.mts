@@ -62,9 +62,9 @@ describe('de 0–100 a lo que pide cada plataforma', () => {
   it('0 es el valor neutro del SDK en las dos: sin efecto', () => {
     assert.deepEqual(parametrosDeAndroid(valoresEnCero()), {
       smoothness: 0,
-      brightness: 0.5,
-      contrast: 0.5,
-      sharpness: 0.5,
+      brightness: 0,
+      contrast: 0,
+      sharpness: 0,
       redness: 0,
     });
     assert.deepEqual(parametrosDeIos(valoresEnCero()), {
@@ -76,24 +76,26 @@ describe('de 0–100 a lo que pide cada plataforma', () => {
     });
   });
 
-  it('los máximos de la maqueta: piel 0–0,8 y luz +0,3 sobre el neutro', () => {
+  it('los máximos: piel 0–0,8 en las dos; la luz de Android es una curva (0–0,6)', () => {
     const todo = con({ piel: 100, luz: 100, contraste: 100, nitidez: 100, rubor: 100 });
     const android = parametrosDeAndroid(todo);
     const ios = parametrosDeIos(todo);
     assert.equal(android.smoothness, 0.8);
     assert.equal(ios.smoothness, 0.8);
-    assert.equal(android.brightness, 0.5 + 0.3);
+    // Android: el gris medio sube a 0,5^(1/1,6) ≈ 0,65, sin mover el blanco.
+    assert.equal(android.brightness, 0.6);
+    assert.ok(Math.abs(0.5 ** (1 / (1 + android.brightness)) - 0.648) < 0.001);
     assert.equal(ios.brightness, 0.5 + 0.3);
   });
 
   it('contraste, nitidez y rubor llegan a lo razonable, y lo mismo en las dos', () => {
     const todo = parametrosDeAndroid(con({ contraste: 100, nitidez: 100, rubor: 100 }));
-    // Pasado a la escala de GPUImage del filtro de Android (leída en sus
-    // clases): contraste 0…2, nitidez −4…4, rojo ×1…×1,5.
+    // Lo que hace con ellos el retoque de Android (`RetocadorGpu.kt`):
+    // contraste ×(1 + c), nitidez como la de GPUImage, rojo ×(1 + r) en la piel.
     const gpu = {
-      contraste: todo.contrast * 2,
-      nitidez: -4 + 8 * todo.sharpness,
-      rojo: 1 + 0.5 * todo.redness,
+      contraste: 1 + todo.contrast,
+      nitidez: todo.sharpness,
+      rojo: 1 + todo.redness,
     };
     assert.equal(gpu.contraste, 1.4);
     assert.equal(gpu.nitidez, 1);
@@ -109,10 +111,10 @@ describe('de 0–100 a lo que pide cada plataforma', () => {
     const mitad = parametrosDeAndroid(con({ piel: 50, luz: 50, contraste: 50, nitidez: 50, rubor: 50 }));
     assert.deepEqual(mitad, {
       smoothness: 0.4,
-      brightness: 0.65,
-      contrast: 0.6,
-      sharpness: 0.5625,
-      redness: 0.2,
+      brightness: 0.3,
+      contrast: 0.2,
+      sharpness: 0.5,
+      redness: 0.1,
     });
     for (let v = 0; v <= 100; v += 1) {
       const p = parametrosDeAndroid(con({ piel: v, luz: v, contraste: v, nitidez: v, rubor: v }));
@@ -151,14 +153,14 @@ describe('de 0–100 a lo que pide cada plataforma', () => {
     const primero = ajusteDeAndroid(con({ luz: 40 }), new Set());
     assert.deepEqual(primero.parametros, {
       smoothness: null,
-      brightness: 0.62,
+      brightness: 0.24,
       contrast: null,
       sharpness: null,
       redness: null,
     });
     // Ya tocado: volver a 0 SÍ se manda, con su neutro, para que deje de notarse.
     const segundo = ajusteDeAndroid(con({ piel: 10 }), primero.tocados);
-    assert.equal(segundo.parametros.brightness, 0.5);
+    assert.equal(segundo.parametros.brightness, 0);
     assert.equal(segundo.parametros.smoothness, 0.08);
     assert.equal(segundo.parametros.sharpness, null);
     assert.deepEqual([...segundo.tocados].sort(), ['luz', 'piel']);

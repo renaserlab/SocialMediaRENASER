@@ -1104,14 +1104,18 @@ reacciones y los botones se apartan.
 
 ### Por qué un módulo propio
 
-Los cinco filtros son de 100ms (`HMSVideoFilter`, artefacto
-`live.100ms:video-filters:2.9.84`, el mismo número que el SDK que trae
-`react-native-hms` 1.12.3). El paquete de React Native de 100ms tiene el
-filtro escrito en JavaScript pero no lo exporta, y su parte nativa no lo
-implementa. El módulo propio busca la instancia de `HMSSDK` de la sala en
-`HMSManager.hmsCollection` —igual que el complemento de fondos de 100ms— y le
-engancha el filtro. Tres verbos: `encender(sdkId)`, `ajustar(...)` y
-`apagar()`. Es `platforms: ["android"]`: iOS no lo compila.
+El paquete de React Native de 100ms no deja poner complementos de video desde
+JavaScript, salvo el fondo virtual. El módulo propio busca la instancia de
+`HMSSDK` de la sala en `HMSManager.hmsCollection` —igual que el complemento de
+fondos de 100ms— y le engancha un complemento de video propio
+(`FiltroDeMejoras.kt`), que retoca en la GPU (`RetocadorGpu.kt`). Tres verbos:
+`encender(sdkId)`, `ajustar(...)` y `apagar()`. Es `platforms: ["android"]`:
+iOS no lo compila. Solo depende de `live.100ms:android-sdk`, en el mismo
+número que trae `react-native-hms` 1.12.3 (2.9.84).
+
+Al principio se usó el filtro de 100ms (`HMSVideoFilter`, artefacto
+`live.100ms:video-filters`), y en el teléfono salió en espejo y con segundos
+de retraso: ver «Por qué no el filtro de 100ms», más abajo.
 
 ### No se combina con un fondo
 
@@ -1129,16 +1133,16 @@ el fondo y el siguiente con la casa real. Por eso:
 
 ### De 0–100 a cada plataforma
 
-0 es el valor neutro (sin efecto). En Android cada ajuste va de 0 a 1 y el
-filtro lo reparte sobre su rango de GPUImage.
+0 es el valor neutro (sin efecto). En Android cada ajuste va de 0 (sin
+efecto) a 1, y lo que hace cada uno está en `RetocadorGpu.kt`.
 
-| Efecto | Android (0 → 100) | En GPUImage | iOS (0 → 100) |
+| Efecto | Android (0 → 100) | Qué hace en Android | iOS (0 → 100) |
 |---|---|---|---|
-| Piel suave | smoothness 0 → 0,8 | desenfoque 0 → 0,8 (de toda la imagen) | smoothness 0 → 0,8 |
-| Luz | brightness 0,5 → 0,8 | +0 → +0,6 sumado a cada canal | brightness 0,5 → 0,8 |
-| Contraste | contrast 0,5 → 0,7 | ×1 → ×1,4 | contrast 1 → 1,4 |
-| Nitidez | sharpness 0,5 → 0,625 | 0 → 1 | sharpness 0 → 1 |
-| Rubor | redness 0 → 0,4 | rojo ×1 → ×1,2 (de toda la imagen) | redness 1 → 1,2 |
+| Piel suave | smoothness 0 → 0,8 | mezcla la piel con su versión alisada (solo piel, respetando bordes) | smoothness 0 → 0,8 |
+| Luz | brightness 0 → 0,6 | curva gamma: el gris medio 0,5 → 0,65; negro y blanco quietos | brightness 0,5 → 0,8 |
+| Contraste | contrast 0 → 0,4 | ×1 → ×1,4 alrededor del gris medio | contrast 1 → 1,4 |
+| Nitidez | sharpness 0 → 1 | máscara de enfoque con 4 vecinos (la de GPUImage) | sharpness 0 → 1 |
+| Rubor | redness 0 → 0,2 | rojo ×1 → ×1,2, solo en la piel | redness 1 → 1,2 |
 
 Los máximos están en `ESCALA_ANDROID` y `ESCALA_IOS`: afinar es cambiar un
 número. iOS no se ofrece todavía; la escala queda lista.
@@ -1146,7 +1150,8 @@ número. iOS no se ofrece todavía; la escala queda lista.
 ### Las reglas
 
 - Todo empieza en 0, y en 0 el filtro ni se engancha. Con todo en 0 durante
-  3 s se quita (procesa cada fotograma aunque no cambie nada).
+  3 s se quita (en 0 deja pasar cada fotograma sin tocar la GPU, pero sigue
+  enganchado).
 - La barra manda como mucho un valor cada 100 ms y el último al soltar. Imán
   en 0 y en 50; doble toque a 0; «Restablecer» pone todo en 0.
 - El ojo («Mantén presionado para ver sin efecto») pone los cinco en 0 en el
@@ -1160,88 +1165,96 @@ número. iOS no se ofrece todavía; la escala queda lista.
 - Desenfoque suave (radio 40) y fuerte (75, el de antes) solo en Android; en
   iOS hay uno.
 
-### El filtro de 100ms devuelve la imagen en espejo (03/11/2026)
+### El retoque en la GPU (03/11/2026)
 
-Visto en la primera prueba en teléfono: con «Mejorar» puesto, quien emite se
-veía «al derecho» (se movía a la derecha y su imagen iba a la izquierda) y el
-público lo veía en espejo. Al quitarse el filtro (todo en 0 durante 3 s)
-volvía a estar bien: por eso pasaba «a veces».
+`FiltroDeMejoras` es un complemento de video del SDK (tipo `TRANSFORM`). Leído
+en las clases del SDK 2.9.84: la cámara de 100ms (`HMSCameraCapturer`)
+entrega cada fotograma en el hilo de su `SurfaceTextureHelper`, con su
+contexto de GPU puesto, y llega a `processVideoFrame` sin cambiar de hilo. Así
+que el retoque se hace AHÍ, textura a textura (`RetocadorGpu`):
 
-La causa, leída en las clases de `video-filters` 2.9.84: el filtro sube su
-mapa de bits a una textura, la pasa a I420 con `YuvConverter` y marca el
-fotograma girado 180°. En WebRTC la fila 0 de una textura es la de abajo, así
-que el I420 sale volteado de arriba abajo, y el giro de 180° lo pone de pie
-cambiando izquierda por derecha. El fondo virtual de 100ms hace el mismo
-camino con un `postScale(-1, 1)` en la textura y sale bien; el filtro no lo
-lleva.
+1. La textura de la cámara (OES) se copia a una textura normal aplicando su
+   matriz, igual que la pinta WebRTC en cualquier pantalla.
+2. Un programa de GPU lee esa copia y escribe el retoque en una textura de
+   salida, que se entrega con matriz identidad y el mismo giro que la cámara.
+3. `glFinish` antes de entregarla (el codificador y la vista la leen desde
+   otros contextos) y la salida vuelve a la reserva cuando todos la sueltan.
+   Como mucho 8 en uso; si se agotan, se pierde ese fotograma (no se manda
+   uno sin retocar, que parpadearía).
 
-El arreglo está en `FiltroArreglado.kt`, en el módulo propio: envuelve al filtro,
-intercepta cada fotograma que devuelve, pone las filas de los tres planos en
-su orden (en el mismo búfer) y quita el giro. Solo toca lo que sale como hoy
-(I420 girado 180°); cualquier otra cosa pasa tal cual. Comprobado en la JVM
-contra las clases de WebRTC de 100ms, de 1×1 a 720×1280.
+Nada sale de la GPU: ni mapas de bits ni colas. Va a la frecuencia de la
+cámara y sin retraso. En 0 ni se toca la GPU: pasa el mismo fotograma.
 
-**Si se sube el SDK de 100ms, revisar esto**: si arreglan el filtro y siguen
-marcando 180°, el envoltorio lo pondría en espejo otra vez.
+Nunca deja la cámara sin imagen: si el fotograma no es una textura, no
+estamos en su hilo o no hay contexto, pasa tal cual. Si la GPU falla, se
+registra, queda sin efecto hasta reencenderlo y la imagen sigue. Si la cámara
+se vuelve a crear (otro contexto), lo de antes se abandona y se crea de nuevo.
 
-### El filtro de 100ms se queda atrás: segundos de retraso (03/11/2026)
+**Comprobado en el emulador** (03/11/2026): un APK de prueba sin Gradle con
+`FiltroDeMejoras.kt` y `RetocadorGpu.kt` tal cual, las clases de WebRTC de
+100ms y su `.so`, y una «cámara» falsa dibujada en un `SurfaceTextureHelper`
+(cuadrantes de colores, piel con grano y azul con grano). 25 comprobaciones:
 
-Visto en el teléfono con el APK 78: con «Mejorar», moverse a la derecha
-tardaba unos 3 segundos en verse, en la pantalla de quien emite y, por tanto,
-también en lo que se envía.
+- Sin efectos, la salida pasada a I420 por `YuvConverter` es la de la cámara
+  (diferencia máxima 1 de 255): ni espejo ni vuelta. También recortada, y
+  reducida (luminancia igual; el color, a lo sumo 14: aquí se muestrea de la
+  textura ya reducida). OJO al comparar: `YuvConverter` solo lee en los
+  centros exactos con anchos múltiplos de 8 (1280, 720, 640, 320 lo son).
+- Piel suave: la varianza de la piel baja de 13,9 a 1,2; la del azul no se
+  mueve (18,31 → 18,31) y el rojo de al lado tampoco.
+- Luz aclara el gris sin bajar el blanco; rubor sube el rojo de la piel y no
+  el del azul; nitidez y contraste dan más detalle.
+- El complemento: en neutro pasa el mismo fotograma; con ajustes, una
+  textura nueva; con `skipProcessing`, tal cual; con 8 salidas retenidas, el
+  9.º se pierde; 300 seguidos soltando cada uno, 300 retocados; después de
+  `stop()` vuelve a retocar.
+- 5,6–9,3 ms por fotograma de 640×480 en el emulador, que pinta SIN GPU
+  (SwiftShader, en el procesador). En un teléfono, bastante menos.
 
-La causa, leída en las clases de `video-filters` 2.9.84, del SDK y de
-GPUImage 2.1.0:
+La prueba no está en el repositorio (usa las clases de 100ms descomprimidas
+en la PC de trabajo): `~/.cache/zeta-perf/efectos-impl/prueba-gpu/`
+(`construir.sh` y, con el cerrojo de trabajos pesados, `emulador.sh`, que
+arranca el AVD sin ventana y en solo lectura).
 
-- `HMSVideoFilter.processVideoFrame` convierte CADA fotograma de la cámara en
-  un mapa de bits (bajándolo de la GPU, pasándolo a ARGB y girándolo: tres
-  mapas de ~3,7 MB a 720p) y encarga el retoque a su propio hilo, en una cola
-  **sin límite**. Lo que devuelve es el último retoque terminado.
-- Cada retoque llama a `GPUImage.getBitmapWithFilterApplied`, que **monta un
-  contexto de GPU nuevo y recompila los sombreadores en cada fotograma**.
-  Tarda más de lo que tarda en llegar el siguiente fotograma.
-- El SDK no frena nada: los 15 fps de `addPlugin` los anota
-  (`pluginNumFramesToSkip`), pero no los usa en ninguna parte. Le llegan
-  todos los de la cámara.
+### Por qué no el filtro de 100ms (03/11/2026)
 
-Resultado: la cola crece sin parar y la imagen se queda cada vez más atrás,
-con un mapa de bits retenido por cada fotograma en espera. Simulado en la JVM
-(cámara a 30 fps, retoque de 120 ms): 2,9 s de retraso a los 4 s.
+Probado en el teléfono con los APK 77 a 79. Dos defectos, leídos en las
+clases de `video-filters` 2.9.84, del SDK y de GPUImage 2.1.0:
 
-El fondo virtual no tiene el problema: su procesado espera a terminar
-(`VBThreadExecutor.executeBlocking`), así que pierde fotogramas pero no se
-retrasa.
+- **Espejo.** Para devolver el fotograma filtrado sube su mapa de bits a una
+  textura, la pasa a I420 con `YuvConverter` y lo marca girado 180°. En
+  WebRTC la fila 0 de una textura es la de abajo: el I420 sale volteado de
+  arriba abajo, y el giro de 180° lo pone de pie cambiando izquierda por
+  derecha. El público veía a quien emite en espejo, y quien emite se veía «al
+  derecho» (se movía a la derecha y su imagen iba a la izquierda).
+- **Segundos de retraso.** Convierte CADA fotograma en mapa de bits (tres de
+  ~3,7 MB a 720p) y encola el retoque en su hilo sin límite. Cada retoque
+  (`GPUImage.getBitmapWithFilterApplied`) monta un contexto de GPU nuevo y
+  recompila los sombreadores, y tarda más de lo que tarda en llegar el
+  siguiente fotograma. El SDK no frena nada: los fps de `addPlugin` los anota
+  (`pluginNumFramesToSkip`) pero no los usa. Con «Mejorar», ~3 s de retraso.
 
-El arreglo es `UnFotogramaALaVez.kt`, usado por `FiltroArreglado`: detrás de
-cada retoque se deja un aviso en la cola del filtro (su `processHandler`,
-privado, leído por reflexión; el SDK conserva sus nombres con
-`-keep class live.hms.**`). Hasta que llega el aviso, los fotogramas que
-entran se descartan sin convertir. En la misma simulación el retraso se queda
-en ~0,2 s y la cola en 1. Si el campo no se encontrara, todo pasa como antes.
-Si un aviso no llegara, a los 2 s pasa otro fotograma: la cámara no se
-congela.
+Se llegó a corregir los dos por fuera (commits 0c9809d y 32e9c01: enderezar
+cada fotograma y pasarle uno a la vez), pero quedaba entrecortado: el filtro
+no da para más fotogramas. Por eso se sustituyó por el retoque propio.
 
-De paso, al quitar el filtro se cierra su hilo: 100ms abría uno nuevo en cada
-encendido y no lo cerraba nunca.
-
-**Lo que no arregla**: con «Mejorar» salen solo los fotogramas que el filtro
-da abasto a retocar (en la simulación, ~8 por segundo). Para que vaya fluido
-hace falta un filtro propio que trabaje sobre la textura de la cámara en la
-GPU, sin bajar cada fotograma a un mapa de bits.
+El fondo virtual de 100ms no tiene ninguno de los dos: lleva el
+`postScale(-1, 1)` y su procesado espera a terminar
+(`VBThreadExecutor.executeBlocking`).
 
 ### Lo que no se hizo
 
 - **Menores de 18** (la maqueta pedía solo Luz, Contraste y Nitidez): Zeta no
   guarda la edad ni la fecha de nacimiento de la cuenta, así que no se puede
   aplicar sin pedirla. No se pidió.
-- iOS: necesita su propio puente a `HMSVideoFilterPlugin`.
+- iOS: necesita su propio puente (100ms tiene `HMSVideoFilterPlugin` con Core
+  Image; habría que comprobar que no tiene los defectos del de Android).
 
 ### Solo se sabe en un teléfono
 
-Que el módulo enlaza y el filtro se engancha a la sala, cuánto se nota cada
-máximo (sobre todo la luz y la piel, que en Android afectan a toda la
-imagen), los fotogramas con el filtro puesto (los que dé abasto a retocar:
-el SDK no aplica los 15 fps) y que el cambio filtro ↔ fondo no deja ver la casa ni un fotograma.
+Cuánto se nota cada máximo, si la piel suave reconoce bien la piel con luces
+distintas, que va fluido en teléfonos de gama baja y que el cambio filtro ↔
+fondo no deja ver la casa ni un fotograma.
 
 El módulo propio sube la versión de la aplicación a **1.2.4**
 (`perfilesDeCompilacion.test.mts`): una actualización de JavaScript no llega
