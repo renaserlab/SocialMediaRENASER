@@ -75,6 +75,10 @@ const EXENTOS = new Map<string, string>([
     'Vive dentro de un `Modal`, que se monta en OTRA jerarquia nativa: el gesto del carrusel no llega a su contenido y por eso lleva su propio `GestureHandlerRootView`.',
   ],
   [
+    'components/live/HojaDeEfectos.tsx',
+    'La hoja de efectos de la transmisión (sus filas de efectos y fondos, y la barra 0–100) vive dentro de un `Modal`, otra jerarquía nativa como `ImageViewer`; y la transmisión es una ruta del Stack raíz (`app/live/[id].tsx`), fuera del grupo de pestañas.',
+  ],
+  [
     'screens/CrearScreen.tsx',
     'Declara su PROPIO arrastre horizontal y le anade `.blocksExternalGesture(gestoDeSeccion)`, que es la otra forma valida de ganarle la mano al carrusel.',
   ],

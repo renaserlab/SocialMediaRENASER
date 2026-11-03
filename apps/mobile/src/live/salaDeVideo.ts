@@ -22,6 +22,7 @@
 import type { ComponentType } from 'react';
 import type { EstadoDeCalidad, PreferenciaDeCalidad } from '@/live/calidadDeVideo';
 import type { CapacidadDeEfectos, EfectoDeVideo, EstadoDeEfectos } from '@/live/efectosDeVideo';
+import type { CapacidadDeMejoras, EstadoDeMejoras, ValoresDeMejora } from '@/live/mejorasDeVideo';
 
 /* ------------------------------------------------------------------------- *
  * LA CREDENCIAL. Lo que responde el backend, ya leido y comprobado.
@@ -217,6 +218,8 @@ export type EventoDeSala =
   | { tipo: 'pistas'; pistas: PistasDeSala }
   /** Cambio el efecto de la camara propia, o se esta cambiando, o fallo. */
   | { tipo: 'efecto'; estado: EstadoDeEfectos }
+  /** Cambio «Mejorar» (piel suave, luz…): valores, fondo que lo apaga, fallo. */
+  | { tipo: 'mejora'; estado: EstadoDeMejoras }
   /** Cambiaron las calidades entre las que se puede elegir, o la elegida. */
   | { tipo: 'capas'; estado: EstadoDeCalidad }
   /**
@@ -271,6 +274,21 @@ export interface SalaDeVideo {
   estadoDeEfectos(): EstadoDeEfectos;
   /** Pide un efecto. No rechaza: si no se puede, lo dice el estado. */
   aplicarEfecto(efecto: EfectoDeVideo): Promise<EstadoDeEfectos>;
+  /**
+   * Si esta sala ofrece «Mejorar» a quien emite. Solo Android con el modulo
+   * propio (`modules/mejoras-de-video`): en iOS, web, Expo Go o un binario
+   * anterior, no.
+   */
+  mejoras(): CapacidadDeMejoras;
+  /** Los valores de «Mejorar» y si el filtro esta apagado por un fondo o un fallo. */
+  estadoDeMejoras(): EstadoDeMejoras;
+  /**
+   * Los valores que quiere la persona, de 0 a 100. Se pueden dar antes de
+   * entrar (lo recordado en el telefono): se ponen al publicar. No rechaza.
+   */
+  cambiarMejoras(valores: ValoresDeMejora): void;
+  /** Mantener el ojo: sin efecto mientras dure, tambien para quien mira. */
+  compararMejoras(si: boolean): void;
   /** Entre que calidades de imagen puede elegir quien mira, y cual tiene. */
   calidad(): EstadoDeCalidad;
   /** Elige una. No rechaza, y no reconecta la sala. */
@@ -399,6 +417,29 @@ export function crearSalaFalsa(): SalaDeVideo {
         aplicando: false,
         error: efecto.tipo === 'ninguno' ? null : 'no_se_pudo',
       });
+    },
+
+    mejoras() {
+      // Sin proveedor no hay camara que filtrar: «Mejorar» no aparece.
+      return { admitida: false };
+    },
+
+    estadoDeMejoras() {
+      return {
+        valores: { piel: 0, luz: 0, contraste: 0, nitidez: 0, rubor: 0 },
+        comparando: false,
+        bloqueada: false,
+        averiada: false,
+        aplicando: false,
+      };
+    },
+
+    cambiarMejoras() {
+      // Nada que filtrar. La hoja no lo ofrece sin capacidad.
+    },
+
+    compararMejoras() {
+      // Nada que comparar.
     },
 
     calidad() {

@@ -335,7 +335,11 @@ describe('los efectos son de la pista que sale, y solo de quien emite', () => {
   });
 
   it('el control de efectos es de quien publica, y dice por que no esta cuando no esta', () => {
-    assert.match(PANTALLA, /hayEfectos=\{efectos\.capacidad\.admitidos\}/);
+    // Los fondos o «Mejorar»: con cualquiera de los dos, el botón está vivo.
+    assert.match(
+      PANTALLA,
+      /hayEfectos=\{efectos\.capacidad\.admitidos \|\| mejoras\.capacidad\.admitida\}/,
+    );
     assert.match(PANTALLA, /if \(!vista\.puedePublicar\) return null;/);
     // Quien publica lo ve siempre; si este telefono no admite efectos sale
     // atenuado, y la hoja explica por que. Esconderlo dejaba esa explicacion

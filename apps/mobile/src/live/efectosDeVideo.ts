@@ -1,10 +1,11 @@
 /**
- * LOS EFECTOS DE LA CAMARA DE QUIEN EMITE: ninguno, desenfoque del fondo, o un
- * fondo de los que trae la aplicacion.
+ * LOS FONDOS DE LA CAMARA DE QUIEN EMITE: ninguno, desenfoque del fondo (suave o
+ * fuerte en Android), o un fondo de los que trae la aplicacion.
  *
- * «FILTRO» AQUI SIGNIFICA ESO Y NADA MAS. No hay maquillaje, ni alisado, ni
- * mascaras, ni seguimiento de la cara, ni color: el proveedor de video no lo
- * ofrece y no se finge.
+ * AQUI SOLO HAY FONDOS. Piel suave, luz, contraste, nitidez y rubor
+ * («Mejorar», 02/11/2026) son otro complemento del SDK y tienen sus reglas en
+ * `mejorasDeVideo.ts`; los dos no pueden ir a la vez. Maquillaje, mascaras o
+ * seguimiento de la cara no los ofrece el proveedor y no se fingen.
  *
  * EL EFECTO VA EN LA PISTA QUE SALE. Lo aplica el SDK de video a los fotogramas
  * de la camara ANTES de codificarlos, asi que lo que ve quien emite es lo mismo
@@ -28,8 +29,14 @@
 
 export type EfectoDeVideo =
   | { tipo: 'ninguno' }
-  | { tipo: 'desenfoque' }
+  /**
+   * `fuerza`: solo Android ofrece dos (02/11/2026). Sin ella es el fuerte, el
+   * de siempre: lo que ya estaba guardado o repuesto sigue igual.
+   */
+  | { tipo: 'desenfoque'; fuerza?: FuerzaDeDesenfoque }
   | { tipo: 'fondo'; fondoId: string };
+
+export type FuerzaDeDesenfoque = 'suave' | 'fuerte';
 
 /** Por que esta sala no ofrece efectos. Se le dice a la persona. */
 export type MotivoSinEfectos =
@@ -48,6 +55,11 @@ export type CapacidadDeEfectos = {
   motivo?: MotivoSinEfectos;
   /** Los fondos que se pueden pedir. Lista cerrada: los que trae la app. */
   fondos: readonly string[];
+  /**
+   * Hay desenfoque suave y fuerte. Solo en Android: en iOS el radio lo fija el
+   * SDK al construirse y hay uno solo.
+   */
+  dosDesenfoques?: boolean;
 };
 
 /** Lo que salio mal la ultima vez, para decirlo. `null` = nada. */
@@ -85,6 +97,14 @@ export type ComplementoDeEfectos = {
  */
 export const RADIO_DE_DESENFOQUE = 75;
 
+/** El desenfoque suave de Android. Se nota el fondo, pero no se lee. */
+export const RADIO_DE_DESENFOQUE_SUAVE = 40;
+
+/** El radio que lleva cada desenfoque. Sin fuerza, el fuerte de siempre. */
+export function radioDeDesenfoque(fuerza: FuerzaDeDesenfoque | undefined): number {
+  return fuerza === 'suave' ? RADIO_DE_DESENFOQUE_SUAVE : RADIO_DE_DESENFOQUE;
+}
+
 /**
  * Cuanto se espera a que el SDK conteste antes de darlo por perdido.
  *
@@ -109,6 +129,9 @@ export function estadoSinEfectos(): EstadoDeEfectos {
 export function mismoEfecto(a: EfectoDeVideo, b: EfectoDeVideo): boolean {
   if (a.tipo !== b.tipo) return false;
   if (a.tipo === 'fondo' && b.tipo === 'fondo') return a.fondoId === b.fondoId;
+  if (a.tipo === 'desenfoque' && b.tipo === 'desenfoque') {
+    return radioDeDesenfoque(a.fuerza) === radioDeDesenfoque(b.fuerza);
+  }
   return true;
 }
 
@@ -155,6 +178,8 @@ export type EntornoDeEfectos = {
   motivo?: MotivoSinEfectos;
   /** Los ids de los fondos que trae la aplicacion. */
   fondos: readonly string[];
+  /** Si este aparato ofrece desenfoque suave y fuerte (Android). */
+  dosDesenfoques?: boolean;
   /** Programa algo. Devuelve como cancelarlo. */
   programar: (fn: () => void, ms: number) => () => void;
   alCambiar: (estado: EstadoDeEfectos) => void;
@@ -229,6 +254,7 @@ export function crearGestorDeEfectos(entorno: EntornoDeEfectos): GestorDeEfectos
   }
 
   function valido(pedido: EfectoDeVideo): boolean {
+    if (pedido.tipo === 'desenfoque' && pedido.fuerza === 'suave') return entorno.dosDesenfoques === true;
     return pedido.tipo !== 'fondo' || entorno.fondos.includes(pedido.fondoId);
   }
 
@@ -281,7 +307,8 @@ export function crearGestorDeEfectos(entorno: EntornoDeEfectos): GestorDeEfectos
     }
     if (!activo) await activar(plugin);
     if (pedido.tipo === 'desenfoque') {
-      await conLimite(() => plugin.desenfocar(RADIO_DE_DESENFOQUE), ESPERA_DE_EFECTO_MS);
+      const radio = radioDeDesenfoque(pedido.fuerza);
+      await conLimite(() => plugin.desenfocar(radio), ESPERA_DE_EFECTO_MS);
     } else {
       await conLimite(() => plugin.ponerFondo(pedido.fondoId), ESPERA_DE_EFECTO_MS);
     }
@@ -332,7 +359,9 @@ export function crearGestorDeEfectos(entorno: EntornoDeEfectos): GestorDeEfectos
   return {
     capacidad() {
       if (!complemento) return sinCapacidadDeEfectos(entorno.motivo ?? 'sin_proveedor');
-      return { admitidos: true, fondos: [...entorno.fondos] };
+      return entorno.dosDesenfoques
+        ? { admitidos: true, fondos: [...entorno.fondos], dosDesenfoques: true }
+        : { admitidos: true, fondos: [...entorno.fondos] };
     },
 
     estado,

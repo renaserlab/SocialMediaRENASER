@@ -459,6 +459,52 @@ export const rotuloDeDirecto = {
   veloDeLaHoja: 'rgba(0,0,0,0.3)',
 } as const;
 
+/* =========================================================
+   LA HOJA DE EFECTOS DE CÁMARA (aprobada el 02/11/2026, maqueta v4).
+
+   Va SIEMPRE sobre la cámara de quien emite: oscura y translúcida en los
+   dos temas, como `sobreMedio`. El velo de detrás es TRANSPARENTE: quien
+   ajusta la luz o el contraste tiene que ver su imagen tal cual sale, no
+   oscurecida. En iOS y web el panel lleva desenfoque real detrás; Android
+   no lo paga (como la barra flotante) y va algo más opaco.
+
+   El único color es el esmeralda de la marca en la muesca del 50, cuando la
+   barra está enganchada ahí: es la misma guía del imán que la del rótulo.
+   ========================================================= */
+export const efectosDeCamara = {
+  velo: 'transparent',
+  /** El panel con desenfoque detrás (iOS y web) y sin él (Android). */
+  hoja: 'rgba(0,0,0,0.58)',
+  hojaSinDesenfoque: 'rgba(0,0,0,0.74)',
+  asa: 'rgba(255,255,255,0.4)',
+  texto: '#FFFFFF',
+  /** Los círculos de «Mejorar» y las miniaturas de los fondos. */
+  circulo: 'rgba(255,255,255,0.14)',
+  circuloElegido: 'rgba(255,255,255,0.22)',
+  /** El anillo de lo elegido, y su separación oscura en las miniaturas. */
+  anillo: '#FFFFFF',
+  separacionDelAnillo: 'rgba(0,0,0,0.55)',
+  /** El punto de un efecto encendido que no es el elegido. */
+  punto: '#FFFFFF',
+  bordeDelPunto: 'rgba(0,0,0,0.45)',
+  /** La barra 0–100. */
+  carril: 'rgba(255,255,255,0.3)',
+  relleno: '#FFFFFF',
+  muesca: 'rgba(255,255,255,0.45)',
+  muescaEnganchada: rotuloDeDirecto.guia,
+  pulgar: '#FFFFFF',
+  sombra: '#000000',
+  burbuja: '#FFFFFF',
+  textoDeLaBurbuja: '#000000',
+  /** «Mantén para ver sin efecto»: suelto y apretado. */
+  ojo: 'rgba(0,0,0,0.42)',
+  ojoApretado: '#FFFFFF',
+  iconoDelOjoApretado: '#000000',
+  /** «Así sales sin efecto», encima de la cámara mientras se mantiene el ojo. */
+  insignia: 'rgba(0,0,0,0.72)',
+  bordeDeLaInsignia: 'rgba(255,255,255,0.22)',
+} as const;
+
 /* ---------- Alias semánticos (opcional, estilo Figma prompt) ---------- */
 export const tokenNames = {
   'surface/primary': 'surface',

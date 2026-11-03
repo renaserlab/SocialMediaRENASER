@@ -12,6 +12,11 @@ export const haptics = {
     if (Platform.OS === 'web') return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   },
+  /** Un clic finito: una barra que se engancha en su imán. */
+  seleccion() {
+    if (Platform.OS === 'web') return;
+    Haptics.selectionAsync().catch(() => {});
+  },
   success() {
     if (Platform.OS === 'web') return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});

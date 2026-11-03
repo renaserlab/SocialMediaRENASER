@@ -13,7 +13,7 @@
  * propio) se manda a los telefonos sin volver a pasar por la tienda.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -319,6 +319,23 @@ NATIVO_POR_VERSION['1.2.2'] = NATIVO_POR_VERSION['1.2.1'] as (typeof NATIVO_POR_
 // sabe cuál de los dos lleva cada teléfono.
 NATIVO_POR_VERSION['1.2.3'] = NATIVO_POR_VERSION['1.2.2'] as (typeof NATIVO_POR_VERSION)[string];
 
+// 1.2.4: dependencias, plugins y permisos iguales que 1.2.3. Sube porque entra
+// el PRIMER módulo nativo propio, `modules/mejoras-de-video` (solo Android):
+// el puente al filtro de video de 100ms (`live.100ms:video-filters`) para
+// «Mejorar» en la transmisión. No está en `package.json` —Expo lo enlaza desde
+// la carpeta `modules/`—, así que lo vigila la prueba de MODULOS_PROPIOS.
+NATIVO_POR_VERSION['1.2.4'] = NATIVO_POR_VERSION['1.2.3'] as (typeof NATIVO_POR_VERSION)[string];
+
+/**
+ * LOS MÓDULOS NATIVOS PROPIOS de cada versión (`apps/mobile/modules/`). Expo los
+ * enlaza sin pasar por `package.json`, así que la prueba de arriba no los ve:
+ * añadir uno sin subir la versión dejaría que una actualización de JavaScript
+ * llegara a binarios que no lo traen. Como allí, las entradas no se editan.
+ */
+const MODULOS_PROPIOS_POR_VERSION: Record<string, string[]> = {
+  '1.2.4': ['mejoras-de-video'],
+};
+
 test('si cambia algo nativo, cambia expo.version', () => {
   const version = app.expo.version;
   const esperado = NATIVO_POR_VERSION[version];
@@ -343,6 +360,22 @@ test('si cambia algo nativo, cambia expo.version', () => {
     { ...esperado, dependencias: [...esperado.dependencias].sort() },
     `Lo nativo cambio y expo.version sigue en ${version}. Una actualizacion llegaria a builds sin ` +
       'esos modulos. Sube expo.version en app.json y añade su entrada a NATIVO_POR_VERSION.',
+  );
+});
+
+test('si cambian los modulos nativos propios, cambia expo.version', () => {
+  const carpeta = join(RAIZ, 'modules');
+  const actuales = existsSync(carpeta)
+    ? readdirSync(carpeta, { withFileTypes: true })
+        .filter((entrada) => entrada.isDirectory())
+        .map((entrada) => entrada.name)
+        .sort()
+    : [];
+  assert.deepEqual(
+    actuales,
+    [...(MODULOS_PROPIOS_POR_VERSION[app.expo.version] ?? [])].sort(),
+    `Los modulos de apps/mobile/modules no son los de la version ${app.expo.version}. ` +
+      'Sube expo.version en app.json y anota sus modulos en MODULOS_PROPIOS_POR_VERSION.',
   );
 });
 

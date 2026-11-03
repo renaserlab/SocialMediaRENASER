@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { FEATURE_LIVE } from '@/config/features';
 import { traduceEnElIdiomaActual, type TranslationKey } from '@/i18n';
@@ -15,6 +16,17 @@ import {
   type EfectoDeVideo,
   type EstadoDeEfectos,
 } from '@/live/efectosDeVideo';
+import {
+  CLAVE_DE_MEJORAS,
+  estadoSinMejoras,
+  guardarMejoras,
+  hayMejora,
+  mejorasGuardadas,
+  mismosValores,
+  type CapacidadDeMejoras,
+  type EstadoDeMejoras,
+  type ValoresDeMejora,
+} from '@/live/mejorasDeVideo';
 import { asegurarProveedorDeVideo } from '@/live/registro100ms';
 import {
   crearSesionDeDirecto,
@@ -74,6 +86,18 @@ export type SesionEnPantalla = {
     estado: EstadoDeEfectos;
     aplicar: (efecto: EfectoDeVideo) => void;
   };
+  /**
+   * «Mejorar» (piel suave, luz…): si este telefono lo ofrece, como esta, y
+   * cambiarlo. `recordadas`: al entrar habia valores guardados en el telefono
+   * (la pantalla lo avisa una vez, al empezar).
+   */
+  mejoras: {
+    capacidad: CapacidadDeMejoras;
+    estado: EstadoDeMejoras;
+    cambiar: (valores: ValoresDeMejora) => void;
+    comparar: (si: boolean) => void;
+    recordadas: boolean;
+  };
   /** La calidad de lo que se recibe: entre que se elige, y elegir. */
   calidad: {
     estado: EstadoDeCalidad;
@@ -93,6 +117,10 @@ export function useSesionDeDirecto({
   );
   const [pistas, setPistas] = useState<PistasDeSala>(sinPistas);
   const [efectos, setEfectos] = useState<EstadoDeEfectos>(estadoSinEfectos);
+  const [mejoras, setMejoras] = useState<EstadoDeMejoras>(estadoSinMejoras);
+  const [mejorasRecordadas, setMejorasRecordadas] = useState(false);
+  /** Para avisar UNA vez cuando «Mejorar» se apaga sola. */
+  const mejoraAveriada = useRef(false);
   const [calidad, setCalidad] = useState<EstadoDeCalidad>(calidadSinOpciones);
 
   /*
@@ -220,6 +248,15 @@ export function useSesionDeDirecto({
           setPistas(evento.pistas);
           maquina.laSalaCambioDePistasAjenas(evento.pistas.hayMediosAjenos);
           break;
+        case 'mejora':
+          // Se apago sola (fallo o no contesto): se DICE, aunque la hoja este
+          // cerrada. Quien emitia con la piel suavizada tiene que saberlo.
+          if (evento.estado.averiada && !mejoraAveriada.current) {
+            ultimas.current.avisar(traduceEnElIdiomaActual('live.enhanceTurnedOff'));
+          }
+          mejoraAveriada.current = evento.estado.averiada;
+          setMejoras(evento.estado);
+          break;
         case 'efecto':
           setEfectos(evento.estado);
           // Un efecto que se quita solo se DICE, aunque la hoja este cerrada:
@@ -253,6 +290,55 @@ export function useSesionDeDirecto({
     };
   }, [motor]);
 
+  /*
+    LO QUE SE RECUERDA DE «MEJORAR», EN ESTE TELEFONO Y PARA ESTA CUENTA
+    (`live/mejorasDeVideo.ts` decide el formato). Se lee al montar y se le da a
+    la sala ANTES de entrar: lo pone al publicar, no hace falta esperar. Se
+    escribe cuando cambian los valores, y SOLO despues de haber leido: si no,
+    los ceros con los que nace la sala pisarian lo guardado.
+  */
+  const leidas = useRef<{ cuenta: string; valores: ValoresDeMejora } | null>(null);
+  useEffect(() => {
+    const cuenta = useAppStore.getState().user?.id;
+    if (!cuenta) return;
+    let vigente = true;
+    void AsyncStorage.getItem(CLAVE_DE_MEJORAS)
+      .catch(() => null)
+      .then((crudo) => {
+        if (!vigente) return;
+        const valores = mejorasGuardadas(crudo, cuenta);
+        leidas.current = { cuenta, valores };
+        if (hayMejora(valores)) {
+          motor.sala.cambiarMejoras(valores);
+          setMejorasRecordadas(true);
+        }
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [motor]);
+
+  useEffect(() => {
+    const leido = leidas.current;
+    if (!leido || mismosValores(leido.valores, mejoras.valores)) return;
+    // Solo lo que la sala de verdad puede aplicar: sin «Mejorar» en este
+    // telefono no hay nada nuevo que recordar.
+    if (!motor.sala.mejoras().admitida) return;
+    const valores = mejoras.valores;
+    const id = setTimeout(() => {
+      leido.valores = valores;
+      void AsyncStorage.getItem(CLAVE_DE_MEJORAS)
+        .catch(() => null)
+        .then((crudo) =>
+          AsyncStorage.setItem(CLAVE_DE_MEJORAS, guardarMejoras(crudo, leido.cuenta, valores)),
+        )
+        .catch(() => {
+          // Sin disco, la proxima transmision empieza en 0. No rompe nada.
+        });
+    }, ESPERA_PARA_GUARDAR_MEJORAS_MS);
+    return () => clearTimeout(id);
+  }, [motor, mejoras.valores]);
+
   /* Lo que cuenta el servidor sobre la emision. */
   useEffect(() => {
     if (estadoDeSesion === null) return;
@@ -271,6 +357,11 @@ export function useSesionDeDirecto({
     },
     [motor],
   );
+  const cambiarMejoras = useCallback(
+    (valores: ValoresDeMejora) => motor.sala.cambiarMejoras(valores),
+    [motor],
+  );
+  const compararMejoras = useCallback((si: boolean) => motor.sala.compararMejoras(si), [motor]);
   const elegirCalidad = useCallback(
     (preferencia: PreferenciaDeCalidad) => {
       void motor.sala.elegirCalidad(preferencia).then(setCalidad);
@@ -290,6 +381,17 @@ export function useSesionDeDirecto({
       estado: efectos,
       aplicar: aplicarEfecto,
     },
+    mejoras: {
+      // Como `capacidad` de los efectos: se lee en cada pintado.
+      capacidad: motor.sala.mejoras(),
+      estado: mejoras,
+      cambiar: cambiarMejoras,
+      comparar: compararMejoras,
+      recordadas: mejorasRecordadas,
+    },
     calidad: { estado: calidad, elegir: elegirCalidad },
   };
 }
+
+/** Lo que se espera tras el último cambio de «Mejorar» antes de escribirlo en el disco. */
+const ESPERA_PARA_GUARDAR_MEJORAS_MS = 600;

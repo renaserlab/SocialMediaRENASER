@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Keyboard,
   Platform,
   Pressable,
@@ -57,6 +58,7 @@ import {
   type VistaDeDirecto,
 } from '@/live/maquinaDeDirecto';
 import { elegirPistasDeEscenario } from '@/live/escenario';
+import { mejoraPuesta } from '@/live/mejorasDeVideo';
 import {
   ESTILO_POR_OMISION,
   PRESENTACION_POR_OMISION,
@@ -270,8 +272,10 @@ function ControlesDeAnfitrion({
     <View style={estilos.columnaDeControles}>
       <BotonDeControl
         icono="aperture"
-        etiqueta={t('live.effects')}
+        etiqueta={efectoPuesto ? t('live.effectsOnA11y') : t('live.effects')}
         activo={efectoPuesto}
+        // Un fondo o «Mejorar» puestos se ven sin abrir la hoja.
+        punto={efectoPuesto}
         // Nunca se deshabilita: el efecto se tiene que poder quitar con la
         // sala ocupada, y la hoja es donde se explica por que no hay.
         desactivado={false}
@@ -309,6 +313,7 @@ function BotonDeControl({
   activo,
   desactivado,
   atenuado = false,
+  punto = false,
   alPulsar,
 }: {
   icono: keyof typeof Feather.glyphMap;
@@ -317,6 +322,8 @@ function BotonDeControl({
   desactivado: boolean;
   /** Se puede pulsar, pero se ve apagado: lo que ofrece no esta disponible. */
   atenuado?: boolean;
+  /** Un punto de aviso en la esquina: hay algo puesto (los efectos de camara). */
+  punto?: boolean;
   alPulsar: () => void;
 }) {
   return (
@@ -330,6 +337,12 @@ function BotonDeControl({
       style={[estilos.botonRedondo, estilos.sobreImagen]}
     >
       <Feather name={icono} size={18} color={media.text} />
+      {punto ? (
+        <View
+          style={[estilos.puntoDeAviso, { backgroundColor: media.aviso, borderColor: media.background }]}
+          pointerEvents="none"
+        />
+      ) : null}
     </Pulsable>
   );
 }
@@ -685,13 +698,48 @@ export function LiveScreen() {
     [emisionId, t],
   );
 
-  const { vista, sesion, pistas, VistaDePista, efectos, calidad } = useSesionDeDirecto({
+  const { vista, sesion, pistas, VistaDePista, efectos, mejoras, calidad } = useSesionDeDirecto({
     emisionId,
     estadoDeSesion: emision?.estado ?? null,
     esAnfitrion: puedeGestionar,
     alCambiarLaFicha,
     avisar: setAviso,
   });
+
+  /*
+    CON LA HOJA DE EFECTOS ABIERTA SE APARTAN el chat, el tema, las reacciones
+    y los botones (aprobado el 02/11/2026): quien ajusta la luz o la piel tiene
+    que ver su cámara limpia, como en TikTok. Se funden; con «reducir
+    movimiento», de golpe.
+  */
+  const apartado = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.timing(apartado, {
+      toValue: hojaDeEfectos ? 0 : 1,
+      duration: reduceMotion ? 0 : 200,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [apartado, hojaDeEfectos, reduceMotion]);
+  const conLaHoja = { opacity: apartado };
+
+  /*
+    «MEJORAR» RECORDADO: si este teléfono traía valores de la última
+    transmisión, se dice UNA vez al empezar a publicar —y se puede cambiar ahí
+    mismo—: nadie sale con la piel suavizada sin saberlo. Seis segundos.
+  */
+  const [avisoDeMejoras, setAvisoDeMejoras] = useState(false);
+  const avisoDeMejorasDado = useRef(false);
+  useEffect(() => {
+    if (avisoDeMejorasDado.current) return;
+    if (!mejoras.recordadas || !mejoras.capacidad.admitida || !mejoraPuesta(mejoras.estado)) return;
+    avisoDeMejorasDado.current = true;
+    setAvisoDeMejoras(true);
+  }, [mejoras.recordadas, mejoras.capacidad.admitida, mejoras.estado]);
+  useEffect(() => {
+    if (!avisoDeMejoras) return;
+    const id = setTimeout(() => setAvisoDeMejoras(false), DURACION_DEL_AVISO_DE_QUITADO_MS);
+    return () => clearTimeout(id);
+  }, [avisoDeMejoras]);
 
   const terminar = useCallback(() => void sesion.terminar(), [sesion]);
   const empezar = useCallback(() => void sesion.empezar(), [sesion]);
@@ -1211,9 +1259,9 @@ export function LiveScreen() {
             derecha. Se miden: la zona libre del rotulo acaba encima del chat
             (con el mensaje fijado, si lo hay).
           */}
-          <View
-            style={estilos.filaInferior}
-            pointerEvents="box-none"
+          <Animated.View
+            style={[estilos.filaInferior, conLaHoja]}
+            pointerEvents={hojaDeEfectos ? 'none' : 'box-none'}
             onLayout={(evento: LayoutChangeEvent) => medirParte('fila', evento.nativeEvent.layout.y)}
           >
             <View
@@ -1297,15 +1345,18 @@ export function LiveScreen() {
               ) : null}
             <ControlesDeAnfitrion
               vista={vista}
-              hayEfectos={efectos.capacidad.admitidos}
-              efectoPuesto={efectos.estado.efecto.tipo !== 'ninguno'}
+              hayEfectos={efectos.capacidad.admitidos || mejoras.capacidad.admitida}
+              efectoPuesto={
+                efectos.estado.efecto.tipo !== 'ninguno' ||
+                (mejoras.capacidad.admitida && mejoraPuesta(mejoras.estado))
+              }
               alAlternarCamara={() => void sesion.alternarCamara()}
               alAlternarMicrofono={() => void sesion.alternarMicrofono()}
               alCambiarCamara={() => void sesion.cambiarCamara()}
               alAbrirEfectos={() => setHojaDeEfectos(true)}
             />
             </View>
-          </View>
+          </Animated.View>
 
           {aviso ? (
             <View style={estilos.aviso} accessibilityLiveRegion="polite">
@@ -1319,26 +1370,53 @@ export function LiveScreen() {
             El tema del directo: debajo de los comentarios y encima de las
             reacciones, con su propio aire para que no se pegue a ninguno.
           */}
-          <TemaDeDirecto titulo={emision.titulo} />
+          <Animated.View style={conLaHoja} pointerEvents={hojaDeEfectos ? 'none' : 'box-none'}>
+            <TemaDeDirecto titulo={emision.titulo} />
 
-          <ReaccionesDeDirecto
-            emisionId={emision.id}
-            abierto={chatAbierto}
-            totalesDelServidor={emision.reacciones}
-            reduceMotion={reduceMotion}
-          />
-
-          {chatAbierto ? (
-            <EscribirEnElChat
+            <ReaccionesDeDirecto
               emisionId={emision.id}
-              alAvisar={setAviso}
-              alGuardar={alGuardarMensaje}
+              abierto={chatAbierto}
+              totalesDelServidor={emision.reacciones}
+              reduceMotion={reduceMotion}
             />
-          ) : (
-            <Text variant="caption" color={media.textMuted} style={estilos.chatCerrado}>
-              {emision.estado === 'scheduled' ? t('live.chatOpensLater') : t('live.chatClosed')}
-            </Text>
-          )}
+
+            {chatAbierto ? (
+              <EscribirEnElChat
+                emisionId={emision.id}
+                alAvisar={setAviso}
+                alGuardar={alGuardarMensaje}
+              />
+            ) : (
+              <Text variant="caption" color={media.textMuted} style={estilos.chatCerrado}>
+                {emision.estado === 'scheduled' ? t('live.chatOpensLater') : t('live.chatClosed')}
+              </Text>
+            )}
+          </Animated.View>
+
+          {/* «Mejorar» recordado del último directo: se avisa una vez, al empezar. */}
+          {avisoDeMejoras && !hojaDeEfectos ? (
+            <View style={[estilos.avisoDeMejoras, { top: insets.top + 64 }]} pointerEvents="box-none">
+              <View style={[estilos.pildoraDeMejoras, { borderColor: media.border }]} accessibilityLiveRegion="polite">
+                <Feather name="aperture" size={14} color={media.text} />
+                <Text variant="caption" weight="700" color={media.text} style={estilos.textoDeMejoras}>
+                  {t('live.enhanceRemembered')}
+                </Text>
+                <Pulsable
+                  onPress={() => {
+                    setAvisoDeMejoras(false);
+                    setHojaDeEfectos(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('live.enhanceRememberedChange')}
+                  style={[estilos.cambiarMejoras, { backgroundColor: media.text }]}
+                >
+                  <Text variant="caption" weight="800" color={media.background}>
+                    {t('live.enhanceRememberedChange')}
+                  </Text>
+                </Pulsable>
+              </View>
+            </View>
+          ) : null}
 
           {/* «Texto quitado · Deshacer»: solo para quien lo quitó, seis segundos. */}
           {rotuloQuitado && puedeDestacar && enDirecto ? (
@@ -1357,6 +1435,7 @@ export function LiveScreen() {
         capacidad={efectos.capacidad}
         estado={efectos.estado}
         alElegir={efectos.aplicar}
+        mejoras={mejoras}
       />
       <HojaDeInvitados
         visible={hojaDeInvitados && escena.disponible && escena.escenario.puedeInvitar}
@@ -1474,6 +1553,36 @@ const estilos = StyleSheet.create({
     gap: spacing.sm,
   },
   filaInferior: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, flexShrink: 1 },
+  // El punto de «hay efectos puestos», arriba a la derecha del botón.
+  puntoDeAviso: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+  },
+  avisoDeMejoras: { position: 'absolute', left: spacing.md, right: spacing.md, alignItems: 'center' },
+  pildoraDeMejoras: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    maxWidth: '100%',
+    paddingLeft: spacing.md,
+    paddingRight: 5,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    backgroundColor: VELO,
+  },
+  textoDeMejoras: { flexShrink: 1 },
+  cambiarMejoras: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+  },
   // Mientras se mueve el texto: arriba está la papelera, y la cabecera se aparta.
   cabeceraApagada: { opacity: 0.12 },
   ladoDelChat: { flex: 1, minWidth: 0, flexShrink: 1 },

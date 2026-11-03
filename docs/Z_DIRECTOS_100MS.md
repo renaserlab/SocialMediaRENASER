@@ -698,7 +698,7 @@ demás. No hay nada dibujado encima de la vista.
 |---|---|---|
 | Quién procesa | El módulo nativo del complemento (`ReactNativeVideoPlugin`) | El propio SDK de 100ms, que ya estaba |
 | Cuándo se engancha a la pista | Al activar el efecto | Al construir el SDK (apagado) |
-| Radio del desenfoque | 75 (lo fija la aplicación) | El del SDK; el valor de la aplicación no se usa |
+| Radio del desenfoque | 75, y 40 el «suave» (§21) | El del SDK; el valor de la aplicación no se usa |
 | Mínimo | El que ya pide la app (Android 7) | **iOS 16** |
 | Sin el módulo (binario 1.1.x) | No se ofrecen | — |
 
@@ -1083,3 +1083,97 @@ aplicación no pinta nada.
 - Guardar el vídeo en el almacenamiento de Z, o borrarlo pasado un plazo.
 - Enseñar la grabación a quienes miraron.
 - Los clips con IA, que necesitan esta grabación como punto de partida.
+
+## 21. «Mejorar»: piel suave, luz, contraste, nitidez y rubor (02/11/2026)
+
+Lo aprobado en la maqueta «Efectos de cámara» v4. La hoja de efectos pasa a
+ser translúcida y baja, sin velo; arriba va **Mejorar** (cinco efectos en
+fila y una barra 0–100 para el elegido) y debajo **Fondo** (Ninguno,
+desenfoque y los seis fondos). Con la hoja abierta, el chat, el tema, las
+reacciones y los botones se apartan.
+
+### Dónde está cada cosa
+
+| | |
+|---|---|
+| Reglas, conversión, barra y lo que se recuerda | `apps/mobile/src/live/mejorasDeVideo.ts` (+ `.test.mts`) |
+| El puente nativo (solo Android) | `apps/mobile/modules/mejoras-de-video/` (módulo local de Expo) |
+| Adaptador | `src/live/salaDeVideo100ms.ts` (`crearMejoras`, `protegerFondoConMejoras`) |
+| Hoja | `src/components/live/HojaDeEfectos.tsx` |
+| Lo que se mira en el código fuente | `src/live/mejorasCableado.test.mts` |
+
+### Por qué un módulo propio
+
+Los cinco filtros son de 100ms (`HMSVideoFilter`, artefacto
+`live.100ms:video-filters:2.9.84`, el mismo número que el SDK que trae
+`react-native-hms` 1.12.3). El paquete de React Native de 100ms tiene el
+filtro escrito en JavaScript pero no lo exporta, y su parte nativa no lo
+implementa. El módulo propio busca la instancia de `HMSSDK` de la sala en
+`HMSManager.hmsCollection` —igual que el complemento de fondos de 100ms— y le
+engancha el filtro. Tres verbos: `encender(sdkId)`, `ajustar(...)` y
+`apagar()`. Es `platforms: ["android"]`: iOS no lo compila.
+
+### No se combina con un fondo
+
+Leído en el SDK de Android 2.9.84 (`HMSVideoPluginsManager`): a cada
+complemento le llega el MISMO fotograma de la cámara y la salida de todos va
+al mismo sitio, sin encadenarse. Con los dos puestos saldría un fotograma con
+el fondo y el siguiente con la casa real. Por eso:
+
+- al poner un fondo o un desenfoque, primero se quita el filtro y se espera; si
+  no se deja quitar, el fondo no se pone;
+- con el fondo puesto, «Mejorar» dice «Apagado con un fondo. Vuelve con
+  «Ninguno».» y guarda sus valores;
+- al volver a «Ninguno», el filtro vuelve con los mismos valores;
+- el módulo nativo se niega a encender el filtro si hay otro complemento.
+
+### De 0–100 a cada plataforma
+
+0 es el valor neutro (sin efecto). En Android cada ajuste va de 0 a 1 y el
+filtro lo reparte sobre su rango de GPUImage.
+
+| Efecto | Android (0 → 100) | En GPUImage | iOS (0 → 100) |
+|---|---|---|---|
+| Piel suave | smoothness 0 → 0,8 | desenfoque 0 → 0,8 (de toda la imagen) | smoothness 0 → 0,8 |
+| Luz | brightness 0,5 → 0,8 | +0 → +0,6 sumado a cada canal | brightness 0,5 → 0,8 |
+| Contraste | contrast 0,5 → 0,7 | ×1 → ×1,4 | contrast 1 → 1,4 |
+| Nitidez | sharpness 0,5 → 0,625 | 0 → 1 | sharpness 0 → 1 |
+| Rubor | redness 0 → 0,4 | rojo ×1 → ×1,2 (de toda la imagen) | redness 1 → 1,2 |
+
+Los máximos están en `ESCALA_ANDROID` y `ESCALA_IOS`: afinar es cambiar un
+número. iOS no se ofrece todavía; la escala queda lista.
+
+### Las reglas
+
+- Todo empieza en 0, y en 0 el filtro ni se engancha. Con todo en 0 durante
+  3 s se quita (procesa cada fotograma aunque no cambie nada).
+- La barra manda como mucho un valor cada 100 ms y el último al soltar. Imán
+  en 0 y en 50; doble toque a 0; «Restablecer» pone todo en 0.
+- El ojo («Mantén presionado para ver sin efecto») pone los cinco en 0 en el
+  filtro mientras se mantiene: lo ve también el público.
+- Mismos límites de tiempo que los fondos (8 s; 1,5 s al salir). Si algo falla
+  o no contesta, «Mejorar» se apaga solo para esa sala, con todo en 0, y se
+  avisa aunque la hoja esté cerrada. Si el filtro aparece tarde, se quita.
+- Se recuerda en el teléfono, por cuenta (`z.mejoras.v1` en AsyncStorage). Al
+  empezar a publicar con valores recordados se avisa una vez, con «Cambiar».
+  El fondo no se recuerda.
+- Desenfoque suave (radio 40) y fuerte (75, el de antes) solo en Android; en
+  iOS hay uno.
+
+### Lo que no se hizo
+
+- **Menores de 18** (la maqueta pedía solo Luz, Contraste y Nitidez): Zeta no
+  guarda la edad ni la fecha de nacimiento de la cuenta, así que no se puede
+  aplicar sin pedirla. No se pidió.
+- iOS: necesita su propio puente a `HMSVideoFilterPlugin`.
+
+### Solo se sabe en un teléfono
+
+Que el módulo enlaza y el filtro se engancha a la sala, cuánto se nota cada
+máximo (sobre todo la luz y la piel, que en Android afectan a toda la
+imagen), los fotogramas con el filtro puesto (100ms lo limita a 720p y 15
+fps) y que el cambio filtro ↔ fondo no deja ver la casa ni un fotograma.
+
+El módulo propio sube la versión de la aplicación a **1.2.4**
+(`perfilesDeCompilacion.test.mts`): una actualización de JavaScript no llega
+a binarios sin él. Y si llegara, «Mejorar» no aparece.

@@ -18,6 +18,7 @@ import {
   type HMSTrack,
 } from '@100mslive/react-native-hms';
 import { HMSVirtualBackgroundPlugin } from '@100mslive/react-native-video-plugin';
+import { requireOptionalNativeModule } from 'expo';
 
 import {
   crearGestorDeCalidad,
@@ -38,6 +39,17 @@ import {
   type MotivoSinEfectos,
 } from '@/live/efectosDeVideo';
 import { IDS_DE_FONDOS, fondoPorId } from '@/live/fondosVirtuales';
+import {
+  ajusteDeAndroid,
+  crearGestorDeMejoras,
+  protegerFondoConMejoras,
+  type CapacidadDeMejoras,
+  type ComplementoDeMejoras,
+  type EstadoDeMejoras,
+  type GestorDeMejoras,
+  type IdDeMejora,
+  type ValoresDeMejora,
+} from '@/live/mejorasDeVideo';
 import {
   SalaNoDisponible,
   elegirPistaPrincipal,
@@ -91,6 +103,12 @@ import {
  *    de red y la degradación de pista que da 100ms, y las capas entre las que
  *    se elige son las que devuelve `getLayerDefinition()`. Sin Simulcast en la
  *    plantilla esa lista llega vacía y no se ofrece nada.
+ * 7. **«Mejorar» va en la pista que sale** (02/11/2026). Piel suave, luz,
+ *    contraste, nitidez y rubor son el filtro de video de 100ms, enganchado a
+ *    ESTA instancia del SDK por un módulo propio (`modules/mejoras-de-video`,
+ *    solo Android). Sus reglas están en `mejorasDeVideo.ts`. No puede ir a la
+ *    vez que un fondo: el fondo se pone con el filtro ya quitado
+ *    (`protegerFondoConMejoras`) y el filtro vuelve al quitar el fondo.
  */
 
 /** Cuánto se espera a que el SDK conteste antes de darlo por perdido. */
@@ -158,6 +176,37 @@ function motivoSinEfectos(): MotivoSinEfectos | null {
   return 'sin_proveedor';
 }
 
+/** El módulo propio de «Mejorar» (`modules/mejoras-de-video/…/MejorasDeVideoModule.kt`). */
+type ModuloNativoDeMejoras = {
+  encender: (sdkId: string) => Promise<boolean>;
+  /** De 0 a 1 cada uno; `null` = ese filtro no se toca. */
+  ajustar: (
+    brillo: number | null,
+    contraste: number | null,
+    nitidez: number | null,
+    rubor: number | null,
+    suavidad: number | null,
+  ) => Promise<boolean>;
+  apagar: () => Promise<boolean>;
+};
+
+/**
+ * El módulo de «Mejorar», o `null` si este aparato no lo trae.
+ *
+ * Solo existe en Android y desde la compilación 1.2.4. En iOS, en Expo Go o
+ * en un binario anterior no está, y «Mejorar» simplemente no aparece: el
+ * resto de la sala sigue igual.
+ */
+function moduloDeMejoras(): ModuloNativoDeMejoras | null {
+  if (Platform.OS !== 'android') return null;
+  try {
+    const modulo = requireOptionalNativeModule<ModuloNativoDeMejoras>('MejorasDeVideo');
+    return modulo && typeof modulo.encender === 'function' ? modulo : null;
+  } catch {
+    return null;
+  }
+}
+
 class SalaDe100ms implements SalaDeVideo {
   readonly proveedor = '100ms';
 
@@ -186,6 +235,12 @@ class SalaDe100ms implements SalaDeVideo {
   private motivoSinEfectos: MotivoSinEfectos = 'no_publica';
   /** Si la instancia del SDK de ahora es la que conoce el complemento. */
   private complementoAlcanzable = true;
+
+  /**
+   * «Mejorar». Nace con la sala —sin tocar el SDK— para poder recibir lo
+   * recordado en el teléfono antes de entrar; se pone al publicar.
+   */
+  private readonly mejorasDeLaSala: GestorDeMejoras = this.crearMejoras();
 
   /* ----- Calidad de lo que se recibe ----- */
 
@@ -271,7 +326,7 @@ class SalaDe100ms implements SalaDeVideo {
     if (!this.complemento) this.complemento = new HMSVirtualBackgroundPlugin();
     const complemento = this.complemento;
     if (!this.efectosDeLaSala) {
-      const verbos: ComplementoDeEfectos = {
+      const delSdk: ComplementoDeEfectos = {
         activar: () => complemento.enable(),
         desactivar: () => complemento.disable(),
         // En iOS el radio lo fija el SDK al construir y este valor no se usa.
@@ -283,9 +338,13 @@ class SalaDe100ms implements SalaDeVideo {
           return complemento.setBackground(fondo.imagen);
         },
       };
+      // El fondo y «Mejorar» no pueden estar a la vez: ver `mejorasDeVideo.ts`.
+      const verbos = protegerFondoConMejoras(delSdk, this.mejorasDeLaSala);
       this.efectosDeLaSala = crearGestorDeEfectos({
         complemento: verbos,
         fondos: IDS_DE_FONDOS,
+        // En Android el radio se elige; en iOS lo fija el SDK y hay uno.
+        dosDesenfoques: Platform.OS === 'android',
         programar: (fn, ms) => {
           const id = setTimeout(fn, ms);
           return () => clearTimeout(id);
@@ -397,9 +456,11 @@ class SalaDe100ms implements SalaDeVideo {
     void this.refrescarPistas();
 
     // La pista propia es NUEVA en cada entrada: el efecto de antes ya no está.
+    // «Mejorar» se repone DESPUÉS del fondo: si el fondo vuelve, el filtro se
+    // queda quitado y no hace falta ponerlo para quitarlo enseguida.
     if (reponer && this.efectosDeLaSala) {
       if (this.complementoAlcanzable) {
-        void this.reponerEfecto(this.efectosDeLaSala);
+        void this.reponerEfecto(this.efectosDeLaSala).finally(() => this.estrenarMejoras());
       } else {
         // No hay forma de reponerlo en esta instancia. La cámara nació apagada
         // y así se queda; se dice igual que si el efecto hubiera fallado.
@@ -407,8 +468,63 @@ class SalaDe100ms implements SalaDeVideo {
           tipo: 'efecto',
           estado: { efecto: { tipo: 'ninguno' }, aplicando: false, error: 'se_apago' },
         });
+        this.estrenarMejoras();
       }
+    } else if (publicar) {
+      this.estrenarMejoras();
     }
+  }
+
+  /** Pone «Mejorar» en la pista recién estrenada, si hay algo que poner. */
+  private estrenarMejoras(): void {
+    if (this.destruida || !this.sdk || !this.estado.publicando) return;
+    void this.mejorasDeLaSala.laPistaEsNueva();
+  }
+
+  /**
+   * El gestor de «Mejorar» con los tres verbos del módulo propio, o sin
+   * complemento donde no lo hay.
+   *
+   * Los verbos buscan la instancia del SDK EN CADA LLAMADA (`this.sdk.id`): tras
+   * una caída la sala estrena instancia, y el filtro tiene que ir a la nueva.
+   */
+  private crearMejoras(): GestorDeMejoras {
+    const nativo = moduloDeMejoras();
+    // Los filtros que ya están en la cadena desde que se encendió (ver
+    // `ajusteDeAndroid`). Al encender, la cadena nace vacía.
+    let tocados: ReadonlySet<IdDeMejora> = new Set();
+    const complemento: ComplementoDeMejoras | null = nativo
+      ? {
+          encender: () => {
+            const id = this.sdk?.id;
+            if (this.destruida || !id) return Promise.reject(new Error('No hay sala.'));
+            tocados = new Set();
+            return nativo.encender(id);
+          },
+          ajustar: async (valores) => {
+            const { parametros, tocados: siguientes } = ajusteDeAndroid(valores, tocados);
+            const hecho = await nativo.ajustar(
+              parametros.brightness,
+              parametros.contrast,
+              parametros.sharpness,
+              parametros.redness,
+              parametros.smoothness,
+            );
+            // `false`: el módulo no tiene filtro puesto. No se finge que sí.
+            if (hecho === false) throw new Error('El filtro no estaba puesto.');
+            tocados = siguientes;
+          },
+          apagar: () => nativo.apagar(),
+        }
+      : null;
+    return crearGestorDeMejoras({
+      complemento,
+      programar: (fn, ms) => {
+        const id = setTimeout(fn, ms);
+        return () => clearTimeout(id);
+      },
+      alCambiar: (estado) => this.avisar({ tipo: 'mejora', estado }),
+    });
   }
 
   /** La llamada a `join`, con su límite de tiempo. Rechaza si no se entra. */
@@ -614,6 +730,13 @@ class SalaDe100ms implements SalaDeVideo {
       // Si no se pudo silenciar, salir libera igual las pistas.
     }
     try {
+      // «Mejorar» primero: así, al quitar el fondo —que lo deja volver—, ya
+      // no hay pista y no se vuelve a poner. No lanza y tiene su límite.
+      await this.mejorasDeLaSala.apagarParaSalir();
+    } catch {
+      // Salir libera la pista igualmente.
+    }
+    try {
       // El procesado no puede quedarse enganchado a una pista que se va a
       // destruir. Tiene su propio límite de tiempo.
       await this.efectosDeLaSala?.apagarParaSalir();
@@ -703,6 +826,26 @@ class SalaDe100ms implements SalaDeVideo {
     return gestor.aplicar(efecto);
   }
 
+  mejoras(): CapacidadDeMejoras {
+    // Solo para quien publica, y solo con el módulo propio en el aparato.
+    if (!this.estado.publicando) return { admitida: false };
+    return this.mejorasDeLaSala.capacidad();
+  }
+
+  estadoDeMejoras(): EstadoDeMejoras {
+    return this.mejorasDeLaSala.estado();
+  }
+
+  cambiarMejoras(valores: ValoresDeMejora): void {
+    if (this.destruida) return;
+    void this.mejorasDeLaSala.cambiar(valores);
+  }
+
+  compararMejoras(si: boolean): void {
+    if (this.destruida) return;
+    void this.mejorasDeLaSala.comparar(si);
+  }
+
   calidad(): EstadoDeCalidad {
     return this.calidadDeLaSala.estado();
   }
@@ -728,7 +871,10 @@ class SalaDe100ms implements SalaDeVideo {
     // cámara encendida, así que se suelta igual y se traga cualquier fallo.
     void this.salir()
       .catch(() => {})
-      .finally(() => this.efectosDeLaSala?.destruir());
+      .finally(() => {
+        this.efectosDeLaSala?.destruir();
+        this.mejorasDeLaSala.destruir();
+      });
   }
 
   // ------------------------------------------------------------------ //

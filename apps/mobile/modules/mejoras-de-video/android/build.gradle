@@ -1,0 +1,33 @@
+// «Mejorar» del directo: el filtro de video de 100ms (piel suave, luz,
+// contraste, nitidez y rubor) enganchado a la MISMA instancia del SDK que usa
+// la sala. Solo Android: en iOS este módulo no existe (`expo-module.config.json`).
+//
+// LAS TRES VERSIONES DE 100ms VAN JUNTAS. `video-filters` se compila contra el
+// `android-sdk` de su mismo número, y es el que trae `react-native-hms` 1.12.3
+// (`sdk-versions.json`: 2.9.84). Si se sube `react-native-hms`, se suben aquí
+// las dos; `mejorasCableado.test.mts` falla si se separan.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.mejorasdevideo'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.mejorasdevideo"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // `HMSManager.hmsCollection`: donde el puente de React Native guarda cada
+  // `HMSSDK` por su identificador. Es como lo encuentra también el complemento
+  // de fondos de 100ms (`@100mslive/react-native-video-plugin`).
+  implementation project(':100mslive_react-native-hms')
+  implementation 'live.100ms:android-sdk:2.9.84'
+  // El filtro. Trae, de 100ms, GPUImage 2.1.0 (Maven Central) para pintar.
+  implementation 'live.100ms:video-filters:2.9.84'
+}

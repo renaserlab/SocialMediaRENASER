@@ -75,6 +75,9 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
   en: new Set<string>([
     // El rótulo del directo (02/11/2026): «Color» es la misma palabra.
     'live.bannerColor',
+    // «Mejorar» del directo (02/11/2026): «{nombre}: {valor}» lo dice el
+    // lector de pantalla con el nombre ya traducido; no lleva palabras.
+    'live.enhanceOnA11y',
     // Temas de un grupo: «General» es el nombre del chat de todo el grupo, y
     // en inglés se llama igual (es como lo llama Telegram).
     'groupTopics.general',
@@ -164,6 +167,12 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'live.bannerColorPink',
     'live.bannerBackgroundSolid',
     'live.bannerFontTypewriter',
+    // «Mejorar» del directo (02/11/2026): «Luz», «Contraste» y «Nitidez» se
+    // escriben igual en portugués, y «{nombre}: {valor}» no lleva palabras.
+    'live.enhanceLight',
+    'live.enhanceContrast',
+    'live.enhanceSharpness',
+    'live.enhanceOnA11y',
     // Audios y temas: «{n} segundos» se escribe igual en portugués; es la
     // duración que dice el lector de pantalla al reproducir un audio con nombre.
     'chat.spokenSeconds',
