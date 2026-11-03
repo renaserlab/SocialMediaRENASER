@@ -247,8 +247,8 @@ describe('el módulo nativo', () => {
       COMPLEMENTO,
       /catch \(fallo: Throwable\) \{[\s\S]*?averiado = true[\s\S]*?return pasarTalCual\(input, destino\)/,
     );
-    // En neutro, ni se toca la GPU.
-    assert.match(COMPLEMENTO, /if \(averiado \|\| ajustes\.neutros\) return null/);
+    // En neutro, quitado o averiado, ni se toca la GPU.
+    assert.match(COMPLEMENTO, /if \(detenido \|\| averiado \|\| ajustes\.neutros\) return null/);
   });
 
   it('la salida es la cámara retocada, sin espejo ni vuelta: la matriz de la cámara una vez', () => {
@@ -259,18 +259,53 @@ describe('el módulo nativo', () => {
     assert.match(RETOCADOR, /convertMatrixFromAndroidGraphicsMatrix\(entrada\.transformMatrix\)/);
     // La segunda pasada y la salida, sin matriz: identidad.
     assert.match(RETOCADOR, /retoque\.pintar\(GLES20\.GL_TEXTURE_2D, base\.textureId, IDENTIDAD, salida\)/);
-    assert.match(RETOCADOR, /VideoFrame\.TextureBuffer\.Type\.RGB,\s*salida\.textureId,\s*Matrix\(\),/);
+    assert.match(RETOCADOR, /val idDeLaTextura = salida\.textureId/);
+    assert.match(RETOCADOR, /VideoFrame\.TextureBuffer\.Type\.RGB,\s*idDeLaTextura,\s*Matrix\(\),/);
     assert.match(RETOCADOR, /return VideoFrame\(buffer, giro, marcaDeTiempoNs\)/);
     assert.doesNotMatch(RETOCADOR, /1\.0 - tc|postScale|preScale|setRotate/);
   });
 
   it('cada salida vuelve a su hilo al soltarse; terminada antes de entregarla', () => {
-    assert.match(RETOCADOR, /GLES20\.glFinish\(\)[\s\S]*?TextureBufferImpl\(/);
-    assert.match(RETOCADOR, /Runnable \{ hilo\.post \{ devolver\(salida, generacionDeLaTextura\) \} \}/);
+    // Se pinta (y se termina: glFinish) ANTES de envolverla para entregarla.
+    assert.match(RETOCADOR, /pintar\(entrada, ajustes, ancho, alto, salida\)[\s\S]*?TextureBufferImpl\(/);
+    assert.match(RETOCADOR, /checkNoGLES2Error\("RetocadorGpu\.retocar"\)[\s\S]{0,200}GLES20\.glFinish\(\)/);
+    // Si su cámara ya no existe, la textura queda para borrarla desde otra.
+    assert.match(
+      RETOCADOR,
+      /if \(!hilo\.post \{ devolver\(salida, generacionDeLaTextura\) \}\) texturasHuerfanas\.add\(idDeLaTextura\)/,
+    );
     assert.match(RETOCADOR, /const val MAXIMO_EN_USO = 8/);
-    // stop() suelta la GPU en el hilo de la cámara, y solo en su contexto.
-    assert.match(COMPLEMENTO, /override fun stop\(\) \{\s*hiloDeLaGpu\?\.post \{/);
-    assert.match(COMPLEMENTO, /EGL14\.eglGetCurrentContext\(\) == contextoDeLaGpu/);
+    // Si falla a medias, la salida vuelve a la reserva (si no, se perdería).
+    assert.match(RETOCADOR, /catch \(fallo: Throwable\) \{\s*libres\.addLast\(salida\)\s*throw fallo/);
+    // Los errores GL que dejó otro no cuentan como avería.
+    assert.match(RETOCADOR, /while \(GLES20\.glGetError\(\) != GLES20\.GL_NO_ERROR && pendientes\+\+ < 16\)/);
+  });
+
+  it('un retocador por cámara, soltado una sola vez y sin fugas si la cámara muere', () => {
+    // Cámara nueva = hilo nuevo (el número de un contexto puede repetirse).
+    assert.match(COMPLEMENTO, /actual\.hilo !== hilo \|\| contexto != contextoDeLaGpu/);
+    assert.match(COMPLEMENTO, /actual\?\.soltar\(\)\s*val nuevo = RetocadorGpu\(hilo\)/);
+    // stop(): lo que llegue después pasa tal cual y no crea nada.
+    assert.match(COMPLEMENTO, /override fun stop\(\) \{\s*detenido = true[\s\S]*?actual\?\.soltar\(\)/);
+    assert.match(COMPLEMENTO, /override suspend fun init\(\) \{\s*averiado = false\s*detenido = false/);
+    // Se suelta quien lo saca de porSoltar: en su hilo, o desde otra cámara si murió.
+    assert.match(RETOCADOR, /porSoltar\.add\(this\)\s*hilo\.post \{ if \(porSoltar\.remove\(this\)\) runCatching \{ liberar\(\) \} \}/);
+    assert.match(RETOCADOR, /!otro\.hilo\.looper\.thread\.isAlive && porSoltar\.remove\(otro\)/);
+    // Desde otra cámara solo lo compartido: texturas y programas, nunca framebuffers.
+    const compartido = RETOCADOR.slice(
+      RETOCADOR.indexOf('private fun liberarCompartido()'),
+      RETOCADOR.indexOf('private fun olvidar()'),
+    );
+    assert.match(compartido, /glDeleteTextures/);
+    assert.doesNotMatch(compartido, /\.release\(\)|Framebuffer/);
+  });
+
+  it('si la GPU falla, JavaScript se entera: ajustar da false y encender lo rechaza', () => {
+    assert.match(KOTLIN, /if \(actual\.averiado\) return false/);
+    assert.match(KOTLIN, /if \(actual\.averiado\) \{\s*promise\.reject\("averiado"/);
+    // Al encender nace en 0 aunque se reutilice: JS solo manda lo que no es 0.
+    assert.match(KOTLIN, /actual\.ajustes = Ajustes\(\)/);
+    assert.match(ADAPTADOR, /if \(hecho === false\) throw new Error/);
   });
 
   it('el SDK y react-native-hms van en la MISMA versión de 100ms', () => {

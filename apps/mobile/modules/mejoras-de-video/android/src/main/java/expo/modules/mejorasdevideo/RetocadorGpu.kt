@@ -12,6 +12,8 @@ import hms.webrtc.TextureBufferImpl
 import hms.webrtc.VideoFrame
 import hms.webrtc.YuvConverter
 import java.nio.FloatBuffer
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * Los cinco ajustes de «Mejorar», de 0 (sin efecto) a 1. Qué es cada uno lo
@@ -51,28 +53,33 @@ internal data class Ajustes(
  *   que se está suavizando, para no deshacerlo.
  * - **Rubor**: el rojo ×(1 + rubor), solo sobre la piel.
  *
- * TODO EN EL HILO DE LA CÁMARA. Cada método se llama en el hilo del
- * `SurfaceTextureHelper` que entrega los fotogramas, con su contexto de GPU
- * puesto. Ahí viven las texturas, y desde ahí las leen el codificador y la
- * vista (comparten contexto). Fuera de ese hilo no se toca nada.
+ * UNO POR CÁMARA, EN SU HILO. Cada retocador es de un `SurfaceTextureHelper`
+ * (su [hilo], con su contexto de GPU puesto) y solo se usa ahí. Si la cámara se
+ * vuelve a crear, se estrena otro y este se suelta ([soltar]).
+ *
+ * TEXTURAS COMPARTIDAS. 100ms crea el contexto de cada cámara compartiendo con
+ * uno suyo que no se suelta nunca (`SharedEglContext`, en `HMSCameraCapturer`).
+ * Así, las texturas y los programas de un retocador siguen vivos aunque muera
+ * su cámara, y se pueden borrar desde el contexto de otra cámara
+ * ([liberarCompartido]). Los framebuffers no: son de cada contexto y mueren con
+ * él. Desde esos contextos compartidos leen las salidas el codificador y la
+ * vista.
  */
-internal class RetocadorGpu {
+internal class RetocadorGpu(val hilo: Handler) {
   private var copiaOes: Programa? = null
   private var copiaRgb: Programa? = null
   private var retoque: Programa? = null
   private var base: GlTextureFrameBuffer? = null
 
-  /** Texturas de salida libres para reutilizar. Solo se tocan en este hilo. */
+  /** Texturas de salida libres para reutilizar. Solo se tocan en [hilo]. */
   private val libres = ArrayDeque<GlTextureFrameBuffer>()
   private var creadas = 0
 
   /**
    * Sube cada vez que se sueltan los recursos: una textura de salida que
    * vuelve de una generación anterior se borra en vez de reutilizarse.
-   * Volátil: si la cámara se volvió a crear, las de antes vuelven por el hilo
-   * de antes.
    */
-  @Volatile private var generacion = 0
+  private var generacion = 0
 
   /**
    * Retoca [entrada] y devuelve el fotograma de salida, o `null` si todas las
@@ -87,12 +94,44 @@ internal class RetocadorGpu {
     giro: Int,
     marcaDeTiempoNs: Long,
     ajustes: Ajustes,
-    hilo: Handler,
     convertidor: YuvConverter,
   ): VideoFrame? {
+    recogerLoDeCamarasMuertas()
+    // Los errores que otro dejó pendientes en este contexto no son nuestros:
+    // sin esto, la comprobación de abajo los tomaría por una avería.
+    var pendientes = 0
+    while (GLES20.glGetError() != GLES20.GL_NO_ERROR && pendientes++ < 16) Unit
+
     val ancho = entrada.width
     val alto = entrada.height
     val salida = sacarTextura(ancho, alto) ?: return null
+    try {
+      pintar(entrada, ajustes, ancho, alto, salida)
+    } catch (fallo: Throwable) {
+      // A la reserva, para que `liberar` la borre con las demás.
+      libres.addLast(salida)
+      throw fallo
+    }
+
+    val generacionDeLaTextura = generacion
+    val idDeLaTextura = salida.textureId
+    val buffer = TextureBufferImpl(
+      ancho,
+      alto,
+      VideoFrame.TextureBuffer.Type.RGB,
+      idDeLaTextura,
+      Matrix(),
+      hilo,
+      convertidor,
+      Runnable {
+        // Si su cámara ya no existe, la borra el próximo retoque de otra.
+        if (!hilo.post { devolver(salida, generacionDeLaTextura) }) texturasHuerfanas.add(idDeLaTextura)
+      },
+    )
+    return VideoFrame(buffer, giro, marcaDeTiempoNs)
+  }
+
+  private fun pintar(entrada: TextureBufferImpl, ajustes: Ajustes, ancho: Int, alto: Int, salida: GlTextureFrameBuffer) {
     val base = base ?: GlTextureFrameBuffer(GLES20.GL_RGBA).also { base = it }
     base.setSize(ancho, alto)
 
@@ -121,53 +160,52 @@ internal class RetocadorGpu {
     // El codificador y la vista la leen desde OTROS contextos: tiene que estar
     // terminada antes de soltarla.
     GLES20.glFinish()
-
-    val generacionDeLaTextura = generacion
-    val buffer = TextureBufferImpl(
-      ancho,
-      alto,
-      VideoFrame.TextureBuffer.Type.RGB,
-      salida.textureId,
-      Matrix(),
-      hilo,
-      convertidor,
-      Runnable { hilo.post { devolver(salida, generacionDeLaTextura) } },
-    )
-    return VideoFrame(buffer, giro, marcaDeTiempoNs)
   }
 
   /**
-   * Suelta todo lo que es de la GPU. Lo que esté todavía en uso (salidas que
-   * el codificador no ha soltado) se borra cuando vuelva. Después se puede
-   * seguir usando: vuelve a crear lo que necesite.
+   * Suelta todo lo que es de la GPU, EN [hilo]. Lo que esté todavía en uso
+   * (salidas que el codificador no ha soltado) se borra cuando vuelva.
    */
   fun liberar() {
     generacion++
-    copiaOes?.liberar()
-    copiaRgb?.liberar()
-    retoque?.liberar()
+    listOfNotNull(copiaOes, copiaRgb, retoque).forEach { it.liberar() }
     base?.release()
-    copiaOes = null
-    copiaRgb = null
-    retoque = null
-    base = null
     while (libres.isNotEmpty()) libres.removeFirst().release()
-    creadas = 0
+    olvidar()
   }
 
   /**
-   * Olvida los recursos SIN borrarlos: son de otro contexto de GPU (la cámara
-   * se volvió a crear) y borrarlos desde este borraría lo que no es. Mueren
-   * con su contexto.
+   * Suelta lo que es de la GPU desde el contexto de OTRA cámara de 100ms,
+   * porque la suya ya no existe: texturas y programas, que se comparten. Los
+   * framebuffers no: murieron con su contexto, y borrar sus números desde este
+   * borraría otros.
    */
-  fun abandonar() {
+  private fun liberarCompartido() {
     generacion++
+    listOfNotNull(copiaOes, copiaRgb, retoque).forEach { it.liberar() }
+    val texturas = (listOfNotNull(base) + libres).map { it.textureId }.filter { it != 0 }
+    if (texturas.isNotEmpty()) GLES20.glDeleteTextures(texturas.size, texturas.toIntArray(), 0)
+    olvidar()
+  }
+
+  private fun olvidar() {
     copiaOes = null
     copiaRgb = null
     retoque = null
     base = null
     libres.clear()
     creadas = 0
+  }
+
+  /**
+   * Se deja de usar: se suelta en su [hilo] si sigue vivo. Si no, lo recoge el
+   * próximo retoque de otra cámara ([recogerLoDeCamarasMuertas]). Un retocador
+   * se suelta una sola vez, lo haga quien lo haga: quien lo saca de
+   * [porSoltar] es quien lo suelta.
+   */
+  fun soltar() {
+    porSoltar.add(this)
+    hilo.post { if (porSoltar.remove(this)) runCatching { liberar() } }
   }
 
   private fun sacarTextura(ancho: Int, alto: Int): GlTextureFrameBuffer? {
@@ -179,6 +217,20 @@ internal class RetocadorGpu {
 
   private fun devolver(textura: GlTextureFrameBuffer, deLaGeneracion: Int) {
     if (deLaGeneracion == generacion) libres.addLast(textura) else textura.release()
+  }
+
+  /** Lo de cámaras que ya no existen, borrado desde esta (comparten texturas). */
+  private fun recogerLoDeCamarasMuertas() {
+    for (otro in porSoltar) {
+      if (otro !== this && !otro.hilo.looper.thread.isAlive && porSoltar.remove(otro)) {
+        runCatching { otro.liberarCompartido() }
+      }
+    }
+    var id = texturasHuerfanas.poll()
+    while (id != null) {
+      GLES20.glDeleteTextures(1, intArrayOf(id), 0)
+      id = texturasHuerfanas.poll()
+    }
   }
 
   /** Un programa de GPU con su forma de pintar un rectángulo entero. */
@@ -218,6 +270,12 @@ internal class RetocadorGpu {
   }
 
   internal companion object {
+    /** Retocadores dejados de usar y aún sin soltar (ver [soltar]). */
+    internal val porSoltar: MutableSet<RetocadorGpu> = ConcurrentHashMap.newKeySet()
+
+    /** Texturas de salida que volvieron cuando su cámara ya no existía. */
+    internal val texturasHuerfanas = ConcurrentLinkedQueue<Int>()
+
     /**
      * Cuántas salidas puede haber a la vez en manos del codificador y de la
      * vista. Si se agotan, se pierde un fotograma: no se crean sin fin.

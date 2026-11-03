@@ -490,8 +490,8 @@ class SalaDe100ms implements SalaDeVideo {
    */
   private crearMejoras(): GestorDeMejoras {
     const nativo = moduloDeMejoras();
-    // Los filtros que ya están en la cadena desde que se encendió (ver
-    // `ajusteDeAndroid`). Al encender, la cadena nace vacía.
+    // Los efectos ya mandados desde que se encendió (ver `ajusteDeAndroid`).
+    // Al encender, el filtro nativo vuelve a 0 y esto, a vacío.
     let tocados: ReadonlySet<IdDeMejora> = new Set();
     const complemento: ComplementoDeMejoras | null = nativo
       ? {
@@ -510,8 +510,9 @@ class SalaDe100ms implements SalaDeVideo {
               parametros.redness,
               parametros.smoothness,
             );
-            // `false`: el módulo no tiene filtro puesto. No se finge que sí.
-            if (hecho === false) throw new Error('El filtro no estaba puesto.');
+            // `false`: el módulo no tiene filtro puesto, o la GPU falló y no hace
+            // nada. No se finge que sí: el gestor lo apaga y lo dice.
+            if (hecho === false) throw new Error('El filtro no está aplicándose.');
             tocados = siguientes;
           },
           apagar: () => nativo.apagar(),

@@ -2,7 +2,6 @@ package expo.modules.mejorasdevideo
 
 import android.opengl.EGL14
 import android.opengl.EGLContext
-import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import hms.webrtc.TextureBufferImpl
@@ -37,14 +36,23 @@ internal class FiltroDeMejoras : HMSVideoPlugin {
   /** Lo que piden las barras. Se cambia desde el hilo del módulo. */
   @Volatile var ajustes = Ajustes()
 
-  private val retocador = RetocadorGpu()
+  /**
+   * La GPU falló: todo pasa sin retocar hasta que se quite y se vuelva a poner.
+   * El módulo lo mira para decírselo a JavaScript (que entonces lo apaga).
+   */
+  @Volatile var averiado = false
+    private set
 
-  /** El hilo de la cámara y su contexto de GPU, donde vive todo lo del [retocador]. */
-  @Volatile private var hiloDeLaGpu: Handler? = null
-  private var contextoDeLaGpu: EGLContext? = null
+  /** Quitado del SDK: lo que aún llegue pasa tal cual, sin crear nada en la GPU. */
+  @Volatile private var detenido = false
 
-  /** La GPU falló: todo pasa sin retocar hasta el próximo encendido. */
-  @Volatile private var averiado = false
+  /**
+   * El retocador de la cámara de ahora, con su hilo y su contexto. Si la cámara
+   * se vuelve a crear (otro hilo, otro contexto), se estrena otro: nada de la
+   * GPU se usa fuera del hilo donde se creó.
+   */
+  @Volatile private var retocador: RetocadorGpu? = null
+  @Volatile private var contextoDeLaGpu: EGLContext? = null
 
   override fun getName(): String = NOMBRE
 
@@ -52,8 +60,10 @@ internal class FiltroDeMejoras : HMSVideoPlugin {
 
   override fun isSupported(): Boolean = true
 
+  /** El SDK lo llama en cada `addPlugin`, antes de mandar fotogramas. */
   override suspend fun init() {
     averiado = false
+    detenido = false
   }
 
   override fun processVideoFrame(
@@ -64,12 +74,14 @@ internal class FiltroDeMejoras : HMSVideoPlugin {
     val destino = outputListener ?: return
     val ajustes = ajustes
     val textura = if (skipProcessing == true) null else retocable(input, ajustes)
-    if (textura == null) return pasarTalCual(input, destino)
+    val retocador = retocador
+    if (textura == null || retocador == null) return pasarTalCual(input, destino)
     val salida = try {
-      retocador.retocar(textura, input.rotation, input.timestampNs, ajustes, textura.toI420Handler, textura.yuvConverter)
+      retocador.retocar(textura, input.rotation, input.timestampNs, ajustes, textura.yuvConverter)
     } catch (fallo: Throwable) {
-      Log.e(ETIQUETA, "La GPU falló retocando; «Mejorar» queda sin efecto hasta reencenderlo.", fallo)
+      Log.e(ETIQUETA, "La GPU falló retocando; «Mejorar» queda sin efecto.", fallo)
       averiado = true
+      this.retocador = null
       runCatching { retocador.liberar() }
       return pasarTalCual(input, destino)
     }
@@ -81,21 +93,31 @@ internal class FiltroDeMejoras : HMSVideoPlugin {
   /**
    * La textura de la cámara si se puede retocar AQUÍ: hay algo que hacer, es
    * una textura, estamos en su hilo y con su contexto de GPU puesto. Si no,
-   * `null`, y el fotograma pasa tal cual.
+   * `null`, y el fotograma pasa tal cual. Deja listo el [retocador] de esta
+   * cámara.
    */
   private fun retocable(entrada: VideoFrame, ajustes: Ajustes): TextureBufferImpl? {
-    if (averiado || ajustes.neutros) return null
+    if (detenido || averiado || ajustes.neutros) return null
     val textura = entrada.buffer as? TextureBufferImpl ?: return null
     val hilo = textura.toI420Handler ?: return null
     if (hilo.looper != Looper.myLooper()) return null
     val contexto = EGL14.eglGetCurrentContext()
     if (contexto == null || contexto == EGL14.EGL_NO_CONTEXT) return null
-    if (contexto != contextoDeLaGpu) {
-      // Otra cámara, otro contexto: lo creado en el de antes no sirve aquí.
-      retocador.abandonar()
+    val actual = retocador
+    // Se compara también el hilo: el número de un contexto nuevo puede repetir
+    // el de uno destruido, el hilo de cada cámara no.
+    if (actual == null || actual.hilo !== hilo || contexto != contextoDeLaGpu) {
+      actual?.soltar()
+      val nuevo = RetocadorGpu(hilo)
+      retocador = nuevo
       contextoDeLaGpu = contexto
+      // Si `stop()` llegó mientras tanto, este no lo vería: se suelta aquí.
+      if (detenido) {
+        retocador = null
+        nuevo.soltar()
+        return null
+      }
     }
-    hiloDeLaGpu = hilo
     return textura
   }
 
@@ -107,16 +129,15 @@ internal class FiltroDeMejoras : HMSVideoPlugin {
 
   /**
    * El SDK lo llama al quitar el complemento, desde su hilo. Lo de la GPU se
-   * suelta en el hilo de la cámara, que es donde vive.
+   * suelta en el hilo de la cámara, que es donde vive (o, si esa cámara ya no
+   * existe, desde la próxima: ver `RetocadorGpu.soltar`).
    */
   override fun stop() {
-    hiloDeLaGpu?.post {
-      if (EGL14.eglGetCurrentContext() == contextoDeLaGpu) {
-        runCatching { retocador.liberar() }
-      } else {
-        retocador.abandonar()
-      }
-    }
+    detenido = true
+    val actual = retocador
+    retocador = null
+    contextoDeLaGpu = null
+    actual?.soltar()
   }
 
   internal companion object {

@@ -1186,14 +1186,27 @@ Nada sale de la GPU: ni mapas de bits ni colas. Va a la frecuencia de la
 cámara y sin retraso. En 0 ni se toca la GPU: pasa el mismo fotograma.
 
 Nunca deja la cámara sin imagen: si el fotograma no es una textura, no
-estamos en su hilo o no hay contexto, pasa tal cual. Si la GPU falla, se
-registra, queda sin efecto hasta reencenderlo y la imagen sigue. Si la cámara
-se vuelve a crear (otro contexto), lo de antes se abandona y se crea de nuevo.
+estamos en su hilo o no hay contexto, pasa tal cual. Si la GPU falla, la
+imagen sigue sin retocar y JavaScript se entera en la siguiente llamada
+(`ajustar` devuelve `false`, `encender` rechaza): el gestor lo apaga y lo
+dice. Si nadie toca una barra, hasta entonces se ve «puesto» sin efecto. Los
+errores de GPU que dejó pendientes otro código no cuentan como avería.
+
+UN RETOCADOR POR CÁMARA. Si la cámara se vuelve a crear (migración de
+servidor, pista nueva), su hilo y su contexto son otros: se estrena otro
+retocador y el de antes se suelta en su hilo. Si ese hilo ya murió, sus
+texturas y programas siguen vivos: 100ms crea el contexto de cada cámara
+compartiendo con uno suyo que no se suelta nunca (`SharedEglContext`). Los
+borra el próximo retoque desde el contexto de otra cámara; los framebuffers
+no (son de cada contexto y murieron con él). Lo mismo con una salida que
+vuelve cuando su cámara ya no existe. Quitado el complemento (`stop()`), lo
+que aún llegue pasa tal cual sin crear nada, hasta el próximo `init()`. Al
+encender, los ajustes vuelven a 0 aunque se reutilice el complemento.
 
 **Comprobado en el emulador** (03/11/2026): un APK de prueba sin Gradle con
 `FiltroDeMejoras.kt` y `RetocadorGpu.kt` tal cual, las clases de WebRTC de
 100ms y su `.so`, y una «cámara» falsa dibujada en un `SurfaceTextureHelper`
-(cuadrantes de colores, piel con grano y azul con grano). 25 comprobaciones:
+(cuadrantes de colores, piel con grano y azul con grano). 41 comprobaciones:
 
 - Sin efectos, la salida pasada a I420 por `YuvConverter` es la de la cámara
   (diferencia máxima 1 de 255): ni espejo ni vuelta. También recortada, y
@@ -1207,8 +1220,16 @@ se vuelve a crear (otro contexto), lo de antes se abandona y se crea de nuevo.
 - El complemento: en neutro pasa el mismo fotograma; con ajustes, una
   textura nueva; con `skipProcessing`, tal cual; con 8 salidas retenidas, el
   9.º se pierde; 300 seguidos soltando cada uno, 300 retocados; después de
-  `stop()` vuelve a retocar.
-- 5,6–9,3 ms por fotograma de 640×480 en el emulador, que pinta SIN GPU
+  `stop()` pasa tal cual y tras `init()` vuelve a retocar.
+- Dos cámaras que comparten raíz, como las de 100ms: con la cámara nueva
+  sigue retocando bien y el retocador de la vieja se suelta en su hilo. Con
+  una cámara muerta, con una salida retenida, el retoque de la otra cámara
+  recoge su retocador y borra la textura huérfana (existía y ya no), sin tocar
+  nada suyo (su salida sigue igual a la cámara, dif. 1).
+- Revisado además por un agente de QA contra las clases del SDK (03/11): de
+  ahí salen el aviso de avería a JavaScript, la limpieza entre cámaras, la
+  comparación por hilo y el reinicio de los ajustes al encender.
+- 4,8–9,3 ms por fotograma de 640×480 en el emulador, que pinta SIN GPU
   (SwiftShader, en el procesador). En un teléfono, bastante menos.
 
 La prueba no está en el repositorio (usa las clases de 100ms descomprimidas

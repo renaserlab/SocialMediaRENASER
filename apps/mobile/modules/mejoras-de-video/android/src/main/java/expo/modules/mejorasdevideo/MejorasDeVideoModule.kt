@@ -86,11 +86,19 @@ class MejorasDeVideoModule : Module() {
     val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: FiltroDeMejoras()
     filtro = actual
     sdkDelFiltro = sdk
+    // Al encender nace todo en 0, también si se reutiliza: JavaScript solo
+    // manda después lo que no está en 0 (`ajusteDeAndroid`).
+    actual.ajustes = Ajustes()
 
     // `getPlugins()` puede devolver `null` (sin pista todavía): sin lista, ninguno.
     val puestos = sdk.getPlugins().orEmpty()
     if (puestos.any { it === actual }) {
-      promise.resolve(true)
+      // Puesto, pero si la GPU falló sigue sin efecto: que JavaScript lo sepa.
+      if (actual.averiado) {
+        promise.reject("averiado", "El retoque de la cámara falló en este teléfono.", null)
+      } else {
+        promise.resolve(true)
+      }
       return
     }
     if (puestos.isNotEmpty()) {
@@ -107,7 +115,10 @@ class MejorasDeVideoModule : Module() {
     rubor: Double?,
     suavidad: Double?,
   ): Boolean {
+    // `false`: no hay filtro, o la GPU falló y no hace nada. JavaScript lo
+    // apaga y lo dice; no se finge que se está aplicando.
     val actual = filtro ?: return false
+    if (actual.averiado) return false
     // `null` = ese ajuste se queda como está.
     val antes = actual.ajustes
     actual.ajustes = Ajustes(
