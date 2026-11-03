@@ -1175,7 +1175,7 @@ cambiando izquierda por derecha. El fondo virtual de 100ms hace el mismo
 camino con un `postScale(-1, 1)` en la textura y sale bien; el filtro no lo
 lleva.
 
-El arreglo es `FiltroAlDerecho.kt`, en el módulo propio: envuelve al filtro,
+El arreglo está en `FiltroArreglado.kt`, en el módulo propio: envuelve al filtro,
 intercepta cada fotograma que devuelve, pone las filas de los tres planos en
 su orden (en el mismo búfer) y quita el giro. Solo toca lo que sale como hoy
 (I420 girado 180°); cualquier otra cosa pasa tal cual. Comprobado en la JVM
@@ -1183,6 +1183,51 @@ contra las clases de WebRTC de 100ms, de 1×1 a 720×1280.
 
 **Si se sube el SDK de 100ms, revisar esto**: si arreglan el filtro y siguen
 marcando 180°, el envoltorio lo pondría en espejo otra vez.
+
+### El filtro de 100ms se queda atrás: segundos de retraso (03/11/2026)
+
+Visto en el teléfono con el APK 78: con «Mejorar», moverse a la derecha
+tardaba unos 3 segundos en verse, en la pantalla de quien emite y, por tanto,
+también en lo que se envía.
+
+La causa, leída en las clases de `video-filters` 2.9.84, del SDK y de
+GPUImage 2.1.0:
+
+- `HMSVideoFilter.processVideoFrame` convierte CADA fotograma de la cámara en
+  un mapa de bits (bajándolo de la GPU, pasándolo a ARGB y girándolo: tres
+  mapas de ~3,7 MB a 720p) y encarga el retoque a su propio hilo, en una cola
+  **sin límite**. Lo que devuelve es el último retoque terminado.
+- Cada retoque llama a `GPUImage.getBitmapWithFilterApplied`, que **monta un
+  contexto de GPU nuevo y recompila los sombreadores en cada fotograma**.
+  Tarda más de lo que tarda en llegar el siguiente fotograma.
+- El SDK no frena nada: los 15 fps de `addPlugin` los anota
+  (`pluginNumFramesToSkip`), pero no los usa en ninguna parte. Le llegan
+  todos los de la cámara.
+
+Resultado: la cola crece sin parar y la imagen se queda cada vez más atrás,
+con un mapa de bits retenido por cada fotograma en espera. Simulado en la JVM
+(cámara a 30 fps, retoque de 120 ms): 2,9 s de retraso a los 4 s.
+
+El fondo virtual no tiene el problema: su procesado espera a terminar
+(`VBThreadExecutor.executeBlocking`), así que pierde fotogramas pero no se
+retrasa.
+
+El arreglo es `UnFotogramaALaVez.kt`, usado por `FiltroArreglado`: detrás de
+cada retoque se deja un aviso en la cola del filtro (su `processHandler`,
+privado, leído por reflexión; el SDK conserva sus nombres con
+`-keep class live.hms.**`). Hasta que llega el aviso, los fotogramas que
+entran se descartan sin convertir. En la misma simulación el retraso se queda
+en ~0,2 s y la cola en 1. Si el campo no se encontrara, todo pasa como antes.
+Si un aviso no llegara, a los 2 s pasa otro fotograma: la cámara no se
+congela.
+
+De paso, al quitar el filtro se cierra su hilo: 100ms abría uno nuevo en cada
+encendido y no lo cerraba nunca.
+
+**Lo que no arregla**: con «Mejorar» salen solo los fotogramas que el filtro
+da abasto a retocar (en la simulación, ~8 por segundo). Para que vaya fluido
+hace falta un filtro propio que trabaje sobre la textura de la cámara en la
+GPU, sin bajar cada fotograma a un mapa de bits.
 
 ### Lo que no se hizo
 
@@ -1195,8 +1240,8 @@ marcando 180°, el envoltorio lo pondría en espejo otra vez.
 
 Que el módulo enlaza y el filtro se engancha a la sala, cuánto se nota cada
 máximo (sobre todo la luz y la piel, que en Android afectan a toda la
-imagen), los fotogramas con el filtro puesto (100ms lo limita a 720p y 15
-fps) y que el cambio filtro ↔ fondo no deja ver la casa ni un fotograma.
+imagen), los fotogramas con el filtro puesto (los que dé abasto a retocar:
+el SDK no aplica los 15 fps) y que el cambio filtro ↔ fondo no deja ver la casa ni un fotograma.
 
 El módulo propio sube la versión de la aplicación a **1.2.4**
 (`perfilesDeCompilacion.test.mts`): una actualización de JavaScript no llega

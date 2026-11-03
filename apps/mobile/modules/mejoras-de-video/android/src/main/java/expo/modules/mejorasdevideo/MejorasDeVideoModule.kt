@@ -44,12 +44,13 @@ import live.hms.videofilters.HMSVideoFilter
  * - **Los ajustes son de 0 a 1** (decimales; la guía dice enteros). El filtro
  *   los guarda como porcentaje entero truncando: por eso `aDecimal` suma una
  *   milésima, para que 0,29 no se quede en 28.
- * - **Devuelve la imagen en espejo.** Por eso nunca se engancha solo: va
- *   dentro de `FiltroAlDerecho`, que la endereza (ver allí el porqué).
+ * - **Tiene defectos propios**: devuelve la imagen en espejo y, si no da
+ *   abasto, se va quedando atrás (segundos). Por eso nunca se engancha solo:
+ *   va dentro de `FiltroArreglado` (ver allí el porqué de cada uno).
  */
 class MejorasDeVideoModule : Module() {
   /** El filtro de ahora y la instancia del SDK a la que está enganchado. */
-  @Volatile private var filtro: FiltroAlDerecho? = null
+  @Volatile private var filtro: FiltroArreglado? = null
   @Volatile private var sdkDelFiltro: HMSSDK? = null
 
   override fun definition() = ModuleDefinition {
@@ -88,7 +89,7 @@ class MejorasDeVideoModule : Module() {
     }
     // Una instancia nueva del SDK (se volvió a entrar) pide un filtro nuevo: el
     // de antes lee la cámara de una sala que ya no existe.
-    val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: FiltroAlDerecho(HMSVideoFilter(sdk))
+    val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: FiltroArreglado(HMSVideoFilter(sdk))
     filtro = actual
     sdkDelFiltro = sdk
 
@@ -157,7 +158,7 @@ class MejorasDeVideoModule : Module() {
     )
   }
 
-  private fun olvidar(quitado: FiltroAlDerecho) {
+  private fun olvidar(quitado: FiltroArreglado) {
     if (filtro === quitado) {
       filtro = null
       sdkDelFiltro = null
@@ -184,7 +185,11 @@ class MejorasDeVideoModule : Module() {
     (valor.coerceIn(0.0, 1.0) + 0.001).toFloat().coerceAtMost(1f)
 
   private companion object {
-    /** Lo que recomienda 100ms para este filtro, y lo que usa ya el fondo virtual. */
+    /**
+     * Lo que recomienda 100ms para este filtro, y lo que usa ya el fondo virtual.
+     * Ojo: el SDK 2.9.84 lo anota pero no frena nada con él (ver
+     * `UnFotogramaALaVez`).
+     */
     const val FOTOGRAMAS_POR_SEGUNDO = 15
   }
 }

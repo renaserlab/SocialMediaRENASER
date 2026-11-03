@@ -37,8 +37,11 @@ const TOKENS = leer(join(SRC, 'theme/tokens.ts'));
 const KOTLIN = sinComentarios(
   leer(join(MODULO, 'android/src/main/java/expo/modules/mejorasdevideo/MejorasDeVideoModule.kt')),
 );
-const AL_DERECHO = sinComentarios(
-  leer(join(MODULO, 'android/src/main/java/expo/modules/mejorasdevideo/FiltroAlDerecho.kt')),
+const ARREGLADO = sinComentarios(
+  leer(join(MODULO, 'android/src/main/java/expo/modules/mejorasdevideo/FiltroArreglado.kt')),
+);
+const COMPUERTA = sinComentarios(
+  leer(join(MODULO, 'android/src/main/java/expo/modules/mejorasdevideo/UnFotogramaALaVez.kt')),
 );
 const GRADLE = sinComentarios(leer(join(MODULO, 'android/build.gradle')));
 const CONFIG = JSON.parse(leer(join(MODULO, 'expo-module.config.json'))) as {
@@ -218,38 +221,66 @@ describe('el módulo nativo', () => {
     assert.match(KOTLIN, /FOTOGRAMAS_POR_SEGUNDO = 15/);
   });
 
-  it('el filtro de 100ms nunca va solo: siempre dentro de FiltroAlDerecho', () => {
-    // Solo, devuelve la imagen en espejo (03/11/2026): el público veía a quien
-    // emite al revés y quien emite se veía «al derecho», moviéndose al revés.
-    assert.match(KOTLIN, /FiltroAlDerecho\(HMSVideoFilter\(sdk\)\)/);
+  it('el filtro de 100ms nunca va solo: siempre dentro de FiltroArreglado', () => {
+    // Solo, devuelve la imagen en espejo y se queda atrás segundos (03/11/2026).
+    assert.match(KOTLIN, /FiltroArreglado\(HMSVideoFilter\(sdk\)\)/);
     assert.equal(KOTLIN.match(/HMSVideoFilter\(/g)?.length, 1, 'un único sitio crea el filtro');
-    assert.match(KOTLIN, /private var filtro: FiltroAlDerecho\? = null/);
+    assert.match(KOTLIN, /private var filtro: FiltroArreglado\? = null/);
     assert.match(KOTLIN, /sdk\.addPlugin\(actual, /);
     // Los ajustes van al filtro de dentro (el envoltorio no los tiene).
     assert.match(KOTLIN, /val actual = filtro\?\.filtro \?: return false/);
   });
 
   it('el envoltorio endereza la salida del filtro y no toca nada más', () => {
-    assert.match(AL_DERECHO, /internal class FiltroAlDerecho\(val filtro: HMSVideoFilter\) : HMSVideoPlugin by filtro/);
-    // Solo se sobreescribe el procesado: nombre, tipo, init y stop son los de 100ms.
-    assert.deepEqual([...AL_DERECHO.matchAll(/override fun (\w+)/g)].map((m) => m[1]), [
+    assert.match(ARREGLADO, /internal class FiltroArreglado\(val filtro: HMSVideoFilter\) : HMSVideoPlugin by filtro/);
+    // Solo el procesado y el cierre: nombre, tipo e init son los de 100ms.
+    assert.deepEqual([...ARREGLADO.matchAll(/override fun (\w+)/g)].map((m) => m[1]), [
       'processVideoFrame',
+      'stop',
       'onOutputResult',
       'onTimeTaken',
     ]);
-    assert.match(AL_DERECHO, /filtro\.processVideoFrame\(input, outputListener\?\.let\(::alDerecho\), skipProcessing\)/);
-    assert.match(AL_DERECHO, /destino\.onOutputResult\(output\?\.let\(::enderezar\)\)/);
+    assert.match(ARREGLADO, /filtro\.processVideoFrame\(input, outputListener\?\.let\(::alDerecho\), skipProcessing\)/);
+    assert.match(ARREGLADO, /destino\.onOutputResult\(output\?\.let\(::enderezar\)\)/);
     // Solo lo que sale como sale hoy: girado 180 y en I420.
-    assert.match(AL_DERECHO, /const val GIRO_DEL_FILTRO = 180/);
-    assert.match(AL_DERECHO, /if \(fotograma\.rotation != GIRO_DEL_FILTRO\) return fotograma/);
-    assert.match(AL_DERECHO, /as\? VideoFrame\.I420Buffer \?: return fotograma/);
+    assert.match(ARREGLADO, /const val GIRO_DEL_FILTRO = 180/);
+    assert.match(ARREGLADO, /if \(fotograma\.rotation != GIRO_DEL_FILTRO\) return fotograma/);
+    assert.match(ARREGLADO, /as\? VideoFrame\.I420Buffer \?: return fotograma/);
     // Los tres planos, y sin giro.
     for (const plano of ['Y', 'U', 'V']) {
-      assert.match(AL_DERECHO, new RegExp(`voltearFilas\\(i420\\.data${plano}, i420\\.stride${plano}, `));
+      assert.match(ARREGLADO, new RegExp(`voltearFilas\\(i420\\.data${plano}, i420\\.stride${plano}, `));
     }
-    assert.match(AL_DERECHO, /return VideoFrame\(i420, 0, fotograma\.timestampNs\)/);
+    assert.match(ARREGLADO, /return VideoFrame\(i420, 0, fotograma\.timestampNs\)/);
     // El búfer lo suelta el SDK, una vez: aquí ni se retiene ni se suelta.
-    assert.doesNotMatch(AL_DERECHO, /\.(retain|release)\(/);
+    assert.doesNotMatch(ARREGLADO, /\.(retain|release)\(/);
+  });
+
+  it('un fotograma a la vez: si no, la cola del filtro crece y la imagen va segundos atrás', () => {
+    // Visto en el teléfono (03/11/2026): con «Mejorar», ~3 s de retraso.
+    assert.match(
+      ARREGLADO,
+      /compuerta\.pasar\(hiloDe\(filtro\)\?\.let \{ hilo -> hilo::post \}\) \{\s*filtro\.processVideoFrame\(/,
+    );
+    assert.equal(ARREGLADO.match(/filtro\.processVideoFrame\(/g)?.length, 1, 'nunca se salta la compuerta');
+    // El hilo del filtro es privado: se lee sin lanzar, y sin él todo pasa como antes.
+    assert.match(ARREGLADO, /getDeclaredField\("processHandler"\)/);
+    assert.equal(ARREGLADO.match(/runCatching \{/g)?.length, 2);
+    assert.match(COMPUERTA, /if \(encolar == null\) \{\s*procesar\(\)\s*return/);
+    // El aviso solo libera SU retoque, y si no se pudo dejar, la puerta no se queda cerrada.
+    assert.match(COMPUERTA, /encolar\(Runnable \{ enMarchaDesde\.compareAndSet\(ahora, LIBRE\) \}\)/);
+    assert.match(COMPUERTA, /finally \{\s*if \(!avisoEnCola\) enMarchaDesde\.compareAndSet\(ahora, LIBRE\)/);
+    // Nunca congelada: como mucho se espera la paciencia.
+    assert.match(COMPUERTA, /const val PACIENCIA_MS = 2_000L/);
+    // Se prueba en la JVM: no depende de Android.
+    assert.doesNotMatch(COMPUERTA, /import android\./);
+  });
+
+  it('al quitar el filtro se cierra su hilo (100ms abría uno nuevo en cada encendido)', () => {
+    assert.match(
+      ARREGLADO,
+      /override fun stop\(\) \{\s*val hilo = hiloDe\(filtro\)\s*filtro\.stop\(\)\s*compuerta\.soltar\(\)\s*hilo\?\.looper\?\.quitSafely\(\)/,
+    );
+    assert.doesNotMatch(ARREGLADO, /\.quit\(\)/, 'quitSafely: termina lo que ya tiene en cola');
   });
 
   it('el filtro, el SDK y react-native-hms van en la MISMA versión de 100ms', () => {
