@@ -1160,6 +1160,30 @@ número. iOS no se ofrece todavía; la escala queda lista.
 - Desenfoque suave (radio 40) y fuerte (75, el de antes) solo en Android; en
   iOS hay uno.
 
+### El filtro de 100ms devuelve la imagen en espejo (03/11/2026)
+
+Visto en la primera prueba en teléfono: con «Mejorar» puesto, quien emite se
+veía «al derecho» (se movía a la derecha y su imagen iba a la izquierda) y el
+público lo veía en espejo. Al quitarse el filtro (todo en 0 durante 3 s)
+volvía a estar bien: por eso pasaba «a veces».
+
+La causa, leída en las clases de `video-filters` 2.9.84: el filtro sube su
+mapa de bits a una textura, la pasa a I420 con `YuvConverter` y marca el
+fotograma girado 180°. En WebRTC la fila 0 de una textura es la de abajo, así
+que el I420 sale volteado de arriba abajo, y el giro de 180° lo pone de pie
+cambiando izquierda por derecha. El fondo virtual de 100ms hace el mismo
+camino con un `postScale(-1, 1)` en la textura y sale bien; el filtro no lo
+lleva.
+
+El arreglo es `FiltroAlDerecho.kt`, en el módulo propio: envuelve al filtro,
+intercepta cada fotograma que devuelve, pone las filas de los tres planos en
+su orden (en el mismo búfer) y quita el giro. Solo toca lo que sale como hoy
+(I420 girado 180°); cualquier otra cosa pasa tal cual. Comprobado en la JVM
+contra las clases de WebRTC de 100ms, de 1×1 a 720×1280.
+
+**Si se sube el SDK de 100ms, revisar esto**: si arreglan el filtro y siguen
+marcando 180°, el envoltorio lo pondría en espejo otra vez.
+
 ### Lo que no se hizo
 
 - **Menores de 18** (la maqueta pedía solo Luz, Contraste y Nitidez): Zeta no

@@ -44,10 +44,12 @@ import live.hms.videofilters.HMSVideoFilter
  * - **Los ajustes son de 0 a 1** (decimales; la guía dice enteros). El filtro
  *   los guarda como porcentaje entero truncando: por eso `aDecimal` suma una
  *   milésima, para que 0,29 no se quede en 28.
+ * - **Devuelve la imagen en espejo.** Por eso nunca se engancha solo: va
+ *   dentro de `FiltroAlDerecho`, que la endereza (ver allí el porqué).
  */
 class MejorasDeVideoModule : Module() {
   /** El filtro de ahora y la instancia del SDK a la que está enganchado. */
-  @Volatile private var filtro: HMSVideoFilter? = null
+  @Volatile private var filtro: FiltroAlDerecho? = null
   @Volatile private var sdkDelFiltro: HMSSDK? = null
 
   override fun definition() = ModuleDefinition {
@@ -86,7 +88,7 @@ class MejorasDeVideoModule : Module() {
     }
     // Una instancia nueva del SDK (se volvió a entrar) pide un filtro nuevo: el
     // de antes lee la cámara de una sala que ya no existe.
-    val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: HMSVideoFilter(sdk)
+    val actual = filtro.takeIf { sdkDelFiltro === sdk } ?: FiltroAlDerecho(HMSVideoFilter(sdk))
     filtro = actual
     sdkDelFiltro = sdk
 
@@ -110,7 +112,7 @@ class MejorasDeVideoModule : Module() {
     rubor: Double?,
     suavidad: Double?,
   ): Boolean {
-    val actual = filtro ?: return false
+    val actual = filtro?.filtro ?: return false
     // `null` = ese filtro no se toca. Llamar a un ajuste mete su filtro en la
     // cadena aunque sea con el valor neutro, y cada uno cuesta una pasada más.
     if (brillo != null) actual.setBrightness(aDecimal(brillo))
@@ -155,7 +157,7 @@ class MejorasDeVideoModule : Module() {
     )
   }
 
-  private fun olvidar(quitado: HMSVideoFilter) {
+  private fun olvidar(quitado: FiltroAlDerecho) {
     if (filtro === quitado) {
       filtro = null
       sdkDelFiltro = null

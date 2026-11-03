@@ -37,6 +37,9 @@ const TOKENS = leer(join(SRC, 'theme/tokens.ts'));
 const KOTLIN = sinComentarios(
   leer(join(MODULO, 'android/src/main/java/expo/modules/mejorasdevideo/MejorasDeVideoModule.kt')),
 );
+const AL_DERECHO = sinComentarios(
+  leer(join(MODULO, 'android/src/main/java/expo/modules/mejorasdevideo/FiltroAlDerecho.kt')),
+);
 const GRADLE = sinComentarios(leer(join(MODULO, 'android/build.gradle')));
 const CONFIG = JSON.parse(leer(join(MODULO, 'expo-module.config.json'))) as {
   platforms: string[];
@@ -213,6 +216,40 @@ describe('el módulo nativo', () => {
   it('no llama a init() a mano: addPlugin ya lo hace, y otra vez crearía otro hilo', () => {
     assert.doesNotMatch(KOTLIN, /\.init\(/);
     assert.match(KOTLIN, /FOTOGRAMAS_POR_SEGUNDO = 15/);
+  });
+
+  it('el filtro de 100ms nunca va solo: siempre dentro de FiltroAlDerecho', () => {
+    // Solo, devuelve la imagen en espejo (03/11/2026): el público veía a quien
+    // emite al revés y quien emite se veía «al derecho», moviéndose al revés.
+    assert.match(KOTLIN, /FiltroAlDerecho\(HMSVideoFilter\(sdk\)\)/);
+    assert.equal(KOTLIN.match(/HMSVideoFilter\(/g)?.length, 1, 'un único sitio crea el filtro');
+    assert.match(KOTLIN, /private var filtro: FiltroAlDerecho\? = null/);
+    assert.match(KOTLIN, /sdk\.addPlugin\(actual, /);
+    // Los ajustes van al filtro de dentro (el envoltorio no los tiene).
+    assert.match(KOTLIN, /val actual = filtro\?\.filtro \?: return false/);
+  });
+
+  it('el envoltorio endereza la salida del filtro y no toca nada más', () => {
+    assert.match(AL_DERECHO, /internal class FiltroAlDerecho\(val filtro: HMSVideoFilter\) : HMSVideoPlugin by filtro/);
+    // Solo se sobreescribe el procesado: nombre, tipo, init y stop son los de 100ms.
+    assert.deepEqual([...AL_DERECHO.matchAll(/override fun (\w+)/g)].map((m) => m[1]), [
+      'processVideoFrame',
+      'onOutputResult',
+      'onTimeTaken',
+    ]);
+    assert.match(AL_DERECHO, /filtro\.processVideoFrame\(input, outputListener\?\.let\(::alDerecho\), skipProcessing\)/);
+    assert.match(AL_DERECHO, /destino\.onOutputResult\(output\?\.let\(::enderezar\)\)/);
+    // Solo lo que sale como sale hoy: girado 180 y en I420.
+    assert.match(AL_DERECHO, /const val GIRO_DEL_FILTRO = 180/);
+    assert.match(AL_DERECHO, /if \(fotograma\.rotation != GIRO_DEL_FILTRO\) return fotograma/);
+    assert.match(AL_DERECHO, /as\? VideoFrame\.I420Buffer \?: return fotograma/);
+    // Los tres planos, y sin giro.
+    for (const plano of ['Y', 'U', 'V']) {
+      assert.match(AL_DERECHO, new RegExp(`voltearFilas\\(i420\\.data${plano}, i420\\.stride${plano}, `));
+    }
+    assert.match(AL_DERECHO, /return VideoFrame\(i420, 0, fotograma\.timestampNs\)/);
+    // El búfer lo suelta el SDK, una vez: aquí ni se retiene ni se suelta.
+    assert.doesNotMatch(AL_DERECHO, /\.(retain|release)\(/);
   });
 
   it('el filtro, el SDK y react-native-hms van en la MISMA versión de 100ms', () => {
