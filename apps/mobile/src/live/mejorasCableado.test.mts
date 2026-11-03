@@ -204,6 +204,12 @@ describe('el módulo nativo', () => {
     assert.ok(pista >= 0 && pista < otro && otro < anadir, 'orden: pista, otro complemento, addPlugin');
   });
 
+  it('la lista de complementos del SDK puede ser null: siempre con `.orEmpty()`', () => {
+    // Así falló la primera compilación en EAS (02/11/2026): `getPlugins()` es
+    // `List<HMSVideoPlugin>?` y llamarla sin más no compila.
+    assert.doesNotMatch(KOTLIN, /getPlugins\(\)\.(?!orEmpty\(\))/);
+  });
+
   it('no llama a init() a mano: addPlugin ya lo hace, y otra vez crearía otro hilo', () => {
     assert.doesNotMatch(KOTLIN, /\.init\(/);
     assert.match(KOTLIN, /FOTOGRAMAS_POR_SEGUNDO = 15/);

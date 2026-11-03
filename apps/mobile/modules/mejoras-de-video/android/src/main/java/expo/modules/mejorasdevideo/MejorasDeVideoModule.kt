@@ -90,7 +90,8 @@ class MejorasDeVideoModule : Module() {
     filtro = actual
     sdkDelFiltro = sdk
 
-    val puestos = sdk.getPlugins()
+    // `getPlugins()` puede devolver `null` (sin pista todavía): sin lista, ninguno.
+    val puestos = sdk.getPlugins().orEmpty()
     if (puestos.any { it === actual }) {
       promise.resolve(true)
       return
@@ -127,7 +128,7 @@ class MejorasDeVideoModule : Module() {
       promise.resolve(true)
       return
     }
-    val puesto = sdk.getPlugins().any { it === actual }
+    val puesto = sdk.getPlugins().orEmpty().any { it === actual }
     if (!puesto) {
       // No está puesto AHORA. No se olvida: si un `encender` lento lo pone
       // después, el siguiente `apagar` tiene que poder encontrarlo.
