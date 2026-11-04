@@ -167,6 +167,8 @@ const IGUALES_A_PROPOSITO: Record<string, ReadonlySet<string>> = {
     'live.bannerColorPink',
     'live.bannerBackgroundSolid',
     'live.bannerFontTypewriter',
+    // La hoja del texto, minimalista (04/11/2026): «Texto» es la misma palabra.
+    'live.bannerSheetTitle',
     // «Mejorar» del directo (02/11/2026): «Luz», «Contraste» y «Nitidez» se
     // escriben igual en portugués, y «{nombre}: {valor}» no lleva palabras.
     'live.enhanceLight',

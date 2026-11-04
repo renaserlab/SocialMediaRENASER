@@ -253,6 +253,7 @@ const COMPONENTES = [
   '../components/live/CapaDelRotulo.tsx',
   '../components/live/RotuloDeDirecto.tsx',
   '../components/live/HojaDeRotulo.tsx',
+  '../components/live/ReglaFina.tsx',
 ];
 
 test('los componentes del rótulo no escriben colores a mano', () => {
@@ -348,18 +349,41 @@ test('la sala no ve el borrador: solo la hoja del host lo pinta', () => {
   assert.equal((hoja.match(/destacar\.ponerRotulo\(/g) ?? []).length, 1);
 });
 
-test('la hoja trae −/+ de tamaño y de giro para la web y los lectores de pantalla', () => {
+test('tamaño y giro van con la barra fina, que se mueve con el lector de pantalla y en la web con las flechas', () => {
   const hoja = sinComentarios(leer('../components/live/HojaDeRotulo.tsx'));
-  assert.match(hoja, /accessibilityRole="adjustable"/);
-  assert.match(hoja, /name: 'increment'/);
-  assert.match(hoja, /name: 'decrement'/);
-  assert.match(hoja, /etiqueta=\{t\('live\.bannerSize'\)\}/);
-  assert.match(hoja, /etiqueta=\{t\('live\.bannerRotation'\)\}/);
+  assert.match(hoja, /<ReglaFina\s+regla=\{REGLA_DE_TAMANO\}[\s\S]*?etiqueta=\{t\('live\.bannerSize'\)\}/);
+  assert.match(hoja, /<ReglaFina\s+regla=\{REGLA_DE_GIRO\}[\s\S]*?etiqueta=\{t\('live\.bannerRotation'\)\}/);
+  const regla = sinComentarios(leer('../components/live/ReglaFina.tsx'));
+  assert.match(regla, /accessibilityRole="adjustable"/);
+  assert.match(regla, /name: 'increment'/);
+  assert.match(regla, /name: 'decrement'/);
+  assert.match(regla, /onKeyDown:/);
+  assert.match(regla, /tabIndex: 0/);
+  // En la web el valor va en aria-valuenow: `accessibilityValue` ya no llega al DOM.
+  assert.match(regla, /aria-valuenow=\{valor\}/);
 });
 
-test('el velo de la hoja deja ver el texto detrás, y las demás hojas no cambian', () => {
+test('la hoja del texto es la translúcida de los efectos, sin velo, y las demás hojas no cambian', () => {
   const hoja = sinComentarios(leer('../components/live/HojaDeRotulo.tsx'));
-  assert.match(hoja, /colorDelVelo=\{rotuloDeDirecto\.veloDeLaHoja\}/);
+  assert.doesNotMatch(hoja, /<BottomSheet/);
+  assert.match(hoja, /backgroundColor: tinta\.velo/);
+  assert.match(hoja, /Platform\.OS === 'android' \? tinta\.hojaSinDesenfoque : tinta\.hoja/);
+  // El teclado no tapa el campo: la hoja es otra ventana y se aparta sola.
+  assert.match(hoja, /<SinTecladoDelante style=\{estilos\.pantalla\} ventanaPropia>/);
+  // El 80 % se mide contra la pantalla (la caja), no contra la hoja: si no,
+  // la hoja se recorta a sí misma y el botón de mandar queda fuera.
+  assert.match(hoja, /caja: \{ alignItems: 'stretch', maxHeight: '80%' \}/);
+  assert.doesNotMatch(hoja, /hoja: \{\s*maxHeight/);
+  const tokens = sinComentarios(leer('../theme/tokens.ts'));
+  assert.match(tokens, /export const hojaDelRotulo = \{\s*\.\.\.efectosDeCamara,/);
+  assert.match(tokens, /export const efectosDeCamara = \{\s*velo: 'transparent',/);
   const base = sinComentarios(leer('../components/BottomSheet.tsx'));
   assert.match(base, /backgroundColor: colorDelVelo \?\? colors\.overlay/);
+});
+
+test('con la hoja del texto abierta el chat y los botones se apartan, como con la de efectos', () => {
+  const pantalla = sinComentarios(leer('../screens/LiveScreen.tsx'));
+  assert.match(pantalla, /const hojaSobreLaImagen = hojaDeEfectos \|\| hojaDeRotulo;/);
+  assert.match(pantalla, /toValue: hojaSobreLaImagen \? 0 : 1/);
+  assert.equal((pantalla.match(/pointerEvents=\{hojaSobreLaImagen \? 'none' : 'box-none'\}/g) ?? []).length, 2);
 });

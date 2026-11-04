@@ -452,11 +452,6 @@ export const rotuloDeDirecto = {
   letreroDeLaPapelera: 'rgba(0,0,0,0.7)',
   /** «Texto quitado · Deshacer». */
   avisoQuitado: 'rgba(17,17,17,0.95)',
-  /**
-   * El velo de la hoja de editar el texto. Más suave que el de las demás
-   * hojas: el host tiene que ver detrás, al momento, lo que está cambiando.
-   */
-  veloDeLaHoja: 'rgba(0,0,0,0.3)',
 } as const;
 
 /* =========================================================
@@ -503,6 +498,29 @@ export const efectosDeCamara = {
   /** «Así sales sin efecto», encima de la cámara mientras se mantiene el ojo. */
   insignia: 'rgba(0,0,0,0.72)',
   bordeDeLaInsignia: 'rgba(255,255,255,0.22)',
+} as const;
+
+/* =========================================================
+   LA HOJA DEL TEXTO EN PANTALLA (aprobada el 04/11/2026, maqueta v2).
+
+   La misma hoja translúcida de los efectos de cámara, sin velo: quien escribe
+   el texto lo ve cambiar detrás, al momento. Lo que añade es lo suyo: el campo
+   de escribir, el aviso de que sobra texto y el botón que lo manda a la sala.
+   ========================================================= */
+export const hojaDelRotulo = {
+  ...efectosDeCamara,
+  /** El campo: una píldora translúcida, con un anillo al escribir. */
+  campo: 'rgba(255,255,255,0.14)',
+  campoEnfocado: 'rgba(255,255,255,0.75)',
+  /** El contador y lo que se lee en el campo vacío. */
+  textoSuave: 'rgba(255,255,255,0.7)',
+  /** «Sobran N caracteres»: el rojo claro que se lee sobre oscuro. */
+  peligro: '#FF8A80',
+  /** El borde de las muestras de color, para que el negro se vea. */
+  bordeDeLaMuestra: 'rgba(255,255,255,0.3)',
+  /** «Actualizar el texto»: blanco, con la letra negra. */
+  boton: '#FFFFFF',
+  textoDelBoton: '#000000',
 } as const;
 
 /* ---------- Alias semánticos (opcional, estilo Figma prompt) ---------- */

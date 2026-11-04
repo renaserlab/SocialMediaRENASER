@@ -116,7 +116,9 @@ describe('la hoja de efectos', () => {
 describe('la pantalla de la transmisión', () => {
   it('le pasa «Mejorar» a la hoja y aparta el chat y los botones con ella abierta', () => {
     assert.match(PANTALLA, /mejoras=\{mejoras\}/);
-    assert.match(PANTALLA, /toValue: hojaDeEfectos \? 0 : 1,/);
+    // La del texto también aparta lo mismo (04/11/2026).
+    assert.match(PANTALLA, /const hojaSobreLaImagen = hojaDeEfectos \|\| hojaDeRotulo;/);
+    assert.match(PANTALLA, /toValue: hojaSobreLaImagen \? 0 : 1,/);
     assert.match(PANTALLA, /style=\{\[estilos\.filaInferior, conLaHoja\]\}/);
     assert.match(PANTALLA, /<Animated\.View style=\{conLaHoja\}[^>]*>\s*<TemaDeDirecto/);
   });

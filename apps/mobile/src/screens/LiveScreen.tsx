@@ -707,19 +707,22 @@ export function LiveScreen() {
   });
 
   /*
-    CON LA HOJA DE EFECTOS ABIERTA SE APARTAN el chat, el tema, las reacciones
-    y los botones (aprobado el 02/11/2026): quien ajusta la luz o la piel tiene
-    que ver su cámara limpia, como en TikTok. Se funden; con «reducir
-    movimiento», de golpe.
+    CON LA HOJA DE EFECTOS O LA DEL TEXTO ABIERTA SE APARTAN el chat, el tema,
+    las reacciones y los botones (aprobado el 02/11/2026 y, para el texto, el
+    04/11/2026): las dos hojas son translúcidas y quien ajusta la luz o
+    escribe el texto tiene que ver la imagen limpia, como en TikTok. Se
+    funden; con «reducir movimiento», de golpe. El texto en pantalla no se
+    aparta: es lo que se está editando.
   */
+  const hojaSobreLaImagen = hojaDeEfectos || hojaDeRotulo;
   const apartado = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.timing(apartado, {
-      toValue: hojaDeEfectos ? 0 : 1,
+      toValue: hojaSobreLaImagen ? 0 : 1,
       duration: reduceMotion ? 0 : 200,
       useNativeDriver: Platform.OS !== 'web',
     }).start();
-  }, [apartado, hojaDeEfectos, reduceMotion]);
+  }, [apartado, hojaSobreLaImagen, reduceMotion]);
   const conLaHoja = { opacity: apartado };
 
   /*
@@ -1261,7 +1264,7 @@ export function LiveScreen() {
           */}
           <Animated.View
             style={[estilos.filaInferior, conLaHoja]}
-            pointerEvents={hojaDeEfectos ? 'none' : 'box-none'}
+            pointerEvents={hojaSobreLaImagen ? 'none' : 'box-none'}
             onLayout={(evento: LayoutChangeEvent) => medirParte('fila', evento.nativeEvent.layout.y)}
           >
             <View
@@ -1370,7 +1373,7 @@ export function LiveScreen() {
             El tema del directo: debajo de los comentarios y encima de las
             reacciones, con su propio aire para que no se pegue a ninguno.
           */}
-          <Animated.View style={conLaHoja} pointerEvents={hojaDeEfectos ? 'none' : 'box-none'}>
+          <Animated.View style={conLaHoja} pointerEvents={hojaSobreLaImagen ? 'none' : 'box-none'}>
             <TemaDeDirecto titulo={emision.titulo} />
 
             <ReaccionesDeDirecto
