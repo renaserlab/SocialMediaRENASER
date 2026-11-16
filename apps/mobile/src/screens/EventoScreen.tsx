@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Feather from '@expo/vector-icons/Feather';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -275,7 +275,22 @@ export function EventoScreen() {
         `accessMode` a `null` significa «no se preguntó», y entonces se ofrece lo
         de siempre: es el comportamiento heredado y el único que no inventa nada.
       */}
-      {puedeReservar && vendeEntradas(evento.accessMode) ? (
+      {/*
+        ENTRADAS DE EVENTOS EN LÍNEA, NO EN iOS. Las entradas se cobran con
+        Stripe en el navegador. Para un evento presencial Apple lo permite
+        (es un servicio que se consume fuera de la app, directriz 3.1.3(e));
+        para uno en línea o en vivo es contenido digital y Apple exige sus
+        compras integradas (3.1.1). Un tipo desconocido cuenta como en línea:
+        ante la duda, no se vende.
+      */}
+      {puedeReservar && vendeEntradas(evento.accessMode) && Platform.OS === 'ios' && evento.type !== 'presencial' ? (
+        <View style={[styles.aviso, { backgroundColor: colors.surfaceAlt }]}>
+          <Feather name="info" size={16} color={colors.textMuted} />
+          <Text variant="secondary" color={colors.textMuted} style={styles.crece}>
+            {t('evento.entradasNoDisponiblesEnLaApp')}
+          </Text>
+        </View>
+      ) : puedeReservar && vendeEntradas(evento.accessMode) ? (
         <>
           {evento.precioDesde !== null &&
           evento.precioDesde !== undefined &&

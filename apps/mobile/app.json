@@ -18,7 +18,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.renaser.zeta",
       "infoPlist": {
-        "NSCameraUsageDescription": "Z utiliza la cámara para tomar una foto o grabar un video y publicarlo, y para transmitir en vivo.",
+        "NSCameraUsageDescription": "Z usa la cámara para que tomes fotos y grabes videos para publicar y para tus historias, y para transmitir en vivo.",
         "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
@@ -89,7 +89,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
-          "cameraPermission": "Z utiliza la cámara para tomar una foto o grabar un video y publicarlo."
+          "cameraPermission": "Z usa la cámara para que tomes fotos y grabes videos para publicar y para tus historias, y para transmitir en vivo."
         }
       ],
       [

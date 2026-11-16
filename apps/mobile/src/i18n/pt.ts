@@ -844,6 +844,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'course.noPurchasesFoundBody': 'Nao ha compras associadas a esta conta da loja. Verifique se iniciou sessao na loja com a conta que usou para comprar.',
   'course.headerTitle': 'Programa',
   'course.restorePurchases': 'Restaurar compras',
+  'course.noDisponibleEnLaApp': 'Este curso não está disponível no aplicativo.',
   'course.notFound': 'Curso não encontrado.',
   'course.loadFailed': 'Não foi possível carregar o curso.',
   'course.restoreFailed': 'Não foi possível restaurar',
@@ -2551,6 +2552,7 @@ export const pt: Partial<Record<keyof typeof es, string>> = {
   'admisionEvento.fueraDeCondicional': 'Condicional vai de 80 a 84.',
   // Bilhetes e inventário
   'evento.elegirEntradas': 'Escolher bilhetes',
+  'evento.entradasNoDisponiblesEnLaApp': 'Os bilhetes deste evento não estão disponíveis no aplicativo.',
   'evento.desde': 'Desde {importe}',
 
   'modoDeAcceso.FREE_RSVP': 'Reserva gratuita',

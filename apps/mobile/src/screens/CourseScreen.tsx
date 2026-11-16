@@ -15,7 +15,14 @@ import { FichaDelCurso } from '@/components/FichaDelCurso';
 import { StateView } from '@/components/StateView';
 import { TarjetaDeGarantia } from '@/components/TarjetaDeGarantia';
 import { ValoracionesDelCurso } from '@/components/valoraciones/ValoracionesDelCurso';
-import { esMovil, explicar, ofertaPara, comprarEnTienda, restaurarCompras } from '@/services/compras';
+import {
+  esMovil,
+  explicar,
+  ofertaPara,
+  comprarEnTienda,
+  ocultarPreciosDigitales,
+  restaurarCompras,
+} from '@/services/compras';
 import type { OfertaDeCompra } from '@/services/compras';
 import { CommerceRepository, DevolucionesRepository } from '@/repositories/PaymentRepository';
 import type { AvisoDeRecompra } from '@/repositories/PaymentRepository';
@@ -124,6 +131,8 @@ export function CourseScreen() {
   const [horasDeGarantia, setHorasDeGarantia] = useState<number | null>(null);
 
   const esDePago = (course?.priceMinor ?? 0) > 0;
+  /** iOS sin compras: ni precio, ni explicación de compra, ni «Restaurar». */
+  const sinPrecio = esDePago && ocultarPreciosDigitales();
   const borrador = course?.status === 'draft';
   const retirado = course?.status === 'hidden';
 
@@ -546,12 +555,14 @@ export function CourseScreen() {
             tabla, ni suscripcion, ni derecho de acceso que se llame asi. Un
             curso gratis pone «Gratis» y uno de pago pone lo que cuesta.
           */}
-          <View style={[styles.acceso, { borderColor: colors.border }]}>
-            <Feather name={esDePago ? 'tag' : 'unlock'} size={14} color={colors.text} />
-            <Text style={[styles.accesoTexto, { color: colors.text }]}>
-              {etiquetaDePrecio(course.priceMinor, course.currency)}
-            </Text>
-          </View>
+          {sinPrecio ? null : (
+            <View style={[styles.acceso, { borderColor: colors.border }]}>
+              <Feather name={esDePago ? 'tag' : 'unlock'} size={14} color={colors.text} />
+              <Text style={[styles.accesoTexto, { color: colors.text }]}>
+                {etiquetaDePrecio(course.priceMinor, course.currency)}
+              </Text>
+            </View>
+          )}
           {/*
             EL BLOQUE DE COMPRA. La regla es que SIEMPRE diga algo: o se puede
             comprar y se ensena el precio, o no se puede y se explica por que.
@@ -574,6 +585,12 @@ export function CourseScreen() {
           {esDePago && !hasAccess && beta?.available ? (
             <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
               {t('course.betaFreeNote')}
+            </Text>
+          ) : sinPrecio && !hasAccess ? (
+            // Sin la palabra «compras»: aquí no se vende, y decirlo con
+            // precio al lado es justo lo que Apple no acepta.
+            <Text style={[styles.notaDeAcceso, { color: colors.textMuted }]}>
+              {t('course.noDisponibleEnLaApp')}
             </Text>
           ) : esDePago && !hasAccess && oferta ? (
             oferta.sePuedeComprar ? (
@@ -886,7 +903,7 @@ export function CourseScreen() {
             falta: quien reinstala o cambia de telefono llega justo aqui, a un
             curso que pago y que no puede abrir.
           */}
-          {esDePago && !hasAccess && esMovil() ? (
+          {esDePago && !hasAccess && esMovil() && !sinPrecio ? (
             <Pressable
               onPress={() => void restaurar()}
               disabled={comprando}

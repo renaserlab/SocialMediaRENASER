@@ -900,6 +900,7 @@ export const es = {
   'course.noPurchasesFoundBody': 'No hay compras asociadas a esta cuenta de la tienda. Comprueba que has iniciado sesión en la tienda con la cuenta que usaste al comprar.',
   'course.headerTitle': 'Programa',
   'course.restorePurchases': 'Restaurar compras',
+  'course.noDisponibleEnLaApp': 'Este curso no está disponible en la aplicación.',
   'course.notFound': 'Curso no encontrado.',
   'course.loadFailed': 'No se pudo cargar el curso.',
   'course.restoreFailed': 'No se pudieron restaurar',
@@ -2621,6 +2622,7 @@ export const es = {
   'admisionEvento.fueraDeCondicional': 'Condicional es de 80 a 84.',
   // Entradas e inventario (Incremento 2)
   'evento.elegirEntradas': 'Elegir entradas',
+  'evento.entradasNoDisponiblesEnLaApp': 'Las entradas de este evento no están disponibles en la aplicación.',
   'evento.desde': 'Desde {importe}',
 
   'modoDeAcceso.FREE_RSVP': 'Reserva gratuita',

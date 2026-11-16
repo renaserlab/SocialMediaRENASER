@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/Skeleton';
 import { Text } from '@/components/Text';
 import { assets } from '@/data/assets';
 import { etiquetaDePrecio } from '@/lib/dinero';
+import { ocultarPreciosDigitales } from '@/services/compras';
 import { haptics } from '@/lib/haptics';
 import { frasePrincipalDeCurso, type NombresDeTema } from '@/lib/motivoDeCurso';
 import { useSeccionActiva } from '@/navigation/foco';
@@ -423,10 +424,14 @@ export function CursosParaTi() {
                           </Text>
                         ) : null}
 
-                        {/* «Gratis» y no «S/ 0.00»: son dos afirmaciones distintas. */}
-                        <Text variant="secondary" weight="700">
-                          {etiquetaDePrecio(curso.priceMinor, curso.currency)}
-                        </Text>
+                        {/* «Gratis» y no «S/ 0.00»: son dos afirmaciones distintas.
+                            En iOS sin compras, un curso de pago no enseña
+                            precio: ver `ocultarPreciosDigitales`. */}
+                        {curso.priceMinor > 0 && ocultarPreciosDigitales() ? null : (
+                          <Text variant="secondary" weight="700">
+                            {etiquetaDePrecio(curso.priceMinor, curso.currency)}
+                          </Text>
+                        )}
 
                         {motivo ? (
                           <Text variant="secondary" color={colors.textMuted} numberOfLines={2}>

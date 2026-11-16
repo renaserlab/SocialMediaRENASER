@@ -37,6 +37,23 @@ export function plataformaDeCompra(): PlataformaDeCompra {
   return 'web';
 }
 
+/**
+ * Si hay que CALLAR el precio del contenido digital (los cursos).
+ *
+ * POR QUÉ. Con las compras apagadas, la ficha de un curso de pago enseñaba
+ * «S/ 65.00», «Las compras no están disponibles ahora mismo» y un botón de
+ * «Restaurar compras» que no restauraba nada. Para Apple eso es una función a
+ * medias (directriz 2.1) y un precio de algo que la app no deja comprar con
+ * sus compras integradas (3.1.1). En iOS, mientras no se venda con StoreKit,
+ * no se dice nada de precio: el curso se ve, pero sin cifra ni botón muerto.
+ *
+ * SOLO iOS. Android y la web siguen como estaban; se decidió así para no
+ * cambiar más de lo que pide la revisión de Apple.
+ */
+export function ocultarPreciosDigitales(): boolean {
+  return plataformaDeCompra() === 'ios' && !comprasHabilitadas();
+}
+
 export function esMovil(): boolean {
   return plataformaDeCompra() !== 'web';
 }
