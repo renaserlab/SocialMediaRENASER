@@ -59,7 +59,8 @@ Cada parte tiene su `.env.example`. Los archivos `.env` no se suben nunca.
 npm run mobile:check
 npm run mobile:test
 
-# Servidor (desde apps/api)
+# Servidor (desde apps/api); las dependencias de prueba van aparte
+pip install -r requirements-dev.txt
 python -m pytest
 ```
 

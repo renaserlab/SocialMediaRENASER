@@ -21,8 +21,6 @@ tzdata>=2025.1
 # usamos directo (firma RSA-SHA256 de CloudFront), asi que va explicita.
 boto3==1.44.6
 cryptography==50.0.2
-pytest>=8.3,<9.0
-pytest-asyncio>=0.25,<1.0
-# S3 y CloudFront simulados en las pruebas de los medios (ninguna prueba habla
-# con AWS). Va aqui, junto a pytest, como el resto de dependencias de prueba.
-moto[s3,cloudfront]==5.2.5
+# Las dependencias SOLO de pruebas (pytest, moto...) viven en
+# `requirements-dev.txt`: no entran en la imagen de produccion. Los flujos que
+# ejecutan pytest instalan los dos ficheros.
