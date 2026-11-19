@@ -607,6 +607,10 @@ def _tipo_hls(nombre: str) -> str:
     return "video/mp2t"
 
 
+class MedioDesaparecido(RuntimeError):
+    """La fila (o la cuenta) dejó de existir mientras se procesaba."""
+
+
 _VERSION = re.compile(r"-v(\d+)(?:\.[a-z0-9]+)?$")
 
 
@@ -647,6 +651,7 @@ async def _process_video(
     media: PostMedia,
     almacen: str = "supabase",
     owner: str | None = None,
+    sigue_viva=None,
 ) -> None:
     """Poster, MP4 de 720p y —si se pide— HLS.
 
@@ -675,8 +680,20 @@ async def _process_video(
             media.storage_path, ESPERA_CODIFICACION_S + 600
         )
 
+    comprobado_para: set[str] = set()
+
     async def _subir(ruta: str, datos: bytes, tipo: str) -> None:
         if es_s3:
+            # ¿SIGUE EXISTIENDO LA FILA? Codificar tarda minutos, y en ese rato
+            # la cuenta pudo darse de baja (que ya vació `videos/<uid>/`) o el
+            # video pudo reemplazarse. Subir igual dejaría derivados sin dueño
+            # en S3 (corrección M4 del QA). Se mira antes de cada derivado; los
+            # segmentos de un mismo HLS comparten la comprobación.
+            grupo = ruta_hls if ruta.startswith(f"{ruta_hls}/") else ruta
+            if sigue_viva is not None and grupo not in comprobado_para:
+                if not await sigue_viva():
+                    raise MedioDesaparecido(media.id)
+                comprobado_para.add(grupo)
             await alm.subir(ruta, datos, tipo, cache_control=CACHE_INMUTABLE)
         else:
             await _upload(client, ruta, datos, tipo)
@@ -875,9 +892,22 @@ async def process_media(media_id: str) -> None:
             if media.media_type == "image":
                 await _process_image(client, media)
             elif almacen == "s3":
-                await _process_video(client, media, "s3", owner)
+
+                async def _sigue_viva() -> bool:
+                    async with SessionLocal() as db:
+                        return (
+                            await db.scalar(
+                                select(PostMedia.id).where(PostMedia.id == media_id)
+                            )
+                        ) is not None
+
+                await _process_video(client, media, "s3", owner, _sigue_viva)
             else:
                 await _process_video(client, media)
+    except MedioDesaparecido:
+        # No es un fallo: la fila se fue. El paso 3 retira lo que se subió.
+        logger.info("El medio %s desaparecio mientras se procesaba", media_id)
+        estado = "failed"
     except Exception:  # noqa: BLE001 — el post ya existe; esto es mejora, no requisito
         logger.exception("Fallo procesando el medio %s", media_id)
         estado = "failed"

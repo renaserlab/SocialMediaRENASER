@@ -18,6 +18,8 @@ no se firma nada aunque llegue una fila (doble cinturón).
 
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -29,6 +31,28 @@ from app.modules.medios import banderas, esquema, firma
 
 if TYPE_CHECKING:
     from app.modules.content.schemas import PostMediaRead
+
+logger = logging.getLogger("renaser.medios")
+
+#: La línea de log que vigila la alarma `AlarmaFirmaDeMediosFallida` (filtro
+#: de métrica en la pila 02). NO CAMBIAR el texto sin cambiar el filtro: si la
+#: firma deja de funcionar, cada fila `s3` sale sin URL y los videos nuevos
+#: se ven negros sin que nada más lo diga.
+MARCA_FIRMA_FALLIDA = "medios.firma_fallida"
+#: Una línea por proceso cada tanto, no una por fila: basta para la alarma y
+#: no inunda el log en cada página del muro.
+_AVISO_CADA_S = 60.0
+_ultimo_aviso = 0.0
+
+
+def _avisar_firma_fallida(motivo: str, media_id: str | None) -> None:
+    global _ultimo_aviso
+    ahora = time.monotonic()
+    if ahora - _ultimo_aviso < _AVISO_CADA_S:
+        return
+    _ultimo_aviso = ahora
+    # Estructurada (clave=valor) y SIN nada secreto: el motivo y el medio.
+    logger.error("%s motivo=%s media_id=%s", MARCA_FIRMA_FALLIDA, motivo, media_id or "-")
 
 
 def url_de_hls(media_id: str, token: str) -> str:
@@ -43,9 +67,11 @@ def firmar_medio(medio: PostMediaRead, vence: int, viewer_id: str | None = None)
     vacías: la app enseña el error de siempre en vez de una URL rota."""
     carpeta = firma.carpeta_de_clave(medio.storage_path or "")
     if carpeta is None:
+        _avisar_firma_fallida("clave_fuera_de_videos", medio.id)
         return
     query = firma.query_de_carpeta(carpeta, vence)
     if query is None:
+        _avisar_firma_fallida("sin_firma_configurada", medio.id)
         return
 
     def _de_esta_carpeta(clave: str | None) -> str | None:
