@@ -70,6 +70,8 @@ from app.modules.reviews.router import router as reviews_router
 from app.modules.search.router import router as search_router
 from app.modules.social_graph.router import router as social_graph_router
 from app.modules.stories.router import router as stories_router
+from app.modules.telemetria.router import admin_router as telemetria_admin_router
+from app.modules.telemetria.router import router as telemetria_router
 
 settings = get_settings()
 logger = get_logger("renaser.api")
@@ -188,6 +190,11 @@ def create_app() -> FastAPI:
     prefix = settings.api_v1_prefix
     app.include_router(identity_router, prefix=prefix)
     app.include_router(plataforma_router, prefix=prefix)
+    # Medicion de velocidad de los videos de Inicio en telefonos. Sin sesion y
+    # aparte de `recommendations/events`, que alimenta al recomendador. Sin la
+    # migracion 0115 acepta y descarta (ver `telemetria/router.py`).
+    app.include_router(telemetria_router, prefix=prefix)
+    app.include_router(telemetria_admin_router, prefix=prefix)
     app.include_router(profiles_router, prefix=prefix)
     app.include_router(social_graph_router, prefix=prefix)
     app.include_router(content_router, prefix=prefix)
