@@ -187,6 +187,7 @@ async def create_all_dev() -> None:
     from app.modules.recommendations import models as _recs  # noqa: F401
     from app.modules.reviews import models as _reviews  # noqa: F401
     from app.modules.social_graph import models as _social  # noqa: F401
+    from app.modules.telemetria import models as _telemetria  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
