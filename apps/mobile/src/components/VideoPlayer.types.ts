@@ -92,6 +92,12 @@ export type VideoPlayerProps = {
   /** El video llego al final. Lo sabe el reproductor y nadie mas. */
   onEnded?: () => void;
   /**
+   * El reproductor fallo (red, URL caducada, archivo ausente). Solo avisa: la
+   * pantalla sigue pintando lo de siempre. Lo usa el feed de Inicio para pedir
+   * otra vez las URLs de un video de S3 (opcion B), que caducan.
+   */
+  onError?: () => void;
+  /**
    * Ya se ve el primer fotograma.
    *
    * Es el «listo» que le importa a quien mide el tiempo desde fuera: el visor

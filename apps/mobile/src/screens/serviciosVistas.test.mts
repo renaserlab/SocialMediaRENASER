@@ -130,7 +130,8 @@ describe('la bandera funcional', () => {
     assert.match(plataforma, /serviciosDeAdministracion: dto\?\.feature_services_admin === true/);
     assert.match(
       plataforma,
-      /const APAGADA: Configuracion = \{\s*publicacionFlexible: false,\s*serviciosEncendido: false,\s*serviciosDeAdministracion: false,\s*\}/,
+      // Detrás pueden venir otras banderas (los videos en S3), todas apagadas.
+      /const APAGADA: Configuracion = \{\s*publicacionFlexible: false,\s*serviciosEncendido: false,\s*serviciosDeAdministracion: false,(\s*\w+: false,)*\s*\}/,
     );
   });
 

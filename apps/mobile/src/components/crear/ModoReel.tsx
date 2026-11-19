@@ -13,7 +13,8 @@ import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { usePublicacion, PublicacionCancelada } from '@/hooks/usePublicacion';
 import { toast } from '@/lib/toast';
-import { uploadPostMedia, type PickedMedia } from '@/services/storage';
+import { type PickedMedia } from '@/services/storage';
+import { subirMedioDePublicacion } from '@/services/subidaDeVideoS3EnApp';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -79,7 +80,9 @@ export function ModoReel({ pie, alSalir, activo = true }: Props) {
         throw new Error(t('create.reelTooLong', { minutos: MAX_REEL_MS / 60_000 }));
       }
 
-      const subido = await uploadPostMedia(elegido, avance);
+      // A S3 si la cuenta tiene la bandera `medios_s3_subida`; si no, a
+      // Supabase como siempre (ver `subidaDeVideoS3EnApp.ts`).
+      const subido = await subirMedioDePublicacion(elegido, avance);
       if (cancelado()) throw new PublicacionCancelada();
 
       await createPost(texto.trim(), [subido], temas);

@@ -131,6 +131,7 @@ export function VideoPlayer({
   uri,
   poster,
   posterCacheKey,
+  onError,
   cacheToDisk = false,
   style,
   loop = false,
@@ -316,6 +317,17 @@ export function VideoPlayer({
 
   useEventListener(player, 'playToEnd', () => {
     avisoDeFinal.current?.();
+  });
+
+  /*
+    Fallos del reproductor hacia fuera, con la misma referencia que arriba
+    para no resuscribir en cada render. Un video de S3 con la URL caducada
+    termina aqui, y el feed pide otra (ver `onError` en los tipos).
+  */
+  const avisoDeError = useRef(onError);
+  avisoDeError.current = onError;
+  useEventListener(player, 'statusChange', ({ status }) => {
+    if (status === 'error') avisoDeError.current?.();
   });
 
   /*

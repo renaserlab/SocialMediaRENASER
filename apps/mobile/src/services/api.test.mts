@@ -165,3 +165,23 @@ test('ya no existe una llamada de arranque para despertar el servidor', async ()
     'warmUpApi volvio: era una suposicion sobre Render, no sobre AWS',
   );
 });
+
+/*
+  Videos en S3 (opcion B): sin esta cabecera la API OCULTA las publicaciones
+  con videos en S3, porque da por hecho que el cliente es una app vieja que
+  intentaria firmarlos en Supabase. Si se pierde en un refactor, los videos
+  nuevos desaparecen en silencio de Inicio, del muro y de los perfiles.
+*/
+test('toda peticion declara que la app entiende videos en S3', async () => {
+  const vistas: Record<string, string>[] = [];
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    vistas.push((init?.headers ?? {}) as Record<string, string>);
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  }) as typeof fetch;
+
+  await apiRequest('/muro', { auth: false });
+  await apiRequest('/posts', { method: 'POST', body: JSON.stringify({}) });
+
+  assert.equal(vistas.length, 2);
+  for (const cabeceras of vistas) assert.equal(cabeceras['X-Zeta-Medios'], 's3');
+});

@@ -92,6 +92,20 @@ function mergeMediaUrls(current: Post[], withUrls: Post[]): Post[] {
   return current.map((post) => {
     const resolved = byId.get(post.id);
     if (!resolved) return post;
+    /*
+      Video en S3 (opcion B) con URLs renovadas: el HLS lleva su propio token y
+      vence a la vez que el MP4, asi que viajan juntos. En Supabase no hay
+      nada de esto y se sigue por la regla de siempre, de abajo.
+    */
+    if (resolved.mediaAlmacen === 's3' && resolved.urlsExpiran !== post.urlsExpiran) {
+      return {
+        ...post,
+        mediaUrl: resolved.mediaUrl ?? post.mediaUrl,
+        posterUrl: resolved.posterUrl ?? post.posterUrl,
+        streamUrl: resolved.streamUrl,
+        urlsExpiran: resolved.urlsExpiran,
+      };
+    }
     if (resolved.mediaUrl === post.mediaUrl && resolved.posterUrl === post.posterUrl) {
       return post;
     }

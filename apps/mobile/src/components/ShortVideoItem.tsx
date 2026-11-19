@@ -59,6 +59,12 @@ export type ReelItem = {
   createdAtIso?: string;
   likes: number;
   comments: number;
+  /**
+   * Hasta cuando valen `uri` y `posterUrl` (ISO 8601). Solo en videos de S3
+   * (opcion B), cuyas URLs firma la API y no se pueden refirmar aqui: el feed
+   * las vuelve a pedir antes de que caduquen (`feed/urlsDeMedios.ts`).
+   */
+  urlsExpiran?: string;
 };
 
 // Superficie full-bleed sobre video → contexto de media (siempre oscuro).
@@ -136,6 +142,12 @@ type Props = {
    */
   alDescartar?: (postId: string) => void;
   /**
+   * El reproductor no pudo con este video. Lo resuelve el feed: en videos de
+   * S3 la causa tipica es una URL caducada, y el feed pide la publicacion otra
+   * vez (una sola). Sin callback, el error de siempre.
+   */
+  alFallarVideo?: (postId: string) => void;
+  /**
    * Abrir los comentarios en una HOJA, sin salir del video. Antes se iba a la
    * pantalla `/comments/{id}` y se perdia el video de vista, que es lo que se
    * reporto: tiene que subir la misma bandeja que en Explorar.
@@ -164,6 +176,7 @@ function ShortVideoItemBase({
   onForcedMute,
   espacioInferior = 0,
   alDescartar,
+  alFallarVideo,
   alAbrirComentarios,
   alVerReacciones,
   medir = false,
@@ -288,6 +301,7 @@ function ShortVideoItemBase({
           poster={short.posterUrl ? { uri: short.posterUrl } : undefined}
           posterCacheKey={short.posterPath}
           cacheToDisk={!short.isStream}
+          onError={alFallarVideo ? () => alFallarVideo(short.id) : undefined}
           style={StyleSheet.absoluteFill}
           contentFit={encuadre}
           loop

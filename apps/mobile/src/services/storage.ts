@@ -15,6 +15,7 @@ import {
   readVideoMetadata,
 } from '@/services/mediaCompressor';
 import { uploadResumable } from '@/services/resumableUpload';
+import { esClaveDeS3 } from '@/lib/mediosS3';
 import { supabase, supabaseUrl } from '@/services/supabase';
 
 const BUCKET = 'post-media';
@@ -125,6 +126,13 @@ export type UploadedMedia = {
   bytes?: number;
   /** Ruta del poster ya subido a Storage (solo videos, cuando se pudo). */
   posterPath?: string;
+  /*
+    Video de publicacion subido a S3 (opcion B, `services/subidaDeVideoS3.ts`).
+    Con esto `storagePath` va vacio: la clave definitiva la decide la API al
+    publicar. `uploadPostMedia` nunca los rellena.
+  */
+  idDeSubida?: string;
+  idDeSubidaPoster?: string;
 };
 
 const DEFAULT_EXT: Record<MediaKind, string> = {
@@ -345,7 +353,7 @@ export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
  * los originales de camara sin tocar. Solo se aplica cuando no se ha podido
  * comprimir: si el compresor hizo su trabajo, manda el limite general.
  */
-const MAX_VIDEO_SIN_COMPRIMIR_BYTES = 60 * 1024 * 1024;
+export const MAX_VIDEO_SIN_COMPRIMIR_BYTES = 60 * 1024 * 1024;
 
 export function formatMb(bytes: number): string {
   const mb = bytes / 1024 / 1024;
@@ -954,6 +962,13 @@ export async function signCourseUrls(paths: string[]): Promise<Record<string, st
 export async function signMediaUrls(
   paths: string[],
 ): Promise<Record<string, string>> {
+  /*
+    Una clave de S3 (videos de la opcion B) JAMAS se firma en Supabase: sus
+    URLs llegan firmadas de la API. Normalmente ni llegan aqui (ver
+    `rutasParaFirmar`), pero este es el ultimo punto antes de la red y de la
+    cache `z-signed-urls-v1`, que sigue siendo solo de Supabase.
+  */
+  paths = paths.filter((ruta) => !esClaveDeS3(ruta));
   if (!supabase || paths.length === 0) return {};
 
   // Las firmas guardadas del arranque anterior cuentan como cache valida.

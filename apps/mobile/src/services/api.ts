@@ -98,6 +98,9 @@ async function parseError(response: Response): Promise<ApiError> {
  */
 const ESPERA_MAXIMA_MS = 20_000;
 
+/** Cabecera con la que la app declara que entiende videos en S3. */
+export const CABECERA_DE_MEDIOS = 'X-Zeta-Medios';
+
 export type ApiRequestOptions = RequestInit & {
   /** Si true, incluye el header Authorization con el token actual. Default true. */
   auth?: boolean;
@@ -135,6 +138,19 @@ export async function apiRequest<T>(
     ...(init.body != null && !esFormulario
       ? { 'Content-Type': 'application/json' }
       : {}),
+    /*
+      «Esta app sabe reproducir videos guardados en S3» (opcion B). A quien no
+      la manda, la API le oculta las publicaciones con videos en S3, porque una
+      app vieja intentaria firmarlos en Supabase y veria un video negro. Va en
+      TODAS las peticiones: cualquier endpoint que devuelva publicaciones la
+      mira. Un servidor viejo la ignora.
+
+      Coste conocido: en la web, una cabecera propia obliga a la comprobacion
+      `OPTIONS` tambien en los GET anonimos (ver el comentario de arriba). Es
+      el precio de que el servidor pueda distinguir clientes sin romper los
+      viejos.
+    */
+    [CABECERA_DE_MEDIOS]: 's3',
     ...(headers as Record<string, string> | undefined),
   };
 

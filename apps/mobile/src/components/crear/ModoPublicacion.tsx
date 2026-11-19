@@ -17,7 +17,8 @@ import { Text } from '@/components/Text';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import { usePublicacion, PublicacionCancelada } from '@/hooks/usePublicacion';
 import { toast } from '@/lib/toast';
-import { uploadPostMedia, type PickedMedia } from '@/services/storage';
+import { type PickedMedia } from '@/services/storage';
+import { subirMedioDePublicacion } from '@/services/subidaDeVideoS3EnApp';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -84,7 +85,9 @@ export function ModoPublicacion({ pie, alSalir, activo = true }: Props) {
     if (!elegido && !cuerpo) return;
 
     void envio.ejecutar(async ({ avance, cancelado }) => {
-      const subidos = elegido ? [await uploadPostMedia(elegido, avance)] : [];
+      // Las fotos siguen en Supabase; un video va a S3 solo con la bandera
+      // `medios_s3_subida` de la cuenta (ver `subidaDeVideoS3EnApp.ts`).
+      const subidos = elegido ? [await subirMedioDePublicacion(elegido, avance)] : [];
       if (cancelado()) throw new PublicacionCancelada();
 
       await createPost(cuerpo, subidos, temas);
