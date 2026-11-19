@@ -45,5 +45,7 @@ class MetricaDeVideo(Base):
     esperas: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     espera_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     formato: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: De donde salio el video: 'supabase' (Storage) o 's3' (S3 + CloudFront).
+    almacen: Mapped[str | None] = mapped_column(Text, nullable=True)
     bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

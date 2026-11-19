@@ -29,6 +29,8 @@ export type PostMediaDto = {
   poster_path?: string | null;
   /** Version optimizada para el feed (imagen recomprimida o MP4 ligero). */
   feed_path?: string | null;
+  /** Donde vive el archivo; la API lo manda cuando hay videos en S3 (opcion B). */
+  almacen?: 'supabase' | 's3' | null;
   /** Raiz del empaquetado HLS, si el video fue transcodificado. */
   stream_path?: string | null;
   processing_status?: string | null;
@@ -195,6 +197,7 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     mediaHeight: first?.height ?? undefined,
     mediaDurationS: first?.duration_s ?? undefined,
     mediaBytes: first && !first.feed_path ? (first.bytes ?? undefined) : undefined,
+    mediaAlmacen: first?.almacen === 's3' ? 's3' : 'supabase',
     processingStatus: (first?.processing_status as Post['processingStatus']) ?? undefined,
     // La playlist HLS la sirve el backend, que firma cada segmento. Solo se
     // construye si el video fue transcodificado (stream_path) y conocemos el

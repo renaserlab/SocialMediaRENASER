@@ -146,6 +146,9 @@ async def test_acepta_sin_sesion_y_guarda_una_fila_por_medicion(entorno):
     ]
     deslizar = filas[-1]
     assert (deslizar.esperas, deslizar.espera_ms, deslizar.formato) == (2, 500, "hls")
+    # Sin `almacen` en el lote, los tramos cuentan como Supabase; los hitos no lo llevan.
+    assert [f.almacen for f in filas[-2:]] == ["supabase", "supabase"]
+    assert all(f.almacen is None for f in filas[:5])
     assert all(f.plataforma == "ios" and f.modelo == "iPhone 13 Pro" for f in filas)
     assert all(f.sesion == "0123456789abcdef" for f in filas)
 
@@ -174,6 +177,7 @@ async def test_un_lote_vacio_se_acepta_sin_escribir(entorno):
         lote(tramos=[{**LOTE["tramos"][0], "hasta_reproducir_ms": 999_999}]),
         lote(tramos=[{**LOTE["tramos"][0], "esperas": 5000}]),
         lote(tramos=[{**LOTE["tramos"][0], "formato": "webm"}]),
+        lote(tramos=[{**LOTE["tramos"][0], "almacen": "dropbox"}]),
         lote(tramos=[{**LOTE["tramos"][0], "post_id": "abc"}]),
         lote(tramos=[LOTE["tramos"][0]] * (TOPE_DE_TRAMOS + 1)),
         lote(extra=1),
@@ -280,3 +284,21 @@ async def test_el_informe_valida_los_dias(entorno):
     http, _, _ = entorno
     assert (await http.get(INFORME, params={"dias": 0})).status_code == 422
     assert (await http.get(INFORME, params={"dias": 91})).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_guarda_el_almacen_y_el_informe_lo_separa(entorno):
+    """Supabase y S3 se resumen por separado, para compararlos mientras conviven."""
+    http, sesiones, _ = entorno
+    tramo = {**LOTE["tramos"][0]}
+    respuesta = await http.post(
+        RUTA,
+        json=lote(hitos={}, tramos=[{**tramo, "almacen": "s3"}, {**tramo, "almacen": "supabase"}]),
+    )
+    assert respuesta.status_code == 202, respuesta.text
+    filas = await _filas(sesiones)
+    assert sorted(f.almacen for f in filas) == ["s3", "supabase"]
+    from app.modules.telemetria.router import resumir
+
+    claves = {(r.tramo, r.almacen) for r in resumir(filas)}
+    assert claves == {(tramo["tipo"], "s3"), (tramo["tipo"], "supabase")}

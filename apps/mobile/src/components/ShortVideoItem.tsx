@@ -38,6 +38,8 @@ export type ReelItem = {
   isStream?: boolean;
   /** Peso del MP4 que se reproduce, si se conoce. Solo para la medicion. */
   bytes?: number;
+  /** De donde sale el video (Supabase o S3). Solo para la medicion. */
+  almacen?: 'supabase' | 's3';
   /**
    * Medidas del video, si se guardaron (migracion 0021).
    *
@@ -172,8 +174,8 @@ function ShortVideoItemBase({
     objeto nuevo en cada render: la medicion solo lee, no debe redibujar.
   */
   const medirComo = useMemo(
-    () => (medir ? { id: short.id, hls: Boolean(short.isStream), bytes: short.bytes ?? null } : undefined),
-    [medir, short.id, short.isStream, short.bytes],
+    () => (medir ? { id: short.id, hls: Boolean(short.isStream), bytes: short.bytes ?? null, almacen: short.almacen ?? 'supabase' } : undefined),
+    [medir, short.id, short.isStream, short.bytes, short.almacen],
   );
   const router = useRouter();
 

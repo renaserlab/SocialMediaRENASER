@@ -122,6 +122,7 @@ export function aReel(post: Post): ReelItem | null {
     // El peso solo vale si lo que se reproduce es el archivo medido (ver
     // `mediaBytes` en el tipo); para HLS no hay un archivo que pesar.
     bytes: source.isStream ? undefined : post.mediaBytes,
+    almacen: post.mediaAlmacen ?? 'supabase',
     posterUrl: post.posterUrl,
     posterPath: post.posterPath,
     // Las medidas viajan con el elemento: la celda las necesita para decidir

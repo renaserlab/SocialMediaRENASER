@@ -65,6 +65,8 @@ class TramoDeVideo(_Estricto):
     esperas: int = Field(default=0, ge=0, le=1000)
     espera_ms: Ms = 0
     formato: Literal["hls", "mp4"]
+    #: De donde salio el video. Opcional: un cliente que no lo mande cuenta como Supabase.
+    almacen: Literal["supabase", "s3"] = "supabase"
     #: Hasta 10 GB: ningun video subido pesa mas (el limite de subida es 500 MB).
     bytes: int | None = Field(default=None, ge=0, le=10 * 1024**3)
     error: bool = False
@@ -85,6 +87,8 @@ class Recepcion(BaseModel):
 class Resumen(BaseModel):
     plataforma: str
     tramo: str
+    #: Solo en los tramos de video; en los hitos de carga va vacio.
+    almacen: str | None = None
     n: int
     #: Cuantas de esas mediciones no llegaron a reproducir (solo en tramos).
     sin_reproducir: int = 0

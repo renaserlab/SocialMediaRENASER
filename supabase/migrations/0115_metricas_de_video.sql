@@ -62,6 +62,8 @@ create table if not exists public.metricas_de_video (
   esperas smallint,
   espera_ms integer,
   formato text,
+  -- De donde salio el video: Supabase Storage (hoy) o S3 + CloudFront (spec opcion B).
+  almacen text,
   bytes bigint,
   error boolean,
   constraint metricas_de_video_sesion check (sesion ~ '^[0-9a-f]{16}$'),
@@ -75,6 +77,7 @@ create table if not exists public.metricas_de_video (
   constraint metricas_de_video_esperas check (esperas is null or esperas between 0 and 1000),
   constraint metricas_de_video_espera check (espera_ms is null or espera_ms between 0 and 120000),
   constraint metricas_de_video_formato check (formato is null or formato in ('hls', 'mp4')),
+  constraint metricas_de_video_almacen check (almacen is null or almacen in ('supabase', 's3')),
   constraint metricas_de_video_bytes check (bytes is null or bytes >= 0),
   constraint metricas_de_video_textos check (
     coalesce(length(version_app), 0) <= 32 and coalesce(length(build), 0) <= 32
@@ -102,6 +105,7 @@ create or replace view public.metricas_de_video_resumen
 select
   plataforma,
   tramo,
+  almacen,
   count(*) as n,
   count(*) filter (where ms is null) as sin_reproducir,
   round(percentile_cont(0.5) within group (order by ms))::integer as mediana_ms,
@@ -110,8 +114,8 @@ select
   round(avg(case when esperas > 0 then 1.0 else 0.0 end), 3) as con_esperas
 from public.metricas_de_video
 where creado_en >= now() - interval '7 days'
-group by plataforma, tramo
-order by plataforma, tramo;
+group by plataforma, tramo, almacen
+order by plataforma, tramo, almacen;
 
 revoke all on public.metricas_de_video_resumen from anon, authenticated;
 
