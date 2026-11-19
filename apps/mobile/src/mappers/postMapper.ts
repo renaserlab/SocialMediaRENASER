@@ -194,6 +194,7 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
     mediaWidth: first?.width ?? undefined,
     mediaHeight: first?.height ?? undefined,
     mediaDurationS: first?.duration_s ?? undefined,
+    mediaBytes: first && !first.feed_path ? (first.bytes ?? undefined) : undefined,
     processingStatus: (first?.processing_status as Post['processingStatus']) ?? undefined,
     // La playlist HLS la sirve el backend, que firma cada segmento. Solo se
     // construye si el video fue transcodificado (stream_path) y conocemos el

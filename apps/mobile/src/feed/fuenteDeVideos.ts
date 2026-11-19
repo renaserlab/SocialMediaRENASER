@@ -2,6 +2,7 @@ import { decidirLote } from '@/feed/decisionDeFuente';
 import { PostRepository, resolveMediaUrls, type FeedKind } from '@/repositories/PostRepository';
 import { RecommendationRepository } from '@/repositories/RecommendationRepository';
 import { bestVideoSource } from '@/lib/videoSource';
+import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import type { ReelItem } from '@/components/ShortVideoItem';
 import { useAppStore } from '@/store/useAppStore';
 import type { Post } from '@/types';
@@ -118,6 +119,9 @@ export function aReel(post: Post): ReelItem | null {
     caption: post.body,
     uri: source.uri,
     isStream: source.isStream,
+    // El peso solo vale si lo que se reproduce es el archivo medido (ver
+    // `mediaBytes` en el tipo); para HLS no hay un archivo que pesar.
+    bytes: source.isStream ? undefined : post.mediaBytes,
     posterUrl: post.posterUrl,
     posterPath: post.posterPath,
     // Las medidas viajan con el elemento: la celda las necesita para decidir
@@ -219,9 +223,13 @@ function fuenteRecomendada(usuarioId: string | null | undefined): FuenteDeVideos
           usuarioId,
         );
         const posts = respuesta.items;
+        // Solo cuentan los de la primera pagina: la medicion exige que antes
+        // se marcara `feed_pedido` y guarda cada hito una sola vez.
+        medicionDeVideo.hito('feed_respuesta');
         // Las firmas de Storage van en una segunda fase, igual que en el muro:
         // lo que se mide es cuanto tarda en verse el PRIMER video.
         const conMedios = posts.length > 0 ? await resolveMediaUrls(posts) : [];
+        medicionDeVideo.hito('urls_firmadas');
         sembrarReacciones(conMedios);
         const items = conMedios.map(aReel).filter((r): r is ReelItem => r !== null);
 

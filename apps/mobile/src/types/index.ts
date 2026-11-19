@@ -88,6 +88,12 @@ export type Post = {
   mediaHeight?: number;
   /** Duracion del video/audio en segundos. */
   mediaDurationS?: number;
+  /**
+   * Peso en bytes del archivo de `mediaPath`, SOLO si es el original subido
+   * (el unico cuyo peso se guarda). Si se reproduce el derivado del feed, el
+   * peso del original mentiria, y se deja vacio. Lo usa la medicion de video.
+   */
+  mediaBytes?: number;
   /** Fecha ISO original; `createdAt` es su forma corta y hay que recalcularla. */
   createdAtIso?: string;
   /**

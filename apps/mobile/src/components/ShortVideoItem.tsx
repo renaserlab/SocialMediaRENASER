@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,6 +36,8 @@ export type ReelItem = {
   uri: string;
   /** true si `uri` es una playlist HLS (sin cache de disco del reproductor). */
   isStream?: boolean;
+  /** Peso del MP4 que se reproduce, si se conoce. Solo para la medicion. */
+  bytes?: number;
   /**
    * Medidas del video, si se guardaron (migracion 0021).
    *
@@ -143,6 +145,11 @@ type Props = {
   alAbrirComentarios: (postId: string, total: number) => void;
   /** Quien reacciono, en la misma hoja que en Explorar. Tambien la monta el feed. */
   alVerReacciones: (postId: string) => void;
+  /**
+   * Mide cuanto tarda este video en arrancar (ver `lib/medicionDeVideo`). Solo
+   * lo enciende el feed de Inicio: los reels sueltos no son lo que se mide.
+   */
+  medir?: boolean;
 };
 
 function ShortVideoItemBase({
@@ -157,8 +164,17 @@ function ShortVideoItemBase({
   alDescartar,
   alAbrirComentarios,
   alVerReacciones,
+  medir = false,
 }: Props) {
   const { t } = useTranslation();
+  /*
+    Que reproductor se mide. Memorizado por id para no darle al reproductor un
+    objeto nuevo en cada render: la medicion solo lee, no debe redibujar.
+  */
+  const medirComo = useMemo(
+    () => (medir ? { id: short.id, hls: Boolean(short.isStream), bytes: short.bytes ?? null } : undefined),
+    [medir, short.id, short.isStream, short.bytes],
+  );
   const router = useRouter();
 
   /*
@@ -301,6 +317,7 @@ function ShortVideoItemBase({
           */
           controlsBottomInset={espacioInferior}
           onMutedChange={onForcedMute}
+          medirComo={medirComo}
         />
       ) : (
         /*

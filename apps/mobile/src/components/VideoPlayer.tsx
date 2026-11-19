@@ -8,6 +8,7 @@ import { useVideoPlayer, VideoView, type VideoSource } from 'expo-video';
 
 import { VideoScrubber } from '@/components/VideoScrubber';
 import { perfMark } from '@/lib/perf';
+import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import { palette } from '@/theme/tokens';
 import type { VideoPlayerProps } from './VideoPlayer.types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -146,6 +147,7 @@ export function VideoPlayer({
   onProgressSeconds,
   onEnded,
   onFirstFrame,
+  medirComo,
 }: VideoPlayerProps) {
   const { t } = useTranslation();
   /*
@@ -261,7 +263,36 @@ export function VideoPlayer({
     });
   }, [muted, player]);
 
-  useEventListener(player, 'playingChange', ({ isPlaying }) => setPlaying(isPlaying));
+  /*
+    MEDICION DE VIDEO (Inicio en telefonos). Que reproductor se mide va en una
+    referencia: los oyentes leen el valor actual sin volver a suscribirse, y
+    nada de esto toca el estado de React.
+
+    Se elige `playingChange` como «ya reproduce» porque es el unico aviso que
+    significa lo mismo en las dos plataformas: en iOS sale de
+    `timeControlStatus == .playing` (no de haber pedido `play()`), y en Android
+    de `onIsPlayingChanged` de ExoPlayer, que solo es cierto con datos y
+    avanzando. `readyToPlay` llega antes de que haya imagen y el primer
+    fotograma puede pintarse en pausa (el vecino precargado), asi que ninguno
+    de los dos sirve para eso. Las esperas son `statusChange → loading`
+    despues de haber arrancado.
+  */
+  const medida = useRef(medirComo);
+  medida.current = medirComo;
+  // Layout y no efecto: corre en el mismo commit, antes de que pueda llegar
+  // ningun aviso nativo de este reproductor (los avisos son asincronos).
+  useLayoutEffect(() => {
+    const m = medida.current;
+    if (active && m) medicionDeVideo.videoActivo(m.id, m);
+  }, [active, medirComo?.id]);
+
+  useEventListener(player, 'playingChange', ({ isPlaying }) => {
+    setPlaying(isPlaying);
+    if (isPlaying && medida.current) medicionDeVideo.reproduciendo(medida.current.id);
+  });
+  useEventListener(player, 'statusChange', ({ status }) => {
+    if (medida.current) medicionDeVideo.estado(medida.current.id, status);
+  });
 
   /*
     Progreso hacia fuera y final del video.
@@ -403,6 +434,7 @@ export function VideoPlayer({
         nativeControls={nativeControls && !shortsControls && started}
         onFirstFrameRender={() => {
           perfMark('VIDEO_FIRST_FRAME');
+          if (medirComo) medicionDeVideo.primerFotograma(medirComo.id);
           setFirstFrame(true);
           onFirstFrame?.();
         }}

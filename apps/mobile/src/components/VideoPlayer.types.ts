@@ -100,4 +100,11 @@ export type VideoPlayerProps = {
    * tarda un video en arrancar se descontaba del tramo.
    */
   onFirstFrame?: () => void;
+  /**
+   * Medir cuanto tarda este video en reproducir de verdad (Inicio en
+   * telefonos, `lib/medicionDeVideo`). `id` solo sirve para saber de que
+   * reproductor viene cada aviso; no sale del telefono. Sin esta prop, el
+   * reproductor no informa de nada.
+   */
+  medirComo?: { id: string; hls: boolean; bytes?: number | null };
 };

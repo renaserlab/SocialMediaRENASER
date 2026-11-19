@@ -5,6 +5,7 @@ import {
   leerInstantaneaDeVideos,
 } from '@/feed/cacheDeVideos';
 import { perfMark } from '@/lib/perf';
+import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import { useRefrescoAlEnfocar } from '@/hooks/useRefrescoAlEnfocar';
 import { VIDEOS_POR_PAGINA, type CursorDeVideos, type FuenteDeVideos } from '@/feed/fuenteDeVideos';
 import type { ReelItem } from '@/components/ShortVideoItem';
@@ -135,6 +136,9 @@ export function useFeedDeVideos(
     enVuelo.current = true;
     setEstado('cargando');
     setError(null);
+    // Cero de la medicion en telefonos: desde aqui hasta el primer video que
+    // reproduce es lo que espera quien abre Inicio. Solo cuenta la primera vez.
+    medicionDeVideo.hito('feed_pedido');
     fuenteRef.current
       .cargar(null, VIDEOS_POR_PAGINA)
       .then((lote) => {
