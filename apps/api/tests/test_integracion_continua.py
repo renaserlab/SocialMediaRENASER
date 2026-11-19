@@ -251,6 +251,25 @@ def test_todo_trabajo_que_ejecuta_pytest_instala_el_arnes() -> None:
         "recoleccion revienta antes de la primera prueba: " + ", ".join(faltan)
     )
 
+def test_todo_trabajo_que_ejecuta_pytest_instala_las_dependencias_de_prueba() -> None:
+    """pytest y moto viven en `requirements-dev.txt` para no entrar en la imagen
+    de produccion. Un trabajo con pytest que solo instale `requirements.txt`
+    no encontraria ni pytest: se mira en TODOS los flujos, como psycopg."""
+    faltan = [
+        f"{fichero}:{trabajo}"
+        for fichero, trabajo, bloque in _trabajos_que_ejecutan_pytest()
+        if "requirements-dev.txt" not in bloque
+    ]
+    assert not faltan, "estos trabajos ejecutan pytest sin requirements-dev.txt: " + ", ".join(faltan)
+    dev = (RAIZ / "apps" / "api" / "requirements-dev.txt").read_text(encoding="utf-8")
+    produccion = (RAIZ / "apps" / "api" / "requirements.txt").read_text(encoding="utf-8")
+    for paquete in ("pytest", "moto"):
+        assert paquete in dev
+        assert not any(
+            linea.strip().startswith(paquete) for linea in produccion.splitlines()
+        ), f"{paquete} no debe ir en la imagen de produccion"
+
+
 def test_el_trabajo_del_movil_ejecuta_sus_pruebas_y_no_solo_los_tipos() -> None:
     """`mobile:check` es `tsc --noEmit`: comprueba TIPOS, no comportamiento.
 

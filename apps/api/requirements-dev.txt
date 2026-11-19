@@ -1,0 +1,15 @@
+# Dependencias SOLO de pruebas. No entran en la imagen de produccion: el
+# Dockerfile instala `requirements.txt` y nada mas.
+#
+# Quien ejecuta pytest instala los dos:
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# Asi lo hacen los tres trabajos con pytest de `.github/workflows/` (ci.yml y
+# la puerta de desplegar-aws.yml). `psycopg` del arnes de migraciones se sigue
+# instalando aparte en esos trabajos, como antes.
+pytest>=8.3,<9.0
+pytest-asyncio>=0.25,<1.0
+# S3 y CloudFront simulados en las pruebas de los medios en S3: ninguna prueba
+# habla con AWS. Fijada, como boto3.
+moto[s3,cloudfront]==5.2.5

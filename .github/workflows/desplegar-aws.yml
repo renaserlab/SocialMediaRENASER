@@ -142,8 +142,10 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: apps/api/requirements.txt
-      - run: pip install -r requirements.txt
+          cache-dependency-path: |
+            apps/api/requirements.txt
+            apps/api/requirements-dev.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
         if: steps.huella.outputs.probada != 'true'
       # psycopg NO es dependencia de la aplicacion —la API habla con la base por
       # asyncpg— sino del ARNES de las migraciones. Diecisiete ficheros de
