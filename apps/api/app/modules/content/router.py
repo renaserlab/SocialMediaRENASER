@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
-from app.modules.content import hashtags, menciones, reposts
+from app.modules.content import hashtags, menciones, reposts, visibilidad
 from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import (
@@ -43,6 +43,10 @@ from app.modules.content.schemas import (
     PostUpdate,
     PostRead,
 )
+from app.modules.medios import banderas as medios_banderas
+from app.modules.medios import firma as medios_firma
+from app.modules.medios import hidratacion as medios_hidratacion
+from app.modules.medios import publicacion as medios_publicacion
 from app.modules.notifications.push import encolar_push, nombre_visible
 from app.modules.notifications.service import add_notification
 from app.modules.profiles.models import Profile
@@ -183,7 +187,7 @@ async def _etiquetas_del_lote(
 
 
 async def _load_media_map(
-    db: AsyncSession, post_ids: list[str]
+    db: AsyncSession, post_ids: list[str], viewer_id: str | None = None
 ) -> dict[str, list[PostMediaRead]]:
     if not post_ids:
         return {}
@@ -195,8 +199,15 @@ async def _load_media_map(
         )
     ).all()
     result: dict[str, list[PostMediaRead]] = {}
+    lecturas: list[PostMediaRead] = []
     for media in rows:
-        result.setdefault(media.post_id, []).append(_media_read(media))
+        lectura = _media_read(media)
+        lecturas.append(lectura)
+        result.setdefault(media.post_id, []).append(lectura)
+    # LA FIRMA EN UN SOLO PUNTO (spec §7): todo endpoint que devuelve
+    # `PostRead` pasa por aqui. Marca `almacen` y firma las filas `s3`; sin la
+    # migracion 0116 no hace nada y no cuesta ninguna consulta.
+    await medios_hidratacion.hidratar(db, lecturas, viewer_id)
     return result
 
 
@@ -215,6 +226,36 @@ def _media_read(media: PostMedia) -> PostMediaRead:
         stream_path=media.stream_path,
         processing_status=media.processing_status,
     )
+
+
+#: Prefijos del bucket de S3. Una ruta asi que llega del cliente como si fuera
+#: de Supabase no es de Supabase: se rechaza para que nadie pueda colgar una
+#: clave de S3 en una fila que la API no firmo (spec §5, L8).
+_PREFIJOS_DE_S3 = ("videos/", "pendientes/", "borrados/")
+
+
+def _exigir_ruta_de_supabase(ruta: str | None) -> None:
+    if ruta and ruta.lstrip("/").startswith(_PREFIJOS_DE_S3):
+        raise ValidationAppError("Ruta de medio no valida.")
+
+
+async def _firmar_respuesta(
+    db: AsyncSession, medios: list[PostMediaRead], uid: str
+) -> None:
+    """Al crear o editar, quien publica recibe ya firmado su video de S3.
+
+    Se marca `almacen` a mano porque estas lecturas se armaron antes de que la
+    fila existiera en la base (`_media_read` sobre el objeto recien creado).
+    """
+    en_s3 = await medios_publicacion.ids_en_s3(db, [m.id for m in medios if m.id])
+    if not en_s3:
+        return
+    vence = medios_firma.vencimiento_de_ventana()
+    for medio in medios:
+        if medio.id in en_s3:
+            medio.almacen = "s3"
+            if medios_banderas.puede_recibir_s3():
+                medios_hidratacion.firmar_medio(medio, vence, uid)
 
 
 async def _get_active_post(db: AsyncSession, post_id: str) -> Post:
@@ -298,15 +339,18 @@ async def _hidratar_publicaciones(
         return {}
     unicos = list(dict.fromkeys(post_ids))
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
-    filas = (
-        await db.execute(
-            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
-            .join(Profile, Profile.id == Post.author_id)
-            .where(Post.id.in_(unicos))
-        )
-    ).all()
+    stmt = (
+        select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+        .join(Profile, Profile.id == Post.author_id)
+        .where(Post.id.in_(unicos))
+    )
+    # Quien llama ya filtro, pero esta es la ultima puerta antes de firmar: se
+    # vuelve a aplicar el predicado comun (spec §7). Sin nada que aplicar, la
+    # consulta sale igual que antes.
+    stmt = await visibilidad.aplicar(stmt, db, uid)
+    filas = (await db.execute(stmt)).all()
     presentes = [fila[0].id for fila in filas]
-    medios = await _load_media_map(db, presentes)
+    medios = await _load_media_map(db, presentes, uid)
     temas, etiquetas, personas = await _etiquetas_del_lote(db, presentes)
     lecturas = {
         fila[0].id: _to_post_read(
@@ -388,6 +432,11 @@ async def list_posts(
     # de video, y en ninguno de esos sitios una republicacion significa lo
     # mismo. Quien las quiere, las pide.
     with_reposts: bool = Query(default=False),
+    # Publicaciones CONCRETAS, en el orden pedido (spec §7): la app las vuelve
+    # a pedir cuando las URLs firmadas de sus videos estan por vencer (la
+    # instantanea de Inicio dura hasta 3 dias; las firmas, 6 h). Con `ids`,
+    # los demas filtros no aplican: se devuelve lo que se pidio y se puede ver.
+    ids: str | None = Query(default=None, max_length=50 * 37),
     current_user: AuthUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PostRead]:
@@ -408,6 +457,20 @@ async def list_posts(
     """
     uid = current_user.id if current_user else None
 
+    if ids is not None:
+        pedidos = list(dict.fromkeys(i.strip() for i in ids.split(",") if i.strip()))
+        if not pedidos or len(pedidos) > 50:
+            raise ValidationAppError("Pide entre 1 y 50 publicaciones.")
+        for pid in pedidos:
+            ensure_uuid(pid, "Publicacion no encontrada.")
+        salida = await leer_posts_por_id(db, pedidos, uid)
+        await reposts.anotar(db, salida, uid)
+        return salida
+
+    # El predicado comun de visibilidad (spec §7). Se calcula UNA vez y entra
+    # en `filtro_de_contenido`, que lo comparten las dos corrientes del muro.
+    condicion_visible = await visibilidad.predicado(db, uid)
+
     # El cursor se interpreta UNA vez: lo usan las dos corrientes.
     cursor_at: datetime | None = None
     if before_created_at:
@@ -422,7 +485,7 @@ async def list_posts(
         ensure_uuid(author_id, "Perfil no encontrado.")
 
     def filtro_de_contenido(stmt):
-        return _filtros_de_contenido(
+        stmt = _filtros_de_contenido(
             stmt,
             circle_id=circle_id,
             media=media,
@@ -430,6 +493,7 @@ async def list_posts(
             category=category,
             exclude_category=exclude_category,
         )
+        return stmt if condicion_visible is None else stmt.where(condicion_visible)
 
     def filtro_de_autoria(stmt):
         """Quien firma la publicacion: bloqueos, «siguiendo» y el perfil pedido.
@@ -487,10 +551,10 @@ async def list_posts(
         if cursor_at is None:
             stmt = stmt.offset(page.offset)
         rows = (await db.execute(stmt)).all()
-        ids = [row[0].id for row in rows]
-        media_map = await _load_media_map(db, ids)
+        ids_de_pagina = [row[0].id for row in rows]
+        media_map = await _load_media_map(db, ids_de_pagina, uid)
         # Una consulta por cosa para el lote entero, no una por publicacion.
-        temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
+        temas, etiquetas, personas = await _etiquetas_del_lote(db, ids_de_pagina)
         salida = [
             _to_post_read(
                 *row,
@@ -595,6 +659,22 @@ async def create_post(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostRead:
+    # VIDEOS SUBIDOS A S3 (spec §5). Se adoptan ANTES de crear nada: si una
+    # subida no es de esta cuenta, no existe o no coincide en tamano y tipo,
+    # no queda una publicacion a medias sin su video. Adoptar copia la
+    # pendiente a `videos/<uid>/<media_id>/` dentro de S3.
+    adoptados: dict[int, medios_publicacion.Adoptado] = {}
+    for item in payload.media:
+        _exigir_ruta_de_supabase(item.storage_path)
+        _exigir_ruta_de_supabase(item.poster_path)
+    for ruta in payload.image_paths:
+        _exigir_ruta_de_supabase(ruta)
+    for indice, item in enumerate(payload.media):
+        if item.id_de_subida:
+            adoptados[indice] = await medios_publicacion.adoptar(
+                db, current_user.id, item.id_de_subida, item.id_de_subida_poster
+            )
+
     post = Post(
         author_id=current_user.id,
         body=payload.body,
@@ -664,24 +744,36 @@ async def create_post(
     ]
 
     media: list[PostMediaRead] = []
+    filas_s3: list[PostMedia] = []
     for index, item in enumerate(entries):
+        adoptado = adoptados.get(index)
         row = PostMedia(
             post_id=post.id,
-            storage_path=item.storage_path,
+            storage_path=adoptado.storage_path if adoptado else item.storage_path,
             media_type=item.media_type,
             sort_order=index,
             # Metadata calculada en el dispositivo al subir (si el movil pudo).
             width=item.width,
             height=item.height,
             duration_s=item.duration_s,
-            bytes=item.bytes,
-            poster_path=item.poster_path,
+            bytes=(item.bytes or adoptado.bytes) if adoptado else item.bytes,
+            poster_path=adoptado.poster_path if adoptado else item.poster_path,
         )
+        if adoptado:
+            # El id es el de la carpeta de S3: `videos/<uid>/<media_id>/`.
+            row.id = adoptado.media_id
+            filas_s3.append(row)
         db.add(row)
         media.append(_media_read(row))
+    if filas_s3:
+        await db.flush()
+        for row in filas_s3:
+            await medios_publicacion.marcar_s3(db, row.id)
+        await _firmar_respuesta(db, media, current_user.id)
     if media:
         await db.commit()
-        if processing_configured():
+        ids_s3 = {row.id for row in filas_s3}
+        if processing_configured() or (ids_s3 and _mp.procesado_s3_configurado()):
             # DESPUES de responder: genera la version ligera de la imagen y el
             # poster del video si el dispositivo no lo mando. Publicar no
             # espera a nada de esto.
@@ -690,7 +782,12 @@ async def create_post(
                     select(PostMedia).where(PostMedia.post_id == post.id)
                 )
             ).all():
-                if row.media_type in ("image", "video"):
+                if row.media_type not in ("image", "video"):
+                    continue
+                if row.id in ids_s3:
+                    if _mp.procesado_s3_configurado():
+                        background.add_task(process_media, row.id)
+                elif processing_configured():
                     background.add_task(process_media, row.id)
 
     profile = await db.get(Profile, current_user.id)
@@ -722,16 +819,19 @@ async def _load_single_post(
 ) -> PostRead:
     """Una publicacion con autor, contadores y estado propio."""
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(uid)
-    row = (
-        await db.execute(
-            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
-            .join(Profile, Profile.id == Post.author_id)
-            .where(Post.id == post_id, Post.status != "deleted")
-        )
-    ).first()
+    stmt = (
+        select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+        .join(Profile, Profile.id == Post.author_id)
+        .where(Post.id == post_id, Post.status != "deleted")
+    )
+    # Con el predicado, lo que no se puede ver es un 404 limpio, igual que lo
+    # que no existe: tambien para una app vieja que abre desde un enlace o un
+    # aviso una publicacion con video en S3 (spec §7, «Compatibilidad»).
+    stmt = await visibilidad.aplicar(stmt, db, uid)
+    row = (await db.execute(stmt)).first()
     if row is None:
         raise NotFoundError("Publicacion no encontrada.")
-    media_map = await _load_media_map(db, [row[0].id])
+    media_map = await _load_media_map(db, [row[0].id], uid)
     temas, etiquetas, personas = await _etiquetas_del_lote(db, [row[0].id])
     lectura = _to_post_read(
         *row,
@@ -763,15 +863,15 @@ async def leer_posts_por_id(
     if not post_ids:
         return []
     likes_sq, comments_sq, liked_sq, saved_sq = _feed_columns(viewer_id)
-    filas = (
-        await db.execute(
-            select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
-            .join(Profile, Profile.id == Post.author_id)
-            .where(Post.id.in_(post_ids), Post.status == "published")
-        )
-    ).all()
+    stmt = (
+        select(Post, Profile, likes_sq, comments_sq, liked_sq, saved_sq)
+        .join(Profile, Profile.id == Post.author_id)
+        .where(Post.id.in_(post_ids), Post.status == "published")
+    )
+    stmt = await visibilidad.aplicar(stmt, db, viewer_id)
+    filas = (await db.execute(stmt)).all()
     ids_cargados = [fila[0].id for fila in filas]
-    media_map = await _load_media_map(db, ids_cargados)
+    media_map = await _load_media_map(db, ids_cargados, viewer_id)
     temas, etiquetas, personas = await _etiquetas_del_lote(db, ids_cargados)
     por_id = {
         fila[0].id: _to_post_read(
@@ -871,24 +971,80 @@ async def update_post(
 
     # `media` ausente deja el adjunto como estaba; presente lo reemplaza (una
     # lista vacia equivale a quitarlo).
+    #
+    # VIDEOS EN S3 (spec §5, «Publicar y editar»). Un video `s3` que la app
+    # reenvia con su clave (`storage_path`) se CONSERVA tal cual: su fila no se
+    # borra ni se recrea, y la API no acepta ninguna otra clave de S3 del
+    # cliente. Uno nuevo llega con `id_de_subida`. El que sale se mueve a
+    # `borrados/` e invalida CloudFront, y el nuevo se procesa.
+    retirados_s3: list[PostMedia] = []
+    nuevos_s3: list[str] = []
     if payload.media is not None:
-        await db.execute(delete(PostMedia).where(PostMedia.post_id == post_id))
+        existentes = (
+            await db.scalars(select(PostMedia).where(PostMedia.post_id == post_id))
+        ).all()
+        en_s3 = await medios_publicacion.ids_en_s3(db, [m.id for m in existentes])
+        s3_por_clave = {m.storage_path: m for m in existentes if m.id in en_s3}
+        adoptados: dict[int, medios_publicacion.Adoptado] = {}
+        conservados: dict[int, PostMedia] = {}
         for index, item in enumerate(payload.media):
-            db.add(
-                PostMedia(
-                    post_id=post_id,
-                    storage_path=item.storage_path,
-                    media_type=item.media_type,
-                    sort_order=index,
-                    width=item.width,
-                    height=item.height,
-                    duration_s=item.duration_s,
-                    bytes=item.bytes,
-                    poster_path=item.poster_path,
+            if item.id_de_subida:
+                adoptados[index] = await medios_publicacion.adoptar(
+                    db, current_user.id, item.id_de_subida, item.id_de_subida_poster
                 )
+            elif (
+                item.storage_path in s3_por_clave
+                and s3_por_clave[item.storage_path] not in conservados.values()
+            ):
+                conservados[index] = s3_por_clave[item.storage_path]
+            else:
+                _exigir_ruta_de_supabase(item.storage_path)
+                _exigir_ruta_de_supabase(item.poster_path)
+        ids_conservados = [m.id for m in conservados.values()]
+        retirados_s3 = [
+            m for m in existentes if m.id in en_s3 and m.id not in ids_conservados
+        ]
+        borrar = delete(PostMedia).where(PostMedia.post_id == post_id)
+        if ids_conservados:
+            borrar = borrar.where(PostMedia.id.not_in(ids_conservados))
+        await db.execute(borrar)
+        for index, item in enumerate(payload.media):
+            if index in conservados:
+                conservados[index].sort_order = index
+                continue
+            adoptado = adoptados.get(index)
+            fila = PostMedia(
+                post_id=post_id,
+                storage_path=adoptado.storage_path if adoptado else item.storage_path,
+                media_type=item.media_type,
+                sort_order=index,
+                width=item.width,
+                height=item.height,
+                duration_s=item.duration_s,
+                bytes=(item.bytes or adoptado.bytes) if adoptado else item.bytes,
+                poster_path=adoptado.poster_path if adoptado else item.poster_path,
             )
+            if adoptado:
+                fila.id = adoptado.media_id
+                nuevos_s3.append(adoptado.media_id)
+            db.add(fila)
+        if nuevos_s3:
+            await db.flush()
+            for media_id in nuevos_s3:
+                await medios_publicacion.marcar_s3(db, media_id)
 
     await db.commit()
+
+    # Lo que sale de S3, despues del commit: el predicado ya no lo firma y la
+    # carpeta se mueve fuera del comodin de las firmas.
+    for medio in retirados_s3:
+        background.add_task(
+            medios_publicacion.retirar, post.author_id, medio.id, post_id
+        )
+    # Hoy PATCH no reprocesaba; para un video nuevo de S3, si (spec §5).
+    if nuevos_s3 and _mp.procesado_s3_configurado():
+        for media_id in nuevos_s3:
+            background.add_task(process_media, media_id)
 
     # DESPUES del commit, como en el resto del modulo: si la transaccion
     # fallara, no puede haberse avisado ya de algo que no llego a ocurrir.
@@ -908,6 +1064,7 @@ async def update_post(
 @router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_post(
     post_id: str,
+    background: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -918,7 +1075,18 @@ async def delete_post(
     if post.author_id != current_user.id and not await is_admin_user(db, current_user.id):
         raise ForbiddenError("No puedes eliminar esta publicacion.")
     post.status = "deleted"  # soft delete
+    medios_ids = list(
+        (await db.scalars(select(PostMedia.id).where(PostMedia.post_id == post_id))).all()
+    )
+    en_s3 = await medios_publicacion.ids_en_s3(db, medios_ids)
     await db.commit()
+    # VIDEOS EN S3 (spec §9). El predicado ya excluye `deleted`, asi que la API
+    # dejo de firmar al instante. Ademas la carpeta se MUEVE a `borrados/`:
+    # invalidar no basta, porque con una URL firmada todavia vigente CloudFront
+    # volveria a traer el objeto de S3. Se borra de verdad a los 30 dias
+    # (limpieza diaria), salvo denuncia abierta.
+    for media_id in en_s3:
+        background.add_task(medios_publicacion.retirar, post.author_id, media_id, post_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -933,6 +1101,8 @@ _SEGMENT_LINE = re.compile(r"^[^#].*\.(ts|m4s|mp4)$")
 async def media_hls_playlist(
     media_id: str,
     playlist: str,
+    # Token corto de la API, solo para videos en S3 (ver `_hls_de_s3`).
+    t: str | None = Query(default=None, max_length=200),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Sirve una playlist HLS del empaquetado de un video.
@@ -954,6 +1124,8 @@ async def media_hls_playlist(
     media = await db.get(PostMedia, media_id)
     if media is None or not media.stream_path:
         raise NotFoundError("Este video no tiene streaming.")
+    if await medios_publicacion.ids_en_s3(db, [media.id]):
+        return await _hls_de_s3(db, media, playlist, t)
     if not _mp.processing_configured():
         raise NotFoundError("Streaming no configurado en este servidor.")
 
@@ -995,6 +1167,95 @@ async def media_hls_playlist(
         # Corta pero cacheable: las firmas duran una hora; la playlist puede
         # reutilizarse unos minutos sin volver a firmar nada.
         headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+#: `URI="..."` dentro de una etiqueta (`#EXT-X-MAP`, `#EXT-X-MEDIA`...).
+_URI_ATTR = re.compile(r'URI="([^"]+)"')
+
+
+def reescribir_lista_hls(
+    texto: str, *, token: str, carpeta_hls: str, query_cloudfront: str
+) -> str:
+    """Reescribe una lista HLS de S3 (master o variante) — spec §7, A1.
+
+    - Las referencias a OTRA lista (`360p.m3u8`) vuelven a pasar por la API con
+      el mismo token: quedan RELATIVAS a esta misma ruta, asi que resuelven
+      contra `/media/<id>/hls/` sin saber el dominio de la API.
+    - Cada segmento (y cada `URI=` de una etiqueta) pasa a una URL ABSOLUTA de
+      CloudFront con la query de la politica con comodin: todos llegan
+      firmados, y ningun pedido de segmento toca la API.
+    """
+
+    def _absoluta(nombre: str) -> str:
+        if nombre.startswith(("http://", "https://")) or "/" in nombre:
+            # La disposicion es plana: algo con carpetas no es nuestro.
+            return nombre
+        if nombre.endswith(".m3u8"):
+            return f"{nombre}?t={token}"
+        return medios_firma.url_firmada(f"{carpeta_hls}/{nombre}", query_cloudfront)
+
+    salida = []
+    for linea in texto.splitlines():
+        limpia = linea.strip()
+        if not limpia:
+            salida.append(linea)
+        elif limpia.startswith("#"):
+            salida.append(_URI_ATTR.sub(lambda m: f'URI="{_absoluta(m.group(1))}"', linea))
+        else:
+            salida.append(_absoluta(limpia))
+    return "\n".join(salida) + "\n"
+
+
+async def _hls_de_s3(
+    db: AsyncSession, media: PostMedia, playlist: str, token: str | None
+) -> Response:
+    """HLS de un video en S3: token de la API + predicado EN CADA PEDIDO (N2).
+
+    El reproductor nativo no manda la sesion. Por eso la visibilidad se decide
+    al emitir el token (con el mismo predicado que el muro) y se VUELVE a
+    comprobar aqui en cada lista, para la persona a la que se emitio: un
+    borrado o un bloqueo cortan el acceso al instante. La firma de CloudFront
+    que se pone nunca vence despues que el token.
+    """
+    if not medios_banderas.lectura_activa():
+        raise NotFoundError("Este video no tiene streaming.")
+    valido = medios_firma.validar_token_hls(media.id, token)
+    if valido is None:
+        raise NotFoundError("Este video no tiene streaming.")
+    vence_token, quien = valido
+    if not await visibilidad.puede_ver_publicacion(db, media.post_id, quien):
+        raise NotFoundError("Este video no tiene streaming.")
+    carpeta = medios_firma.carpeta_de_clave(media.stream_path or "")
+    if carpeta is None:
+        raise NotFoundError("Este video no tiene streaming.")
+    vence = min(vence_token, medios_firma.vencimiento_de_ventana())
+    query = medios_firma.query_de_carpeta(carpeta, vence)
+    if query is None:
+        raise NotFoundError("Streaming no configurado en este servidor.")
+
+    from app.modules.medios.almacen import S3Storage
+
+    try:
+        crudo = await S3Storage().descargar(f"{media.stream_path}/{playlist}")
+    except Exception as error:  # noqa: BLE001
+        from app.modules.medios.almacen import es_no_existe
+
+        if es_no_existe(error):
+            raise NotFoundError("Playlist no encontrada.") from None
+        raise
+    cuerpo = reescribir_lista_hls(
+        crudo.decode("utf-8", "replace"),
+        token=token or "",
+        carpeta_hls=media.stream_path or "",
+        query_cloudfront=query,
+    )
+    return Response(
+        content=cuerpo,
+        media_type="application/vnd.apple.mpegurl",
+        # PRIVADA y corta: la lista lleva firmas, y el predicado se revisa en
+        # cada pedido. Una cache compartida se saltaria esa revision.
+        headers={"Cache-Control": "private, max-age=60"},
     )
 
 
@@ -1191,10 +1452,13 @@ async def list_saved_posts(
     if media:
         with_media = select(PostMedia.post_id).where(PostMedia.media_type == media)
         stmt = stmt.where(Post.id.in_(with_media))
+    # Guardar algo no da derecho a verlo despues: si dejo de ser visible para
+    # quien lo guardo, deja de salir aqui (spec §7).
+    stmt = await visibilidad.aplicar(stmt, db, uid)
 
     rows = (await db.execute(stmt)).all()
     ids = [row[0].id for row in rows]
-    media_map = await _load_media_map(db, ids)
+    media_map = await _load_media_map(db, ids, uid)
     temas, etiquetas, personas = await _etiquetas_del_lote(db, ids)
     salida = [
         _to_post_read(

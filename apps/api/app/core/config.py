@@ -541,6 +541,54 @@ class Settings(BaseSettings):
     #: la practica es lo subido desde la web.
     video_bitrate_umbral: int = 3_500_000
 
+    # --- Videos de publicaciones en S3 + CloudFront (spec «opción B») ---
+    #: TODO APAGADO DE FÁBRICA. Sin tocar nada de esto, la API se comporta como
+    #: antes: los videos van a Supabase y no se firma nada en CloudFront. El
+    #: detalle y las fases están en `docs/Z_MEDIOS_S3_CLOUDFRONT.md`.
+    #:
+    #: QUIÉN SUBE a S3 los videos de sus publicaciones: `nadie` (de fábrica),
+    #: `lista` (solo las cuentas de `medios_s3_subida_cuentas`, la prueba con
+    #: cuentas internas de la fase 2) o `todos`. Volver a `nadie` es el
+    #: rollback de la fase 2: lo ya subido se sigue sirviendo.
+    medios_s3_subida: Literal["nadie", "lista", "todos"] = "nadie"
+    #: Lista de `uid` separados por comas. Va en el SECRETO, no en la plantilla:
+    #: quién prueba no tiene por qué quedar escrito en el repositorio.
+    medios_s3_subida_cuentas: str = ""
+    #: Si la API firma y DEVUELVE las publicaciones con videos en S3. Apagada,
+    #: esas publicaciones no salen en ningún endpoint: es el interruptor de
+    #: emergencia (spec §7, «Banderas»).
+    medios_s3_lectura: bool = False
+    #: EL PREDICADO DE VISIBILIDAD (spec §7). `abierta` (de fábrica) deja los
+    #: endpoints de publicaciones como estaban —ninguno miraba `visibility`—
+    #: salvo para las publicaciones con videos en S3, que SIEMPRE pasan por el
+    #: predicado antes de firmarse. `estricta` lo aplica a todas: `followers`
+    #: solo a seguidores, `circle` a los miembros del círculo, borradores solo
+    #: al autor y bloqueos en los dos sentidos. Se enciende en la fase 1.
+    publicaciones_visibilidad: Literal["abierta", "estricta"] = "abierta"
+    #: El bucket y su región. Sin bucket, todo lo de S3 está apagado.
+    medios_s3_bucket: str = ""
+    medios_s3_region: str = "us-east-1"
+    #: La distribución de medios: dominio (`dxxxx.cloudfront.net`) para firmar
+    #: y su id para invalidar. Las credenciales salen del rol de la instancia
+    #: (nunca de claves guardadas).
+    cloudfront_medios_dominio: str = ""
+    cloudfront_medios_distribucion_id: str = ""
+    #: El id de la clave pública del grupo de confianza y la clave PRIVADA en
+    #: PEM codificada en base64 DE UNA LÍNEA: el arranque convierte el secreto
+    #: en variables de entorno línea por línea y una PEM con saltos de línea se
+    #: truncaría (spec §4, corrección C2). Si falta o no se puede leer, la API
+    #: arranca igual pero no firma: las filas `s3` salen sin URL.
+    cloudfront_medios_key_pair_id: str = ""
+    cloudfront_medios_private_key_b64: str = ""
+    #: Tope del lado de la API, igual al `EXPO_PUBLIC_MAX_UPLOAD_MB` de la app.
+    medios_max_video_mb: int = 500
+    #: Publicaciones con video por cuenta y por hora (contadas por grupo).
+    medios_publicaciones_con_video_por_hora: int = 20
+    #: El secreto con el que EventBridge llama a la limpieza diaria
+    #: (`/tareas/medios/limpieza`). Vacío o corto = sin configurar: la ruta
+    #: contesta 503. Va en el secreto de la API.
+    medios_tareas_token: str = ""
+
     # --- Recomendaciones ---
     #: Personalizacion (onboarding + "Personas para ti" + "Para ti" ordenado).
     #: ENCENDIDO por defecto, y apagable en caliente desde una variable de

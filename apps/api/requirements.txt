@@ -14,5 +14,15 @@ pillow>=11.0,<12.0
 # para que Windows y el contenedor calculen con la MISMA, y no con la que
 # traiga (o no) el sistema.
 tzdata>=2025.1
+# Videos de publicaciones en S3 + CloudFront (spec «opcion B»): S3 con el rol
+# de la instancia y la firma de CloudFront. FIJADAS: la firma y las URLs
+# prefirmadas son la frontera de seguridad y no deben cambiar solas en un
+# despliegue. `cryptography` ya llegaba por `pyjwt[crypto]`, pero ahora la
+# usamos directo (firma RSA-SHA256 de CloudFront), asi que va explicita.
+boto3==1.44.6
+cryptography==50.0.2
 pytest>=8.3,<9.0
 pytest-asyncio>=0.25,<1.0
+# S3 y CloudFront simulados en las pruebas de los medios (ninguna prueba habla
+# con AWS). Va aqui, junto a pytest, como el resto de dependencias de prueba.
+moto[s3,cloudfront]==5.2.5
