@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import AuthUser, get_optional_user
+from app.modules.medios import banderas as medios_banderas
+from app.modules.medios import esquema as medios_esquema
 from app.modules.services import acceso as servicios
 from app.shared.database import get_db
 
@@ -36,6 +38,13 @@ class PlatformConfig(BaseModel):
     #: entra por su rol y no por la lista del piloto: quien revisa no tiene por
     #: qué ser participante, y un participante no administra nada.
     feature_services_admin: bool = False
+    #: Videos de publicaciones en S3 (spec «opcion B»). `medios_s3_subida`: si
+    #: ESTA cuenta sube sus videos de Reel, Publicacion y Edicion a S3 (de
+    #: fabrica nadie; sin sesion, false). `medios_s3_lectura`: si la API firma
+    #: y entrega las publicaciones con videos en S3. AÑADIDOS: una app vieja
+    #: los ignora y una nueva frente a un servidor viejo los toma como false.
+    medios_s3_subida: bool = False
+    medios_s3_lectura: bool = False
 
 
 @router.get("/config", response_model=PlatformConfig)
@@ -45,8 +54,11 @@ async def configuracion(
 ) -> PlatformConfig:
     ajustes = get_settings()
     perfil = usuario.id if usuario is not None else None
+    hay_0116 = await medios_esquema.hay_almacen(db) if medios_banderas.s3_configurado() else False
     return PlatformConfig(
         publicacion_flexible=ajustes.publicacion_flexible,
         feature_services=servicios.abierto_para(perfil),
         feature_services_admin=await servicios.administra(db, perfil),
+        medios_s3_subida=hay_0116 and medios_banderas.puede_subir(perfil),
+        medios_s3_lectura=medios_banderas.lectura_activa(),
     )

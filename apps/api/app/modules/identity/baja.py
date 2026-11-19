@@ -62,6 +62,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ServiceUnavailableError
+from app.modules.medios import publicacion as medios_publicacion
 from app.modules.messaging.models import Conversation, ConversationMember
 from app.modules.profiles.models import Profile
 from app.modules.services import conservacion
@@ -358,6 +359,17 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     except (storage.StorageFallo, storage.StorageNoConfigurado):
         await db.rollback()
         logger.warning("Baja de %s deshecha: no se pudieron borrar sus archivos", usuario_id)
+        raise ArchivosSinBorrar() from None
+
+    # Los videos de publicaciones en S3 (spec §9): `videos/<uid>/`,
+    # `borrados/<uid>/` y `pendientes/<uid>/`, borrados EN EL ACTO, mas una
+    # invalidacion de `/videos/<uid>/*`. Si S3 falla, la baja aborta antes de
+    # confirmar, igual que con Supabase. Sin bucket configurado no hace nada.
+    try:
+        await medios_publicacion.borrar_cuenta(usuario_id)
+    except Exception:  # noqa: BLE001 — cualquier fallo de S3: no se confirma
+        await db.rollback()
+        logger.warning("Baja de %s deshecha: no se pudieron borrar sus videos de S3", usuario_id)
         raise ArchivosSinBorrar() from None
 
     await db.commit()

@@ -44,6 +44,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -103,6 +104,14 @@ def processing_configured() -> bool:
         and settings.supabase_url
         and settings.supabase_service_role_key
     )
+
+
+def procesado_s3_configurado() -> bool:
+    """El procesado de los videos en S3 (spec §6): lee y escribe en el bucket
+    de medios con el rol de la instancia, sin la service key de Supabase."""
+    from app.modules.medios import banderas
+
+    return bool(get_settings().media_processing_enabled and banderas.s3_configurado())
 
 
 def _headers() -> dict[str, str]:
@@ -598,7 +607,47 @@ def _tipo_hls(nombre: str) -> str:
     return "video/mp2t"
 
 
-async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
+_VERSION = re.compile(r"-v(\d+)(?:\.[a-z0-9]+)?$")
+
+
+def _version(ruta: str | None) -> int:
+    """La `n` de `poster-v<n>.jpg`, `feed-720-v<n>.mp4` o `hls-v<n>`; 0 si no
+    tiene."""
+    if not ruta:
+        return 0
+    coincide = _VERSION.search(ruta.rstrip("/"))
+    return int(coincide.group(1)) if coincide else 0
+
+
+def rutas_de_derivados(
+    media: PostMedia, almacen: str, owner: str
+) -> tuple[str, str, str]:
+    """(poster, mp4 del feed, carpeta HLS) donde se escribe cada derivado.
+
+    - Supabase: `<dueño>/derived/<medio>/…`, como siempre.
+    - S3 (spec §2): `videos/<uid>/<medio>/poster-v<n>.jpg`,
+      `feed-720-v<n>.mp4` y `hls-v<n>/`, con `n` = la versión siguiente a la
+      que nombra la fila. VERSIONADOS porque CloudFront guarda cada objeto un
+      año: un reproceso con el mismo nombre serviría la copia vieja. La versión
+      anterior la borra la limpieza diaria a los 7 días.
+    """
+    if almacen == "s3":
+        carpeta = f"videos/{owner}/{media.id}"
+        return (
+            f"{carpeta}/poster-v{_version(media.poster_path) + 1}.jpg",
+            f"{carpeta}/feed-720-v{_version(media.feed_path) + 1}.mp4",
+            f"{carpeta}/hls-v{_version(media.stream_path) + 1}",
+        )
+    base = f"{owner}/derived/{media.id}"
+    return f"{base}/poster.jpg", f"{base}/feed.mp4", f"{base}/hls"
+
+
+async def _process_video(
+    client: httpx.AsyncClient,
+    media: PostMedia,
+    almacen: str = "supabase",
+    owner: str | None = None,
+) -> None:
     """Poster, MP4 de 720p y —si se pide— HLS.
 
     QUE CAMBIO Y POR QUE. Antes esto solo sacaba el poster, y ni eso cuando
@@ -608,10 +657,31 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
 
     El trabajo caro va detras de un semaforo y con UNA sola descarga del
     original para las tres cosas.
+
+    DOS ALMACENES (spec §6). Con S3 solo cambia de donde se lee y donde se
+    escribe: el dueño llega de `post.author_id` (en S3 la clave empieza por
+    `videos/`, no por el uid) y las URLs prefirmadas para ffmpeg se crean
+    JUSTO ANTES de usarse, porque heredan las credenciales temporales del rol.
     """
+    from app.modules.medios.almacen import CACHE_INMUTABLE, almacen_para
+
+    alm = almacen_para(almacen, client)
+    es_s3 = almacen == "s3"
     ffmpeg = _ffmpeg()
     ajustes = get_settings()
-    url = await _signed_url(client, media.storage_path, expires=ESPERA_CODIFICACION_S + 600)
+
+    async def _url() -> str:
+        return await alm.url_de_lectura_temporal(
+            media.storage_path, ESPERA_CODIFICACION_S + 600
+        )
+
+    async def _subir(ruta: str, datos: bytes, tipo: str) -> None:
+        if es_s3:
+            await alm.subir(ruta, datos, tipo, cache_control=CACHE_INMUTABLE)
+        else:
+            await _upload(client, ruta, datos, tipo)
+
+    url = await _url()
 
     if media.width is None or media.duration_s is None:
         ancho, alto, duracion = await _probe_video(url)
@@ -637,18 +707,21 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
     if not falta_poster and not quiere_mp4 and not quiere_hls:
         return
 
-    owner = media.storage_path.split("/", 1)[0]
+    if owner is None:
+        owner = media.storage_path.split("/", 1)[0]
+    ruta_poster, ruta_feed, ruta_hls = rutas_de_derivados(media, almacen, owner)
 
     # CAMINO BARATO: solo falta el poster. Se saca leyendo por rangos unos
     # cientos de KB, sin bajar el archivo entero y sin ocupar el semaforo.
     if not quiere_mp4 and not quiere_hls:
+        if es_s3:
+            url = await _url()
         with tempfile.TemporaryDirectory() as tmp:
             destino = Path(tmp) / "poster.jpg"
             if not await _extraer_poster(ffmpeg, url, destino):
                 return
-            poster_path = f"{owner}/derived/{media.id}/poster.jpg"
-            await _upload(client, poster_path, destino.read_bytes(), "image/jpeg")
-            media.poster_path = poster_path
+            await _subir(ruta_poster, destino.read_bytes(), "image/jpeg")
+            media.poster_path = ruta_poster
             logger.info("Poster generado para el video %s", media.id)
         return
 
@@ -657,14 +730,18 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             carpeta = Path(tmp)
             local = carpeta / "original"
-            await _descargar_a_disco(client, url, local)
+            if es_s3:
+                # Dentro del semaforo y con boto3: un video en cola no puede
+                # quedarse con una URL vencida (spec §6, M1).
+                await alm.descargar_a_disco(media.storage_path, local)
+            else:
+                await _descargar_a_disco(client, url, local)
 
             if falta_poster:
                 destino = carpeta / "poster.jpg"
                 if await _extraer_poster(ffmpeg, str(local), destino):
-                    poster_path = f"{owner}/derived/{media.id}/poster.jpg"
-                    await _upload(client, poster_path, destino.read_bytes(), "image/jpeg")
-                    media.poster_path = poster_path
+                    await _subir(ruta_poster, destino.read_bytes(), "image/jpeg")
+                    media.poster_path = ruta_poster
 
             if quiere_mp4:
                 destino = carpeta / "feed.mp4"
@@ -672,11 +749,8 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
                     # Solo se adopta si de verdad ahorra: un derivado igual o
                     # mayor que el original no compensa la copia.
                     if destino.stat().st_size < local.stat().st_size * 0.9:
-                        feed_path = f"{owner}/derived/{media.id}/feed.mp4"
-                        await _upload(
-                            client, feed_path, destino.read_bytes(), "video/mp4"
-                        )
-                        media.feed_path = feed_path
+                        await _subir(ruta_feed, destino.read_bytes(), "video/mp4")
+                        media.feed_path = ruta_feed
                         logger.info(
                             "Video %s: original %.1f MB -> feed %.1f MB",
                             media.id,
@@ -687,15 +761,13 @@ async def _process_video(client: httpx.AsyncClient, media: PostMedia) -> None:
             if quiere_hls:
                 hls = carpeta / "hls"
                 if await _generar_hls(ffmpeg, local, hls, media.width, media.height):
-                    stream_path = f"{owner}/derived/{media.id}/hls"
                     for archivo in sorted(hls.iterdir()):
-                        await _upload(
-                            client,
-                            f"{stream_path}/{archivo.name}",
+                        await _subir(
+                            f"{ruta_hls}/{archivo.name}",
                             archivo.read_bytes(),
                             _tipo_hls(archivo.name),
                         )
-                    media.stream_path = stream_path
+                    media.stream_path = ruta_hls
                     logger.info("HLS generado para el video %s", media.id)
 
 
@@ -716,7 +788,9 @@ CAMPOS_DERIVADOS = (
 )
 
 
-async def _retirar_derivados(media: PostMedia) -> None:
+async def _retirar_derivados(
+    media: PostMedia, almacen: str = "supabase", owner: str | None = None
+) -> None:
     """Borra `<dueño>/derived/<medio>/`, lo haya llegado a anotar o no (una
     subida pudo terminar justo antes de un fallo). Si no hay nada, es un
     listado vacío.
@@ -725,6 +799,18 @@ async def _retirar_derivados(media: PostMedia) -> None:
     Un fallo se registra sin la ruta.
     """
     from app.shared import storage
+
+    if almacen == "s3":
+        # En S3 la fila ya no existe: la baja borro `videos/<uid>/` o una
+        # edicion movio el medio a `borrados/`. Lo que quede en su carpeta de
+        # `videos/` son derivados recien subidos sin dueño.
+        from app.modules.medios.almacen import S3Storage
+
+        try:
+            await S3Storage().borrar_prefijo(f"videos/{owner}/{media.id}/")
+        except Exception:  # noqa: BLE001
+            logger.warning("No se pudieron retirar los derivados huérfanos del medio %s", media.id)
+        return
 
     carpeta = f"{media.storage_path.split('/', 1)[0]}/derived/{media.id}"
     try:
@@ -748,7 +834,7 @@ async def process_media(media_id: str) -> None:
 
     Cualquier fallo marca `failed` y deja el original sirviendose como siempre.
     """
-    if not processing_configured():
+    if not processing_configured() and not procesado_s3_configurado():
         return
 
     # 1. Leer y marcar. Sesion corta.
@@ -758,6 +844,23 @@ async def process_media(media_id: str) -> None:
         ).first()
         if media is None or media.media_type not in ("image", "video"):
             return
+        # De que almacen es (migracion 0116) y, para S3, el dueño: se captura
+        # AQUI de `post.author_id` (spec §6), no de la ruta.
+        from app.modules.medios import publicacion as medios_publicacion
+        from app.modules.content.models import Post
+
+        almacen = (
+            "s3" if await medios_publicacion.ids_en_s3(db, [media.id]) else "supabase"
+        )
+        if almacen == "s3" and (media.media_type != "video" or not procesado_s3_configurado()):
+            return
+        if almacen == "supabase" and not processing_configured():
+            return
+        owner = (
+            await db.scalar(select(Post.author_id).where(Post.id == media.post_id))
+            if almacen == "s3"
+            else None
+        )
         media.processing_status = "processing"
         await db.commit()
         # Se desliga de la sesion para poder seguir usandolo como un objeto
@@ -771,6 +874,8 @@ async def process_media(media_id: str) -> None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             if media.media_type == "image":
                 await _process_image(client, media)
+            elif almacen == "s3":
+                await _process_video(client, media, "s3", owner)
             else:
                 await _process_video(client, media)
     except Exception:  # noqa: BLE001 — el post ya existe; esto es mejora, no requisito
@@ -793,7 +898,7 @@ async def process_media(media_id: str) -> None:
             )
         ).first()
         if fila is None:
-            await _retirar_derivados(media)
+            await _retirar_derivados(media, almacen, owner)
             return
         for campo in CAMPOS_DERIVADOS:
             valor = getattr(media, campo, None)

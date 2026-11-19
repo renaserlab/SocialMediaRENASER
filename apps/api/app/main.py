@@ -55,6 +55,7 @@ from app.modules.services.reserva_router import router as services_booking_route
 from app.modules.services.router import admin_router as services_admin_router
 from app.modules.services.router import router as services_router
 from app.modules.learning.router import router as learning_router
+from app.modules.medios.router import router as medios_router
 from app.modules.live.router import router as live_router
 from app.modules.messaging.router import router as messaging_router
 from app.modules.moderation.router import router as moderation_router
@@ -173,6 +174,22 @@ def create_app() -> FastAPI:
         respuesta.headers["X-Request-Id"] = identificador
         return respuesta
 
+    # QUE SABE REPRODUCIR EL CLIENTE (spec «opcion B», §7). La app nueva manda
+    # `X-Zeta-Medios: s3`; una vieja no, y a esa no se le devuelven
+    # publicaciones con videos en S3 en ningun endpoint. Se deja en un
+    # `ContextVar` para no pasarlo por cada funcion que arma publicaciones.
+    @app.middleware("http")
+    async def _cliente_de_medios(request, call_next):  # noqa: ANN001, ANN202
+        from app.modules.medios import banderas as medios_banderas
+
+        testigo = medios_banderas.fijar_cliente(
+            request.headers.get(medios_banderas.CABECERA_CLIENTE)
+        )
+        try:
+            return await call_next(request)
+        finally:
+            medios_banderas.restaurar_cliente(testigo)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -209,6 +226,9 @@ def create_app() -> FastAPI:
     # vacias y republicar avisa de que no esta disponible.
     app.include_router(reposts_router, prefix=prefix)
     app.include_router(stories_router, prefix=prefix)
+    # Videos de publicaciones en S3: subidas, limpieza diaria y salud. Todo
+    # detras de banderas apagadas de fabrica (`medios_s3_*`).
+    app.include_router(medios_router, prefix=prefix)
     app.include_router(messaging_router, prefix=prefix)
     app.include_router(catalog_router, prefix=prefix)
     # El dominio de Eventos. La lectura publica sigue en `catalog`.

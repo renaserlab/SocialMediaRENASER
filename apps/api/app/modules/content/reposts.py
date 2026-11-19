@@ -315,6 +315,11 @@ async def list_reposts(
             PostRepost.author_id.not_in(bloqueados), Post.author_id.not_in(bloqueados)
         )
 
+    # El predicado comun de visibilidad (spec §7) sobre el post ORIGINAL.
+    # Import diferido por el mismo ciclo que `_hidratar_publicaciones`.
+    from app.modules.content import visibilidad  # noqa: PLC0415
+
+    stmt = await visibilidad.aplicar(stmt, db, uid)
     filas = (await db.execute(stmt)).all()
     if not filas:
         return []

@@ -49,6 +49,8 @@ import pytest
 
 from app.core.config import get_settings
 from app.modules.catalog import esquema as esquema_de_catalogo
+from app.modules.medios import esquema as esquema_de_medios
+from app.modules.medios import firma as firma_de_medios
 from app.modules.recommendations import cache, esquema
 
 
@@ -104,3 +106,8 @@ def _sin_estado_heredado() -> None:
     cache.vaciar()
     esquema.olvidar()
     esquema_de_catalogo.olvidar()
+    # Los medios en S3 (0116): si la columna `almacen` existe se recuerda en el
+    # proceso, y la clave de firma se guarda leida. Cada prueba levanta su base
+    # y su clave.
+    esquema_de_medios.olvidar()
+    firma_de_medios.olvidar()

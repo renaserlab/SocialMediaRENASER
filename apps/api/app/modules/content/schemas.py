@@ -29,13 +29,33 @@ class PostMediaRead(BaseModel):
     feed_path: str | None = None
     stream_path: str | None = None
     processing_status: str | None = None
+    #: De donde sale el archivo (migracion 0116). Con 's3', las rutas de arriba
+    #: son CLAVES DE S3 y la app NO debe firmarlas en Supabase: usa las URLs de
+    #: abajo, que firma la API. Un servidor sin la 0116 dice siempre 'supabase'.
+    almacen: str = "supabase"
+    #: Solo en filas 's3' y solo para quien puede verlas (spec §7): URL de
+    #: CloudFront ya firmada del MP4 (el de 720p si existe), del poster y del
+    #: HLS (relativa a la API, con un token corto), y cuando vencen.
+    media_url: str | None = None
+    poster_url: str | None = None
+    stream_url: str | None = None
+    urls_expiran: datetime | None = None
 
 
 class PostMediaInput(BaseModel):
-    """Medio ya subido a Storage por el cliente (bucket post-media)."""
+    """Medio ya subido por el cliente.
 
-    storage_path: str = Field(min_length=1, max_length=500)
+    Dos formas: `storage_path` (Supabase, bucket post-media, como siempre) o
+    `id_de_subida` (un video subido a S3 con `POST /medios/subidas`; spec §5).
+    Con `id_de_subida` la API IGNORA cualquier ruta que mande el cliente: la
+    clave sale de la subida, que es de la cuenta de la sesion.
+    """
+
+    storage_path: str | None = Field(default=None, min_length=1, max_length=500)
     media_type: str = Field(pattern=r"^(image|video|audio|document)$")
+    #: Subida a S3 del video y, si la hay, de su poster.
+    id_de_subida: str | None = Field(default=None, max_length=64)
+    id_de_subida_poster: str | None = Field(default=None, max_length=64)
     # Metadata calculada en el dispositivo al subir. Un movil anterior no la
     # manda y el pipeline del backend puede completarla despues.
     width: int | None = Field(default=None, ge=1, le=20000)
@@ -45,6 +65,21 @@ class PostMediaInput(BaseModel):
     # El poster tambien lo sube el cliente a su carpeta del bucket; aqui llega
     # solo la ruta. La RLS de Storage ya impide escribir fuera de la propia.
     poster_path: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _una_sola_procedencia(self) -> "PostMediaInput":
+        if self.id_de_subida:
+            if self.media_type != "video":
+                raise ValueError("Solo los videos se suben a S3.")
+            # La clave la decide la subida, nunca el cliente.
+            self.storage_path = None
+            self.poster_path = None
+        else:
+            if self.id_de_subida_poster:
+                raise ValueError("El poster de S3 va con su video de S3.")
+            if not self.storage_path:
+                raise ValueError("Falta el archivo del medio.")
+        return self
 
 
 class PostCreate(BaseModel):
