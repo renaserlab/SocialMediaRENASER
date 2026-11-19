@@ -175,7 +175,8 @@ def create_app() -> FastAPI:
         return respuesta
 
     # QUE SABE REPRODUCIR EL CLIENTE (spec «opcion B», §7). La app nueva manda
-    # `X-Zeta-Medios: s3`; una vieja no, y a esa no se le devuelven
+    # `Accept: application/json;zeta-medios=s3` (o `X-Zeta-Medios: s3`); una
+    # vieja no, y a esa no se le devuelven
     # publicaciones con videos en S3 en ningun endpoint. Se deja en un
     # `ContextVar` para no pasarlo por cada funcion que arma publicaciones.
     @app.middleware("http")
@@ -183,7 +184,8 @@ def create_app() -> FastAPI:
         from app.modules.medios import banderas as medios_banderas
 
         testigo = medios_banderas.fijar_cliente(
-            request.headers.get(medios_banderas.CABECERA_CLIENTE)
+            request.headers.get(medios_banderas.CABECERA_CLIENTE),
+            request.headers.get("accept"),
         )
         try:
             return await call_next(request)

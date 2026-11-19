@@ -11,20 +11,38 @@ from contextvars import ContextVar
 
 from app.core.config import get_settings
 
-#: La cabecera con la que la app nueva dice «sé reproducir videos de S3»
-#: (spec §7, «Compatibilidad»). Una app vieja no la manda y no puede recibir
-#: publicaciones con videos en S3: firmaría su ruta en Supabase y fallaría.
+#: Como dice la app nueva «sé reproducir videos de S3» (spec §7,
+#: «Compatibilidad»). Una app vieja no lo dice y no puede recibir publicaciones
+#: con videos en S3: firmaría su ruta en Supabase y fallaría.
+#:
+#: LA FORMA PRINCIPAL ES UN PARÁMETRO DE `Accept` (`application/json;
+#: zeta-medios=s3`), no una cabecera propia: `Accept` está en la lista segura de
+#: CORS y no obliga al navegador a una comprobación `OPTIONS` antes de cada GET
+#: anónimo de la web. La cabecera `X-Zeta-Medios: s3` que pedía la spec se
+#: sigue aceptando (clientes nativos, curl).
 CABECERA_CLIENTE = "x-zeta-medios"
+PARAMETRO_DE_ACCEPT = "zeta-medios"
 
 #: Lo que trajo la petición en curso. Lo fija un middleware (`main.py`) para
 #: no tener que pasarlo por cada endpoint que devuelve publicaciones.
 _cliente_entiende_s3: ContextVar[bool] = ContextVar("cliente_entiende_s3", default=False)
 
 
-def fijar_cliente(valor_de_cabecera: str | None):
+def _accept_dice_s3(accept: str | None) -> bool:
+    for tipo in (accept or "").split(","):
+        for parametro in tipo.split(";")[1:]:
+            nombre, _, valor = parametro.partition("=")
+            if nombre.strip().lower() == PARAMETRO_DE_ACCEPT:
+                valores = {v.strip().strip('"').lower() for v in valor.split("+")}
+                if "s3" in valores:
+                    return True
+    return False
+
+
+def fijar_cliente(valor_de_cabecera: str | None, accept: str | None = None):
     """Devuelve el testigo para restaurar el valor al terminar la petición."""
     valores = {v.strip().lower() for v in (valor_de_cabecera or "").split(",")}
-    return _cliente_entiende_s3.set("s3" in valores)
+    return _cliente_entiende_s3.set("s3" in valores or _accept_dice_s3(accept))
 
 
 def restaurar_cliente(testigo) -> None:
