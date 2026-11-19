@@ -78,9 +78,26 @@ jobs:
       - name: Armar la web
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          # Las variables EXPO_PUBLIC_* estan marcadas como «Sensitive» en Vercel y
+          # `vercel pull` las baja VACIAS: el primer despliegue con token (19-11-2026)
+          # salio sin Supabase y la web se cayo («Invalid supabaseUrl»). Son valores
+          # publicos (viajan dentro del bundle y estan en apps/mobile/eas.json, perfil
+          # production), asi que se fijan aqui. Si cambian, cambiar en los dos sitios.
+          EXPO_PUBLIC_APP_ENV: production
+          EXPO_PUBLIC_SUPABASE_URL: https://jbdlqzimfwyrmmatztqu.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_mozgPT3WYysueBxEvKks9g_tA-7iMbi
+          EXPO_PUBLIC_API_URL: https://dzqncwhehxai0.cloudfront.net
+          EXPO_PUBLIC_WEB_URL: https://social-media-renaser.vercel.app
+          EXPO_PUBLIC_MAX_UPLOAD_MB: '500'
+          EXPO_PUBLIC_FEATURE_LIVE: 'on'
         run: |
           if [ "$ENTORNO" = "production" ]; then extra=--prod; else extra=; fi
           npx --yes "$VERCEL_CLI" build $extra --token="$VERCEL_TOKEN"
+          # Red de seguridad: si el bundle no trae la URL de Supabase, no se publica.
+          if ! grep -rqs "jbdlqzimfwyrmmatztqu.supabase.co" .vercel/output/static/_expo/static/js/web/; then
+            echo "::error::El bundle salio sin EXPO_PUBLIC_SUPABASE_URL: no se publica."
+            exit 1
+          fi
 
       - name: Publicar
         id: publicar
