@@ -53,6 +53,11 @@ const FALSOS: Record<string, string> = {
   '@/i18n': js("export function traduceEnElIdiomaActual(k) { return k; }"),
   '@/data/categories': js("export const PRIVATE_AUDIO_CATEGORY = 'privado';"),
   '@/mappers/profileMapper': js('export function toProfileSummary(x) { return x; }'),
+  // La rama de telemetria (`feature/medicion-video-en-telefono`) hace que
+  // `PostRepository.ts` importe este modulo, que arrastra react-native. Se
+  // simula YA para que el merge no rompa esta bateria; mientras el modulo no
+  // exista en esta rama, la entrada no se usa y no estorba.
+  '@/lib/medicionDeVideoEnApp': js('export const medicionDeVideo = { hito() {} };'),
 };
 const SRC = fileURLToPath(new URL('..', import.meta.url));
 
