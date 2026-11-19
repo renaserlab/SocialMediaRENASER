@@ -1,0 +1,628 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+# =============================================================================
+# PILA 3 — MEDIOS (videos de las publicaciones en S3, servidos por CloudFront)
+# =============================================================================
+#
+# POR QUE SE HACE ESTO. Medido el 19/11/2026 desde Lima en produccion web: el
+# primer video tarda 3,1 s en wifi y 6,6 s en 4G, y la primera vista de cada
+# video sale de Virginia (0,6-1,2 s solo hasta el primer byte). La CloudFront
+# de la API usa PriceClass_100, que no tiene nodos en Sudamerica. Aqui los
+# videos nuevos viven en un bucket privado y salen por una distribucion propia
+# con nodos en Lima y Sao Paulo, con URLs firmadas que da la API despues de
+# revisar quien puede ver cada publicacion. Detalle en la spec «Zeta · videos
+# en S3 + CloudFront (opcion B)».
+#
+#   App --PUT firmado--> S3 (pendientes/)        API (rol de la maquina)
+#   App --GET firmado--> CloudFront --OAC--> S3 (videos/)  <-- procesa y mueve
+#
+# POR QUE ES UNA PILA APARTE Y NO PARTE DE LA PLATAFORMA:
+#
+# 1. Ciclo de vida. La plataforma (red, balanceador, maquinas) se puede borrar
+#    y rehacer. El bucket de medios NO: guarda los videos de la gente. Lo que
+#    no se debe borrar por accidente no vive en la pila que se borra (mismo
+#    criterio que la fundacion).
+#
+# 2. Pruebas sin staging. Con el MISMO fichero se crea la variante de prueba
+#    (`zexcelencia-medios-prueba`, parametro Variante = prueba) para la fase 0:
+#    bucket, distribucion y clave de firma propios, que se borran sin tocar
+#    produccion.
+#
+# 3. La plataforma NO depende de esta pila. Recibe el bucket y la distribucion
+#    por PARAMETROS (BucketDeMedios, DistribucionDeMedios, DominioDeMedios), no
+#    por !ImportValue: la pila 03 puede no existir todavia (o ser la de prueba),
+#    y una exportacion consumida impediria borrar o reemplazar esta pila. Por
+#    eso las salidas de aqui NO se exportan.
+#
+# LO QUE NUNCA VA EN ESTA PLANTILLA: la clave PRIVADA de firma. Aqui solo entra
+# la publica (es publica: sirve para comprobar firmas, no para hacerlas). La
+# privada vive en el secreto de la API, en base64 de una linea
+# (CLOUDFRONT_MEDIOS_PRIVATE_KEY_B64), y no pasa nunca por CloudFormation.
+#
+# LO QUE NO SE MODELA AQUI: el plan de TARIFA PLANA Pro de CloudFront (15
+# USD/mes). Se contrata aparte, en la consola, y solo si AWS confirma que admite
+# servir video. Sin el, la distribucion funciona igual en pago por uso con
+# PriceClass_All. El diseno de abajo vale para los dos.
+#
+# REGION: us-east-1, la misma de la API, por dos motivos: el procesado lee y
+# escribe el bucket sin salir de la region, y los registros estandar v2 de
+# CloudFront (AWS::Logs::DeliverySource) solo se pueden crear en us-east-1.
+#
+# DESPLIEGUE: lo ejecuta una persona con permisos de administrador, NO el CI, y
+# solo con el OK explicito de Luis, fase por fase (primero la variante de
+# prueba). Nada de esta pila se crea solo.
+#
+# =============================================================================
+
+Description: >-
+  Z Excelencia — Medios: bucket S3 privado de videos, distribucion de
+  CloudFront con OAC y URLs firmadas (grupo de claves) y registros estandar v2
+  en un bucket propio. Variante de produccion o de prueba con el mismo fichero.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: {default: Cuenta y proyecto}
+        Parameters: [ExpectedAccountId, Proyecto, PrefijoDeRecursos, Variante]
+      - Label: {default: Navegador que sube}
+        Parameters: [OrigenDeLaWeb]
+      - Label: {default: Claves publicas de firma (dos huecos para rotar)}
+        Parameters: [ClavePublicaA, ClavePublicaB]
+
+Parameters:
+
+  # SIN VALOR POR DEFECTO, a proposito: ver `BarreraExpectedAccountId`.
+  ExpectedAccountId:
+    Type: String
+    AllowedPattern: '^\d{12}$'
+    ConstraintDescription: doce digitos, el identificador de la cuenta de AWS.
+    Description: >-
+      Cuenta de AWS en la que se espera desplegar. Si no es la cuenta real de
+      la sesion, CloudFormation rechaza el plan sin crear ningun recurso.
+
+  Proyecto:
+    Type: String
+    Default: Z-Excelencia
+    AllowedPattern: '^[A-Za-z0-9 ._-]{1,64}$'
+    Description: Etiqueta `Proyecto` de cada recurso (separa la factura en la cuenta compartida).
+
+  # Mismo limite que en las otras dos pilas, para que un prefijo valido alli
+  # lo sea tambien aqui. NO usar `renaser`: es el de otros productos de la
+  # cuenta compartida.
+  PrefijoDeRecursos:
+    Type: String
+    Default: zexcelencia
+    AllowedPattern: '^[a-z][a-z0-9-]{1,16}$'
+    Description: >-
+      Prefijo con el que empiezan los buckets, la distribucion y el grupo de
+      claves. El bucket queda como <prefijo>-medios-<variante>-<cuenta>.
+
+  # SIN VALOR POR DEFECTO, igual que la cuenta: quien despliega tiene que
+  # decir si esta creando la de produccion o la de prueba. Un defecto aqui es
+  # crear el bucket de produccion por olvido durante una prueba.
+  Variante:
+    Type: String
+    AllowedValues: [produccion, prueba]
+    Description: >-
+      `produccion` o `prueba`. Cambia los nombres (…-medios-produccion-… o
+      …-medios-prueba-…) y, solo en `prueba`, deja subir desde
+      http://localhost:8081 (Expo web en local).
+
+  OrigenDeLaWeb:
+    Type: String
+    Default: https://social-media-renaser.vercel.app
+    AllowedPattern: '^https://[a-z0-9.-]+$'
+    ConstraintDescription: 'https://<dominio>, sin barra final.'
+    Description: >-
+      Origen del navegador que sube directo a S3 (CORS del bucket). La app
+      nativa no necesita CORS; la web si.
+
+  # DOS HUECOS SIMETRICOS, Y NO «PRINCIPAL + ROTACION». CloudFront NO deja
+  # cambiar la clave de un AWS::CloudFront::PublicKey ya creado (su API solo
+  # deja cambiar el comentario): cambiar el PEM de un hueco ocupado haria
+  # fallar la actualizacion. Por eso cada hueco solo se LLENA o se VACIA, y la
+  # rotacion de la spec (§4) va asi:
+  #   1. llenar el hueco libre con la clave publica nueva (el grupo queda con
+  #      las dos, y las firmas viejas siguen valiendo);
+  #   2. poner en el secreto CLOUDFRONT_MEDIOS_KEY_PAIR_ID = el id del hueco
+  #      nuevo (salida IdDeLaClavePublicaA/B) y la privada nueva en base64;
+  #   3. instance refresh del grupo de autoescalado (el secreto solo se lee al
+  #      arrancar);
+  #   4. pasadas MAS DE 6 HORAS desde que murio la ultima maquina vieja (las
+  #      URLs firmadas viven hasta 6 h), vaciar el hueco viejo.
+  # Hace falta al menos uno lleno: ver `BarreraAlMenosUnaClave`.
+  ClavePublicaA:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^-----BEGIN PUBLIC KEY-----[A-Za-z0-9+/=\s]+-----END PUBLIC KEY-----\s*$'
+    ConstraintDescription: vacia, o una clave publica RSA 2048 en PEM (BEGIN PUBLIC KEY).
+    Description: >-
+      Hueco A del grupo de claves de confianza: clave PUBLICA RSA 2048 en PEM.
+      La privada NUNCA va aqui (va en el secreto de la API). No cambies el PEM
+      de un hueco lleno: vacialo en un despliegue y llenalo en otro.
+
+  ClavePublicaB:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^-----BEGIN PUBLIC KEY-----[A-Za-z0-9+/=\s]+-----END PUBLIC KEY-----\s*$'
+    ConstraintDescription: vacia, o una clave publica RSA 2048 en PEM (BEGIN PUBLIC KEY).
+    Description: >-
+      Hueco B del grupo de claves, para rotar sin cortar las firmas vigentes
+      (ver la explicacion junto a ClavePublicaA). Normalmente vacio.
+
+Conditions:
+
+  EsLaCuentaEsperada: !Equals [!Ref ExpectedAccountId, !Ref 'AWS::AccountId']
+  EsPrueba: !Equals [!Ref Variante, prueba]
+  HayClaveA: !Not [!Equals [!Ref ClavePublicaA, '']]
+  HayClaveB: !Not [!Equals [!Ref ClavePublicaB, '']]
+  HayAlgunaClave: !Or [!Condition HayClaveA, !Condition HayClaveB]
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Barreras
+  # ---------------------------------------------------------------------------
+  #
+  # La de la cuenta es la COMPROBADA el 23/09/2026 (ver 01-fundacion.yaml):
+  # solo existe si ExpectedAccountId es la cuenta real, y los recursos raiz
+  # dependen de ella. En otra cuenta CloudFormation rechaza el PLAN con
+  # «Unresolved resource dependencies [BarreraExpectedAccountId]» y no crea
+  # nada. Una regla `Rules` contra AWS::AccountId no bloqueo el plan en esa
+  # misma prueba: no vale sustituirla.
+  BarreraExpectedAccountId:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: EsLaCuentaEsperada
+
+  # Un grupo de claves vacio no se puede crear, y la distribucion sin grupo no
+  # tiene con que comprobar las firmas. Mejor que el PLAN falle en el acto a
+  # que falle a medio crear, con los buckets ya hechos.
+  BarreraAlMenosUnaClave:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: HayAlgunaClave
+
+  # ---------------------------------------------------------------------------
+  # Bucket de medios
+  # ---------------------------------------------------------------------------
+  BucketDeMedios:
+    Type: AWS::S3::Bucket
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      # E3005: la barrera no existe cuando la cuenta no coincide. Es lo buscado.
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    # Retain: son los videos de la gente. Borrar la pila (o un reemplazo por
+    # error) no puede llevarselos por delante. La variante de prueba tambien:
+    # se vacia y se borra a mano, sabiendo lo que se borra.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # La cuenta sale de la sesion, no se escribe: el nombre de un bucket es
+      # global y sin la cuenta chocaria con el de cualquiera.
+      BucketName: !Sub '${PrefijoDeRecursos}-medios-${Variante}-${AWS::AccountId}'
+      # El bucket no lo lee nadie mas que CloudFront. Los cuatro bloqueos
+      # impiden que una politica o una ACL lo abra por descuido.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # Sin ACL: el dueno de todo objeto es la cuenta, suba quien suba (las
+      # URLs firmadas de subida las firma el rol de la API, pero el PUT lo hace
+      # el telefono).
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # SSE-S3 y no KMS: cuesta cero, no hace falta dar kms:* al rol ni a
+      # CloudFront, y una clave de cliente no anade nada contra quien ya tenga
+      # permiso de lectura sobre el bucket.
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      # SIN VERSIONADO, a proposito: las claves son inmutables (los derivados
+      # llevan -v<n>) y el borrado tiene que ser real. Con versionado, la baja
+      # de una cuenta dejaria los videos vivos como versiones anteriores.
+      CorsConfiguration:
+        CorsRules:
+          # Solo SUBIR desde el navegador. La lectura va por CloudFront, que
+          # tiene su propia politica de cabeceras; S3 no sirve nada directo.
+          - AllowedMethods: [PUT, POST]
+            AllowedOrigins: !If
+              - EsPrueba
+              # localhost:8081 es Expo web en la maquina de quien prueba. En
+              # produccion no: cualquiera puede servir una pagina en su
+              # localhost.
+              - [!Ref OrigenDeLaWeb, 'http://localhost:8081']
+              - [!Ref OrigenDeLaWeb]
+            AllowedHeaders: [Content-Type, Content-MD5, 'x-amz-*']
+            # La subida por partes necesita leer el ETag de cada parte para
+            # completar la subida. Sin exponerlo, el navegador lo esconde.
+            ExposedHeaders: [ETag]
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          # Una subida que no llega a publicarse no se queda para siempre: al
+          # publicar, la API la COPIA a videos/ y borra la pendiente.
+          - Id: caducar-pendientes
+            Status: Enabled
+            Prefix: pendientes/
+            ExpirationInDays: 1
+          # Las partes de una subida por partes abandonada se cobran como
+          # almacenamiento y no se ven en un listado normal.
+          - Id: abortar-subidas-incompletas
+            Status: Enabled
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}
+          # videos/: SIN expiracion. Es el contenido publicado.
+          #
+          # borrados/: SIN expiracion automatica, A PROPOSITO. Se borra a los
+          # 30 dias, pero lo borra la API (el trabajo diario de limpieza, ver
+          # la pila 02) porque antes tiene que mirar si hay una denuncia
+          # abierta sobre la publicacion: si la hay, el video se conserva como
+          # evidencia hasta que se resuelva. Una regla de S3 no sabe nada de
+          # denuncias y borraria la evidencia el dia 30.
+      Tags:
+        - {Key: Proyecto, Value: !Ref Proyecto}
+        - {Key: Variante, Value: !Ref Variante}
+        - {Key: Gestionado-por, Value: CloudFormation}
+
+  PoliticaDelBucketDeMedios:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketDeMedios
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # El UNICO lector es CloudFront, y solo ESTA distribucion: sin la
+          # condicion de SourceArn, cualquier distribucion de cualquier cuenta
+          # con OAC podria leer el bucket.
+          #
+          # SOLO videos/*. pendientes/ y borrados/ quedan fuera aunque alguien
+          # tuviera una firma valida: por eso mover un video a borrados/ corta
+          # el acceso al instante, y S3 responde 403 (no 404: sin ListBucket
+          # no se revela que existe o no un objeto).
+          #
+          # La escritura no se concede aqui: la tiene el rol de las maquinas de
+          # la API por su politica de IAM (pila 02, `medios-en-s3`).
+          - Sid: SoloCloudFrontDeMediosLeeVideos
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub '${BucketDeMedios.Arn}/videos/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistribucionDeMedios}'
+          - Sid: NadaSinTls
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt BucketDeMedios.Arn
+              - !Sub '${BucketDeMedios.Arn}/*'
+            Condition:
+              Bool: {'aws:SecureTransport': 'false'}
+
+  # ---------------------------------------------------------------------------
+  # Claves de firma (solo las PUBLICAS)
+  # ---------------------------------------------------------------------------
+  #
+  # El id de la clave publica que firma es el KEY_PAIR_ID que la API pone en
+  # cada URL (CLOUDFRONT_MEDIOS_KEY_PAIR_ID en el secreto). Ver las salidas.
+  ClavePublicaDeFirmaA:
+    Type: AWS::CloudFront::PublicKey
+    Condition: HayClaveA
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    Properties:
+      PublicKeyConfig:
+        # El nombre es unico en la cuenta, y nunca se reemplaza un hueco en el
+        # mismo despliegue (se vacia en uno y se llena en otro): no choca.
+        Name: !Sub '${PrefijoDeRecursos}-medios-${Variante}-a'
+        CallerReference: !Sub '${PrefijoDeRecursos}-medios-${Variante}-a'
+        Comment: !Sub 'Firma de URLs de medios (${Variante}), hueco A'
+        EncodedKey: !Ref ClavePublicaA
+
+  ClavePublicaDeFirmaB:
+    Type: AWS::CloudFront::PublicKey
+    Condition: HayClaveB
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    Properties:
+      PublicKeyConfig:
+        Name: !Sub '${PrefijoDeRecursos}-medios-${Variante}-b'
+        CallerReference: !Sub '${PrefijoDeRecursos}-medios-${Variante}-b'
+        Comment: !Sub 'Firma de URLs de medios (${Variante}), hueco B'
+        EncodedKey: !Ref ClavePublicaB
+
+  # El grupo de claves de confianza: CloudFront acepta una URL firmada con
+  # CUALQUIERA de las claves del grupo. Durante una rotacion hay dos.
+  GrupoDeClaves:
+    Type: AWS::CloudFront::KeyGroup
+    DependsOn: BarreraAlMenosUnaClave
+    Metadata:
+      # E3005: la barrera no existe si los dos huecos estan vacios. Es lo buscado.
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    Properties:
+      KeyGroupConfig:
+        Name: !Sub '${PrefijoDeRecursos}-medios-${Variante}'
+        Comment: !Sub 'Claves que pueden firmar URLs de medios (${Variante})'
+        Items:
+          - !If [HayClaveA, !Ref ClavePublicaDeFirmaA, !Ref 'AWS::NoValue']
+          - !If [HayClaveB, !Ref ClavePublicaDeFirmaB, !Ref 'AWS::NoValue']
+
+  # ---------------------------------------------------------------------------
+  # CloudFront de medios
+  # ---------------------------------------------------------------------------
+  #
+  # OAC y no OAI: el OAI es el mecanismo heredado, no firma con SigV4 y AWS ya
+  # no lo recomienda. «always» = CloudFront firma TODA peticion al origen, asi
+  # que el bucket puede exigir el SourceArn de la distribucion.
+  ControlDeAccesoAlOrigen:
+    Type: AWS::CloudFront::OriginAccessControl
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${PrefijoDeRecursos}-medios-${Variante}'
+        Description: !Sub 'CloudFront de medios (${Variante}) leyendo el bucket privado'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # NUEVA y separada de la de la API (`FrenteHttps` de la pila 02 no se toca):
+  # la de la API no cachea nada y usa PriceClass_100; esta cachea un ano y
+  # necesita nodos en Sudamerica.
+  DistribucionDeMedios:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'Medios de ${PrefijoDeRecursos} (${Variante}): videos firmados desde S3'
+        # PriceClass_All: es la UNICA clase con nodos en Sudamerica (Lima, Sao
+        # Paulo), que es todo el motivo de esta distribucion. Si AWS confirma
+        # que la tarifa plana Pro admite video, se contrata en la consola y
+        # esta clase deja de facturarse por uso; no se modela aqui.
+        PriceClass: PriceClass_All
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        # Sin dominio propio por ahora: *.cloudfront.net con el certificado de
+        # CloudFront. Un CNAME futuro (medios.<dominio>) no cambia el diseno.
+        Origins:
+          - Id: bucket-de-medios
+            # El dominio REGIONAL (…s3.us-east-1.amazonaws.com) y no el global:
+            # con el global, un bucket recien creado puede redirigir (307)
+            # durante horas mientras se propaga el DNS.
+            DomainName: !GetAtt BucketDeMedios.RegionalDomainName
+            OriginAccessControlId: !GetAtt ControlDeAccesoAlOrigen.Id
+            # Vacio = sin OAI heredado. CloudFormation exige el bloque para un
+            # origen S3 aunque el acceso lo de el OAC.
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            # ORIGIN SHIELD APAGADO: el plan Pro no lo incluye y con el trafico
+            # actual no compensa (cobra cada peticion que pasa por el). Se
+            # reconsidera si los registros muestran muchos fallos de cache
+            # hacia el origen.
+            OriginShield:
+              Enabled: false
+        CacheBehaviors:
+          - PathPattern: videos/*
+            TargetOriginId: bucket-de-medios
+            # https-only y no redirect: una URL firmada que viajara por HTTP ya
+            # habria dejado la firma a la vista antes de la redireccion.
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            # «Restrict viewer access»: sin una firma valida de una clave del
+            # grupo, CloudFront responde 403 sin ir al origen. CloudFront
+            # valida la firma ANTES de buscar en cache.
+            TrustedKeyGroups: [!Ref GrupoDeClaves]
+            # Administrada CachingOptimized: sin query strings, cookies ni
+            # cabeceras en la clave de cache; TTL por defecto 1 dia y maximo 1
+            # ano, respetando el Cache-Control del objeto (immutable). Como la
+            # firma va en la query y no entra en la clave, TODOS comparten la
+            # misma copia, y CloudFront quita Policy/Signature/Key-Pair-Id
+            # antes de ir a S3. Los rangos (Range) los maneja CloudFront.
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            # Administrada SimpleCORS: Access-Control-Allow-Origin: * en GET y
+            # HEAD. Es la que admite el plan Pro, y la web usa <video> sin
+            # crossOrigin, asi que hoy es por si acaso (hls.js si la necesita).
+            ResponseHeadersPolicyId: 60669652-455b-4ae9-85a4-c4c02393f86c
+        # LA RAIZ Y CUALQUIER OTRO CAMINO RESPONDEN 403, por la via mas simple:
+        # el mismo grupo de claves (sin firma, 403 de CloudFront sin tocar el
+        # origen) y, aun con una firma, el bucket solo deja leer videos/* (403
+        # de S3). Las firmas de la API ademas solo cubren
+        # /videos/<uid>/<media_id>/*. Sin funcion de CloudFront: nada que
+        # mantener ni que pagar por peticion.
+        DefaultCacheBehavior:
+          TargetOriginId: bucket-de-medios
+          ViewerProtocolPolicy: https-only
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          TrustedKeyGroups: [!Ref GrupoDeClaves]
+          # Administrada CachingDisabled: fuera de videos/ no hay nada que
+          # merezca guardarse, ni siquiera un 403.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+      Tags:
+        - {Key: Proyecto, Value: !Ref Proyecto}
+        - {Key: Variante, Value: !Ref Variante}
+
+  # ---------------------------------------------------------------------------
+  # Registros estandar v2 de CloudFront
+  # ---------------------------------------------------------------------------
+  #
+  # A un bucket PROPIO: el de logs del balanceador (pila 02) esta en
+  # BucketOwnerEnforced y no acepta los registros heredados de CloudFront, y
+  # mezclarlos tampoco ayuda a acotar quien los lee.
+  #
+  # LOS REGISTROS GUARDAN LA URL COMPLETA, CON LA FIRMA, y esa firma se puede
+  # reutilizar hasta 6 h. Tambien la IP de cada pedido. Por eso:
+  #   * nadie mas que los administradores de la cuenta puede leerlos (la
+  #     politica no concede lectura a nadie; ni el rol de las maquinas ni el de
+  #     despliegue tienen s3 sobre este bucket);
+  #   * se borran solos a los 30 dias.
+  BucketDeRegistros:
+    Type: AWS::S3::Bucket
+    DependsOn: BarreraExpectedAccountId
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [E3005]
+    # Retain: son la evidencia de lo que paso. Caducan solos a los 30 dias.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If
+        - EsPrueba
+        - !Sub '${PrefijoDeRecursos}-medios-logs-prueba-${AWS::AccountId}'
+        - !Sub '${PrefijoDeRecursos}-medios-logs-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          # SSE-S3: la entrega de registros no escribe en un bucket con clave
+          # KMS de cliente sin permisos extra sobre la clave.
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: caducar-a-los-30-dias
+            Status: Enabled
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}
+      Tags:
+        - {Key: Proyecto, Value: !Ref Proyecto}
+        - {Key: Variante, Value: !Ref Variante}
+        - {Key: Gestionado-por, Value: CloudFormation}
+
+  PoliticaDelBucketDeRegistros:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketDeRegistros
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Solo escribe el servicio de entrega de registros, solo desde ESTA
+          # cuenta y solo para ESTA fuente: sin SourceAccount y SourceArn,
+          # cualquier cuenta podria entregar sus registros aqui (el problema
+          # del «confused deputy»). Es la politica que documenta AWS para los
+          # registros v2 enviados a S3.
+          - Sid: SoloEscribeLaEntregaDeRegistros
+            Effect: Allow
+            Principal: {Service: delivery.logs.amazonaws.com}
+            Action: s3:PutObject
+            Resource: !Sub '${BucketDeRegistros.Arn}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:delivery-source:${PrefijoDeRecursos}-medios-${Variante}'
+          - Sid: NadaSinTls
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt BucketDeRegistros.Arn
+              - !Sub '${BucketDeRegistros.Arn}/*'
+            Condition:
+              Bool: {'aws:SecureTransport': 'false'}
+
+  # Las tres piezas de los registros v2: QUE se registra (la distribucion), A
+  # DONDE (el bucket) y la UNION de las dos.
+  FuenteDeRegistros:
+    Type: AWS::Logs::DeliverySource
+    Properties:
+      # El mismo nombre que la condicion SourceArn de la politica de arriba.
+      Name: !Sub '${PrefijoDeRecursos}-medios-${Variante}'
+      LogType: ACCESS_LOGS
+      # AWS::CloudFront::Distribution no da su ARN como atributo: se compone.
+      ResourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistribucionDeMedios}'
+      Tags:
+        - {Key: Proyecto, Value: !Ref Proyecto}
+
+  DestinoDeRegistros:
+    Type: AWS::Logs::DeliveryDestination
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-medios-${Variante}-s3'
+      DestinationResourceArn: !GetAtt BucketDeRegistros.Arn
+      # JSON: se lee con Athena o con un `jq` sin conversiones de pago (Parquet
+      # cobra la conversion).
+      OutputFormat: json
+      Tags:
+        - {Key: Proyecto, Value: !Ref Proyecto}
+
+  EntregaDeRegistros:
+    Type: AWS::Logs::Delivery
+    # La politica del bucket tiene que existir antes: la entrega comprueba que
+    # puede escribir al crearse.
+    DependsOn: PoliticaDelBucketDeRegistros
+    Properties:
+      DeliverySourceName: !Ref FuenteDeRegistros
+      DeliveryDestinationArn: !GetAtt DestinoDeRegistros.Arn
+      Tags:
+        - {Key: Proyecto, Value: !Ref Proyecto}
+
+Outputs:
+
+  # SIN Export, a proposito: la pila 02 recibe estos valores por parametro (la
+  # 03 puede no existir, o ser la de prueba), y una exportacion consumida
+  # impediria borrar o reemplazar esta pila.
+
+  NombreDelBucket:
+    Description: Parametro BucketDeMedios de la pila 02 (y MEDIOS_S3_BUCKET de la API).
+    Value: !Ref BucketDeMedios
+
+  ArnDelBucket:
+    Description: ARN del bucket de medios.
+    Value: !GetAtt BucketDeMedios.Arn
+
+  IdDeLaDistribucion:
+    Description: Parametro DistribucionDeMedios de la pila 02 (invalidaciones).
+    Value: !Ref DistribucionDeMedios
+
+  DominioDeLaDistribucion:
+    Description: Parametro DominioDeMedios de la pila 02 (*.cloudfront.net que firma la API).
+    Value: !GetAtt DistribucionDeMedios.DomainName
+
+  ArnDeLaDistribucion:
+    Description: ARN de la distribucion de medios (el SourceArn de la politica del bucket).
+    Value: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistribucionDeMedios}'
+
+  IdDelGrupoDeClaves:
+    Description: Grupo de claves de confianza de la distribucion de medios.
+    Value: !Ref GrupoDeClaves
+
+  IdDeLaClavePublicaA:
+    Condition: HayClaveA
+    Description: >-
+      KEY_PAIR_ID del hueco A. Si la privada de este hueco es la que firma, va
+      en el secreto de la API como CLOUDFRONT_MEDIOS_KEY_PAIR_ID.
+    Value: !Ref ClavePublicaDeFirmaA
+
+  IdDeLaClavePublicaB:
+    Condition: HayClaveB
+    Description: >-
+      KEY_PAIR_ID del hueco B. Si la privada de este hueco es la que firma, va
+      en el secreto de la API como CLOUDFRONT_MEDIOS_KEY_PAIR_ID.
+    Value: !Ref ClavePublicaDeFirmaB
+
+  BucketDeRegistros:
+    Description: Registros estandar v2 de la distribucion (30 dias; lectura solo administradores).
+    Value: !Ref BucketDeRegistros

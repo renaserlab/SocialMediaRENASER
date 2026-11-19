@@ -43,6 +43,8 @@ Metadata:
         Parameters: [EtiquetaDeImagen, NombreDelSecreto, CorsOrigins, FeatureRecommendationsV1, PaymentsEnabled, PaymentsReturnUrl, BetaFreeAccessEnabled]
       - Label: {default: Z Servicios (apagado de fabrica)}
         Parameters: [FeatureServices, FeatureServiceBooking, ServicesPublicAccess, ServicesCatalogModalities, ServicesCatalogCurrencies, PlanificadorDeServicios, VersionDelSecretoDelPlanificador]
+      - Label: {default: Medios en S3 (apagado de fabrica)}
+        Parameters: [BucketDeMedios, DistribucionDeMedios, DominioDeMedios, MediosS3Subida, MediosS3Lectura, PublicacionesVisibilidad, PlanificadorDeMedios, SaltosDeMetadatosDelContenedor]
       - Label: {default: Observabilidad y escalado}
         Parameters: [RetencionDeLogsEnDias, CorreoDeAlertas, UmbralLatenciaP95Segundos, UmbralErrores5xxDeLaApi, CpuObjetivo, PeticionesPorInstanciaObjetivo, AmiDeAmazonLinux2023]
     ParameterLabels:
@@ -455,7 +457,123 @@ Parameters:
       SERVICES_TASKS_TOKEN cuando cambia la conexion que lo usa. Tras rotar ese
       secreto hay que SUBIR este numero: sin subirlo, un despliegue no cambia
       nada, la conexion de EventBridge sigue llamando con el secreto viejo y
-      la API lo rechaza para siempre.
+      la API lo rechaza para siempre. Vale para LOS DOS planificadores: el de
+      Z Servicios (SERVICES_TASKS_TOKEN) y el de la limpieza de medios
+      (MEDIOS_TAREAS_TOKEN). Rotar cualquiera de los dos obliga a subirlo; la
+      otra conexion se vuelve a leer con el mismo valor y no pasa nada.
+
+  # --- Medios en S3 (videos nuevos en S3 + CloudFront) -----------------------
+  # TODO APAGADO DE FABRICA. Cada valor por defecto deja la pila EXACTAMENTE
+  # como estaba: sin politica nueva en el rol, sin planificador, con el mismo
+  # salto de metadatos y con la API sirviendo los videos desde Supabase. El
+  # bucket y la distribucion los crea la pila 03 (03-medios.yaml) y llegan aqui
+  # por PARAMETRO, no por !ImportValue: la 03 puede no existir, o ser la de
+  # prueba, y esta pila no puede quedarse rehen de ella.
+  #
+  # EL ORDEN (spec, fase 1 y 2): (1) crear la pila 03; (2) poner en el secreto
+  # CLOUDFRONT_MEDIOS_KEY_PAIR_ID y CLOUDFRONT_MEDIOS_PRIVATE_KEY_B64; (3)
+  # desplegar con BucketDeMedios, DistribucionDeMedios y DominioDeMedios
+  # rellenos, SaltosDeMetadatosDelContenedor = 2 (si el dueno lo aprueba) y
+  # MediosS3Lectura = true; (4) solo despues, MediosS3Subida = lista y, mas
+  # tarde, todos.
+  #
+  # LO QUE NO ESTA AQUI, A PROPOSITO (va en el SECRETO):
+  #   * CLOUDFRONT_MEDIOS_KEY_PAIR_ID y CLOUDFRONT_MEDIOS_PRIVATE_KEY_B64: la
+  #     clave privada de firma, en base64 de UNA linea (el arranque convierte
+  #     el secreto linea a linea y una PEM de varias lineas se truncaria);
+  #   * MEDIOS_S3_SUBIDA_CUENTAS: los uid de la lista interna (identificadores
+  #     de personas, igual que el piloto de Servicios);
+  #   * MEDIOS_TAREAS_TOKEN: la credencial del planificador de medios.
+  BucketDeMedios:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    ConstraintDescription: vacio, o el nombre de un bucket de S3.
+    Description: >-
+      Bucket de medios de la pila 03 (salida NombreDelBucket). Vacio = sin
+      medios en S3: el rol de las maquinas no gana ningun permiso.
+
+  DistribucionDeMedios:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^E[A-Z0-9]{8,20}$'
+    ConstraintDescription: vacio, o el id de una distribucion de CloudFront (E…).
+    Description: >-
+      Id de la distribucion de medios de la pila 03 (salida
+      IdDeLaDistribucion). Solo da permiso de invalidar ESA distribucion; la
+      de la API no se toca.
+
+  DominioDeMedios:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    ConstraintDescription: vacio, o un nombre de host sin https:// ni barra.
+    Description: >-
+      Dominio con el que la API firma las URLs de video. Hoy el *.cloudfront.net
+      de la distribucion de medios (salida DominioDeLaDistribucion); un CNAME
+      propio en el futuro.
+
+  MediosS3Subida:
+    Type: String
+    Default: nadie
+    AllowedValues: [nadie, lista, todos]
+    Description: >-
+      Quien sube los videos nuevos a S3. `nadie`: todo sigue yendo a Supabase.
+      `lista`: solo los uid de MEDIOS_S3_SUBIDA_CUENTAS (en el secreto).
+      `todos`: todo el mundo. Volver a `nadie` es el rollback de la fase 2.
+
+  MediosS3Lectura:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Si la API firma y devuelve las URLs de CloudFront de las publicaciones
+      guardadas en S3. `false` las oculta (rollback); no borra nada.
+
+  PublicacionesVisibilidad:
+    Type: String
+    Default: abierta
+    AllowedValues: [abierta, estricta]
+    Description: >-
+      `abierta`: el comportamiento de hoy. `estricta`: la API aplica el mismo
+      predicado de visibilidad en todas las lecturas de publicaciones antes de
+      firmar nada (borradores, bloqueos, solo seguidores).
+
+  PlanificadorDeMedios:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Si', 'No']
+    Description: >-
+      LA LIMPIEZA DIARIA de medios: una regla de EventBridge que llama una vez
+      al dia (03:00 en Lima) a POST /api/v1/tareas/medios/limpieza para borrar
+      lo vencido de borrados/ (sin denuncia abierta), las versiones viejas de
+      derivados y las subidas caducadas. `Si`: exige el frente HTTPS y la clave
+      MEDIOS_TAREAS_TOKEN en el secreto. La regla solo queda ACTIVA con
+      BucketDeMedios relleno.
+
+  # EL SALTO DE METADATOS ES LA DECISION PENDIENTE DEL DUENO (spec §6, opcion
+  # 1). Con 1, el contenedor NO puede leer las credenciales del rol (el puente
+  # de Docker cuenta como salto) y la API no llega a S3. Con 2, IMDSv2 sigue
+  # obligatorio (frena la SSRF por GET), pero CUALQUIER proceso del contenedor
+  # puede pedir las credenciales del rol, y el rol no queda acotado a S3. Hoy
+  # ese rol puede, ademas de S3:
+  #   * leer el secreto de la API (que el contenedor ya recibe como entorno);
+  #   * usar SSM Session Manager (AmazonSSMManagedInstanceCore), con el Deny de
+  #     parametros ajenos;
+  #   * bajar imagenes de NUESTRO repositorio de ECR (no subirlas);
+  #   * escribir sus logs y metricas;
+  #   * cloudformation:SignalResource sobre esta pila.
+  # El riesgo NUEVO real es que un proceso comprometido dentro del contenedor
+  # gane SSM y ECR. Por eso el defecto sigue siendo 1 y subirlo es una linea
+  # escrita en un Change Set, no un cambio colado con lo demas.
+  SaltosDeMetadatosDelContenedor:
+    Type: Number
+    Default: 1
+    AllowedValues: [1, 2]
+    Description: >-
+      HttpPutResponseHopLimit de IMDSv2 en la plantilla de arranque. 1 = solo
+      el anfitrion lee credenciales (lo de hoy). 2 = tambien el contenedor, que
+      lo necesita para S3 con el rol (sin claves guardadas). Decision del dueno.
 
   RetencionDeLogsEnDias:
     Type: Number
@@ -615,6 +733,17 @@ Conditions:
   LaContratacionTieneSusProcesos: !Or
     - !Not [!Condition SeContrataEnServicios]
     - !Condition HayPlanificadorDeServicios
+  # Medios en S3: sin bucket, el rol de las maquinas queda exactamente igual.
+  HayMedios: !Not [!Equals [!Ref BucketDeMedios, '']]
+  # Invalidar solo tiene sentido con bucket Y distribucion.
+  HayDistribucionDeMedios: !And
+    - !Condition HayMedios
+    - !Not [!Equals [!Ref DistribucionDeMedios, '']]
+  # La limpieza diaria llama a la API por HTTPS, igual que los procesos de
+  # Servicios: sin el frente de CloudFront no hay a donde llamar.
+  HayPlanificadorDeMedios: !And
+    - !Equals [!Ref PlanificadorDeMedios, 'Si']
+    - !Condition HayFrenteHttps
 
 # -----------------------------------------------------------------------------
 Resources:
@@ -1334,6 +1463,55 @@ Resources:
                 Action: cloudformation:SignalResource
                 Resource: !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
 
+        # MEDIOS EN S3. Vive aqui y no en la pila 03 porque este rol no se
+        # exporta, y no debe: exportarlo dejaria a otra pila colgarle permisos.
+        # Sin bucket (HayMedios falso) la politica NO EXISTE (AWS::NoValue): la
+        # lista de politicas queda identica a la de antes y CloudFormation no
+        # toca el rol.
+        #
+        # Con esto la API sube derivados, copia pendientes/ a videos/, mueve a
+        # borrados/ y firma URLs de subida (simple y por partes: crear,
+        # subir parte y completar se autorizan con s3:PutObject). La lectura
+        # publica no pasa por aqui: la hace CloudFront con su OAC.
+        - !If
+          - HayMedios
+          - PolicyName: medios-en-s3
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: ObjetosDelBucketDeMedios
+                  Effect: Allow
+                  Action:
+                    - s3:GetObject
+                    - s3:PutObject
+                    - s3:DeleteObject
+                    - s3:AbortMultipartUpload
+                    - s3:ListMultipartUploadParts
+                  Resource: !Sub 'arn:${AWS::Partition}:s3:::${BucketDeMedios}/*'
+                # Listar solo las tres carpetas que la API usa (borrado de
+                # cuenta, mover a borrados/, limpieza diaria). OJO: HeadBucket
+                # no lleva prefijo y por tanto NO casa con esta condicion; una
+                # comprobacion de salud tiene que listar con un prefijo o hacer
+                # HeadObject.
+                - Sid: ListarSoloLasCarpetasDeMedios
+                  Effect: Allow
+                  Action: s3:ListBucket
+                  Resource: !Sub 'arn:${AWS::Partition}:s3:::${BucketDeMedios}'
+                  Condition:
+                    StringLike:
+                      s3:prefix: [videos/, videos/*, borrados/, borrados/*, pendientes/, pendientes/*]
+                # Sacar de los nodos lo que se borra o se mueve. SOLO la
+                # distribucion de medios: la de la API (FrenteHttps) no se puede
+                # invalidar desde una maquina.
+                - !If
+                  - HayDistribucionDeMedios
+                  - Sid: InvalidarSoloLaDistribucionDeMedios
+                    Effect: Allow
+                    Action: cloudfront:CreateInvalidation
+                    Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistribucionDeMedios}'
+                  - !Ref 'AWS::NoValue'
+          - !Ref 'AWS::NoValue'
+
       Tags:
         - {Key: Proyecto, Value: !Ref Proyecto}
 
@@ -1360,12 +1538,15 @@ Resources:
           # aplicacion se convierte en robo de las credenciales del rol.
           HttpTokens: required
           HttpEndpoint: enabled
-          # 1 salto = solo procesos del ANFITRION llegan a los metadatos. El
-          # contenedor pasa por el puente de Docker, que cuenta como salto
-          # extra, asi que la app NO puede leer credenciales de AWS ni aunque la
-          # comprometan. No las necesita: el anfitrion le entrega la
-          # configuracion ya resuelta como variables de entorno.
-          HttpPutResponseHopLimit: 1
+          # 1 salto (el defecto) = solo procesos del ANFITRION llegan a los
+          # metadatos. El contenedor pasa por el puente de Docker, que cuenta
+          # como salto extra, asi que la app NO puede leer credenciales de AWS
+          # ni aunque la comprometan, y hasta medios en S3 no las necesitaba:
+          # el anfitrion le entrega la configuracion ya resuelta como
+          # variables de entorno. Con medios en S3 la API usa el rol para S3 y
+          # necesita 2: ver el inventario de riesgo en el parametro
+          # SaltosDeMetadatosDelContenedor. Es una decision del dueno.
+          HttpPutResponseHopLimit: !Ref SaltosDeMetadatosDelContenedor
         Monitoring:
           # Metricas cada minuto solo en alta disponibilidad. Cuestan unos 2 USD
           # por maquina y mes; lo que compran es que el autoescalado reaccione en
@@ -1538,6 +1719,17 @@ Resources:
                 echo "SERVICES_CATALOG_PRICE_MODELS=free,on_request"
                 echo "FEATURE_SERVICE_PAYMENTS=false"
                 echo "SERVICE_PAYMENTS_PROVIDER=none"
+                # Medios en S3. Vacias o apagadas por defecto: la API sigue
+                # con Supabase. La clave de firma (KEY_PAIR_ID y la privada en
+                # base64), la lista interna de cuentas y el token de la
+                # limpieza vienen del secreto, mas arriba.
+                echo "MEDIOS_S3_BUCKET=${BucketDeMedios}"
+                echo "MEDIOS_S3_REGION=${AWS::Region}"
+                echo "CLOUDFRONT_MEDIOS_DOMINIO=${DominioDeMedios}"
+                echo "CLOUDFRONT_MEDIOS_DISTRIBUCION_ID=${DistribucionDeMedios}"
+                echo "MEDIOS_S3_SUBIDA=${MediosS3Subida}"
+                echo "MEDIOS_S3_LECTURA=${MediosS3Lectura}"
+                echo "PUBLICACIONES_VISIBILIDAD=${PublicacionesVisibilidad}"
               } >> /etc/renaser/api.env
               chmod 600 /etc/renaser/api.env
 
@@ -2185,6 +2377,137 @@ Resources:
       # mientras se renuevan) o una pasada cortada a los 5 segundos fallan un
       # rato y se arreglan solos. Media hora fallando ya no es eso.
       EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
+  # ===========================================================================
+  # LA LIMPIEZA DIARIA DE MEDIOS
+  # ===========================================================================
+  #
+  # El MISMO patron que los procesos de Z Servicios, y por las mismas razones:
+  # la API no tiene temporizador (con dos maquinas, un cron en el proceso
+  # correria dos veces), asi que una regla de EventBridge llama una vez al dia
+  # a `POST /api/v1/tareas/medios/limpieza`, una ruta idempotente que:
+  #   * borra lo de borrados/ con mas de 30 dias, SALVO lo que tenga una
+  #     denuncia abierta (se conserva como evidencia; por eso el bucket no
+  #     tiene regla de expiracion en borrados/);
+  #   * borra las versiones viejas de derivados (-v<n>) con mas de 7 dias;
+  #   * cierra las subidas caducadas.
+  #
+  # Es una REGLA de EventBridge con ScheduleExpression y no EventBridge
+  # Scheduler, para no traer un segundo servicio: es lo que ya usa Servicios y
+  # lo que vigilan las pruebas.
+  #
+  # EL SECRETO: MEDIOS_TAREAS_TOKEN, con una referencia dinamica al secreto de
+  # la API (ni parametro, ni perfil, ni consola). Rotarlo: cambiarlo en el
+  # secreto, -Accion Renovar, y desplegar subiendo
+  # VersionDelSecretoDelPlanificador (el contador va en la descripcion de la
+  # conexion; sin cambiarlo CloudFormation no vuelve a leer el secreto).
+  #
+  # EL LIMITE DE 5 SEGUNDOS. EventBridge corta la llamada a un destino a los 5
+  # segundos y la cuenta como fallida. La API tiene que CONTESTAR enseguida
+  # (aceptar y trabajar en segundo plano, o hacer tandas que quepan) y seguir
+  # donde quedo en la pasada siguiente.
+  #
+  # LO QUE PUEDE HACER EL ROL: invocar ESTE destino, y nada mas.
+  ConexionDelPlanificadorDeMedios:
+    Type: AWS::Events::Connection
+    Condition: HayPlanificadorDeMedios
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-medios-limpieza'
+      # El contador va en la descripcion a proposito: cambiarlo es lo que hace
+      # que CloudFormation actualice la conexion y vuelva a leer el secreto.
+      Description: !Sub 'Credencial con la que el planificador llama a la limpieza de medios (secreto v${VersionDelSecretoDelPlanificador}).'
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: X-Medios-Tareas-Token
+          ApiKeyValue: !Sub '{{resolve:secretsmanager:${NombreDelSecreto}:SecretString:MEDIOS_TAREAS_TOKEN}}'
+
+  DestinoDelPlanificadorDeMedios:
+    Type: AWS::Events::ApiDestination
+    Condition: HayPlanificadorDeMedios
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-medios-limpieza'
+      Description: La limpieza diaria de medios (borrados vencidos, derivados viejos y subidas caducadas).
+      ConnectionArn: !GetAtt ConexionDelPlanificadorDeMedios.Arn
+      HttpMethod: POST
+      InvocationEndpoint: !If
+        - HayDominioEnCloudFront
+        - !Sub 'https://${NombreDeDominio}/api/v1/tareas/medios/limpieza'
+        - !Sub 'https://${FrenteHttps.DomainName}/api/v1/tareas/medios/limpieza'
+      InvocationRateLimitPerSecond: 1
+
+  RolDelPlanificadorDeMedios:
+    Type: AWS::IAM::Role
+    Condition: HayPlanificadorDeMedios
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+      Policies:
+        - PolicyName: invocar-la-limpieza-de-medios
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: events:InvokeApiDestination
+                Resource: !GetAtt DestinoDelPlanificadorDeMedios.Arn
+
+  ReglaDelPlanificadorDeMedios:
+    Type: AWS::Events::Rule
+    Condition: HayPlanificadorDeMedios
+    Properties:
+      Name: !Sub '${PrefijoDeRecursos}-${Entorno}-medios-limpieza'
+      Description: Una vez al dia (03:00 en Lima), la limpieza de medios. Desactivada sin bucket de medios.
+      # 08:00 UTC = 03:00 en Lima (UTC-5, sin horario de verano): la hora de
+      # menos trafico, para que los borrados e invalidaciones no compitan con
+      # nadie.
+      ScheduleExpression: cron(0 8 * * ? *)
+      # Sin bucket no hay nada que limpiar: la regla existe pero no llama.
+      State: !If [HayMedios, ENABLED, DISABLED]
+      Targets:
+        - Id: limpieza-de-medios
+          Arn: !GetAtt DestinoDelPlanificadorDeMedios.Arn
+          RoleArn: !GetAtt RolDelPlanificadorDeMedios.Arn
+          # La ruta no recibe nada: ni el evento ni la cuenta viajan a la API.
+          Input: '{}'
+          # Pocos reintentos y dentro de la hora: es idempotente y, si un dia
+          # no sale, la pasada de manana recoge lo pendiente.
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+            MaximumEventAgeInSeconds: 3600
+
+  AlarmaLimpiezaDeMedios:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HayPlanificadorDeMedios
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-limpieza-de-medios'
+      AlarmDescription: >-
+        La limpieza diaria de medios fallo tambien tras los reintentos: no se
+        borro lo vencido de borrados/, ni los derivados viejos, ni se cerraron
+        las subidas caducadas. Buscar «medios.limpieza» en los logs de la API:
+        dice si falta el secreto o si no coincide (ver
+        VersionDelSecretoDelPlanificador). No es urgente: la pasada siguiente
+        recoge lo pendiente.
+      Namespace: AWS/Events
+      # FailedInvocations cuenta las llamadas que fallaron DEFINITIVAMENTE, ya
+      # agotados los reintentos: un solo fallo al dia ya es la pasada perdida.
+      MetricName: FailedInvocations
+      Dimensions:
+        - {Name: RuleName, Value: !Ref ReglaDelPlanificadorDeMedios}
+      Statistic: Sum
+      # Una hora cubre los reintentos (MaximumEventAgeInSeconds = 3600).
+      Period: 3600
+      EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
