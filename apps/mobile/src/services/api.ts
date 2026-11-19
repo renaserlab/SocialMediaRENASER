@@ -98,8 +98,15 @@ async function parseError(response: Response): Promise<ApiError> {
  */
 const ESPERA_MAXIMA_MS = 20_000;
 
-/** Cabecera con la que la app declara que entiende videos en S3. */
-export const CABECERA_DE_MEDIOS = 'X-Zeta-Medios';
+/**
+ * Como declara la app que entiende videos en S3 (opcion B): un parametro en
+ * `Accept`, que la API lee. NO una cabecera propia (`X-Zeta-Medios`): esa no
+ * esta en la lista segura de CORS y obligaba a un `OPTIONS` previo en cada GET
+ * anonimo de la web, deshaciendo lo que explica el comentario de
+ * `Content-Type` mas abajo. `Accept` es segura mientras su valor no lleve
+ * caracteres como `"():<>?@[]{}` y mida menos de 128 bytes, y este no.
+ */
+export const ACEPTA_MEDIOS_S3 = 'application/json;zeta-medios=s3';
 
 export type ApiRequestOptions = RequestInit & {
   /** Si true, incluye el header Authorization con el token actual. Default true. */
@@ -140,17 +147,13 @@ export async function apiRequest<T>(
       : {}),
     /*
       «Esta app sabe reproducir videos guardados en S3» (opcion B). A quien no
-      la manda, la API le oculta las publicaciones con videos en S3, porque una
-      app vieja intentaria firmarlos en Supabase y veria un video negro. Va en
-      TODAS las peticiones: cualquier endpoint que devuelva publicaciones la
-      mira. Un servidor viejo la ignora.
-
-      Coste conocido: en la web, una cabecera propia obliga a la comprobacion
-      `OPTIONS` tambien en los GET anonimos (ver el comentario de arriba). Es
-      el precio de que el servidor pueda distinguir clientes sin romper los
-      viejos.
+      lo declara, la API le oculta las publicaciones con videos en S3, porque
+      una app vieja intentaria firmarlos en Supabase y veria un video negro. Va
+      en TODAS las peticiones (cualquier endpoint que devuelva publicaciones lo
+      mira) y dentro de `Accept`, que no dispara la comprobacion `OPTIONS`.
+      Un servidor viejo lo ignora: para el sigue siendo «quiero JSON».
     */
-    [CABECERA_DE_MEDIOS]: 's3',
+    Accept: ACEPTA_MEDIOS_S3,
     ...(headers as Record<string, string> | undefined),
   };
 

@@ -167,7 +167,7 @@ test('ya no existe una llamada de arranque para despertar el servidor', async ()
 });
 
 /*
-  Videos en S3 (opcion B): sin esta cabecera la API OCULTA las publicaciones
+  Videos en S3 (opcion B): sin esta declaracion la API OCULTA las publicaciones
   con videos en S3, porque da por hecho que el cliente es una app vieja que
   intentaria firmarlos en Supabase. Si se pierde en un refactor, los videos
   nuevos desaparecen en silencio de Inicio, del muro y de los perfiles.
@@ -183,5 +183,33 @@ test('toda peticion declara que la app entiende videos en S3', async () => {
   await apiRequest('/posts', { method: 'POST', body: JSON.stringify({}) });
 
   assert.equal(vistas.length, 2);
-  for (const cabeceras of vistas) assert.equal(cabeceras['X-Zeta-Medios'], 's3');
+  for (const cabeceras of vistas) {
+    assert.equal(cabeceras.Accept, 'application/json;zeta-medios=s3');
+  }
+});
+
+/*
+  Un GET anonimo de la web no puede pagar la comprobacion `OPTIONS` de CORS:
+  es la primera pantalla de quien aun no tiene cuenta. Para eso, TODAS sus
+  cabeceras tienen que estar en la lista segura de la especificacion Fetch
+  (nombre y valor). Si alguien vuelve a meter una cabecera propia, aqui falla.
+*/
+const SEGURAS = new Set(['accept', 'accept-language', 'content-language', 'content-type']);
+const BYTES_NO_SEGUROS = /["():<>?@[\\\]{}\u0000-\u0008\u000a-\u001f\u007f]/;
+
+test('un GET anonimo solo lleva cabeceras seguras para CORS (sin OPTIONS previo)', async () => {
+  let vistas: Record<string, string> = {};
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    vistas = (init?.headers ?? {}) as Record<string, string>;
+    return Promise.resolve(new Response('[]', { status: 200 }));
+  }) as typeof fetch;
+
+  await apiRequest('/api/v1/posts', { auth: false });
+
+  for (const [nombre, valor] of Object.entries(vistas)) {
+    assert.ok(SEGURAS.has(nombre.toLowerCase()), `cabecera no segura para CORS: ${nombre}`);
+    assert.ok(valor.length <= 128, `${nombre} mide mas de 128 bytes`);
+    assert.ok(!BYTES_NO_SEGUROS.test(valor), `${nombre} lleva bytes no seguros: ${valor}`);
+  }
+  assert.equal(vistas['Content-Type'], undefined, 'un GET sin cuerpo no declara Content-Type');
 });
