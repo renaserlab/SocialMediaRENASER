@@ -251,8 +251,12 @@ Código: `apps/mobile/src/lib/medicionDeVideo.ts` (lógica, sin React Native),
 ### Cómo consultarlo
 
 - Admin en la API: `GET /api/v1/admin/telemetria/video?dias=7` (1 a 90 días)
-  da `n`, mediana, p75 y p90 por plataforma y tramo, cuántos no llegaron a
-  reproducir y qué fracción tuvo esperas.
+  da `n`, mediana, p75 y p90 por plataforma, tramo y almacén, cuántos no
+  llegaron a reproducir y qué fracción tuvo esperas.
+- **Almacén.** Cada tramo de video lleva `almacen`: `supabase` (Storage, hoy)
+  o `s3` (S3 + CloudFront, spec de la opción B). Mientras convivan, el resumen
+  y la vista los separan, y así se compara con números si S3 carga mejor. Un
+  cliente que no lo manda cuenta como `supabase`; los hitos de carga no lo llevan.
 - Desde el editor SQL de Supabase: `select * from metricas_de_video_resumen;`
   (últimos 7 días). Para cruzar por modelo o versión:
   ```sql

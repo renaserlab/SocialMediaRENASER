@@ -93,6 +93,7 @@ test('mide la primera carga de Inicio de punta a punta', () => {
     esperas: 0,
     espera_ms: 0,
     formato: 'mp4',
+    almacen: 'supabase',
     bytes: 2_500_000,
     error: false,
   });
@@ -378,4 +379,22 @@ test('sin EXPO_PUBLIC_API_URL la medicion se apaga en lugar de llamar a localhos
   assert.match(app, /encendida: MEDICION_ENCENDIDA && Boolean\(API\)/);
   assert.match(app, /keepalive: true/);
   assert.match(app, /ESPERA_DEL_ENVIO_MS/);
+});
+
+test('marca el almacen de cada video (Supabase por defecto, S3 cuando viene de CloudFront)', () => {
+  const b = banco();
+  const m = b.medicion;
+  m.videoActivo('v1', { hls: false });
+  b.avanzar(300);
+  m.reproduciendo('v1');
+  m.inicioDeGesto();
+  b.avanzar(50);
+  m.videoActivo('v2', { hls: false, almacen: 's3' });
+  b.avanzar(200);
+  m.reproduciendo('v2');
+  // Un valor raro no se cuela: cuenta como Supabase.
+  m.videoActivo('v3', { hls: false, almacen: 'otro' as never });
+  m.aSegundoPlano();
+  const almacenes = b.lote().tramos.map((t) => t.almacen);
+  assert.deepEqual(almacenes, ['supabase', 's3', 'supabase']);
 });

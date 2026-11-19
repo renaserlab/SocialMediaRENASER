@@ -86,6 +86,9 @@ export type FormatoDeVideo = 'hls' | 'mp4';
 /** Estados del reproductor que interesan (los de expo-video). */
 export type EstadoDelReproductor = 'idle' | 'loading' | 'readyToPlay' | 'error';
 
+/** De donde salio el video. Hoy todo es Supabase; S3 llega con la spec de la opcion B. */
+export type AlmacenDeVideo = 'supabase' | 's3';
+
 export type TramoDeVideo = {
   tipo: TipoDeTramo;
   /** Desde el gesto (o la activacion) hasta reproducir de verdad. `null` = no llego. */
@@ -97,6 +100,8 @@ export type TramoDeVideo = {
   /** Suma de esas esperas. */
   espera_ms: number;
   formato: FormatoDeVideo;
+  /** De donde salio el video: Supabase Storage (hoy) o S3 + CloudFront. */
+  almacen: AlmacenDeVideo;
   /** Peso del archivo que se reproduce, si se conoce (nunca para HLS). */
   bytes: number | null;
   /** El reproductor dio error. */
@@ -145,7 +150,7 @@ export type DependenciasDeMedicion = {
 export type Medicion = {
   hito: (nombre: Hito) => void;
   inicioDeGesto: () => void;
-  videoActivo: (id: string, datos: { hls: boolean; bytes?: number | null }) => void;
+  videoActivo: (id: string, datos: { hls: boolean; bytes?: number | null; almacen?: AlmacenDeVideo | null }) => void;
   primerFotograma: (id: string) => void;
   reproduciendo: (id: string) => void;
   estado: (id: string, estado: EstadoDelReproductor) => void;
@@ -168,6 +173,7 @@ type Activo = {
   tipo: TipoDeTramo;
   desde: number;
   formato: FormatoDeVideo;
+  almacen: AlmacenDeVideo;
   bytes: number | null;
   reproducidoEn: number | null;
   fotogramaEn: number | null;
@@ -261,6 +267,7 @@ export function crearMedicion(deps: DependenciasDeMedicion): Medicion {
       esperas: Math.min(a.esperas, 1000),
       espera_ms: acotar(esperaMs) ?? MS_MAXIMO,
       formato: a.formato,
+      almacen: a.almacen,
       bytes: a.bytes,
       error: a.error,
     };
@@ -303,7 +310,7 @@ export function crearMedicion(deps: DependenciasDeMedicion): Medicion {
       gestoEn = deps.ahora();
     }),
 
-    videoActivo: seguro((id: string, datos: { hls: boolean; bytes?: number | null }) => {
+    videoActivo: seguro((id: string, datos: { hls: boolean; bytes?: number | null; almacen?: AlmacenDeVideo | null }) => {
       if (activo?.id === id) return;
       const ahora = deps.ahora();
       cerrarActivo();
@@ -323,6 +330,7 @@ export function crearMedicion(deps: DependenciasDeMedicion): Medicion {
         tipo,
         desde,
         formato: datos.hls ? 'hls' : 'mp4',
+        almacen: datos.almacen === 's3' ? 's3' : 'supabase',
         bytes,
         reproducidoEn: null,
         fotogramaEn: null,

@@ -106,5 +106,5 @@ export type VideoPlayerProps = {
    * reproductor viene cada aviso; no sale del telefono. Sin esta prop, el
    * reproductor no informa de nada.
    */
-  medirComo?: { id: string; hls: boolean; bytes?: number | null };
+  medirComo?: { id: string; hls: boolean; bytes?: number | null; almacen?: 'supabase' | 's3' };
 };

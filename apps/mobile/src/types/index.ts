@@ -94,6 +94,11 @@ export type Post = {
    * peso del original mentiria, y se deja vacio. Lo usa la medicion de video.
    */
   mediaBytes?: number;
+  /**
+   * De donde sale el video: Supabase Storage (hoy, y lo que se asume si la API
+   * no lo dice) o S3 + CloudFront (spec de la opcion B). Lo usa la medicion.
+   */
+  mediaAlmacen?: 'supabase' | 's3';
   /** Fecha ISO original; `createdAt` es su forma corta y hay que recalcularla. */
   createdAtIso?: string;
   /**

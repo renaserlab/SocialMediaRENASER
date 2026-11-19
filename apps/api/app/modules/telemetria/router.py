@@ -145,6 +145,7 @@ def filas_del_lote(lote: LoteDeMedicion) -> list[MetricaDeVideo]:
             esperas=t.esperas,
             espera_ms=t.espera_ms,
             formato=t.formato,
+            almacen=t.almacen,
             bytes=t.bytes,
             error=t.error,
         )
@@ -211,16 +212,19 @@ def _percentil(ordenados: list[int], p: float) -> int | None:
 
 
 def resumir(filas: list[MetricaDeVideo]) -> list[Resumen]:
-    grupos: dict[tuple[str, str], list[MetricaDeVideo]] = defaultdict(list)
+    # Los tramos de video se separan tambien por almacen (Supabase o S3) para
+    # poder comparar los dos mientras conviven; los hitos de carga no lo tienen.
+    grupos: dict[tuple[str, str, str], list[MetricaDeVideo]] = defaultdict(list)
     for fila in filas:
-        grupos[(fila.plataforma, fila.tramo)].append(fila)
+        grupos[(fila.plataforma, fila.tramo, fila.almacen or "")].append(fila)
     salida: list[Resumen] = []
-    for (plataforma, tramo), grupo in sorted(grupos.items()):
+    for (plataforma, tramo, almacen), grupo in sorted(grupos.items()):
         valores = sorted(f.ms for f in grupo if f.ms is not None)
         es_tramo = tramo not in HITOS
         resumen = Resumen(
             plataforma=plataforma,
             tramo=tramo,
+            almacen=almacen or None,
             n=len(grupo),
             sin_reproducir=sum(1 for f in grupo if f.ms is None) if es_tramo else 0,
             mediana_ms=_percentil(valores, 0.5),
