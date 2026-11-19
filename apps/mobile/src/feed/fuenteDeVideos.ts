@@ -1,4 +1,5 @@
 import { decidirLote } from '@/feed/decisionDeFuente';
+import { reelNecesitaUrls, renovarUrls } from '@/feed/urlsDeMedios';
 import { PostRepository, resolveMediaUrls, type FeedKind } from '@/repositories/PostRepository';
 import { RecommendationRepository } from '@/repositories/RecommendationRepository';
 import { bestVideoSource } from '@/lib/videoSource';
@@ -132,6 +133,8 @@ export function aReel(post: Post): ReelItem | null {
     createdAtIso: post.createdAtIso,
     likes: post.likes,
     comments: post.commentsCount ?? 0,
+    // Solo en videos de S3: sus URLs caducan y hay que poder renovarlas.
+    urlsExpiran: post.mediaAlmacen === 's3' ? post.urlsExpiran : undefined,
   };
 }
 
@@ -296,4 +299,34 @@ export function fuenteDeInicio(
   return personalizar
     ? fuenteRecomendada(usuarioId)
     : fuenteDelBackend('paraTi', 'all', usuarioId);
+}
+
+/**
+ * Renueva las URLs de los videos de S3 (opcion B) de una lista del feed que
+ * caducan, o de los `forzar` aunque no caduquen (un error de reproduccion).
+ *
+ * Sin nada que renovar no pide nada y devuelve la MISMA lista: quien llama
+ * puede comparar por identidad para no redibujar. Solo se copian la fuente y
+ * la portada; el resto del elemento (contadores, texto) no se toca.
+ */
+export async function renovarUrlsDeReels(
+  items: ReelItem[],
+  forzar: string[] = [],
+): Promise<{ items: ReelItem[]; renovados: string[] }> {
+  return renovarUrls(items, {
+    necesita: (reel) => reelNecesitaUrls(reel),
+    forzar,
+    pedir: async (ids) => {
+      const posts = await PostRepository.listByIds(ids);
+      return posts.map(aReel).filter((r): r is ReelItem => r !== null);
+    },
+    combinar: (viejo, nuevo) => ({
+      ...viejo,
+      uri: nuevo.uri,
+      isStream: nuevo.isStream,
+      posterUrl: nuevo.posterUrl,
+      posterPath: nuevo.posterPath,
+      urlsExpiran: nuevo.urlsExpiran,
+    }),
+  });
 }

@@ -16,10 +16,11 @@ import {
   pickAudio,
   pickImage,
   pickVideo,
-  uploadPostMedia,
   type PickedMedia,
+  type UploadedMedia,
   type UploadProgress,
 } from '@/services/storage';
+import { subirMedioDePublicacion } from '@/services/subidaDeVideoS3EnApp';
 import { useAppStore } from '@/store/useAppStore';
 import { radius, spacing } from '@/theme/tokens';
 import { useAppTheme } from '@/theme/useAppTheme';
@@ -145,7 +146,7 @@ export function EditPostScreen() {
     try {
       const changes: {
         body?: string;
-        media?: Awaited<ReturnType<typeof uploadPostMedia>>[];
+        media?: UploadedMedia[];
         category?: string | null;
         topicIds?: string[];
       } = {};
@@ -166,7 +167,9 @@ export function EditPostScreen() {
       if (media === 'remove') {
         changes.media = [];
       } else if (media) {
-        const uploaded = await uploadPostMedia(media, (p) => setPhase(p.phase));
+        // Un video nuevo va a S3 solo con la bandera `medios_s3_subida` de la
+        // cuenta; foto, audio o bandera apagada, a Supabase como siempre.
+        const uploaded = await subirMedioDePublicacion(media, (p) => setPhase(p.phase));
         changes.media = [uploaded];
       }
 

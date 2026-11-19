@@ -3,7 +3,7 @@ import { apiRequest, API_V1 } from '@/services/api';
 /**
  * Las reglas del servidor que cambian lo que se pinta (`GET /platform/config`).
  *
- * Dos, hoy:
+ * Tres familias, hoy (la tercera, los videos en S3, esta al final):
  *
  *  - El MODO FLEXIBLE (`PUBLICACION_FLEXIBLE`). Encendido, enviar un evento, un
  *    curso o un producto lo PUBLICA al momento, así que los botones dicen
@@ -33,12 +33,16 @@ type Configuracion = {
   publicacionFlexible: boolean;
   serviciosEncendido: boolean;
   serviciosDeAdministracion: boolean;
+  mediosS3Subida: boolean;
+  mediosS3Lectura: boolean;
 };
 
 const APAGADA: Configuracion = {
   publicacionFlexible: false,
   serviciosEncendido: false,
   serviciosDeAdministracion: false,
+  mediosS3Subida: false,
+  mediosS3Lectura: false,
 };
 
 /** Para quién se preguntó: ver `quienPregunta`. `null` es sin sesión. */
@@ -67,11 +71,15 @@ function configuracion(quien: Quien): Promise<Configuracion> {
       publicacion_flexible?: unknown;
       feature_services?: unknown;
       feature_services_admin?: unknown;
+      medios_s3_subida?: unknown;
+      medios_s3_lectura?: unknown;
     }>(`${API_V1}/platform/config`)
       .then((dto) => ({
         publicacionFlexible: dto?.publicacion_flexible === true,
         serviciosEncendido: dto?.feature_services === true,
         serviciosDeAdministracion: dto?.feature_services_admin === true,
+        mediosS3Subida: dto?.medios_s3_subida === true,
+        mediosS3Lectura: dto?.medios_s3_lectura === true,
       }))
       .catch(() => {
         // Solo se olvida si nadie preguntó por otra persona entretanto.
@@ -104,4 +112,26 @@ export function serviciosEncendido(quien: Quien): Promise<boolean> {
  */
 export function serviciosDeAdministracion(quien: Quien): Promise<boolean> {
   return configuracion(quien).then((c) => c.serviciosDeAdministracion);
+}
+
+/**
+ * Si ESTA cuenta sube los videos de sus publicaciones a S3 (opcion B).
+ *
+ * Como Servicios, va por persona: el servidor la enciende para nadie, para una
+ * lista de cuentas o para todas, y la app solo recibe un si o un no. Apagada,
+ * ausente (servidor viejo) o ante cualquier fallo: `false`, y Reel,
+ * Publicacion y Edicion suben a Supabase exactamente como antes. Ver
+ * `services/subidaDeVideoS3EnApp.ts`.
+ */
+export function mediosS3Subida(quien: Quien): Promise<boolean> {
+  return configuracion(quien).then((c) => c.mediosS3Subida);
+}
+
+/**
+ * Si la API firma y entrega los videos en S3. Es el interruptor de emergencia
+ * del servidor: apagado, esas publicaciones simplemente no llegan. La app no
+ * necesita hacer nada distinto con el; se expone para diagnostico.
+ */
+export function mediosS3Lectura(quien: Quien): Promise<boolean> {
+  return configuracion(quien).then((c) => c.mediosS3Lectura);
 }

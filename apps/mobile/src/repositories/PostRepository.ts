@@ -1,5 +1,7 @@
 import { apiRequest, API_V1 } from '@/services/api';
-import { CommentDto, PostDto, toComment, toPost } from '@/mappers/postMapper';
+import { aplicarFirmas, cuerpoDeMedio, rutasParaFirmar } from '@/lib/mediosS3';
+import { publicacionNecesitaUrls, renovarUrls } from '@/feed/urlsDeMedios';
+import { type CommentDto, type PostDto, toComment, toPost } from '@/mappers/postMapper';
 import { profileImageUrl, signMediaUrls, type UploadedMedia } from '@/services/storage';
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import type { Comment, Post } from '@/types';
@@ -78,23 +80,42 @@ export type ComentariosPagina = {
  * persistente suele resolverse sin tocar la red.
  */
 export async function resolveMediaUrls(items: Post[]): Promise<Post[]> {
-  const paths = new Set<string>();
-  for (const item of items) {
-    if (item.mediaPath) paths.add(item.mediaPath);
-    if (item.posterPath) paths.add(item.posterPath);
-  }
-  if (paths.size === 0) return items;
-  const urls = await signMediaUrls([...paths]);
-  return items.map((item) => {
-    const mediaUrl = item.mediaPath ? urls[item.mediaPath] : undefined;
-    const posterUrl = item.posterPath ? urls[item.posterPath] : undefined;
-    if (!mediaUrl && !posterUrl) return item;
-    return {
-      ...item,
-      mediaUrl: mediaUrl ?? item.mediaUrl,
-      posterUrl: posterUrl ?? item.posterUrl,
-    };
+  /*
+    Videos en S3 (opcion B): sus URLs NO se firman aqui, llegan firmadas de la
+    API. Lo unico que puede hacer falta es volver a pedirlas si caducaron
+    (instantaneas, listas viejas en memoria). Sin filas `s3` vencidas esto no
+    pide nada y la rama de Supabase de abajo queda exactamente como antes.
+  */
+  const conS3AlDia = await renovarUrlsDeS3(items);
+  const paths = rutasParaFirmar(conS3AlDia);
+  if (paths.length === 0) return conS3AlDia;
+  const urls = await signMediaUrls(paths);
+  return aplicarFirmas(conS3AlDia, urls);
+}
+
+/**
+ * Vuelve a pedir a la API las publicaciones de S3 cuyas URLs caducan.
+ *
+ * Solo se copian los campos de medio: el resto de la publicacion (contadores,
+ * reaccion propia) es de quien la tenia y puede ir por delante del servidor.
+ */
+async function renovarUrlsDeS3(items: Post[]): Promise<Post[]> {
+  const { items: salida } = await renovarUrls(items, {
+    necesita: (post) => publicacionNecesitaUrls(post),
+    pedir: (ids) => PostRepository.listByIds(ids),
+    combinar: (viejo, nuevo) =>
+      nuevo.mediaAlmacen === 's3'
+        ? {
+            ...viejo,
+            mediaUrl: nuevo.mediaUrl,
+            posterUrl: nuevo.posterUrl,
+            posterPath: nuevo.posterPath,
+            streamUrl: nuevo.streamUrl,
+            urlsExpiran: nuevo.urlsExpiran,
+          }
+        : viejo,
   });
+  return salida;
 }
 
 /** Variante mutante para los flujos de una sola fase (detalle, galerias). */
@@ -105,6 +126,12 @@ async function attachMediaUrls(items: Post[], _dtos?: PostDto[]): Promise<void> 
     if (!item) return;
     item.mediaUrl = post.mediaUrl;
     item.posterUrl = post.posterUrl;
+    // Una fila de S3 renovada trae tambien HLS (con su token) y vencimiento
+    // nuevos. En Supabase no se toca nada mas que antes.
+    if (post.mediaAlmacen === 's3') {
+      item.streamUrl = post.streamUrl;
+      item.urlsExpiran = post.urlsExpiran;
+    }
   });
 }
 
@@ -242,6 +269,25 @@ export const PostRepository = {
   },
 
   /**
+   * Varias publicaciones por id (`GET /posts?ids=`, hasta 50), en el orden
+   * pedido y con URLs recien firmadas.
+   *
+   * Existe para los videos en S3 (opcion B): sus URLs las firma la API y la
+   * unica forma de renovarlas es volver a pedir la publicacion. Devuelve solo
+   * las que siguen visibles. Las filas de Supabase que vengan se firman como
+   * siempre; las de S3 no se vuelven a renovar aqui (acaban de llegar).
+   */
+  async listByIds(ids: string[], currentUserId?: string | null): Promise<Post[]> {
+    if (ids.length === 0) return [];
+    const params = new URLSearchParams({ ids: ids.join(',') });
+    const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
+    const items = dtos.map((dto) => toPost(dto, currentUserId));
+    const rutas = rutasParaFirmar(items);
+    if (rutas.length === 0) return items;
+    return aplicarFirmas(items, await signMediaUrls(rutas));
+  },
+
+  /**
    * Publicaciones con video, en orden reciente: alimentan los reels.
    *
    * Paginado de verdad: antes pedia 30 videos con sus firmas para ensenar el
@@ -332,18 +378,9 @@ export const PostRepository = {
         body,
         category: category ?? null,
         topic_ids: topicIds,
-        media: media.map((m) => ({
-          storage_path: m.storagePath,
-          media_type: m.mediaType,
-          // Metadata calculada en el dispositivo. Un backend anterior a la
-          // migracion 0021 ignora estos campos sin quejarse (Pydantic descarta
-          // lo que no conoce), asi que la app funciona contra ambas versiones.
-          width: m.width ?? null,
-          height: m.height ?? null,
-          duration_s: m.durationS ?? null,
-          bytes: m.bytes ?? null,
-          poster_path: m.posterPath ?? null,
-        })),
+        // Un video subido a S3 viaja por su `id_de_subida`, sin ruta; el
+        // resto, igual que siempre (ver `cuerpoDeMedio`).
+        media: media.map(cuerpoDeMedio),
       }),
     });
     const post = toPost(dto, currentUserId);
@@ -374,15 +411,7 @@ export const PostRepository = {
     if (changes.category !== undefined) payload.category = changes.category;
     if (changes.topicIds !== undefined) payload.topic_ids = changes.topicIds;
     if (changes.media !== undefined) {
-      payload.media = changes.media.map((m) => ({
-        storage_path: m.storagePath,
-        media_type: m.mediaType,
-        width: m.width ?? null,
-        height: m.height ?? null,
-        duration_s: m.durationS ?? null,
-        bytes: m.bytes ?? null,
-        poster_path: m.posterPath ?? null,
-      }));
+      payload.media = changes.media.map(cuerpoDeMedio);
     }
     const dto = await apiRequest<PostDto>(`${API_V1}/posts/${postId}`, {
       method: 'PATCH',

@@ -177,6 +177,18 @@ export type Post = {
     /** Cuando se COMPARTIO, distinta de `createdAt`, que es cuando se publico. */
     fecha: string;
   };
+  /**
+   * Hasta cuando valen las URLs de CloudFront que firmo la API (ISO 8601).
+   *
+   * Solo existe en videos guardados en S3 (opcion B): ahi `mediaUrl`,
+   * `posterUrl` y `streamUrl` NO se firman en el telefono, vienen ya firmadas
+   * y caducan. Hace falta saber cuando para volver a pedirlas antes de
+   * reproducir (`feed/urlsDeMedios.ts`): una publicacion sacada de una
+   * instantanea de hace dos dias trae firmas muertas, y CloudFront rechaza
+   * incluso los pedidos de rango hechos despues del vencimiento. En Supabase
+   * no hace falta: ahi la firma se renueva sola con su propia cache.
+   */
+  urlsExpiran?: string;
 };
 
 /** Alguien etiquetado en una publicación: lo justo para pintarlo y abrirlo. */

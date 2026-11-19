@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 
+import { elegirFuenteDeVideo } from '@/lib/elegirFuenteDeVideo';
+
 /**
  * Elige la mejor fuente disponible para reproducir un video.
  *
@@ -10,6 +12,10 @@ import { Platform } from 'react-native';
  *      cuando existe (feed_path) y al original como ultimo recurso, asi que el
  *      contenido anterior al pipeline sigue funcionando igual que siempre.
  *
+ * En videos de S3 (opcion B) las dos URLs son las que firmo la API: el mapper
+ * ya las puso en `streamUrl`/`mediaUrl`. Si la API no manda HLS, se usa el MP4
+ * de 720p, que es lo que evita que una lista rota rompa el video.
+ *
  * `isStream` decide si conviene la cache de disco de expo-video: para MP4 si;
  * para HLS no (no esta soportada en iOS y los segmentos ya son incrementales).
  */
@@ -17,9 +23,5 @@ export function bestVideoSource(post: {
   streamUrl?: string;
   mediaUrl?: string;
 }): { uri: string; isStream: boolean } | null {
-  if (post.streamUrl && Platform.OS !== 'web') {
-    return { uri: post.streamUrl, isStream: true };
-  }
-  if (post.mediaUrl) return { uri: post.mediaUrl, isStream: false };
-  return null;
+  return elegirFuenteDeVideo(post, Platform.OS !== 'web');
 }

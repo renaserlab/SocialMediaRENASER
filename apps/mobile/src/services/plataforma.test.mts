@@ -177,3 +177,33 @@ describe('para quién se pregunta', () => {
     assert.equal(peticiones.length, 2);
   });
 });
+
+describe('videos de publicaciones en S3 (opción B)', () => {
+  it('por persona, y solo `true` literal enciende: un servidor viejo es que no', async () => {
+    for (const [quien, dto, subida, lectura] of [
+      ['m1', {}, false, false],
+      ['m2', { medios_s3_subida: true, medios_s3_lectura: true }, true, true],
+      ['m3', { medios_s3_subida: 'true', medios_s3_lectura: 1 }, false, false],
+      ['m4', { medios_s3_lectura: true }, false, true],
+    ] as [string, Record<string, unknown>, boolean, boolean][]) {
+      responder = async () => dto as Respuesta;
+      assert.equal(await P.mediosS3Subida(quien), subida, quien);
+      assert.equal(await P.mediosS3Lectura(quien), lectura, quien);
+    }
+  });
+
+  it('un fallo es que no: se sube a Supabase como siempre', async () => {
+    responder = async () => {
+      throw new Error('sin cobertura');
+    };
+    assert.equal(await P.mediosS3Subida('m5'), false);
+  });
+
+  it('sale de la misma pregunta que Servicios: ni una petición más', async () => {
+    peticiones.length = 0;
+    responder = async () => ({ feature_services: true, medios_s3_subida: true }) as Respuesta;
+    assert.equal(await P.serviciosEncendido('m6'), true);
+    assert.equal(await P.mediosS3Subida('m6'), true);
+    assert.equal(peticiones.length, 1);
+  });
+});

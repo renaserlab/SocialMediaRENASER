@@ -1,6 +1,7 @@
 import { traduceEnElIdiomaActual } from '@/i18n';
 import { API_BASE_URL, API_V1 } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
+import { camposDeS3 } from '@/lib/mediosS3';
 import type { Comment, Post } from '@/types';
 
 export type PostAuthorDto = {
@@ -34,6 +35,19 @@ export type PostMediaDto = {
   /** Raiz del empaquetado HLS, si el video fue transcodificado. */
   stream_path?: string | null;
   processing_status?: string | null;
+  /*
+    URLs de CloudFront ya firmadas por la API (opcion B). Solo vienen en filas
+    con `almacen = 's3'`; en esas filas las rutas de arriba son claves de S3 y
+    NUNCA se firman en Supabase. Un servidor viejo no manda nada de esto y
+    todo sigue por el camino de siempre. Ver `lib/mediosS3.ts`.
+  */
+  /** El MP4 de 720p si existe; si no, el original. */
+  media_url?: string | null;
+  poster_url?: string | null;
+  /** HLS. Puede venir relativa a la API (`/api/v1/media/{id}/hls/...?t=`). */
+  stream_url?: string | null;
+  /** ISO 8601: cuando dejan de valer las tres URLs de arriba. */
+  urls_expiran?: string | null;
 };
 
 export type PostDto = {
@@ -206,5 +220,13 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
       first?.stream_path && first?.id
         ? `${API_BASE_URL}${API_V1}/media/${first.id}/hls/master.m3u8`
         : undefined,
+    /*
+      Video en S3 (opcion B): las URLs llegan firmadas por la API y PISAN lo de
+      arriba. Va al final y como propagacion a proposito: en una fila de
+      Supabase no aporta nada y el objeto queda exactamente como antes; en una
+      de S3 reemplaza el HLS construido a mano (sin el token de la API, ese
+      endpoint contestaria que no) y deja la portada con su clave estable.
+    */
+    ...camposDeS3(first, API_BASE_URL),
   };
 }

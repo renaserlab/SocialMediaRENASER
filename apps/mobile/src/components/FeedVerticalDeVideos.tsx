@@ -215,6 +215,17 @@ export function FeedVerticalDeVideos({
   }, [activo, cerrarMedicion]);
 
   /*
+    Videos de S3 (opcion B): antes de que el video y sus vecinos reproduzcan,
+    se renuevan las URLs que caducan (las firma la API y duran horas; una lista
+    de la manana, o la instantanea, las trae muertas). Sin nada vencido no se
+    pide nada. Depende de la lista para revisar tambien lo recien llegado.
+  */
+  const renovarCercanos = feed.renovarCercanos;
+  useEffect(() => {
+    if (activo) renovarCercanos(indiceActivo);
+  }, [activo, indiceActivo, feed.items, renovarCercanos]);
+
+  /*
     «No me interesa» sobre ESTE video.
 
     RECHAZAR UN VIDEO NO ES RECHAZAR A QUIEN LO PUBLICO. Aqui no se deja de
@@ -359,6 +370,7 @@ export function FeedVerticalDeVideos({
             onToggleMuted={alCambiarSilencio}
             onForcedMute={alForzarSilencio}
             espacioInferior={espacioInferior}
+            alFallarVideo={feed.alFallarVideo}
             alDescartar={descartarVideo}
             alAbrirComentarios={abrirComentarios}
             alVerReacciones={verReacciones}

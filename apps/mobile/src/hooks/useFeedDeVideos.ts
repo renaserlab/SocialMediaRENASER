@@ -9,6 +9,8 @@ import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import { useRefrescoAlEnfocar } from '@/hooks/useRefrescoAlEnfocar';
 import { VIDEOS_POR_PAGINA, type CursorDeVideos, type FuenteDeVideos } from '@/feed/fuenteDeVideos';
 import type { ReelItem } from '@/components/ShortVideoItem';
+import { renovarUrlsDeReels } from '@/feed/fuenteDeVideos';
+import { crearReintentoUnico, reelNecesitaUrls } from '@/feed/urlsDeMedios';
 
 export type EstadoDelFeed = 'cargando' | 'listo' | 'error';
 
@@ -54,6 +56,18 @@ export type FeedDeVideos = {
    * sigue en la lista y en el feed.
    */
   descartar: (postId: string) => void;
+  /**
+   * Videos de S3 (opcion B): renueva las URLs que caducan del video que se ve
+   * y de sus vecinos, ANTES de que les toque reproducir. Sin nada vencido no
+   * pide nada. Identidad estable.
+   */
+  renovarCercanos: (indice: number) => void;
+  /**
+   * Un video no se pudo reproducir. Si es de S3, se pide su publicacion otra
+   * vez UNA sola vez (la URL pudo caducar); si vuelve a fallar, o es de
+   * Supabase, se queda el error de siempre. Identidad estable.
+   */
+  alFallarVideo: (postId: string) => void;
 };
 
 /**
@@ -130,6 +144,62 @@ export function useFeedDeVideos(
   const fuenteRef = useRef(fuente);
   fuenteRef.current = fuente;
 
+  /*
+    URLS DE VIDEOS EN S3 (opcion B). Las firma la API y caducan: la unica forma
+    de tener otras es volver a pedir la publicacion. `renovando` evita pedir
+    dos veces la misma mientras la primera esta en vuelo, y `reintento` lleva
+    la cuenta de «una sola vez» por video ante un error de reproduccion.
+    Todo en referencias: nada de esto se pinta, y las funciones que salen de
+    aqui viajan como props hasta cada celda memoizada.
+  */
+  const renovando = useRef(new Set<string>());
+  const reintento = useRef(crearReintentoUnico());
+  /*
+    Cuando se renovo cada video por ultima vez. Si la API devolviera URLs que
+    ya nacen «por vencer» (ventanas de firma mal ajustadas), renovar cambiaria
+    la lista, la lista volveria a pedir renovar, y asi en bucle. Con esto, como
+    mucho una vez cada dos minutos por video, salvo un error de reproduccion.
+  */
+  const ultimaRenovacion = useRef(new Map<string, number>());
+  const renovarUrls = useCallback((candidatos: ReelItem[], forzar: string[] = []) => {
+    const ahora = Date.now();
+    const pendientes = candidatos.filter((item) => {
+      if (renovando.current.has(item.id)) return false;
+      if (forzar.includes(item.id)) return true;
+      const hace = ahora - (ultimaRenovacion.current.get(item.id) ?? 0);
+      return hace > ESPERA_ENTRE_RENOVACIONES_MS && reelNecesitaUrls(item);
+    });
+    if (pendientes.length === 0) return;
+    for (const item of pendientes) {
+      renovando.current.add(item.id);
+      ultimaRenovacion.current.set(item.id, ahora);
+    }
+    void renovarUrlsDeReels(pendientes, forzar)
+      .then(({ items: nuevos, renovados }) => {
+        if (renovados.length === 0) return;
+        const porId = new Map(nuevos.map((item) => [item.id, item]));
+        // Solo la fuente y la portada: el resto pudo cambiar entretanto.
+        setItems((prev) =>
+          prev.map((item) => {
+            const nuevo = renovados.includes(item.id) ? porId.get(item.id) : undefined;
+            return nuevo
+              ? {
+                  ...item,
+                  uri: nuevo.uri,
+                  isStream: nuevo.isStream,
+                  posterUrl: nuevo.posterUrl,
+                  posterPath: nuevo.posterPath,
+                  urlsExpiran: nuevo.urlsExpiran,
+                }
+              : item;
+          }),
+        );
+      })
+      .finally(() => {
+        for (const item of pendientes) renovando.current.delete(item.id);
+      });
+  }, []);
+
   useEffect(() => {
     if (!activo) return;
     let vigente = true;
@@ -167,8 +237,15 @@ export function useFeedDeVideos(
         const guardados = conCache ? await leerInstantaneaDeVideos() : [];
         if (!vigente) return;
         if (guardados.length > 0) {
-          setItems(sinDescartados(guardados, descartados.current));
+          const visiblesGuardados = sinDescartados(guardados, descartados.current);
+          setItems(visiblesGuardados);
           setDesdeCache(true);
+          /*
+            La instantanea puede tener dos o tres dias y las URLs de un video
+            de S3 duran horas: se intentan renovar ya, en segundo plano (sin
+            red fallara en silencio, y se vuelve a intentar al deslizar).
+          */
+          renovarUrls(visiblesGuardados);
           cursor.current = null;
           setHayMas(false);
           // Lo guardado se ordeno en otra sesion y quiza con otra version: no
@@ -294,6 +371,27 @@ export function useFeedDeVideos(
     [conCache],
   );
 
+  const renovarCercanos = useCallback(
+    (indice: number) => {
+      // El que se ve, el anterior y los dos siguientes: los que tienen o van
+      // a tener reproductor montado (ver `preload` en `ShortVideoItem`).
+      renovarUrls(itemsRef.current.slice(Math.max(0, indice - 1), indice + 3));
+    },
+    [renovarUrls],
+  );
+
+  const alFallarVideo = useCallback(
+    (postId: string) => {
+      const item = itemsRef.current.find((candidato) => candidato.id === postId);
+      // Solo los videos de S3 llevan `urlsExpiran`; los de Supabase se
+      // refirman solos y su error es el de siempre.
+      if (!item?.urlsExpiran) return;
+      if (!reintento.current.puede(postId)) return;
+      renovarUrls([item], [postId]);
+    },
+    [renovarUrls],
+  );
+
   return {
     items,
     estado,
@@ -306,8 +404,13 @@ export function useFeedDeVideos(
     reintentar,
     refrescar,
     descartar,
+    renovarCercanos,
+    alFallarVideo,
   };
 }
+
+/** Minimo entre dos renovaciones de URLs del mismo video (ver `ultimaRenovacion`). */
+const ESPERA_ENTRE_RENOVACIONES_MS = 2 * 60 * 1000;
 
 /**
  * Quita de un lote lo que esta persona ya rechazó.

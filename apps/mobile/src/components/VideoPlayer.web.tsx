@@ -24,6 +24,7 @@ const OBJECT_FIT = {
 export function VideoPlayer({
   uri,
   poster,
+  onError,
   style,
   loop = false,
   autoPlay = false,
@@ -253,6 +254,8 @@ export function VideoPlayer({
           momento. Los que estan de paso siguen costando solo los metadatos.
         */
         preload={active || autoPlay ? 'auto' : 'metadata'}
+        // Solo avisa hacia fuera: el feed renueva la URL de un video de S3.
+        onError={onError ? () => onError() : undefined}
         // Sin esto el menu "..." del navegador ofrece Descargar / Imagen en
         // imagen: no queremos que el contenido se difunda fuera de la app.
         controlsList="nodownload noplaybackrate noremoteplayback"
