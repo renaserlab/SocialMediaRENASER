@@ -34,6 +34,15 @@
   { "ParameterKey": "PlanificadorDeServicios", "ParameterValue": "No" },
   { "ParameterKey": "VersionDelSecretoDelPlanificador", "ParameterValue": "1" },
 
+  { "ParameterKey": "BucketDeMedios", "ParameterValue": "" },
+  { "ParameterKey": "DistribucionDeMedios", "ParameterValue": "" },
+  { "ParameterKey": "DominioDeMedios", "ParameterValue": "" },
+  { "ParameterKey": "MediosS3Subida", "ParameterValue": "nadie" },
+  { "ParameterKey": "MediosS3Lectura", "ParameterValue": "false" },
+  { "ParameterKey": "PublicacionesVisibilidad", "ParameterValue": "abierta" },
+  { "ParameterKey": "PlanificadorDeMedios", "ParameterValue": "No" },
+  { "ParameterKey": "SaltosDeMetadatosDelContenedor", "ParameterValue": "1" },
+
   { "ParameterKey": "RetencionDeLogsEnDias", "ParameterValue": "30" },
   { "ParameterKey": "CorreoDeAlertas", "ParameterValue": "renaserlab@gmail.com" },
   { "ParameterKey": "UmbralLatenciaP95Segundos", "ParameterValue": "2" },

@@ -130,7 +130,10 @@ $ClavesQueFijaLaPlantilla = @('APP_NAME', 'ENVIRONMENT', 'PORT', 'CORS_ORIGINS',
     'PAYMENTS_ENABLED', 'PAYMENTS_RETURN_URL', 'BETA_FREE_ACCESS_ENABLED',
     'FEATURE_SERVICES', 'FEATURE_SERVICE_BOOKING', 'FEATURE_SERVICE_PAYMENTS',
     'SERVICE_PAYMENTS_PROVIDER', 'SERVICES_PUBLIC_ACCESS', 'SERVICES_CATALOG_MODALITIES',
-    'SERVICES_CATALOG_CURRENCIES', 'SERVICES_CATALOG_PRICE_MODELS')
+    'SERVICES_CATALOG_CURRENCIES', 'SERVICES_CATALOG_PRICE_MODELS',
+    'MEDIOS_S3_BUCKET', 'MEDIOS_S3_REGION', 'CLOUDFRONT_MEDIOS_DOMINIO',
+    'CLOUDFRONT_MEDIOS_DISTRIBUCION_ID', 'MEDIOS_S3_SUBIDA', 'MEDIOS_S3_LECTURA',
+    'PUBLICACIONES_VISIBILIDAD')
 
 # El piloto de Z Servicios: los perfiles autorizados. Va en el secreto y no en
 # un parametro porque son identificadores de personas: un parametro acabaria en
@@ -144,6 +147,17 @@ $PatronDelPiloto = '^$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 # escribe nadie a mano: se conserva el que hay o se genera uno. Nunca se imprime.
 $ClaveDelPlanificador = 'SERVICES_TASKS_TOKEN'
 $PatronDelPlanificador = '^[0-9a-f]{32,128}$'
+
+# Medios en S3: lo que NO puede ir en la plantilla. La clave privada de firma
+# va en base64 de UNA linea (una PEM tiene saltos de linea y el arranque
+# convierte el secreto linea a linea); la lista interna son uid de personas; el
+# token es la credencial de la limpieza diaria (la API exige 32 caracteres o
+# mas). Aqui solo se comprueba su FORMA; nunca se imprime su valor.
+$ClaveDeLaLimpiezaDeMedios = 'MEDIOS_TAREAS_TOKEN'
+$PatronDeLaLimpiezaDeMedios = '^$|^[A-Za-z0-9._~-]{32,256}$'
+$ClaveDeLaFirmaDeMedios = 'CLOUDFRONT_MEDIOS_PRIVATE_KEY_B64'
+$PatronDeLaFirmaDeMedios = '^$|^[A-Za-z0-9+/]+={0,2}$'
+$ClaveDeLaListaDeMedios = 'MEDIOS_S3_SUBIDA_CUENTAS'
 
 # Lo que mueve dinero nace apagado y se enciende a mano, en otra decision.
 $BanderasDeDinero = @('PAYMENTS_ENABLED', 'STRIPE_PAYMENTS_ENABLED', 'STRIPE_REFUNDS_ENABLED',
@@ -715,6 +729,15 @@ function Read-FicheroDeSecretos([string] $Ruta) {
     if ($secreto.Contains($ClaveDelPiloto) -and [string] $secreto[$ClaveDelPiloto] -notmatch $PatronDelPiloto) {
         $problemas.Add("$ClaveDelPiloto tiene que ser una lista de UUID separados por comas, sin espacios (o vacia)")
     }
+    if ($secreto.Contains($ClaveDeLaListaDeMedios) -and [string] $secreto[$ClaveDeLaListaDeMedios] -notmatch $PatronDelPiloto) {
+        $problemas.Add("$ClaveDeLaListaDeMedios tiene que ser una lista de UUID separados por comas, sin espacios (o vacia)")
+    }
+    if ($secreto.Contains($ClaveDeLaFirmaDeMedios) -and [string] $secreto[$ClaveDeLaFirmaDeMedios] -cnotmatch $PatronDeLaFirmaDeMedios) {
+        $problemas.Add("$ClaveDeLaFirmaDeMedios tiene que ser la PEM en base64 de una sola linea (base64 -w0)")
+    }
+    if ($secreto.Contains($ClaveDeLaLimpiezaDeMedios) -and [string] $secreto[$ClaveDeLaLimpiezaDeMedios] -cnotmatch $PatronDeLaLimpiezaDeMedios) {
+        $problemas.Add("$ClaveDeLaLimpiezaDeMedios tiene que tener 32 caracteres o mas, sin espacios (o ir vacia)")
+    }
     if ($problemas.Count -gt 0) { throw "El fichero de secretos no vale: $($problemas -join '; ')." }
     return $secreto
 }
@@ -780,6 +803,9 @@ function Set-Secretos([System.Collections.IDictionary] $Configuracion) {
     if ($cambiadas -contains $ClaveDelPlanificador) {
         Write-Aviso "Cambia ${ClaveDelPlanificador}: (1) -Accion Renovar; (2) sube VersionDelSecretoDelPlanificador en el perfil y -Accion Plataforma. Sin subir ese numero la conexion de EventBridge se queda con el secreto anterior."
     }
+    if ($cambiadas -contains $ClaveDeLaLimpiezaDeMedios) {
+        Write-Aviso "Cambia ${ClaveDeLaLimpiezaDeMedios}: (1) -Accion Renovar; (2) sube VersionDelSecretoDelPlanificador en el perfil y -Accion Plataforma. Sin subir ese numero la conexion de la limpieza de medios se queda con el secreto anterior."
+    }
 
     $accionDelSecreto = if ($actual) { 'Crear una version nueva' } else { 'Crear el secreto' }
     if (-not $PSCmdlet.ShouldProcess($Configuracion.NombreDelSecreto, $accionDelSecreto)) { return }
@@ -820,7 +846,14 @@ function Assert-SecretoCompleto([System.Collections.IDictionary] $Configuracion)
     # Sin esta clave la referencia dinamica de la conexion no resuelve y la
     # pila falla a medio actualizar: mejor saberlo antes.
     if ($Configuracion.PlanificadorDeServicios -eq 'Si') { $necesarias += $ClaveDelPlanificador }
+    if ($Configuracion.PlanificadorDeMedios -eq 'Si') { $necesarias += $ClaveDeLaLimpiezaDeMedios }
     $faltan = @($necesarias | Where-Object { -not $actual.Contains($_) })
+    # El ejemplo la trae vacia: vacia es como si faltara, porque la conexion
+    # de EventBridge se crearia con un token vacio que la API rechaza.
+    if ($Configuracion.PlanificadorDeMedios -eq 'Si' -and $actual.Contains($ClaveDeLaLimpiezaDeMedios) -and
+        [string]::IsNullOrWhiteSpace([string] $actual[$ClaveDeLaLimpiezaDeMedios])) {
+        $faltan += $ClaveDeLaLimpiezaDeMedios
+    }
     if ($faltan) { throw "Al secreto le faltan: $($faltan -join ', '). Cargalo con -Accion Secretos." }
     Write-Bien "Secreto completo ($($actual.Count) claves)"
 }

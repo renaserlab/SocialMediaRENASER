@@ -457,9 +457,13 @@ def test_el_planificador_nace_apagado_y_no_crea_nada_sin_pedirlo() -> None:
         bloque = _recurso(nombre)
         assert f"Type: {tipo}\n" in bloque, nombre
         assert "Condition: HayPlanificadorDeServicios\n" in bloque, f"{nombre} se crearía siempre"
-    # Y NADA MÁS: ni Lambda, ni cola, ni otro servicio para los barridos.
+    # Y NADA MÁS: ni Lambda, ni cola, ni otro servicio para los barridos. El
+    # segundo juego es el de la limpieza diaria de medios, con el mismo patrón
+    # (ver test_infraestructura_medios.py).
     assert sorted(re.findall(r"Type: (AWS::(?:Events|Scheduler|Lambda|SQS|StepFunctions)::\w+)", texto)) == [
-        "AWS::Events::ApiDestination", "AWS::Events::Connection", "AWS::Events::Rule",
+        "AWS::Events::ApiDestination", "AWS::Events::ApiDestination",
+        "AWS::Events::Connection", "AWS::Events::Connection",
+        "AWS::Events::Rule", "AWS::Events::Rule",
     ]
 
 
