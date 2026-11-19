@@ -30,6 +30,7 @@ decisión está en la spec y en los comentarios del código.
 | Procesado leyendo y escribiendo en S3 (derivados versionados) | `apps/api/app/modules/content/media_processing.py` |
 | HLS con token y reescritura de master y variantes | `content/router.media_hls_playlist` → `_hls_de_s3` |
 | App: cabecera, URLs de la API, re-pedido de vencidas, subida a S3 | `apps/mobile/src/lib/mediosS3.ts`, `feed/urlsDeMedios.ts`, `services/subidaDeVideoS3*.ts`, `services/api.ts`, `services/plataforma.ts` |
+| Dependencias solo de pruebas (pytest, moto), fuera de la imagen | `apps/api/requirements-dev.txt` (los flujos con pytest lo instalan) |
 | Infra (sin desplegar) | `infra/aws/03-medios.yaml`, cambios en `infra/aws/02-plataforma.yaml` y perfiles |
 
 ### Endpoints nuevos
@@ -44,6 +45,10 @@ decisión está en la spec y en los comentarios del código.
 | `GET /api/v1/posts?ids=a,b` | cualquiera | hasta 50 publicaciones concretas (re-pedir URLs vencidas) |
 | `POST /api/v1/tareas/medios/limpieza` | `X-Medios-Tareas-Token` | limpieza diaria (contesta 202 y trabaja en segundo plano) |
 | `GET /api/v1/admin/medios/salud` | administración | listado del bucket + firma de prueba + GET a CloudFront |
+
+Cómo dice la app que entiende S3: `Accept: application/json;zeta-medios=s3`
+(segura para CORS: no dispara el `OPTIONS` previo en los GET anónimos de la
+web). La API acepta también la cabecera `X-Zeta-Medios: s3` de la spec.
 
 `POST /posts` y `PATCH /posts/{id}` aceptan `media[].id_de_subida` y
 `media[].id_de_subida_poster`. `/platform/config` trae `medios_s3_subida`
@@ -66,6 +71,22 @@ el arranque de la pila 02; las secretas van en `zexcelencia/produccion/api`):
 | `CLOUDFRONT_MEDIOS_PRIVATE_KEY_B64` | vacío | secreto | PEM privada en **base64 de una línea** (el arranque trunca las multilínea) |
 | `MEDIOS_TAREAS_TOKEN` | vacío | secreto | ≥ 32 caracteres; sin él, la limpieza responde 503 |
 | `MEDIOS_MAX_VIDEO_MB`, `MEDIOS_PUBLICACIONES_CON_VIDEO_POR_HORA` | 500, 20 | — | topes |
+
+> **CONFIGURACIÓN PROHIBIDA: bucket puesto sin hop limit 2.** Con
+> `BucketDeMedios` relleno y `SaltosDeMetadatosDelContenedor = 1`, el
+> contenedor no obtiene credenciales del rol y nada de S3 funciona: ni subir,
+> ni procesar, ni borrar los videos de una baja (la baja de una cuenta que
+> tiene algo en S3 falla con 503 y no se confirma; la de quien no tiene nada
+> allí no habla con S3). `GET /api/v1/admin/medios/salud` lo detecta y
+> contesta `bucket: "sin_credenciales"`. Si el dueño no aprueba el hop limit 2,
+> el bucket se queda VACÍO en la pila 02 y la opción B no se enciende.
+
+## Alarmas
+
+- `…-firma-de-medios`: cuenta las líneas `medios.firma_fallida motivo=…
+  media_id=…` que escribe la API cuando no puede firmar una fila `s3` (como
+  mucho una por minuto y proceso). Mitigación inmediata: `MediosS3Lectura=false`.
+- `…-limpieza-de-medios`: la regla diaria falló tras los reintentos.
 
 ## Cómo se despliega por fases
 
@@ -160,17 +181,14 @@ Sin código nuevo: borrar de `post-media` los migrados a los 30 días.
 
 ## Riesgos conocidos
 
-- **La web paga un `OPTIONS` extra.** La cabecera `X-Zeta-Medios` va en todas
-  las peticiones de la app, también en los GET anónimos de la web, y una
-  cabecera propia obliga a la comprobación previa de CORS (el navegador la
-  guarda `max_age` = 10 min por URL).
 - **`/tmp` del contenedor mide 256 MB** (`--tmpfs /tmp:size=256m` en la pila
   02) y el procesado caro baja el original entero a disco: un video de más de
   ~250 MB que necesite 720p o HLS fallará igual que hoy con Supabase. No lo
   cambia esta rama.
 - **Copiar y luego guardar.** Al publicar, el video se copia a `videos/…`
-  antes de confirmar la fila; si la base falla en medio, la carpeta queda sin
-  fila. La limpieza diaria la mueve a `borrados/` a los 7 días (y se borra a
-  los 30).
+  dentro de la transacción y la pendiente solo se borra DESPUÉS del commit (si
+  publicar falla, el reintento la encuentra intacta). Si la base falla tras la
+  copia, la carpeta queda sin fila: la limpieza diaria la mueve a `borrados/`
+  a los 7 días (y se borra a los 30).
 - **Restaurar** una publicación borrada: la función existe
   (`publicacion.restaurar`) pero hoy ningún endpoint deshace un borrado.

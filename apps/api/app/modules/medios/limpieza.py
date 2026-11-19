@@ -14,6 +14,9 @@ el fallo sale en la respuesta y en el log.
    `feed-720-v<n>`, `hls-v<n>/`) con más de 7 días que ya no nombra la fila.
 4. Reconciliar: si una publicación borrada todavía tiene su carpeta en
    `videos/` (el movimiento en segundo plano falló), la mueve ahora.
+5. Cuentas dadas de baja: si queda algo bajo `videos/<uid>/`,
+   `borrados/<uid>/` o `pendientes/<uid>/` de un perfil que ya no existe (un
+   procesado que terminó de subir justo después de la baja), se borra.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from app.modules.content.models import Post, PostMedia
 from app.modules.medios import almacen, banderas, esquema, publicacion
 from app.modules.medios.models import MedioSubida
 from app.modules.moderation.models import Report
+from app.modules.profiles.models import Profile
 
 logger = logging.getLogger("renaser.medios")
 
@@ -214,6 +218,45 @@ async def reconciliar(db: AsyncSession) -> int:
     return movidas
 
 
+def _uids_con_algo() -> set[str]:
+    """Los `<uid>` que tienen algo en cualquiera de los tres prefijos. Con
+    `Delimiter` S3 devuelve las «carpetas» sin listar cada archivo."""
+    s3 = almacen.cliente_s3()
+    uids: set[str] = set()
+    for prefijo in (almacen.PREFIJO_VIDEOS, almacen.PREFIJO_BORRADOS, almacen.PREFIJO_PENDIENTES):
+        for pagina in s3.get_paginator("list_objects_v2").paginate(
+            Bucket=almacen.bucket(), Prefix=f"{prefijo}/", Delimiter="/"
+        ):
+            for comun in pagina.get("CommonPrefixes") or []:
+                uid = comun["Prefix"].split("/")[1]
+                if uid and not uid.startswith("_"):
+                    uids.add(uid)
+    return uids
+
+
+async def borrar_cuentas_dadas_de_baja(db: AsyncSession) -> int:
+    from uuid import UUID
+
+    candidatos = []
+    for uid in await asyncio.to_thread(_uids_con_algo):
+        try:
+            candidatos.append(str(UUID(uid)))
+        except ValueError:
+            continue  # no es un uid: no es nuestro, no se toca
+    if not candidatos:
+        return 0
+    vivos = set(
+        (await db.scalars(select(Profile.id).where(Profile.id.in_(candidatos)))).all()
+    )
+    borradas = 0
+    for uid in candidatos:
+        if uid in vivos:
+            continue
+        await publicacion.borrar_cuenta(uid)
+        borradas += 1
+    return borradas
+
+
 async def ejecutar(db: AsyncSession) -> dict[str, object]:
     resultado: dict[str, object] = {"errores": []}
     if not await esquema.hay_almacen(db):
@@ -225,6 +268,7 @@ async def ejecutar(db: AsyncSession) -> dict[str, object]:
         "borrados_purgados": purgar_borrados,
         "versiones_viejas": purgar_versiones_viejas,
         "reconciliados": reconciliar,
+        "cuentas_dadas_de_baja": borrar_cuentas_dadas_de_baja,
     }
     if not banderas.s3_configurado():
         # Sin bucket solo se puede cerrar el registro; lo demás es de S3.

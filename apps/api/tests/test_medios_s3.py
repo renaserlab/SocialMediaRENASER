@@ -29,7 +29,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-# `moto` va en requirements.txt: si faltara, la prueba tiene que FALLAR (la
+# `moto` va en requirements-dev.txt: si faltara, la prueba tiene que FALLAR (la
 # puerta del despliegue no admite pruebas omitidas), no saltarse.
 from moto import mock_aws  # noqa: E402
 
@@ -336,6 +336,25 @@ async def test_sin_url_para_followers_sin_permiso_aunque_la_visibilidad_sea_abie
 
 
 @pytest.mark.asyncio
+async def test_si_la_firma_falla_queda_una_linea_que_puede_alarmar(entorno, ajustes, caplog):
+    """L4: sin firma, la fila sale sin URL y queda `medios.firma_fallida` en
+    el log (lo cuenta el filtro de métrica de la pila 02)."""
+    from app.modules.medios import hidratacion
+
+    http, sesiones, s3 = entorno
+    post_id, media_id = await _post_s3(sesiones, s3)
+    ajustes.cloudfront_medios_private_key_b64 = ""
+    firma.olvidar()
+    hidratacion._ultimo_aviso = 0.0
+    _como(None)
+    with caplog.at_level("ERROR", logger="renaser.medios"):
+        detalle = (await http.get(f"/api/v1/posts/{post_id}", headers=NUEVA)).json()
+    assert detalle["media"][0]["media_url"] is None
+    lineas = [r.getMessage() for r in caplog.records if hidratacion.MARCA_FIRMA_FALLIDA in r.getMessage()]
+    assert lineas == [f"medios.firma_fallida motivo=sin_firma_configurada media_id={media_id}"]
+
+
+@pytest.mark.asyncio
 async def test_sin_la_migracion_0116_todo_sigue_como_antes(s3):
     engine = await _crear_base(con_0116=False)
     sesiones = async_sessionmaker(engine, expire_on_commit=False)
@@ -423,7 +442,7 @@ async def test_sin_bandera_para_la_cuenta_no_se_sube(entorno, ajustes):
 
 @pytest.mark.asyncio
 async def test_el_limite_cuenta_publicaciones_por_grupo(entorno, ajustes):
-    http, _, _ = entorno
+    http, sesiones, _ = entorno
     ajustes.medios_publicaciones_con_video_por_hora = 3
     _como(ANA)
     grupos = [str(uuid4()) for _ in range(3)]
@@ -435,9 +454,33 @@ async def test_el_limite_cuenta_publicaciones_por_grupo(entorno, ajustes):
         assert (await http.post("/api/v1/medios/subidas", json=_nueva_subida(grupo=grupo))).status_code == 201
     r = await http.post("/api/v1/medios/subidas", json=_nueva_subida())
     assert r.status_code == 429
+    # Reutilizar un grupo ya contado NO abre más subidas: dos de cada tipo.
+    otra_vez = await http.post("/api/v1/medios/subidas", json=_nueva_subida(grupo=grupos[0]))
+    assert otra_vez.status_code == 429
     # Otra cuenta no hereda el límite.
     _como(BETO)
     assert (await http.post("/api/v1/medios/subidas", json=_nueva_subida())).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_un_grupo_viejo_vuelve_a_contar(entorno, ajustes):
+    """Un grupo usado hace más de una hora no es una llave para saltarse el
+    límite: cuenta como una publicación nueva."""
+    http, sesiones, _ = entorno
+    ajustes.medios_publicaciones_con_video_por_hora = 1
+    _como(ANA)
+    viejo = str(uuid4())
+    assert (await http.post("/api/v1/medios/subidas", json=_nueva_subida(grupo=viejo))).status_code == 201
+    async with sesiones() as db:
+        await db.execute(
+            text("UPDATE medios_subidas SET creada = :hace"),
+            {"hace": datetime.now(timezone.utc) - timedelta(hours=2)},
+        )
+        await db.commit()
+    assert (await http.post("/api/v1/medios/subidas", json=_nueva_subida())).status_code == 201
+    # La ventana ya tiene una publicación (la de arriba): el grupo viejo cuenta
+    # como otra y no cabe.
+    assert (await http.post("/api/v1/medios/subidas", json=_nueva_subida(grupo=viejo))).status_code == 429
 
 
 @pytest.mark.asyncio
@@ -606,6 +649,48 @@ async def test_completar_una_subida_simple_comprueba_el_archivo(entorno):
         "/api/v1/posts", json={"body": "", "media": [{"media_type": "video", "id_de_subida": sid}]}
     )
     assert publicado.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_si_publicar_falla_el_reintento_encuentra_la_subida_intacta(entorno):
+    """Corrección A3 del QA. Antes, adoptar copiaba y BORRABA la pendiente antes
+    de validar los temas: un 422 dejaba la subida marcada y sin archivo, y el
+    reintento daba 409 con el video perdido."""
+    http, sesiones, s3 = entorno
+    sid = await _subida_simple(http, s3, ANA)
+    pendiente = s3.list_objects_v2(Bucket=BUCKET, Prefix="pendientes/")["Contents"][0]["Key"]
+    malo = await http.post(
+        "/api/v1/posts",
+        headers=NUEVA,
+        json={"body": "", "topic_ids": [str(uuid4())],
+              "media": [{"media_type": "video", "id_de_subida": sid}]},
+    )
+    assert malo.status_code == 422
+    assert s3.head_object(Bucket=BUCKET, Key=pendiente)  # sigue ahí
+    async with sesiones() as db:
+        subida = await db.get(MedioSubida, sid)
+        assert subida.estado == "abierta" and subida.media_id is None
+        assert (await db.scalars(select(Post))).all() == []
+    bueno = await http.post(
+        "/api/v1/posts", headers=NUEVA,
+        json={"body": "", "media": [{"media_type": "video", "id_de_subida": sid}]},
+    )
+    assert bueno.status_code == 201, bueno.text
+    # Y solo despues del commit se borra la pendiente.
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix="pendientes/")
+
+
+@pytest.mark.asyncio
+async def test_accept_con_zeta_medios_vale_como_la_cabecera(entorno):
+    """Corrección A2: la app declara S3 en `Accept` (segura para CORS)."""
+    http, sesiones, s3 = entorno
+    post_id, _ = await _post_s3(sesiones, s3)
+    _como(None)
+    con_accept = {"Accept": "application/json;zeta-medios=s3"}
+    detalle = await http.get(f"/api/v1/posts/{post_id}", headers=con_accept)
+    assert detalle.status_code == 200 and detalle.json()["media"][0]["media_url"]
+    simple = {"Accept": "application/json"}
+    assert (await http.get(f"/api/v1/posts/{post_id}", headers=simple)).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -854,6 +939,48 @@ async def test_la_limpieza_reconcilia_un_borrado_que_no_llego_a_moverse(entorno,
     assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"videos/{ANA}/{media_id}/")
 
 
+@pytest.mark.asyncio
+async def test_la_limpieza_borra_lo_que_quedo_de_una_cuenta_dada_de_baja(entorno):
+    """Corrección M4: un procesado que sube justo después de la baja deja
+    archivos de un uid sin perfil; la limpieza los borra."""
+    _, sesiones, s3 = entorno
+    fantasma = str(uuid4())
+    s3.put_object(Bucket=BUCKET, Key=f"videos/{fantasma}/m/poster-v1.jpg", Body=b"x")
+    s3.put_object(Bucket=BUCKET, Key=f"pendientes/{fantasma}/p.mp4", Body=b"x")
+    s3.put_object(Bucket=BUCKET, Key=f"videos/{ANA}/m/original.mp4", Body=b"x")
+    s3.put_object(Bucket=BUCKET, Key="videos/_salud/prueba/ping.txt", Body=b"ok")
+    async with sesiones() as db:
+        resultado = await limpieza.ejecutar(db)
+    assert resultado["cuentas_dadas_de_baja"] == 1
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"videos/{fantasma}/")
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"pendientes/{fantasma}/")
+    assert s3.head_object(Bucket=BUCKET, Key=f"videos/{ANA}/m/original.mp4")
+    assert s3.head_object(Bucket=BUCKET, Key="videos/_salud/prueba/ping.txt")
+
+
+@pytest.mark.asyncio
+async def test_el_procesado_no_sube_si_la_fila_desaparecio(s3, monkeypatch):
+    medio = PostMedia(id="m8", storage_path="videos/ana/m8/original.mp4", media_type="video",
+                      width=720, height=1280, duration_s=5.0, bytes=10)
+    s3.put_object(Bucket=BUCKET, Key=medio.storage_path, Body=b"video")
+
+    async def _poster(_ffmpeg, _entrada, destino):
+        destino.write_bytes(b"jpeg")
+        return True
+
+    async def _ya_no():
+        return False
+
+    monkeypatch.setattr(mp, "_ffmpeg", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(mp, "_extraer_poster", _poster)
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(mp.MedioDesaparecido):
+            await mp._process_video(client, medio, "s3", "ana", _ya_no)
+    assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET, Prefix="videos/ana/m8/poster")
+
+
 # --------------------------------------------------------------------------- #
 # 7. Procesado contra S3 (moto)
 # --------------------------------------------------------------------------- #
@@ -940,3 +1067,33 @@ async def test_la_salud_lista_firma_y_pide_a_cloudfront(entorno, monkeypatch):
     cuerpo = (await http.get("/api/v1/admin/medios/salud")).json()
     assert cuerpo["bucket"] == "ok" and cuerpo["firma"] is True and cuerpo["cloudfront"] == 200
     assert "privada" not in json.dumps(cuerpo).lower()
+
+    # Bucket puesto y sin credenciales del rol (hop limit 1): se dice tal cual.
+    monkeypatch.setattr("app.modules.medios.router._hay_credenciales", lambda: False)
+    cuerpo = (await http.get("/api/v1/admin/medios/salud")).json()
+    assert cuerpo["bucket"] == "sin_credenciales"
+
+
+@pytest.mark.asyncio
+async def test_la_baja_no_habla_con_s3_si_la_cuenta_no_tiene_nada_alli(entorno, monkeypatch):
+    """Corrección M2: con el bucket puesto y sin credenciales, las bajas de
+    quien nunca subió nada a S3 no pueden fallar por S3."""
+    _, sesiones, s3 = entorno
+    llamadas: list[str] = []
+
+    async def _no_llamar(uid):
+        llamadas.append(uid)
+        raise RuntimeError("sin credenciales")
+
+    monkeypatch.setattr(publicacion, "borrar_cuenta", _no_llamar)
+    async with sesiones() as db:
+        assert await publicacion.tiene_algo_en_s3(db, CARLA) is False
+    await _post_s3(sesiones, s3, autor=BETO)
+    async with sesiones() as db:
+        assert await publicacion.tiene_algo_en_s3(db, BETO) is True
+        db.add(MedioSubida(uid=CARLA, grupo=str(uuid4()), tipo="video",
+                           clave_pendiente=f"pendientes/{CARLA}/x.mp4", content_type="video/mp4",
+                           bytes_declarados=1, expira=datetime.now(timezone.utc)))
+        await db.commit()
+        assert await publicacion.tiene_algo_en_s3(db, CARLA) is True
+    assert llamadas == []

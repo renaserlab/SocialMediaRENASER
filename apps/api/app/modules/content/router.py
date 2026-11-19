@@ -659,21 +659,15 @@ async def create_post(
     current_user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PostRead:
-    # VIDEOS SUBIDOS A S3 (spec §5). Se adoptan ANTES de crear nada: si una
-    # subida no es de esta cuenta, no existe o no coincide en tamano y tipo,
-    # no queda una publicacion a medias sin su video. Adoptar copia la
-    # pendiente a `videos/<uid>/<media_id>/` dentro de S3.
-    adoptados: dict[int, medios_publicacion.Adoptado] = {}
     for item in payload.media:
         _exigir_ruta_de_supabase(item.storage_path)
         _exigir_ruta_de_supabase(item.poster_path)
     for ruta in payload.image_paths:
         _exigir_ruta_de_supabase(ruta)
-    for indice, item in enumerate(payload.media):
-        if item.id_de_subida:
-            adoptados[indice] = await medios_publicacion.adoptar(
-                db, current_user.id, item.id_de_subida, item.id_de_subida_poster
-            )
+    # Sin bandera para esta cuenta, un video de S3 se rechaza YA, antes de
+    # tocar nada. La adopcion de verdad va mas abajo (ver «VIDEOS EN S3»).
+    if any(item.id_de_subida for item in payload.media):
+        await medios_publicacion.exigir_habilitado(db, current_user.id)
 
     post = Post(
         author_id=current_user.id,
@@ -719,8 +713,46 @@ async def create_post(
             avisados.append(mencionado)
     nuevas_menciones = avisados
 
+    # VIDEOS SUBIDOS A S3 (spec §5). Se adoptan DESPUES de validar temas y
+    # menciones y DENTRO de la misma transaccion que la publicacion: la fila,
+    # su `almacen = 's3'` y la subida marcada como usada se confirman juntas o
+    # no se confirma nada. Adoptar COPIA la pendiente a `videos/<uid>/<id>/`;
+    # la pendiente NO se borra hasta despues del commit, asi que si publicar
+    # falla, el reintento encuentra su subida intacta (estado sin cambiar).
+    adoptados: dict[int, medios_publicacion.Adoptado] = {}
+    filas_s3: dict[int, PostMedia] = {}
+    for indice, item in enumerate(payload.media):
+        if not item.id_de_subida:
+            continue
+        adoptado = await medios_publicacion.adoptar(
+            db, current_user.id, item.id_de_subida, item.id_de_subida_poster
+        )
+        adoptados[indice] = adoptado
+        fila = PostMedia(
+            id=adoptado.media_id,
+            post_id=post.id,
+            storage_path=adoptado.storage_path,
+            media_type=item.media_type,
+            sort_order=indice,
+            width=item.width,
+            height=item.height,
+            duration_s=item.duration_s,
+            bytes=item.bytes or adoptado.bytes,
+            poster_path=adoptado.poster_path,
+        )
+        db.add(fila)
+        filas_s3[indice] = fila
+    if filas_s3:
+        await db.flush()
+        for fila in filas_s3.values():
+            await medios_publicacion.marcar_s3(db, fila.id)
+
     await db.commit()
     await db.refresh(post)
+    # Ahora si: las pendientes ya copiadas se borran (y si esto falla, el ciclo
+    # de vida de `pendientes/` las borra en un dia).
+    for adoptado in adoptados.values():
+        background.add_task(medios_publicacion.borrar_pendientes, adoptado.pendientes)
 
     # Los push van DESPUES del commit: si la transaccion fallara, no puede
     # haberse avisado ya de algo que no llego a ocurrir.
@@ -744,35 +776,30 @@ async def create_post(
     ]
 
     media: list[PostMediaRead] = []
-    filas_s3: list[PostMedia] = []
     for index, item in enumerate(entries):
-        adoptado = adoptados.get(index)
+        if index in filas_s3:
+            # Ya guardada arriba, con la publicacion.
+            media.append(_media_read(filas_s3[index]))
+            continue
         row = PostMedia(
             post_id=post.id,
-            storage_path=adoptado.storage_path if adoptado else item.storage_path,
+            storage_path=item.storage_path,
             media_type=item.media_type,
             sort_order=index,
             # Metadata calculada en el dispositivo al subir (si el movil pudo).
             width=item.width,
             height=item.height,
             duration_s=item.duration_s,
-            bytes=(item.bytes or adoptado.bytes) if adoptado else item.bytes,
-            poster_path=adoptado.poster_path if adoptado else item.poster_path,
+            bytes=item.bytes,
+            poster_path=item.poster_path,
         )
-        if adoptado:
-            # El id es el de la carpeta de S3: `videos/<uid>/<media_id>/`.
-            row.id = adoptado.media_id
-            filas_s3.append(row)
         db.add(row)
         media.append(_media_read(row))
     if filas_s3:
-        await db.flush()
-        for row in filas_s3:
-            await medios_publicacion.marcar_s3(db, row.id)
         await _firmar_respuesta(db, media, current_user.id)
     if media:
         await db.commit()
-        ids_s3 = {row.id for row in filas_s3}
+        ids_s3 = {row.id for row in filas_s3.values()}
         if processing_configured() or (ids_s3 and _mp.procesado_s3_configurado()):
             # DESPUES de responder: genera la version ligera de la imagen y el
             # poster del video si el dispositivo no lo mando. Publicar no
@@ -979,13 +1006,13 @@ async def update_post(
     # `borrados/` e invalida CloudFront, y el nuevo se procesa.
     retirados_s3: list[PostMedia] = []
     nuevos_s3: list[str] = []
+    adoptados: dict[int, medios_publicacion.Adoptado] = {}
     if payload.media is not None:
         existentes = (
             await db.scalars(select(PostMedia).where(PostMedia.post_id == post_id))
         ).all()
         en_s3 = await medios_publicacion.ids_en_s3(db, [m.id for m in existentes])
         s3_por_clave = {m.storage_path: m for m in existentes if m.id in en_s3}
-        adoptados: dict[int, medios_publicacion.Adoptado] = {}
         conservados: dict[int, PostMedia] = {}
         for index, item in enumerate(payload.media):
             if item.id_de_subida:
@@ -1034,6 +1061,12 @@ async def update_post(
                 await medios_publicacion.marcar_s3(db, media_id)
 
     await db.commit()
+
+    # Las pendientes adoptadas, solo ahora que la edicion quedo guardada: si el
+    # commit hubiera fallado, el reintento las encontraria intactas.
+    if payload.media is not None:
+        for adoptado in adoptados.values():
+            background.add_task(medios_publicacion.borrar_pendientes, adoptado.pendientes)
 
     # Lo que sale de S3, despues del commit: el predicado ya no lo firma y la
     # carpeta se mueve fuera del comodin de las firmas.

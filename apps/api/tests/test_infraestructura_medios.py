@@ -407,3 +407,18 @@ def test_las_salidas_dan_lo_que_la_pila_02_y_la_api_necesitan() -> None:
         "ArnDeLaDistribucion", "IdDelGrupoDeClaves", "IdDeLaClavePublicaA", "IdDeLaClavePublicaB",
     ):
         assert re.search(rf"^  {nombre}:\n", salidas, re.M), nombre
+
+
+def test_la_firma_fallida_de_medios_tiene_filtro_y_alarma() -> None:
+    """L4: la linea que escribe la API cuando no puede firmar es la MISMA que
+    cuenta el filtro de metrica; si alguien cambia una, esta prueba lo ve."""
+    from app.modules.medios.hidratacion import MARCA_FIRMA_FALLIDA
+
+    texto = (Path(__file__).resolve().parents[3] / "infra" / "aws" / "02-plataforma.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert f"FilterPattern: '\"{MARCA_FIRMA_FALLIDA}\"'" in texto
+    bloque = texto[texto.index("  AlarmaFirmaDeMediosFallida:") :]
+    bloque = bloque[: bloque.index("\n\n")]
+    assert "Condition: HayMedios" in bloque
+    assert "AlarmActions: [!Ref TemaDeAlertas]" in bloque

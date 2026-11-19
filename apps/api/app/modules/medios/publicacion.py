@@ -56,6 +56,10 @@ class Adoptado:
     storage_path: str
     poster_path: str | None
     bytes: int
+    #: Las claves de `pendientes/` ya copiadas. Se borran DESPUES del commit
+    #: (`borrar_pendientes`), nunca antes: si publicar falla, el reintento las
+    #: necesita.
+    pendientes: list[str]
 
 
 def carpeta_de_medio(uid: str, media_id: str) -> str:
@@ -67,11 +71,20 @@ async def exigir_habilitado(db: AsyncSession, uid: str) -> None:
         raise MediosS3NoHabilitado()
 
 
-async def subida_propia(db: AsyncSession, uid: str, id_de_subida: str) -> MedioSubida:
+async def subida_propia(
+    db: AsyncSession, uid: str, id_de_subida: str, *, bloquear: bool = False
+) -> MedioSubida:
     """La subida, si es de `uid`. La de otra persona es un 403 (spec,
-    «Publicar con la subida de otra persona»)."""
+    «Publicar con la subida de otra persona»).
+
+    `bloquear` toma la fila con `FOR UPDATE` hasta el final de la transacción:
+    dos publicaciones con la misma subida a la vez no pueden usarla las dos (la
+    segunda espera y la encuentra usada)."""
     ensure_uuid(id_de_subida, "Subida no encontrada.")
-    subida = await db.get(MedioSubida, id_de_subida)
+    consulta = select(MedioSubida).where(MedioSubida.id == id_de_subida)
+    if bloquear:
+        consulta = consulta.with_for_update()
+    subida = (await db.scalars(consulta)).first()
     if subida is None:
         raise NotFoundError("Subida no encontrada.")
     if subida.uid != uid or not subida.clave_pendiente.startswith(
@@ -82,8 +95,8 @@ async def subida_propia(db: AsyncSession, uid: str, id_de_subida: str) -> MedioS
 
 
 def _copiar_pendiente(subida_clave: str, bytes_: int, content_type: str, destino: str) -> None:
-    """HeadObject (que exista, tamaño y tipo) + CopyObject + borrar la
-    pendiente. Síncrono: va en un hilo."""
+    """HeadObject (que exista, tamaño y tipo) + CopyObject. La pendiente NO se
+    borra aquí: ver `Adoptado.pendientes`. Síncrono: va en un hilo."""
     s3 = almacen.cliente_s3()
     try:
         cabeza = s3.head_object(Bucket=almacen.bucket(), Key=subida_clave)
@@ -106,7 +119,22 @@ def _copiar_pendiente(subida_clave: str, bytes_: int, content_type: str, destino
         ContentType=content_type,
         CacheControl=almacen.CACHE_INMUTABLE,
     )
-    s3.delete_object(Bucket=almacen.bucket(), Key=subida_clave)
+
+
+def _borrar_pendientes_sync(claves: list[str]) -> None:
+    for clave in claves:
+        almacen.cliente_s3().delete_object(Bucket=almacen.bucket(), Key=clave)
+
+
+async def borrar_pendientes(claves: list[str]) -> None:
+    """Después del commit, en segundo plano. Si falla, el ciclo de vida de
+    `pendientes/` (1 día) las borra igual: no hay que reintentar."""
+    if not claves or not banderas.s3_configurado():
+        return
+    try:
+        await asyncio.to_thread(_borrar_pendientes_sync, claves)
+    except Exception:  # noqa: BLE001
+        logger.info("No se pudieron borrar %d pendiente(s); las borra el ciclo de vida", len(claves))
 
 
 async def adoptar(
@@ -114,12 +142,12 @@ async def adoptar(
 ) -> Adoptado:
     """Convierte las subidas pendientes en los archivos de un medio nuevo."""
     await exigir_habilitado(db, uid)
-    video = await subida_propia(db, uid, id_de_subida)
+    video = await subida_propia(db, uid, id_de_subida, bloquear=True)
     if video.tipo != "video":
         raise ValidationAppError("Esa subida no es un video.")
     poster = None
     if id_de_subida_poster:
-        poster = await subida_propia(db, uid, id_de_subida_poster)
+        poster = await subida_propia(db, uid, id_de_subida_poster, bloquear=True)
         if poster.tipo != "poster":
             raise ValidationAppError("Esa subida no es un póster.")
     for subida in (video, poster):
@@ -155,6 +183,7 @@ async def adoptar(
         storage_path=original,
         poster_path=clave_poster,
         bytes=int(video.bytes_declarados),
+        pendientes=[s.clave_pendiente for s in (video, poster) if s is not None],
     )
 
 
@@ -243,6 +272,35 @@ def _borrar_cuenta_sync(uid: str) -> int:
         total += almacen.borrar_prefijo_sync(f"{prefijo}/{uid}/")
     almacen.invalidar_sync([f"/{almacen.PREFIJO_VIDEOS}/{uid}/*"])
     return total
+
+
+async def tiene_algo_en_s3(db: AsyncSession, uid: str) -> bool:
+    """Si en la base hay rastro de `uid` en S3: algún medio `s3` en sus
+    publicaciones o alguna subida registrada. Sin la 0116 o sin bucket, no.
+
+    Mira la BASE y no el bucket a propósito: es lo que deja hacer la baja sin
+    credenciales de S3 cuando la cuenta nunca subió nada allí (corrección M2
+    del QA). Lo que no deja rastro en la base (una pendiente sin fila) lo
+    borra el ciclo de vida del bucket a las 24 h.
+    """
+    if not banderas.s3_configurado() or not await esquema.hay_almacen(db):
+        return False
+    from app.modules.content.models import Post, PostMedia
+
+    tabla = esquema.POST_MEDIA_ALMACEN
+    medio = await db.scalar(
+        select(PostMedia.id)
+        .join(Post, Post.id == PostMedia.post_id)
+        .where(
+            Post.author_id == uid,
+            PostMedia.id.in_(select(tabla.c.id).where(tabla.c.almacen == "s3")),
+        )
+        .limit(1)
+    )
+    if medio is not None:
+        return True
+    subida = await db.scalar(select(MedioSubida.id).where(MedioSubida.uid == uid).limit(1))
+    return subida is not None
 
 
 async def borrar_cuenta(uid: str) -> int:

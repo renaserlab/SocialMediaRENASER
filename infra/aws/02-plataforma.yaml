@@ -2513,6 +2513,45 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref TemaDeAlertas]
 
+  # LA FIRMA DE LOS VIDEOS EN S3. Si la clave privada del secreto falta o no se
+  # puede leer, la API arranca igual y entrega las filas `s3` SIN URL: los
+  # videos nuevos se ven negros y nada mas lo dice. La API escribe entonces
+  # «medios.firma_fallida motivo=... media_id=...» (como mucho una vez por
+  # minuto y por proceso; ver `medios/hidratacion.py`). Este filtro la cuenta y
+  # la alarma avisa con una sola linea en 5 minutos.
+  FiltroFirmaDeMediosFallida:
+    Type: AWS::Logs::MetricFilter
+    Condition: HayMedios
+    Properties:
+      LogGroupName: !Ref GrupoDeLogsDeLaApi
+      FilterPattern: '"medios.firma_fallida"'
+      MetricTransformations:
+        - MetricNamespace: !Sub '${PrefijoDeRecursos}/${Entorno}/medios'
+          MetricName: FirmaFallida
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AlarmaFirmaDeMediosFallida:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HayMedios
+    Properties:
+      AlarmName: !Sub '${PrefijoDeRecursos}-${Entorno}-firma-de-medios'
+      AlarmDescription: >-
+        La API no pudo firmar videos de S3 (medios.firma_fallida en los logs):
+        las publicaciones con video en S3 salen sin URL. Revisar
+        CLOUDFRONT_MEDIOS_PRIVATE_KEY_B64 y CLOUDFRONT_MEDIOS_KEY_PAIR_ID en el
+        secreto y GET /api/v1/admin/medios/salud. Mitigacion inmediata:
+        MediosS3Lectura=false.
+      Namespace: !Sub '${PrefijoDeRecursos}/${Entorno}/medios'
+      MetricName: FirmaFallida
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref TemaDeAlertas]
+
 Outputs:
 
   UrlDeLaApi:

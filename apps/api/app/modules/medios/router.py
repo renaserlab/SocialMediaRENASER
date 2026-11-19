@@ -161,15 +161,37 @@ async def _exigir_viva(subida: MedioSubida, *estados: str) -> None:
         raise publicacion.SubidaNoDisponible()
 
 
-async def _limite_por_hora(db: AsyncSession, uid: str, grupo: str) -> None:
+#: Subidas de cada tipo dentro de UN grupo (una publicación). Dos y no una:
+#: deja un reintento completo de la subida sin que cuente como otra
+#: publicación, y nada más. Sin este tope, reutilizar el mismo `grupo` era una
+#: forma de subir sin límite.
+MAX_SUBIDAS_POR_GRUPO_Y_TIPO = 2
+
+
+async def _limite_por_hora(db: AsyncSession, uid: str, grupo: str, tipo: str) -> None:
+    """20 publicaciones con video por hora, contadas por grupo (spec §5).
+
+    - Un grupo cuenta UNA vez mientras está dentro de la ventana: su póster y
+      el reintento de su video no suman otra publicación.
+    - Un grupo usado hace más de una hora vuelve a contar como nuevo (si no,
+      guardar un grupo viejo sería una llave para saltarse el límite).
+    - Dentro de un grupo, como mucho dos videos y dos pósters.
+    """
+    del_tipo = await db.scalar(
+        select(func.count()).select_from(MedioSubida).where(
+            MedioSubida.uid == uid, MedioSubida.grupo == grupo, MedioSubida.tipo == tipo
+        )
+    )
+    if (del_tipo or 0) >= MAX_SUBIDAS_POR_GRUPO_Y_TIPO:
+        raise DemasiadasSubidas("Demasiados intentos para esta publicación. Empieza una nueva.")
+    desde = _ahora() - timedelta(hours=1)
     ya_contado = await db.scalar(
         select(MedioSubida.id)
-        .where(MedioSubida.uid == uid, MedioSubida.grupo == grupo)
+        .where(MedioSubida.uid == uid, MedioSubida.grupo == grupo, MedioSubida.creada >= desde)
         .limit(1)
     )
     if ya_contado is not None:
         return
-    desde = _ahora() - timedelta(hours=1)
     grupos = await db.scalar(
         select(func.count(func.distinct(MedioSubida.grupo))).where(
             MedioSubida.uid == uid, MedioSubida.creada >= desde
@@ -200,7 +222,7 @@ async def crear_subida(
         raise ValidationAppError(
             f"El archivo pasa del máximo permitido ({tope // (1024 * 1024)} MB)."
         )
-    await _limite_por_hora(db, uid, payload.grupo)
+    await _limite_por_hora(db, uid, payload.grupo, payload.tipo)
 
     id_de_subida = str(uuid4())
     clave = (
@@ -493,6 +515,15 @@ async def limpieza_diaria(background: BackgroundTasks) -> dict[str, object]:
 CARPETA_DE_SALUD = f"{almacen.PREFIJO_VIDEOS}/_salud/prueba"
 
 
+def _hay_credenciales() -> bool:
+    import boto3
+
+    try:
+        return boto3.Session().get_credentials() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _escribir_prueba() -> None:
     s3 = almacen.cliente_s3()
     # NO `HeadBucket`: el rol tiene `s3:ListBucket` acotado por prefijo
@@ -533,6 +564,15 @@ async def salud_de_medios(
     }
     if not banderas.s3_configurado():
         salida["bucket"] = "sin_configurar"
+        return salida
+    # CREDENCIALES DEL ROL. Con el bucket puesto y el hop limit de IMDSv2 en 1,
+    # el contenedor no llega a las credenciales de la instancia y NADA de S3
+    # funciona (subir, procesar, borrar). Es una configuración prohibida: se
+    # dice aquí con nombre propio en vez de como un fallo genérico.
+    if not await asyncio.to_thread(_hay_credenciales):
+        salida["bucket"] = "sin_credenciales"
+        salida["pista"] = "El contenedor no obtiene credenciales del rol: revisa el hop limit de IMDSv2 (2)."
+        logger.error("medios.salud: sin_credenciales (bucket configurado sin acceso al rol)")
         return salida
     try:
         await asyncio.to_thread(_escribir_prueba)

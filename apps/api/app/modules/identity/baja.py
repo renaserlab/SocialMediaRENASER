@@ -318,6 +318,10 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     await _sin_historia_de_servicios(db, usuario_id)
     suyas, enteras = await _conversaciones(db, usuario_id)
     servicios = await _servicios(db, usuario_id)
+    # ANTES de borrar (la cascada se lleva las filas): si la cuenta nunca subió
+    # nada a S3, la baja no habla con S3. Así un bucket configurado sin
+    # credenciales del rol no tumba las bajas de quien no tiene nada allí.
+    tiene_algo_en_s3 = await medios_publicacion.tiene_algo_en_s3(db, usuario_id)
     postgres = (await db.connection()).dialect.name == "postgresql"
 
     try:
@@ -366,7 +370,8 @@ async def borrar_cuenta(db: AsyncSession, usuario_id: str) -> list[str]:
     # invalidacion de `/videos/<uid>/*`. Si S3 falla, la baja aborta antes de
     # confirmar, igual que con Supabase. Sin bucket configurado no hace nada.
     try:
-        await medios_publicacion.borrar_cuenta(usuario_id)
+        if tiene_algo_en_s3:
+            await medios_publicacion.borrar_cuenta(usuario_id)
     except Exception:  # noqa: BLE001 — cualquier fallo de S3: no se confirma
         await db.rollback()
         logger.warning("Baja de %s deshecha: no se pudieron borrar sus videos de S3", usuario_id)
