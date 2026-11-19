@@ -174,3 +174,116 @@ variable ya configurada, los borrados de cuenta futuros sí limpian solos.
 **Por producción** — medir en un Android real la build release (RAM, FPS,
 arranque frío/caliente) con `EXPO_PUBLIC_PERFORMANCE_DEBUG=1`, y correr
 `EXPLAIN ANALYZE` del feed contra Postgres cuando el índice parcial exista.
+
+## 7. Medición de los videos de Inicio en teléfonos reales (noviembre 2026)
+
+La línea base que había se midió en la **web** (primer video 3,1 s con wifi y
+6,6 s con 4G; deslizar al siguiente 0,9 s y 13,5 s). Del iPhone y del Android
+no había ningún número. Desde la migración `0115` y la rama
+`feature/medicion-video-en-telefono`, cada arranque de la app manda un lote
+pequeño con lo que tardó cada paso. Funciona en las builds normales, no solo
+con `EXPO_PUBLIC_PERFORMANCE_DEBUG=1`, que sigue igual que antes y solo escribe
+en la consola.
+
+### Qué se mide
+
+Todo en ms y sin datos de persona: ni usuario, ni publicación, ni texto, ni IP.
+`sesion` es un número al azar por arranque.
+
+| Tramo | Qué es |
+|---|---|
+| `feed_pedido` | Desde que arrancó el JS hasta que Inicio pide la primera página |
+| `feed_respuesta` | … hasta que responde el feed (recomendador o cronológico) |
+| `urls_firmadas` | … hasta que están firmadas las URLs de esa página |
+| `primer_fotograma` | … hasta el primer fotograma del primer video (`onFirstFrameRender`) |
+| `primera_reproduccion` | … hasta que el primer video **reproduce de verdad** |
+| `primer_video` / `deslizamiento` / `otro` | Por cada video que pasa a ser el activo: desde el gesto (`onScrollBeginDrag`) o desde que se activó hasta que reproduce; además, hasta el primer fotograma si se vio en ese momento, el número de esperas por falta de datos **después** de arrancar, cuánto sumaron, si era HLS o MP4 y el peso (solo si se reproduce el original: el derivado del feed no tiene un peso guardado) |
+
+«Reproduce de verdad» es el `playingChange` de expo-video, que en iOS sale de
+`timeControlStatus == .playing` y en Android de `onIsPlayingChanged` de
+ExoPlayer: los dos solo son ciertos cuando hay datos y el video avanza.
+`readyToPlay` llega antes de que haya imagen, y el primer fotograma se puede
+pintar con el video en pausa (el vecino precargado), así que ninguno de los dos
+vale para esto. Una espera es `statusChange → loading` tras haber arrancado. En
+la web son los eventos `playing` y `waiting` del `<video>`.
+
+Contexto del equipo: plataforma, versión de la app, id corto de la
+actualización OTA (o `embebido`), modelo (`expo-device`) y versión del sistema.
+**El tipo de red queda vacío en iPhone y Android**: saberlo exige
+`@react-native-community/netinfo` o `expo-network`, que son módulos nativos
+que no están en el binario publicado, y añadir uno obliga a pasar por las
+tiendas. En la web sale del navegador.
+
+### Cuándo se envía y cuánto cuesta
+
+- Todo en memoria. Ni disco, ni estado de React, ni un render por medición.
+- Como mucho 30 tramos por sesión (`TOPE_DE_EVENTOS`).
+- **Un solo envío por arranque**, al pasar a segundo plano o al minuto de la
+  primera medición, lo que ocurra antes. `fetch` sin esperar respuesta, con
+  `keepalive`, corte a los 5 s y sin reintentos: si falla, se pierde.
+- Pesa unos 435 bytes con un video, ~1,8 KB con diez y ~4,7 KB lleno.
+- Se apaga con `MEDICION_ENCENDIDA = false` o con `MUESTREO` (fracción de
+  arranques que se miden; hoy 1 = todos) en `src/lib/medicionDeVideo.ts`.
+  También se apaga sola si falta `EXPO_PUBLIC_API_URL`.
+- Lo que se mide después del envío ya no se guarda. Mide el arranque y el
+  primer minuto, que es justo lo que se quiere comparar con la línea base.
+
+Código: `apps/mobile/src/lib/medicionDeVideo.ts` (lógica, sin React Native),
+`medicionDeVideoEnApp.ts` (conexión con el teléfono), y los enganches en
+`VideoPlayer(.web).tsx`, `FeedVerticalDeVideos.tsx`, `useFeedDeVideos.ts`,
+`fuenteDeVideos.ts` y `PostRepository.listVideos`.
+
+### Servidor
+
+- `POST /api/v1/telemetria/video` funciona sin sesión, igual que Inicio. Valida de forma estricta
+  (campos cerrados, ms entre 0 y 120 000, textos cortos, como mucho 30 tramos,
+  cuerpo de 16 KB como máximo), limita a 20 lotes por IP cada 10 min (en
+  memoria del proceso, como el chat en directo) y responde **202** antes de
+  escribir. La escritura va en segundo plano y, si falla, solo se registra.
+- Tabla `metricas_de_video` (migración `0115`): una fila por medición. Tiene RLS
+  sin políticas y `revoke` a `anon`/`authenticated`, así que solo la API la
+  lee y la escribe. No tiene nada que ver con `behavior_events`, que alimenta
+  al recomendador.
+- **Retención: 90 días** con `select public.purgar_metricas_de_video();`. Se
+  puede programar con `pg_cron` (el comando está en la cabecera de la
+  migración).
+
+### Cómo consultarlo
+
+- Admin en la API: `GET /api/v1/admin/telemetria/video?dias=7` (1 a 90 días)
+  da `n`, mediana, p75 y p90 por plataforma y tramo, cuántos no llegaron a
+  reproducir y qué fracción tuvo esperas.
+- Desde el editor SQL de Supabase: `select * from metricas_de_video_resumen;`
+  (últimos 7 días). Para cruzar por modelo o versión:
+  ```sql
+  select modelo, formato, count(*),
+         percentile_cont(0.5) within group (order by ms) as mediana
+  from metricas_de_video
+  where tramo = 'deslizamiento' and plataforma = 'android'
+    and creado_en > now() - interval '7 days'
+  group by 1, 2 order by 3 desc;
+  ```
+
+**Cómo leerlo frente a la línea base.** La línea base del «primer video» (3,1 s
+y 6,6 s) equivale a `primera_reproduccion`, que cuenta desde el arranque del
+JS. «Deslizar al siguiente» (0,9 s y 13,5 s) equivale a la mediana y al p90 de
+`deslizamiento.ms`. Como hoy no hay tipo de red en nativo, comparar con la
+cifra de wifi o de 4G de la web se hace por percentiles (la mediana se parece
+más a wifi y el p90 a una red mala), no fila a fila.
+
+### Qué hace falta para que llegue a los teléfonos
+
+1. **API y migración**: aplicar `0115` en Supabase y desplegar la API. El
+   orden da igual: sin tabla, la API responde 202 y descarta el lote.
+2. **App por EAS Update, sin pasar por las tiendas.** El cambio es solo de JS:
+   `expo-device`, `expo-constants` y `expo-updates` ya iban en el binario (los
+   avisos push usan `expo-device` desde julio y `expo-updates` está desde
+   septiembre). `runtimeVersion` usa la política `appVersion` (hoy `1.2.4`),
+   así que una actualización publicada desde este código llega a las builds
+   1.2.4 de cada canal: `eas update --channel production` (tiendas) o
+   `--channel preview` (APK repartido). **Cuidado:** `eas update` no lee el
+   `env` de los perfiles de `eas.json`, sino el `.env` local o las variables
+   del entorno de EAS. Si `EXPO_PUBLIC_API_URL` y las de Supabase no están
+   ahí, la actualización sale en modo demo. Hay que comprobarlo antes de
+   publicar. Las builds con otra versión (1.2.3 o anteriores) no la reciben:
+   necesitan una build nueva.

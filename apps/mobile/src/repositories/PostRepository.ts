@@ -4,6 +4,7 @@ import { profileImageUrl, signMediaUrls, type UploadedMedia } from '@/services/s
 import { PRIVATE_AUDIO_CATEGORY } from '@/data/categories';
 import type { Comment, Post } from '@/types';
 import { toProfileSummary, type ProfileSummary, type ProfileSummaryDto } from '@/mappers/profileMapper';
+import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 
 export type FeedPage = {
   items: Post[];
@@ -290,8 +291,12 @@ export const PostRepository = {
     if (beforeCreatedAt) params.set('before_created_at', beforeCreatedAt);
     if (beforeId) params.set('before_id', beforeId);
     const dtos = await apiRequest<PostDto[]>(`${API_V1}/posts?${params.toString()}`);
+    // Hitos de la medicion de Inicio en telefonos. Solo valen si Inicio marco
+    // antes `feed_pedido`, asi que otra pantalla que liste videos no los ensucia.
+    medicionDeVideo.hito('feed_respuesta');
     const items = dtos.map((dto) => toPost(dto, currentUserId));
     await attachMediaUrls(items);
+    medicionDeVideo.hito('urls_firmadas');
     return items;
   },
 

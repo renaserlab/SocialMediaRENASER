@@ -17,6 +17,7 @@ import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
 import { Text } from '@/components/Text';
 import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
 import { haptics } from '@/lib/haptics';
+import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import { toast } from '@/lib/toast';
 import type { Superficie } from '@/repositories/RecommendationRepository';
 import {
@@ -361,6 +362,7 @@ export function FeedVerticalDeVideos({
             alDescartar={descartarVideo}
             alAbrirComentarios={abrirComentarios}
             alVerReacciones={verReacciones}
+            medir
           />
         )}
         pagingEnabled
@@ -369,6 +371,9 @@ export function FeedVerticalDeVideos({
         drawDistance={altoDePagina}
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
+        // El cero de «deslizar al siguiente»: el dedo empieza a mover la
+        // lista. Una funcion estable del modulo, sin estado ni render.
+        onScrollBeginDrag={medicionDeVideo.inicioDeGesto}
         viewabilityConfig={viewabilityConfig}
         onEndReached={feed.cargarMas}
         onEndReachedThreshold={2}

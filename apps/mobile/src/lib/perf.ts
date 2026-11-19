@@ -11,8 +11,15 @@
 
 const enabled = process.env.EXPO_PUBLIC_PERFORMANCE_DEBUG === '1';
 
-/** Instante de referencia: cuando se evaluo este modulo (arranque del JS). */
-const origin = Date.now();
+/**
+ * Instante de referencia: cuando se evaluo este modulo (arranque del JS).
+ *
+ * Se exporta para que la medicion de video en telefonos (`medicionDeVideo`)
+ * cuente desde el MISMO cero que estas marcas: asi un numero de la consola y
+ * uno del servidor se pueden comparar sin traducir.
+ */
+export const ORIGEN_DEL_ARRANQUE = Date.now();
+const origin = ORIGEN_DEL_ARRANQUE;
 
 type Marca = { name: string; at: number };
 

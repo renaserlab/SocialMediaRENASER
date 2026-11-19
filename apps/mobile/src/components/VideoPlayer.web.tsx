@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 
 import { VideoScrubber } from '@/components/VideoScrubber';
+import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import { palette } from '@/theme/tokens';
 import type { VideoPlayerProps } from './VideoPlayer.types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -35,6 +36,7 @@ export function VideoPlayer({
   hidePlayButton = false,
   onMutedChange,
   onFirstFrame,
+  medirComo,
 }: VideoPlayerProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLVideoElement | null>(null);
@@ -82,6 +84,39 @@ export function VideoPlayer({
       el.removeEventListener('play', reaplicar);
     };
   });
+
+  /*
+    Medicion de video, igual que en nativo (ver `VideoPlayer.tsx`): `playing`
+    del DOM es «ya avanza con imagen», `waiting` es quedarse sin datos. Una
+    referencia y oyentes del propio elemento: ni estado ni renders.
+  */
+  const medida = useRef(medirComo);
+  medida.current = medirComo;
+  useLayoutEffect(() => {
+    const m = medida.current;
+    if (active && m) medicionDeVideo.videoActivo(m.id, m);
+  }, [active, medirComo?.id]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const alReproducir = () => {
+      if (medida.current) medicionDeVideo.reproduciendo(medida.current.id);
+    };
+    const alEsperar = () => {
+      if (medida.current) medicionDeVideo.estado(medida.current.id, 'loading');
+    };
+    const alFallar = () => {
+      if (medida.current) medicionDeVideo.estado(medida.current.id, 'error');
+    };
+    el.addEventListener('playing', alReproducir);
+    el.addEventListener('waiting', alEsperar);
+    el.addEventListener('error', alFallar);
+    return () => {
+      el.removeEventListener('playing', alReproducir);
+      el.removeEventListener('waiting', alEsperar);
+      el.removeEventListener('error', alFallar);
+    };
+  }, []);
 
   // Reproduccion por viewport (feeds tipo reels), igual que en nativo.
   useEffect(() => {
@@ -227,7 +262,14 @@ export function VideoPlayer({
         onContextMenu={(event) => event.preventDefault()}
         // `loadeddata` es el primer fotograma disponible: el mismo «listo» que
         // `onFirstFrameRender` en nativo (ver `onFirstFrame` en los tipos).
-        onLoadedData={onFirstFrame ? () => onFirstFrame() : undefined}
+        onLoadedData={
+          onFirstFrame || medirComo
+            ? () => {
+                if (medirComo) medicionDeVideo.primerFotograma(medirComo.id);
+                onFirstFrame?.();
+              }
+            : undefined
+        }
         style={{
           position: 'absolute',
           inset: 0,
