@@ -1,0 +1,107 @@
+# =============================================================================
+# Web en Vercel desplegada con un token del equipo (sin depender del autor)
+# =============================================================================
+#
+# POR QUE EXISTE. La integracion de Git de Vercel no arma la vista previa de un
+# PR cuando el autor de los commits no es miembro del equipo «Renaser's
+# projects» («Git author … must have access to the project»). Sumar a cada
+# persona al equipo cuesta un asiento al mes. Con este flujo, quien despliega
+# es el token de la cuenta renaserlab (secreto VERCEL_TOKEN), asi que da igual
+# quien hizo el commit.
+#
+# QUE HACE:
+# - En cada PR hacia main: arma la web y publica una VISTA PREVIA; deja el
+#   enlace en un comentario del PR (uno solo, que se actualiza).
+# - A mano (Actions > este flujo > Run workflow, con «produccion» marcado):
+#   publica en PRODUCCION. Es el plan B por si el despliegue normal de main
+#   fallara. El despliegue habitual de main lo sigue haciendo la integracion
+#   de Git de Vercel, que para main si funciona.
+#
+# Los PR desde forks no reciben secretos: ahi el flujo se salta sin fallar.
+# =============================================================================
+
+name: Web en Vercel (con token)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      produccion:
+        description: 'Publicar en PRODUCCION (si no, vista previa)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: vercel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Ids publicos del equipo y del proyecto (no son secretos).
+  VERCEL_ORG_ID: team_7C7WLgh4iVLArSZw0VOeMme9
+  VERCEL_PROJECT_ID: prj_PEpBInk5dX4uzl8dJxWlPyKGx7eR
+  VERCEL_CLI: vercel@64.5.0
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Sin secreto (PR desde un fork) no hay nada que hacer.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Entorno de Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PRODUCCION: ${{ github.event_name == 'workflow_dispatch' && inputs.produccion }}
+        run: |
+          if [ "$PRODUCCION" = "true" ]; then entorno=production; else entorno=preview; fi
+          echo "ENTORNO=$entorno" >> "$GITHUB_ENV"
+          # Baja la configuracion del proyecto y sus variables de entorno.
+          npx --yes "$VERCEL_CLI" pull --yes --environment="$entorno" --token="$VERCEL_TOKEN"
+
+      - name: Armar la web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "$ENTORNO" = "production" ]; then extra=--prod; else extra=; fi
+          npx --yes "$VERCEL_CLI" build $extra --token="$VERCEL_TOKEN"
+
+      - name: Publicar
+        id: publicar
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "$ENTORNO" = "production" ]; then extra=--prod; else extra=; fi
+          url=$(npx --yes "$VERCEL_CLI" deploy --prebuilt $extra --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Publicado ($ENTORNO): $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enlace en el PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.publicar.outputs.url }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          marca='<!-- vercel-con-token -->'
+          cuerpo="$marca
+          **Vista previa de la web:** $URL
+          _(commit ${GITHUB_SHA::7}, desplegada con el token del equipo)_"
+          # Un solo comentario por PR: si ya existe, se edita.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                 --jq ".[] | select(.body | startswith(\"$marca\")) | .id" | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$cuerpo" >/dev/null
+          else
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$cuerpo"
+          fi
