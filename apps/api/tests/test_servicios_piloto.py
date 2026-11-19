@@ -364,7 +364,14 @@ async def test_la_app_recibe_un_si_o_un_no_para_esa_persona_y_nunca_la_lista(ent
     for nombre, persona in (("piloto", PILOTO), ("fuera", FUERA), ("anonima", None), ("jefa", JEFA)):
         r = await _pedir(http, quien, persona, "GET", configuracion)
         assert r.status_code == 200
-        assert set(r.json()) == {"publicacion_flexible", "feature_services", "feature_services_admin"}
+        # Las de los videos en S3 son un si o un no, como la de Servicios.
+        assert set(r.json()) == {
+            "publicacion_flexible",
+            "feature_services",
+            "feature_services_admin",
+            "medios_s3_subida",
+            "medios_s3_lectura",
+        }
         for perfil in (PILOTO, MODERADOR):
             assert perfil not in r.text
         vistos[nombre] = r.json()["feature_services"]
