@@ -633,6 +633,9 @@ async def test_la_configuracion_publica_dice_si_servicios_esta_encendido(entorno
         "publicacion_flexible": get_settings().publicacion_flexible,
         "feature_services": False,
         "feature_services_admin": False,
+        # Los videos en S3 (spec «opcion B»): apagados de fabrica.
+        "medios_s3_subida": False,
+        "medios_s3_lectura": False,
     }
     assert (await http.get("/health")).json()["status"] == "ok"
 
