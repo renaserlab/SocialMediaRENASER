@@ -4,6 +4,7 @@ import {
   Animated,
   Easing,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   View,
@@ -23,7 +24,7 @@ import { useEspacioInferior } from '@/components/espacioInferior';
 import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { describeError } from '@/lib/describeError';
-import { alturasDeCamara, ALTO_PISTA, ANILLO } from '@/lib/controlesDeCamara';
+import { alturasDeCamara, ALTO_PISTA, ANILLO, nivelDeZoom } from '@/lib/controlesDeCamara';
 import { alSoltarElDisparadorDeVideo, MANTENER_MS } from '@/lib/disparadorDeVideo';
 import { haptics } from '@/lib/haptics';
 import { SinCambioDeSeccion } from '@/navigation/tabSwipe';
@@ -546,7 +547,7 @@ export function StoryCaptureScreen({
         <View style={[styles.zoomPill, { bottom: alturas.zoom }]}>
           <Feather name="search" size={13} color={media.text} />
           <Text variant="secondary" weight="700" color={media.text}>
-            {(1 + zoom * 4).toFixed(1)}x
+            {nivelDeZoom(zoom, Platform.OS).toFixed(1)}x
           </Text>
         </View>
       ) : null}
