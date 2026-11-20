@@ -1,0 +1,60 @@
+diff --git a/node_modules/expo-camera/ios/Current/CameraSessionManager.swift b/node_modules/expo-camera/ios/Current/CameraSessionManager.swift
+--- a/node_modules/expo-camera/ios/Current/CameraSessionManager.swift
++++ b/node_modules/expo-camera/ios/Current/CameraSessionManager.swift
+@@ -65,6 +65,9 @@
+         session.sessionPreset = .high
+       }
+     }
++    // RENASER (patches/expo-camera): cambiar el preset cambia el formato activo
++    // y el zoom puede volver a 1.0 (el 0.5x); se vuelve a poner el 1x.
++    updateZoom()
+ #endif
+   }
+ 
+@@ -197,8 +200,15 @@
+ 
+     do {
+       try device.lockForConfiguration()
+-      let minZoom = 1.0
+-      device.videoZoomFactor = minZoom * pow(device.activeFormat.videoMaxZoomFactor / minZoom, delegate.zoom)
++      // RENASER (patches/expo-camera): el zoom 0 es el lente normal (1x), no el
++      // ultra gran angular. En los iPhone con varios lentes la camara trasera
++      // por defecto es «virtual» y su factor 1.0 es el 0.5x: la imagen salia
++      // abombada, como con profundidad. Igual que la camara del sistema e
++      // Instagram, se arranca en 1x y el iPhone sigue cambiando solo al
++      // teleobjetivo al acercar. Y el tope es 10x, no el digital del sensor.
++      let minZoom = Self.zoomNeutro(device)
++      let maxZoom = max(minZoom, min(device.activeFormat.videoMaxZoomFactor, minZoom * 10.0))
++      device.videoZoomFactor = minZoom * pow(maxZoom / minZoom, delegate.zoom)
+     } catch {
+       log.info("\(#function): \(error.localizedDescription)")
+     }
+@@ -206,6 +216,18 @@
+     device.unlockForConfiguration()
+   }
+ 
++  // RENASER (patches/expo-camera): factor del lente normal. Solo si la camara
++  // virtual incluye el ultra gran angular su primer cambio de lente es el paso
++  // al normal; en la doble (normal + tele) el 1.0 ya es el normal.
++  private static func zoomNeutro(_ device: AVCaptureDevice) -> CGFloat {
++    guard device.isVirtualDevice,
++          device.constituentDevices.contains(where: { $0.deviceType == .builtInUltraWideCamera }),
++          let cambio = device.virtualDeviceSwitchOverVideoZoomFactors.first else {
++      return 1.0
++    }
++    return max(device.minAvailableVideoZoomFactor, CGFloat(truncating: cambio))
++  }
++
+   func getAvailableLenses() -> [String] {
+     guard let delegate else {
+       return []
+@@ -346,6 +368,9 @@
+     : delegate.pictureSize.toCapturePreset()
+ 
+     session.commitConfiguration()
++    // RENASER (patches/expo-camera): el preset se fija DESPUES de elegir la
++    // camara; se reaplica el zoom para no arrancar en el 0.5x.
++    updateZoom()
+     addErrorNotification()
+     delegate.changePreviewOrientation()
+     delegate.barcodeScanner?.maybeStartBarcodeScanning()

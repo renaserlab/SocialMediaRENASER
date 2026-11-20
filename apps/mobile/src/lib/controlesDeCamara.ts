@@ -77,3 +77,25 @@ export function alturasDeCamara(margenInferior: number): AlturasDeCamara {
 
   return { selector, pista, controles, zoom };
 }
+
+/**
+ * Tope del zoom en iOS, contado desde el lente normal (1x).
+ *
+ * Lo fija el parche de `patches/expo-camera+17.0.10.patch`: sin el, el zoom 0
+ * del iPhone era el ultra gran angular (0.5x, la imagen abombada) y el 1 era el
+ * zoom digital maximo del sensor, decenas de aumentos de pura pixelacion.
+ */
+export const ZOOM_MAXIMO_IOS = 10;
+
+/**
+ * Lo que se lee en la pastilla del zoom, para un `zoom` de la camara (0 a 1).
+ *
+ * En iOS el parche reparte el zoom en curva (1x → 10x), como la camara del
+ * sistema, asi que el numero tiene que seguir esa misma curva o mentiria. En
+ * Android la libreria no expone el tope del sensor y se conserva la escala de
+ * siempre.
+ */
+export function nivelDeZoom(zoom: number, plataforma: string): number {
+  const z = Math.min(1, Math.max(0, zoom));
+  return plataforma === 'ios' ? Math.pow(ZOOM_MAXIMO_IOS, z) : 1 + z * 4;
+}

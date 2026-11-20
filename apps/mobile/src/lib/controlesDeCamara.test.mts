@@ -6,6 +6,8 @@ import {
   ALTO_PISTA,
   ALTO_SELECTOR,
   ANILLO,
+  nivelDeZoom,
+  ZOOM_MAXIMO_IOS,
 } from './controlesDeCamara.ts';
 
 /*
@@ -76,4 +78,23 @@ test('una medida absurda no empuja nada fuera de la pantalla', () => {
   const { selector, pista } = alturasDeCamara(-50);
   assert.ok(selector >= 0);
   assert.ok(pista > 0);
+});
+
+/*
+  El zoom del iPhone: el parche de expo-camera arranca en el lente normal y
+  llega a 10x en curva. Si el numero de la pastilla no sigue la misma curva,
+  enseña «3.2x» cuando la imagen esta en 2x.
+*/
+test('la pastilla del zoom en iOS va de 1x a 10x siguiendo la curva del parche', () => {
+  assert.equal(nivelDeZoom(0, 'ios'), 1);
+  assert.equal(nivelDeZoom(1, 'ios'), ZOOM_MAXIMO_IOS);
+  assert.ok(Math.abs(nivelDeZoom(0.5, 'ios') - Math.sqrt(10)) < 1e-9);
+  // Fuera de rango no inventa: ni por debajo de 1x ni por encima del tope.
+  assert.equal(nivelDeZoom(-1, 'ios'), 1);
+  assert.equal(nivelDeZoom(2, 'ios'), ZOOM_MAXIMO_IOS);
+});
+
+test('en Android la pastilla conserva la escala de siempre', () => {
+  assert.equal(nivelDeZoom(0, 'android'), 1);
+  assert.equal(nivelDeZoom(1, 'android'), 5);
 });
