@@ -150,6 +150,18 @@ Parameters:
       Hueco B del grupo de claves, para rotar sin cortar las firmas vigentes
       (ver la explicacion junto a ClavePublicaA). Normalmente vacio.
 
+  # La tarifa plana de CloudFront (plan Pro) exige un WAF asociado a la
+  # distribucion. El WAF se crea aparte (scope CLOUDFRONT, us-east-1) y aqui
+  # solo se asocia; mientras dure el plan no se puede quitar.
+  WafDeMedios:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:wafv2:us-east-1:\d{12}:global/webacl/[A-Za-z0-9_-]+/[a-f0-9-]+$'
+    ConstraintDescription: vacio, o el ARN de un WAF v2 de alcance CLOUDFRONT.
+    Description: >-
+      ARN del WAF (wafv2, alcance CLOUDFRONT) asociado a la distribucion de
+      medios. Vacio = sin WAF (pago por uso).
+
 Conditions:
 
   EsLaCuentaEsperada: !Equals [!Ref ExpectedAccountId, !Ref 'AWS::AccountId']
@@ -157,6 +169,7 @@ Conditions:
   HayClaveA: !Not [!Equals [!Ref ClavePublicaA, '']]
   HayClaveB: !Not [!Equals [!Ref ClavePublicaB, '']]
   HayAlgunaClave: !Or [!Condition HayClaveA, !Condition HayClaveB]
+  HayWaf: !Not [!Equals [!Ref WafDeMedios, '']]
 
 Resources:
 
@@ -390,10 +403,11 @@ Resources:
         Enabled: true
         Comment: !Sub 'Medios de ${PrefijoDeRecursos} (${Variante}): videos firmados desde S3'
         # PriceClass_All: es la UNICA clase con nodos en Sudamerica (Lima, Sao
-        # Paulo), que es todo el motivo de esta distribucion. Si AWS confirma
-        # que la tarifa plana Pro admite video, se contrata en la consola y
-        # esta clase deja de facturarse por uso; no se modela aqui.
+        # Paulo), que es todo el motivo de esta distribucion. La tarifa plana
+        # Pro (video incluido) se contrata con pricing-plan-manager sobre esta
+        # distribucion y el WAF de `WafDeMedios`; no se modela aqui.
         PriceClass: PriceClass_All
+        WebACLId: !If [HayWaf, !Ref WafDeMedios, !Ref 'AWS::NoValue']
         HttpVersion: http2and3
         IPV6Enabled: true
         # Sin dominio propio por ahora: *.cloudfront.net con el certificado de
