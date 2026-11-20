@@ -174,11 +174,12 @@ control en la notificación.
       `https://social-media-renaser.vercel.app/politicas.html` (HTML estático;
       **no** `/privacy`, que es la pantalla de la app y llega vacía sin
       JavaScript)
-- [ ] **La política cubre Productos.** La publicada es del 03/08/2026 y no
-      menciona la dirección de envío, el teléfono, los pedidos ni a Stripe como
-      encargado del pago. Google la contrasta con este formulario: se actualiza
-      `apps/mobile/public/politicas.html` (y `legal/privacidad.html`) y la
-      revisa alguien de derecho **antes** de enviar
+- [ ] **La política cubre Productos.** Desde el 20/11/2026
+      `apps/mobile/public/politicas.html` (y su plantilla `legal/privacidad.html`)
+      nombra la dirección de envío, el teléfono, los pedidos y a los encargados
+      reales (Supabase, AWS, 100ms, Stripe, RevenueCat), igual que la pantalla de
+      la app. Google la contrasta con este formulario: falta que la revise
+      alguien de derecho **antes** de enviar
 - [ ] URL de eliminación de cuenta declarada:
       `https://social-media-renaser.vercel.app/eliminar-cuenta.html`
 - [ ] *Acceso a la aplicación*: la app pide iniciar sesión, así que hay que dar
