@@ -548,6 +548,15 @@ export type UploadProgress = {
 };
 
 /**
+ * Un ancho o alto que sirve para algo: positivo. 0, NaN o negativo valen como
+ * «sin dato» (lo que completa despues el pipeline del backend), nunca como
+ * medida: la API exige como minimo 1.
+ */
+export function medida(n: number | null | undefined): number | undefined {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Sube un medio (imagen/video/audio) al bucket post-media dentro de la carpeta
  * del usuario (uid/...), como exige la política RLS. Devuelve la ruta y su tipo.
  *
@@ -632,8 +641,12 @@ export async function uploadPostMedia(
   let posterPath: string | undefined;
   if (media.kind === 'video') {
     const fromFile = await readVideoMetadata(uri).catch(() => null);
-    meta.width = fromFile?.width ?? media.width ?? undefined;
-    meta.height = fromFile?.height ?? media.height ?? undefined;
+    // Con `medida()` y no con `??`: si el navegador no sabe decodificar el
+    // video (HEVC de iPhone en Chrome de Linux o en Firefox), el selector
+    // informa 0 x 0, y `??` dejaba pasar ese 0. La API lo rechazaba (ancho
+    // minimo 1) y el video no se podia publicar desde la web.
+    meta.width = medida(fromFile?.width) ?? medida(media.width);
+    meta.height = medida(fromFile?.height) ?? medida(media.height);
     meta.durationS =
       fromFile?.durationS ?? (media.durationMs ? media.durationMs / 1000 : undefined);
 
@@ -653,8 +666,8 @@ export async function uploadPostMedia(
             });
           if (!posterError) {
             posterPath = candidate;
-            meta.width = meta.width ?? poster.width;
-            meta.height = meta.height ?? poster.height;
+            meta.width = meta.width ?? medida(poster.width);
+            meta.height = meta.height ?? medida(poster.height);
           }
         }
       }
@@ -664,8 +677,8 @@ export async function uploadPostMedia(
   } else if (media.kind === 'image') {
     // El compresor reescala en proporcion, asi que las medidas del selector
     // valen para reservar el hueco aunque el archivo subido sea mas pequeno.
-    meta.width = media.width ?? undefined;
-    meta.height = media.height ?? undefined;
+    meta.width = medida(media.width);
+    meta.height = medida(media.height);
   }
 
   onProgress?.({ phase: 'uploading', ratio: 0 });

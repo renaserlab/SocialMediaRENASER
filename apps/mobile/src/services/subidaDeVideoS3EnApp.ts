@@ -12,6 +12,7 @@ import {
 import { mediosS3Subida, quienPregunta } from '@/services/plataforma';
 import {
   formatMb,
+  medida,
   MAX_UPLOAD_BYTES,
   MAX_VIDEO_SIN_COMPRIMIR_BYTES,
   readLocalFile,
@@ -277,13 +278,15 @@ async function subirVideoAS3(
     const local = await readLocalFile(uri);
     const meta: Entrada['meta'] = {};
     const fromFile = await readVideoMetadata(uri).catch(() => null);
-    meta.width = fromFile?.width ?? media.width ?? undefined;
-    meta.height = fromFile?.height ?? media.height ?? undefined;
+    // `medida()` y no `??`: un 0 x 0 (navegador que no decodifica el HEVC
+    // del iPhone) tiene que quedar como «sin dato»; la API rechaza el 0.
+    meta.width = medida(fromFile?.width) ?? medida(media.width);
+    meta.height = medida(fromFile?.height) ?? medida(media.height);
     meta.durationS = fromFile?.durationS ?? (media.durationMs ? media.durationMs / 1000 : undefined);
     const poster = await createVideoPoster(uri).catch(() => null);
     if (poster) {
-      meta.width = meta.width ?? poster.width;
-      meta.height = meta.height ?? poster.height;
+      meta.width = meta.width ?? medida(poster.width);
+      meta.height = meta.height ?? medida(poster.height);
     }
     entrada = {
       uriLocal: uri,

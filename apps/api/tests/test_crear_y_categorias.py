@@ -117,3 +117,28 @@ def test_una_categoria_necesita_nombre():
 def test_el_nombre_de_una_categoria_tiene_tope():
     with pytest.raises(ValidationError):
         PodcastCategoryCreate(name="x" * 41)
+
+
+# --------------------------------------------------------------------------- #
+# Medidas del video: 0 x 0 es «sin dato», no un error
+# --------------------------------------------------------------------------- #
+def test_un_video_con_medidas_cero_se_publica_sin_medidas():
+    """Lo que pasaba con el HEVC del iPhone subido desde Chrome de Linux o
+    Firefox: el navegador no lo decodifica, informa 0 x 0 y la API devolvia
+    422, asi que el video no se podia publicar."""
+    for medio in (
+        PostMediaInput(storage_path="uid/video.mov", media_type="video", width=0, height=0),
+        PostMediaInput(id_de_subida="sub-1", media_type="video", width=0, height=0, duration_s=49.3),
+    ):
+        assert medio.width is None
+        assert medio.height is None
+
+
+def test_las_medidas_reales_se_conservan():
+    medio = PostMediaInput(storage_path="uid/video.mp4", media_type="video", width=1080, height=1920)
+    assert (medio.width, medio.height) == (1080, 1920)
+
+
+def test_una_medida_negativa_sigue_siendo_un_error():
+    with pytest.raises(ValidationError):
+        PostMediaInput(storage_path="uid/video.mp4", media_type="video", width=-5, height=100)

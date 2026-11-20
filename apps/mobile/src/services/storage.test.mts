@@ -218,3 +218,29 @@ test('las copias no se acumulan en la cache', () => {
   assert.ok(FUENTE.includes('VIDA_DE_LA_COPIA_MS'), 'Hay caducidad para las copias.');
   assert.ok(FUENTE.includes('deleteAsync'), 'Y alguien las borra de verdad.');
 });
+
+// ---------------------------------------------------------------------------
+// Medidas del video: un 0 x 0 viaja como «sin dato», nunca como 0
+// ---------------------------------------------------------------------------
+
+test('una medida 0 no se manda: la API la rechazaba y el video no se publicaba', () => {
+  // El HEVC del iPhone en un navegador que no lo decodifica (Chrome de Linux,
+  // Firefox) llega del selector con 0 x 0. Con `??` ese 0 pasaba tal cual.
+  const S3 = readFileSync(fileURLToPath(new URL('./subidaDeVideoS3EnApp.ts', import.meta.url)), 'utf8');
+  for (const [nombre, fuente] of [['storage.ts', FUENTE], ['subidaDeVideoS3EnApp.ts', S3]]) {
+    assert.equal(
+      /meta\.(width|height) = [^;\n]*\?\? (media|poster)\.(width|height)/.test(fuente),
+      false,
+      `${nombre}: una medida del selector o del poster pasa sin medida(), y un 0 llegaria a la API.`,
+    );
+    assert.ok(fuente.includes('medida(media.width)'), `${nombre}: las medidas del selector tienen que pasar por medida().`);
+  }
+  // Y medida() trata como «sin dato» lo que no sirve para reservar el hueco.
+  const cuerpo = FUENTE.match(/export function medida\([^)]*\)[^{]*\{([^}]*)\}/)?.[1] ?? '';
+  const medida = new Function('n', cuerpo) as (n: unknown) => number | undefined;
+  assert.equal(medida(0), undefined);
+  assert.equal(medida(Number.NaN), undefined);
+  assert.equal(medida(-3), undefined);
+  assert.equal(medida(undefined), undefined);
+  assert.equal(medida(1080), 1080);
+});
