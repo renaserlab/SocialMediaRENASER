@@ -124,12 +124,20 @@ export function usePodcastUnlock(enabled = true): PodcastAccess {
   if (isAdmin) {
     return { gateFor: () => ({ state: 'open' }), showsCatalogSlots: false };
   }
+  /*
+    LOS HUECOS DEL CATALOGO SOLO EN DESARROLLO. En produccion se pintaban hasta
+    treinta filas «Episodio N · Disponible con tu membresía» que no existian:
+    Revision de Apple lo lee como contenido de relleno (2.1/2.3) y como un
+    candado de pago sin compra dentro de la app (3.1.1). Quien mira ve solo los
+    episodios publicados; en desarrollo se mantienen para maquetar la lista.
+  */
+  const huecos = __DEV__;
   if (!drips) {
-    // Sin sesión: no hay espera, pero el catálogo se sigue anunciando igual.
+    // Sin sesión: no hay espera.
     return {
       gateFor: (index) => (index < DRIP_EPISODES ? { state: 'open' } : { state: 'membership' }),
-      showsCatalogSlots: true,
+      showsCatalogSlots: huecos,
     };
   }
-  return { gateFor: (index) => gateFor(index, origin, now), showsCatalogSlots: true };
+  return { gateFor: (index) => gateFor(index, origin, now), showsCatalogSlots: huecos };
 }

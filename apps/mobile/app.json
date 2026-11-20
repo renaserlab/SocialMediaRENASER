@@ -18,13 +18,13 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.renaser.zeta",
       "infoPlist": {
-        "NSCameraUsageDescription": "Z usa la cámara para que tomes fotos y grabes videos para publicar y para tus historias, y para transmitir en vivo.",
-        "NSPhotoLibraryUsageDescription": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
+        "NSCameraUsageDescription": "Z usa la cámara para que tomes fotos y grabes videos para tus publicaciones, historias, reels, mensajes y foto de perfil, y para transmitir en vivo.",
+        "NSPhotoLibraryUsageDescription": "Z accede a tus fotos y videos para que elijas qué compartir en tus publicaciones, historias, reels, mensajes o foto de perfil.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSMicrophoneUsageDescription": "Z usa el micrófono para grabar el sonido de los videos de tus historias y para transmitir en vivo.",
+        "NSMicrophoneUsageDescription": "Z usa el micrófono para grabar el sonido de tus videos, historias y reels, tus notas de voz en los mensajes y para transmitir en vivo.",
         "NSLocalNetworkUsageDescription": "Z usa la red local para conectar las transmisiones en vivo."
       }
     },
@@ -88,15 +88,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Z accede a tus fotos cuando eliges contenido para publicar o cambias tu foto de perfil.",
-          "cameraPermission": "Z usa la cámara para que tomes fotos y grabes videos para publicar y para tus historias, y para transmitir en vivo."
+          "photosPermission": "Z accede a tus fotos y videos para que elijas qué compartir en tus publicaciones, historias, reels, mensajes o foto de perfil.",
+          "cameraPermission": "Z usa la cámara para que tomes fotos y grabes videos para tus publicaciones, historias, reels, mensajes y foto de perfil, y para transmitir en vivo."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Z usa la cámara para que puedas tomar fotos y grabar videos para tus historias, y para transmitir en vivo.",
-          "microphonePermission": "Z usa el micrófono para grabar el sonido de los videos de tus historias y para transmitir en vivo.",
+          "cameraPermission": "Z usa la cámara para que tomes fotos y grabes videos para tus publicaciones, historias, reels, mensajes y foto de perfil, y para transmitir en vivo.",
+          "microphonePermission": "Z usa el micrófono para grabar el sonido de tus videos, historias y reels, tus notas de voz en los mensajes y para transmitir en vivo.",
           "recordAudioAndroid": true
         }
       ],
@@ -121,7 +121,7 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "Z accede a tus fotos para que elijas cuál compartir en tu historia.",
+          "photosPermission": "Z accede a tus fotos y videos para que elijas qué compartir en tus publicaciones, historias, reels, mensajes o foto de perfil.",
           "savePhotosPermission": "Z guarda en tu galería las fotos y videos que capturas.",
           "isAccessMediaLocationEnabled": false
         }

@@ -96,9 +96,9 @@ export const es = {
   'settings.dark': 'Oscuro',
   'settings.light': 'Claro',
   'settings.language': 'Idioma de la App',
-  'settings.account': 'Cuenta & Membresía',
+  'settings.account': 'Cuenta',
   'settings.verification': 'Verificación de Cuenta',
-  'settings.verificationBody': 'Ver estado de tu membresía',
+  'settings.verificationBody': "Ver el estado de tu verificación",
   'settings.signOut': 'Cerrar Sesión',
   'settings.signOutBody': 'Salir de tu cuenta en este dispositivo',
   'settings.signIn': 'Iniciar Sesión',
@@ -227,8 +227,11 @@ export const es = {
   'home.podcastBody': 'Escucha los episodios',
   'home.seeMore': 'Ver más',
   'home.addAudio': 'Agregar audio',
-  'podcast.locked': 'Disponible con tu membresía',
+  'podcast.locked': 'Aún no disponible',
   'podcast.empty': 'Aún no hay episodios publicados.',
+  'podcast.emptyOwner': 'Aún no has subido audios.',
+  'podcast.emptyCategory': 'No hay episodios en esta categoría.',
+  'podcast.episodeNumber': 'Episodio {numero}',
 
 
   // Verificación de cuenta
@@ -236,7 +239,7 @@ export const es = {
   'verify.titlePending': 'Verificación en proceso',
   'verify.titleVerified': '¡Tu cuenta está verificada!',
   'verify.bodyNone':
-    'La insignia de verificación demuestra a la comunidad que tu membresía está activa y validada.',
+    "La insignia de verificación demuestra a la comunidad que tu cuenta está activa y validada.",
   'verify.bodyPending':
     'Estamos revisando tu solicitud. Este proceso suele tardar menos de 24 horas hábiles.',
   'verify.bodyVerified':
@@ -399,16 +402,6 @@ export const es = {
   'notif.pendingNoticesOne': 'Tienes 1 notificación sin leer',
   'notif.pendingNoticesMany': 'Tienes {cuenta} notificaciones sin leer',
   'notif.pendingNoticesTap': 'Toca para abrir Notificaciones.',
-  // Avisos de ejemplo, solo cuando no hay servidor detrás.
-  'notif.demo1Title': 'Nueva publicación de Darren Hardy',
-  'notif.demo1Body': 'Hizo un nuevo post sobre disciplina.',
-  'notif.demo1Time': 'Hace 10 m',
-  'notif.demo2Title': 'Mensaje nuevo en el Círculo',
-  'notif.demo2Body': 'Alguien comentó en el Círculo de Liderazgo.',
-  'notif.demo2Time': 'Hace 1 h',
-  'notif.demo3Title': 'Registro de Evento Confirmado',
-  'notif.demo3Body': 'Tienes una reserva activa para el live de mañana.',
-  'notif.demo3Time': 'Hace 3 h',
 
   // Mensajes
   'messages.headerTitle': 'MENSAJES',
@@ -916,8 +909,8 @@ export const es = {
   'course.unpublishFailed': 'No se pudo retirar',
   'course.draft': 'Borrador — solo lo ves tú',
   'course.withdrawn': 'Retirado del catálogo',
-  'course.betaFreeNote': 'Acceso gratuito durante la Beta. No se te cobrará nada.',
-  'course.betaFree': 'Acceso gratuito durante la Beta',
+  'course.betaFreeNote': 'Por ahora, el acceso a este curso es gratuito.',
+  'course.betaFree': 'Obtener acceso gratuito',
   'course.activating': 'Activando…',
   'course.processing': 'Procesando…',
   'course.price': 'Precio: {precio}',
@@ -1444,12 +1437,12 @@ export const es = {
     'Si se trata de una situación grave o urgente, escríbenos directamente al correo de soporte y agrega una captura.',
   'support.q6': '¿Hay pagos dentro de la aplicación?',
   'support.q6a1':
-    'No. Esta versión es una app de miembros: no vende nada ni pide datos de pago en ningún momento.',
+    'El acceso a los cursos lo concede RENASER a sus miembros.',
   'support.q6a2':
-    'El acceso al contenido formativo se gestiona fuera de la aplicación. Si tienes dudas sobre tu membresía, escríbenos.',
+    'Lo único que se paga son bienes y experiencias del mundo real, como las entradas a eventos presenciales.',
   'support.q7': 'Qué necesito para usar Z',
   'support.q7a1':
-    'Un iPhone o un teléfono Android reciente, o cualquier navegador actualizado. Basta con una cuenta creada con tu correo electrónico.',
+    'Un teléfono reciente o cualquier navegador actualizado. Basta con una cuenta creada con tu correo electrónico.',
   'support.q7a2':
     'La app está en español, inglés y portugués; puedes cambiar el idioma en Configuración. Algunas funciones, como subir videos, necesitan conexión estable.',
 
@@ -5685,7 +5678,7 @@ export const es = {
   'servicios.catalogo.crear': 'Crear servicio',
   'servicios.catalogo.vacio': 'Todavía no tienes servicios',
   'servicios.catalogo.vacioCuerpo': 'Crea el primero: lo completas a tu ritmo y lo envías a revisión cuando esté listo.',
-  'servicios.catalogo.soloCatalogo': "Z publica tu servicio para que te encuentren. En el piloto no hay cobros: solo se reservan los servicios gratuitos.",
+  'servicios.catalogo.soloCatalogo': "Z publica tu servicio para que te encuentren. Por ahora en Z no hay cobros: solo se reservan los servicios gratuitos.",
   'servicios.catalogo.sinTitulo': 'Servicio sin título',
   'servicios.catalogo.servicio': 'Servicio',
   'servicios.catalogo.visible': 'Visible para el público',
@@ -5828,7 +5821,7 @@ export const es = {
   'servicios.catalogo.editar.importe': 'Importe',
   'servicios.catalogo.editar.importeAyuda': 'Ej.: 120.00',
   'servicios.catalogo.editar.moneda': 'Moneda',
-  'servicios.catalogo.editar.sinCobros': "En el piloto Z no cobra. Un servicio gratuito se puede reservar; uno «a consultar» se ve en el catálogo, pero no se reserva en Z.",
+  'servicios.catalogo.editar.sinCobros': "Por ahora Z no cobra. Un servicio gratuito se puede reservar; uno «a consultar» se ve en el catálogo, pero no se reserva en Z.",
   'servicios.catalogo.editar.precioNoAdmitido': "Este servicio tenía un precio con importe, y Z no lo admite por ahora. Elige «Gratis» o «A consultar».",
   'servicios.catalogo.editar.alcanceAyuda': 'Hasta dónde llega el servicio.',
   'servicios.catalogo.editar.unaPorLinea': 'Una frase por línea',
@@ -6043,7 +6036,7 @@ export const es = {
   'servicios.descubrir.sinResultadosCuerpo': "Prueba con otras palabras o quita algún filtro.",
   'servicios.descubrir.vacio': "Todavía no hay servicios publicados",
   'servicios.descubrir.vacioCuerpo': "Cuando Z publique los primeros, aparecerán aquí.",
-  'servicios.descubrir.soloDescubrir': "Aquí descubres y guardas servicios. En el piloto Z no cobra: los que se pueden reservar son gratuitos.",
+  'servicios.descubrir.soloDescubrir': "Aquí descubres y guardas servicios. Por ahora en Z solo se reservan servicios gratuitos.",
   'servicios.descubrir.abrirFicha': "Abre la ficha del servicio",
   'servicios.descubrir.sinImagen': "Servicio sin imagen",
   'servicios.descubrir.guardar': "Guardar",

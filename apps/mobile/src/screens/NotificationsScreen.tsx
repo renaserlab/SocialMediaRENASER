@@ -28,16 +28,6 @@ export function NotificationsScreen() {
   const { colors } = useAppTheme();
   const { t } = useTranslation();
   const router = useRouter();
-  /*
-    Los avisos de la demo (sin servidor) se arman al pintar y no en una
-    constante del módulo: una constante se congelaría con el idioma que hubiera
-    al cargar el fichero, que es antes de que nadie haya elegido ninguno.
-  */
-  const demoNotifications: NotificationItem[] = [
-    { id: '1', title: t('notif.demo1Title'), subtitle: t('notif.demo1Body'), icon: 'bell', time: t('notif.demo1Time'), read: false },
-    { id: '2', title: t('notif.demo2Title'), subtitle: t('notif.demo2Body'), icon: 'message-square', time: t('notif.demo2Time'), read: false },
-    { id: '3', title: t('notif.demo3Title'), subtitle: t('notif.demo3Body'), icon: 'award', time: t('notif.demo3Time'), read: true },
-  ];
   const supabaseEnabled = useAuthStore((state) => state.supabaseEnabled);
   const signedIn = useAuthStore((state) => state.status === 'authenticated');
 
@@ -49,11 +39,19 @@ export function NotificationsScreen() {
   const hayListaEnPantalla = useRef(false);
 
   const load = useCallback(() => {
-    // Igual que en Mensajes: sin sesion no hay actividad que consultar.
+    /*
+      Igual que en Mensajes: sin sesion no hay actividad que consultar.
+
+      Y SIN SERVIDOR TAMPOCO SE INVENTA: aqui se rellenaba la bandeja con tres
+      avisos de ejemplo («Nueva publicación de Darren Hardy»…). Revision de
+      Apple los toma por contenido falso (directrices 2.1 y 2.3), y un fallo de
+      configuracion que dejara la app en modo demo los enseñaria a gente real.
+      Lista vacia: se ve la invitacion a entrar o el «Sin notificaciones».
+    */
     if (!supabaseEnabled || !signedIn) {
       // Lo que hubiera era de otra sesion: la siguiente carga parte de cero.
       hayListaEnPantalla.current = false;
-      setItems(demoNotifications);
+      setItems([]);
       setStatus('idle');
       return;
     }
@@ -144,7 +142,7 @@ export function NotificationsScreen() {
         title={t('settings.notifications')}
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
-      {supabaseEnabled && !signedIn ? (
+      {!signedIn ? (
         <SignedOutNotice
           icon="bell"
           title={t('notif.signedOutTitle')}
