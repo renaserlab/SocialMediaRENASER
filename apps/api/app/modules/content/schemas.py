@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AuthorSummary(BaseModel):
@@ -65,6 +65,18 @@ class PostMediaInput(BaseModel):
     # El poster tambien lo sube el cliente a su carpeta del bucket; aqui llega
     # solo la ruta. La RLS de Storage ya impide escribir fuera de la propia.
     poster_path: str | None = Field(default=None, max_length=500)
+
+    @field_validator("width", "height", mode="before")
+    @classmethod
+    def _cero_es_sin_dato(cls, v):
+        # Un navegador que no decodifica el video (el HEVC del iPhone en Chrome
+        # de Linux o en Firefox) informa 0 x 0. Rechazarlo dejaba sin poder
+        # publicar ese video, y las apps ya instaladas lo seguiran mandando: se
+        # toma como «sin medida», que el pipeline completa despues. Un negativo
+        # o un valor absurdo sigue siendo un error.
+        if v == 0:
+            return None
+        return v
 
     @model_validator(mode="after")
     def _una_sola_procedencia(self) -> "PostMediaInput":
