@@ -39,7 +39,7 @@
   Aplicación: <strong>Z</strong><br>
   Responsable del tratamiento: <strong>Renaser Consulting S.A.C.</strong>, Pj. Manuel Castillo N° 205, Alto Selva Alegre, Arequipa, Perú<br>
   Contacto: <a href="mailto:renaserlab@gmail.com">renaserlab@gmail.com</a><br>
-  Última actualización: 31 de julio de 2026 · Versión 1.0
+  Última actualización: 20 de noviembre de 2026 · Versión 1.1
 </p>
 
 <p>
@@ -116,8 +116,8 @@
 <div class="wrap">
 <table>
   <tr><th>Permiso</th><th>Para qué</th><th>Cuándo</th></tr>
-  <tr><td>Cámara</td><td>Tomar fotos o videos para publicar o para tu perfil</td><td>Solo al usar esa función</td></tr>
-  <tr><td>Micrófono</td><td>Grabar audios</td><td>Solo al usar esa función</td></tr>
+  <tr><td>Cámara</td><td>Tomar fotos o videos para publicar o para tu perfil, y aparecer en transmisiones en vivo</td><td>Solo al usar esa función</td></tr>
+  <tr><td>Micrófono</td><td>Grabar audios y hablar en transmisiones en vivo</td><td>Solo al usar esa función</td></tr>
   <tr><td>Fotos y multimedia</td><td>Elegir contenido ya existente en tu dispositivo</td><td>Solo al usar esa función</td></tr>
   <tr><td>Reproducción en segundo plano</td><td>Que el audio siga sonando con la aplicación cerrada</td><td>Durante la reproducción</td></tr>
 </table>
@@ -127,12 +127,18 @@
   funcionando, con esa función concreta limitada.
 </p>
 
-<h3>2.6 Pagos</h3>
-<p>
-  <strong>La aplicación es gratuita y no ofrece compras.</strong> No tratamos datos
-  de pago ni de tarjetas bancarias. Si en el futuro se habilitan compras, se
-  actualizará esta política antes de activarlas.
-</p>
+<h3>2.6 Pagos y pedidos</h3>
+<ul>
+  <li><strong>Entradas a eventos presenciales y productos físicos</strong>: se pagan con
+      Stripe. Los datos de tu tarjeta los recibe Stripe directamente; nosotros
+      <strong>no los vemos ni los guardamos</strong>. Conservamos el registro de la compra
+      (qué, cuándo, importe y estado).</li>
+  <li><strong>Envío de productos físicos</strong>: para entregarte el pedido guardamos el
+      nombre de quien lo recibe, un teléfono de contacto y la dirección de envío.</li>
+  <li><strong>Compras dentro de la aplicación</strong>: solo cuando están disponibles, se
+      hacen a través de la tienda de aplicaciones y las gestiona RevenueCat. La tienda
+      trata el pago según sus propias políticas.</li>
+</ul>
 
 <h2>3. Para qué usamos tus datos y con qué base legal</h2>
 <div class="wrap">
@@ -141,6 +147,7 @@
   <tr><td>Crear y mantener tu cuenta; prestarte el servicio</td><td>Ejecución del contrato (condiciones de uso)</td></tr>
   <tr><td>Mostrar tu contenido y tu perfil a otras personas usuarias</td><td>Ejecución del contrato</td></tr>
   <tr><td>Enviar mensajes y notificaciones del servicio</td><td>Ejecución del contrato</td></tr>
+  <tr><td>Cobrar entradas y productos, y enviar los pedidos</td><td>Ejecución del contrato</td></tr>
   <tr><td>Moderar contenido, atender denuncias y evitar abusos</td><td>Interés legítimo en mantener un entorno seguro</td></tr>
   <tr><td>Seguridad, prevención del fraude y resolución de incidencias</td><td>Interés legítimo</td></tr>
   <tr><td>Conservar justificantes de operaciones</td><td>Obligación legal</td></tr>
@@ -153,16 +160,20 @@
 <div class="wrap">
 <table>
   <tr><th>Proveedor</th><th>Función</th><th>Datos implicados</th></tr>
-  <tr><td>Supabase</td><td>Autenticación, base de datos y almacenamiento de archivos</td><td>Todos los descritos</td></tr>
-  <tr><td>Render</td><td>Alojamiento de la API</td><td>Datos en tránsito y registros técnicos</td></tr>
+  <tr><td>Supabase</td><td>Cuenta y autenticación, base de datos y almacenamiento de archivos</td><td>Todos los descritos</td></tr>
+  <tr><td>Amazon Web Services (AWS)</td><td>Alojamiento de nuestra API, y almacenamiento y entrega de los videos que se publican (S3 y CloudFront)</td><td>Datos en tránsito, registros técnicos y los videos que subes</td></tr>
+  <tr><td>100ms</td><td>Audio y video de las transmisiones en vivo</td><td>Tu imagen y tu voz mientras participas en una transmisión</td></tr>
+  <tr><td>Stripe</td><td>Pago de las entradas a eventos presenciales y de los productos físicos</td><td>Datos de pago, que recibe directamente; nosotros no vemos tu tarjeta</td></tr>
+  <tr><td>RevenueCat</td><td>Gestión de las compras hechas con la tienda de aplicaciones, solo cuando la compra dentro de la aplicación está disponible</td><td>Identificador de cliente e historial de compras</td></tr>
   <tr><td>Google Play</td><td>Distribución de la aplicación</td><td>Los que Google trate según sus propias políticas</td></tr>
 </table>
 </div>
 <p>
-  Estos proveedores pueden alojar información en servidores situados fuera de tu país,
-  incluidos <strong>Estados Unidos y la Unión Europea</strong>. Las transferencias
-  internacionales se amparan en las cláusulas contractuales tipo u otros mecanismos
-  legalmente admitidos. Nuestros proveedores de infraestructura pueden alojar y procesar la información en centros de datos situados fuera del Perú.
+  Estos proveedores tratan los datos solo por encargo nuestro y operan sobre
+  infraestructura ubicada <strong>fuera del Perú</strong> —entre otros lugares, en
+  Estados Unidos y la Unión Europea—. Esto implica una transferencia internacional de
+  datos, que se realiza con las garantías contractuales que ofrece cada proveedor
+  (como las cláusulas contractuales tipo) u otros mecanismos legalmente admitidos.
 </p>
 <p>
   Además, podremos comunicar datos a autoridades, juzgados o cuerpos de seguridad cuando
