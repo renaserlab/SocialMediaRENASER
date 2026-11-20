@@ -71,7 +71,16 @@ function subeAS3(): Promise<boolean> {
   return mediosS3Subida(quienPregunta(perfil, conSesion)).catch(() => false);
 }
 
+/**
+ * Un problema del ARCHIVO (vacio, demasiado grande, sin comprimir en la web)
+ * que ya trae su explicacion para la persona. Se distingue para que
+ * `describirFallo` no lo tape con «Se perdió la conexión»: eso mandaba a
+ * reintentar una y otra vez algo que nunca iba a subir.
+ */
+class ProblemaDelArchivo extends Error {}
+
 function describirFallo(error: unknown): string {
+  if (error instanceof ProblemaDelArchivo) return error.message;
   if (error instanceof ApiError) {
     if (error.status === 429) {
       return 'Llegaste al límite de publicaciones con video por hora. Inténtalo de nuevo más tarde.';
@@ -301,14 +310,14 @@ async function subirVideoAS3(
   }
 
   const local = await readLocalFile(entrada.uriLocal);
-  if (local.size === 0) throw new Error('El archivo seleccionado está vacío.');
+  if (local.size === 0) throw new ProblemaDelArchivo('El archivo seleccionado está vacío.');
   if (local.size > MAX_UPLOAD_BYTES) {
-    throw new Error(
+    throw new ProblemaDelArchivo(
       `El archivo pesa ${formatMb(local.size)} y el máximo son ${formatMb(MAX_UPLOAD_BYTES)}. Elige un video más corto o comprímelo antes de subirlo.`,
     );
   }
   if (entrada.sinComprimir && local.size > MAX_VIDEO_SIN_COMPRIMIR_BYTES) {
-    throw new Error(
+    throw new ProblemaDelArchivo(
       `Este video pesa ${formatMb(local.size)} y no se pudo comprimir en este dispositivo. ` +
         `Súbelo desde la aplicación instalada, o elige uno de menos de ${formatMb(MAX_VIDEO_SIN_COMPRIMIR_BYTES)}: ` +
         'a ese tamaño tardaría demasiado en cargar y consumiría muchos datos a quien lo vea.',
