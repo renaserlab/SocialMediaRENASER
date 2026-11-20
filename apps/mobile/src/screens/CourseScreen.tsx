@@ -133,6 +133,14 @@ export function CourseScreen() {
   const esDePago = (course?.priceMinor ?? 0) > 0;
   /** iOS sin compras: ni precio, ni explicación de compra, ni «Restaurar». */
   const sinPrecio = esDePago && ocultarPreciosDigitales();
+  /*
+    EL ACCESO GRATUITO NO SE OFRECE EN iOS SIN COMPRAS. La rama de la beta se
+    evaluaba antes que `sinPrecio`, asi que en iPhone salia «Acceso gratuito…
+    No se te cobrará nada» al lado de un curso cuyo precio la pantalla oculta
+    a proposito: hablar de no cobrar es hablar de cobrar (directriz 3.1.1). Ahi
+    la ficha se comporta como cualquier curso sin precio en la app.
+  */
+  const betaAbierta = !sinPrecio && beta?.available === true;
   const borrador = course?.status === 'draft';
   const retirado = course?.status === 'hidden';
 
@@ -580,9 +588,11 @@ export function CourseScreen() {
             encendida, lo cierto es que este curso se puede tener gratis, y
             enseñar «las compras no están disponibles» seria contar la mitad.
             El precio de arriba NO desaparece: el curso sigue costando lo que
-            cuesta, y lo que se dice es que durante la beta no se cobra.
+            cuesta, y lo que se dice es que por ahora el acceso es gratuito.
+            Salvo en iOS sin compras (`betaAbierta`), donde no hay precio que
+            matizar y la ficha va por la rama de `sinPrecio`.
           */}
-          {esDePago && !hasAccess && beta?.available ? (
+          {esDePago && !hasAccess && betaAbierta ? (
             <Text style={[styles.notaDeAcceso, { color: colors.text }]}>
               {t('course.betaFreeNote')}
             </Text>
@@ -725,7 +735,7 @@ export function CourseScreen() {
             ABRIR un contenido que la pantalla acaba de decir que no está.
           */}
           {esDePago && !hasAccess ? (
-            beta?.available ? (
+            betaAbierta ? (
               <Button
                 label={pidiendoBeta ? t('course.activating') : t('course.betaFree')}
                 disabled={pidiendoBeta}

@@ -5,6 +5,15 @@ import { LegalDocument, type LegalSection } from '@/components/LegalDocument';
 /** Contacto unico para asuntos legales y de privacidad. */
 export const PRIVACY_CONTACT = 'renaserlab@gmail.com';
 
+/*
+  LOS PROVEEDORES SE NOMBRAN TODOS. Solo figuraba Supabase, pero los videos se
+  guardan y se sirven desde AWS (S3 y CloudFront, donde vive tambien la API),
+  los directos van por 100ms y las entradas se cobran con Stripe. Apple pide que
+  la politica identifique a los terceros que reciben datos (directriz 5.1.1) y
+  que coincida con la etiqueta de privacidad de la ficha. RevenueCat va en el
+  binario pero solo se configura con las compras encendidas: se nombra con esa
+  condicion para no esconderlo ni darlo por activo.
+*/
 const SECTIONS: LegalSection[] = [
   {
     heading: '1. Quién trata tus datos',
@@ -33,7 +42,13 @@ const SECTIONS: LegalSection[] = [
   {
     heading: '4. Dónde se guardan',
     paragraphs: [
-      'La información se aloja en Supabase, que presta servicios de base de datos y almacenamiento sobre infraestructura ubicada fuera de Perú. Esto implica una transferencia internacional de datos, realizada con las garantías contractuales que ofrece dicho proveedor.',
+      'Para operar el servicio trabajamos con estos proveedores, que tratan los datos solo por encargo nuestro:',
+      '• Supabase: cuenta, base de datos y almacenamiento de archivos.',
+      '• Amazon Web Services (AWS): alojamiento de nuestra API, y almacenamiento y entrega de los videos que se publican.',
+      '• 100ms: audio y video de las transmisiones en vivo.',
+      '• Stripe: pago de las entradas a eventos presenciales. Los datos de tu tarjeta los recibe Stripe directamente; nosotros no los vemos ni los guardamos.',
+      '• RevenueCat: gestión de las compras hechas con la tienda de aplicaciones, solo cuando la compra dentro de la aplicación está disponible.',
+      'Estos proveedores operan sobre infraestructura ubicada fuera de Perú. Esto implica una transferencia internacional de datos, realizada con las garantías contractuales que ofrece cada uno.',
       'Los archivos que subes se guardan en almacenamiento privado: solo se sirven mediante enlaces temporales firmados, no son públicos ni indexables.',
     ],
   },
@@ -41,7 +56,7 @@ const SECTIONS: LegalSection[] = [
     heading: '5. Con quién los compartimos',
     paragraphs: [
       'No vendemos datos personales ni los cedemos con fines publicitarios.',
-      'Solo accedemos a proveedores necesarios para operar el servicio (alojamiento y almacenamiento). Podremos comunicar información cuando lo exija una autoridad competente o una obligación legal.',
+      'Solo los compartimos con los proveedores necesarios para operar el servicio, enumerados en el apartado 4. Podremos comunicar información cuando lo exija una autoridad competente o una obligación legal.',
       'El contenido que publiques será visible para el resto de personas miembros de la plataforma. Ten en cuenta esto antes de compartir información sensible.',
     ],
   },
@@ -86,7 +101,7 @@ export function PrivacyScreen() {
   return (
     <LegalDocument
       title="Política de Privacidad"
-      updatedAt="23 de julio de 2026"
+      updatedAt="20 de noviembre de 2026"
       intro="Esta política explica qué datos personales recoge RENASER, con qué finalidad, dónde se guardan y cómo puedes controlarlos. Está redactada en lenguaje claro y a propósito: queremos que se entienda sin ser abogado."
       sections={SECTIONS}
     />

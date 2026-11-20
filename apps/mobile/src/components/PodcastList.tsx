@@ -91,7 +91,7 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
                   numberOfLines={1}
                   color={dimmed ? colors.textMuted : colors.text}
                 >
-                  {episode ? episode.body : `Episodio ${number}`}
+                  {episode ? episode.body : t('podcast.episodeNumber', { numero: number })}
                 </Text>
                 {waiting ? (
                   <View style={styles.waiting}>
@@ -190,7 +190,13 @@ export function PodcastList({ episodes, showLockedSlots = true, onEdit }: Props)
         <Text variant="secondary" color={colors.textMuted} style={styles.empty}>
           {/* El motivo de que no haya nada depende de por que esta vacia: por
               el filtro elegido, o porque todavia no se ha subido ningun audio. */}
-          {showLockedSlots ? 'Aún no has subido audios.' : 'No hay episodios en esta categoría.'}
+          {/* Y de quien mira: «no has subido» solo tiene sentido para quien
+              puede subir (el unico que recibe `onEdit`). */}
+          {!showLockedSlots
+            ? t('podcast.emptyCategory')
+            : onEdit
+            ? t('podcast.emptyOwner')
+            : t('podcast.empty')}
         </Text>
       ) : null}
     </View>

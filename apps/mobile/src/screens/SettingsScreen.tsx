@@ -1,10 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { AppHeader } from '@/components/AppHeader';
 import { ListRow } from '@/components/ListRow';
+import { FEATURE_PURCHASES } from '@/config/features';
 import { DELETE_ACCOUNT_URL } from '@/config/legal';
 import { LANGUAGE_NAMES } from '@/i18n';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -215,13 +216,18 @@ export function SettingsScreen() {
             onPress={() => router.push('/onboarding?modo=editar' as never)}
           />
         ) : null}
-        {isLoggedIn ? (
+        {isLoggedIn && (Platform.OS !== 'ios' || FEATURE_PURCHASES) ? (
           /*
             COMPRAS Y DEVOLUCIONES. Es el expediente comercial de la cuenta, y
             tiene que estar donde se busca: en Ajustes, con lo demas de la
             cuenta. Sigue ahi aunque el acceso a un curso se haya retirado —una
             compra devuelta sigue siendo una compra— y aunque se reinstale la
             aplicacion, porque todo sale del servidor.
+
+            EN iOS SIN COMPRAS NO SE ENSEÑA. Con las compras apagadas la app de
+            iPhone no vende nada, y una entrada «Compras y devoluciones» es una
+            puerta a un comercio que Revision de Apple no encuentra dentro de la
+            app (directrices 2.1 y 3.1.1). Android y la web la mantienen.
           */
           <ListRow
             title={t('settings.purchases')}
