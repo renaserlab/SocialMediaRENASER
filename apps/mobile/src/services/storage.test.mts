@@ -244,3 +244,15 @@ test('una medida 0 no se manda: la API la rechazaba y el video no se publicaba',
   assert.equal(medida(undefined), undefined);
   assert.equal(medida(1080), 1080);
 });
+
+test('un problema del archivo no se cuenta como «Se perdió la conexión» al subir a S3', () => {
+  // Un video de mas de 60 MB desde la web (donde no se comprime) daba «Se
+  // perdió la conexión»: la persona reintentaba algo que nunca iba a subir.
+  const S3 = readFileSync(fileURLToPath(new URL('./subidaDeVideoS3EnApp.ts', import.meta.url)), 'utf8');
+  assert.ok(S3.includes('if (error instanceof ProblemaDelArchivo) return error.message;'));
+  for (const motivo of ['El archivo seleccionado está vacío.', 'El archivo pesa ', 'Este video pesa ']) {
+    const i = S3.indexOf(motivo);
+    assert.ok(i > 0, `no se encontro «${motivo}»`);
+    assert.ok(S3.slice(Math.max(0, i - 80), i).includes('new ProblemaDelArchivo('), `«${motivo}» tiene que lanzarse como ProblemaDelArchivo.`);
+  }
+});
