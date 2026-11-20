@@ -841,6 +841,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'course.noPurchasesFoundBody': 'There are no purchases linked to this store account. Check that you are signed in to the store with the account you bought with.',
   'course.headerTitle': 'Program',
   'course.restorePurchases': 'Restore purchases',
+  'course.noDisponibleEnLaApp': 'This course is not available in the app.',
   'course.notFound': 'Course not found.',
   'course.loadFailed': "We couldn't load the course.",
   'course.restoreFailed': 'They could not be restored',
@@ -2547,6 +2548,7 @@ export const en: Partial<Record<keyof typeof es, string>> = {
   'admisionEvento.fueraDeCondicional': 'Conditional runs from 80 to 84.',
   // Tickets and inventory
   'evento.elegirEntradas': 'Choose tickets',
+  'evento.entradasNoDisponiblesEnLaApp': 'Tickets for this event are not available in the app.',
   'evento.desde': 'From {importe}',
 
   'modoDeAcceso.FREE_RSVP': 'Free booking',

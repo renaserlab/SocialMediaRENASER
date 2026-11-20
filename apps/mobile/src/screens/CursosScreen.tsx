@@ -21,6 +21,7 @@ import { Text } from '@/components/Text';
 import { notify } from '@/lib/confirm';
 import { useTranslation } from '@/i18n/useTranslation';
 import { etiquetaDePrecio } from '@/lib/dinero';
+import { ocultarPreciosDigitales } from '@/services/compras';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { LearningRepository } from '@/repositories/LearningRepository';
 import type { FiltrosDeCatalogo } from '@/repositories/LearningRepository';
@@ -481,10 +482,14 @@ export function CursosScreen() {
                         <Text numberOfLines={2} style={[styles.tituloDeTarjeta, { color: colors.text }]}>
                           {curso.title}
                         </Text>
-                        {/* El catálogo no devuelve estadísticas por tarjeta. */}
-                        <Text style={[styles.precio, { color: colors.textMuted }]}>
-                          {etiquetaDePrecio(curso.priceMinor, curso.currency)}
-                        </Text>
+                        {/* El catálogo no devuelve estadísticas por tarjeta.
+                            En iOS sin compras, un curso de pago no enseña
+                            precio: ver `ocultarPreciosDigitales`. */}
+                        {curso.priceMinor > 0 && ocultarPreciosDigitales() ? null : (
+                          <Text style={[styles.precio, { color: colors.textMuted }]}>
+                            {etiquetaDePrecio(curso.priceMinor, curso.currency)}
+                          </Text>
+                        )}
                       </Pulsable>
                       <Pulsable
                         onPress={() => void alternarGuardado(curso)}
