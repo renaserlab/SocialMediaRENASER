@@ -126,6 +126,10 @@ jobs:
             apps/api/requirements-dev.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: pip install 'psycopg[binary]'
+      # ffmpeg, porque la imagen de produccion lo trae (Dockerfile) y
+      # `test_poster_sin_negro.py` lo usa de verdad. Sin el, esas pruebas se
+      # omiten y la guardia de abajo tumba el trabajo: omitida no es aprobada.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       # EL ORDEN ES EL DE ESCRITURA. Aqui decia que el orden aleatorio era
       # parte de lo que se comprobaba, y no era verdad: `pytest-randomly` no
       # esta en `requirements.txt` ni lo instala ningun paso. Lo que SI se

@@ -160,6 +160,11 @@ jobs:
       # mira TODOS los flujos y no una lista.
       - run: pip install 'psycopg[binary]'
         if: steps.huella.outputs.probada != 'true'
+      # ffmpeg, igual que en ci.yml: la imagen de produccion lo trae y las
+      # pruebas del poster lo usan. Sin el se omiten y la guardia tumba el
+      # despliegue (paso el 21-11-2026 con el poster sin fotograma negro).
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+        if: steps.huella.outputs.probada != 'true'
       - run: pytest -q --junitxml=despliegue.xml
         if: steps.huella.outputs.probada != 'true'
       # EL MISMO GUARDIA QUE LA INTEGRACION CONTINUA, y es el mismo guion a
