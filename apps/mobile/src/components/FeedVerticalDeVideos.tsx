@@ -16,6 +16,7 @@ import { ReaccionesSheet } from '@/components/ReaccionesSheet';
 import { ShortVideoItem, type ReelItem } from '@/components/ShortVideoItem';
 import { Text } from '@/components/Text';
 import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
+import { usePrecargaDeVideos } from '@/hooks/usePrecargaDeVideos';
 import { haptics } from '@/lib/haptics';
 import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import { toast } from '@/lib/toast';
@@ -101,6 +102,10 @@ export function FeedVerticalDeVideos({
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
   const insets = useSafeAreaInsets();
+  // Primer MB de los 5 siguientes en la cache del reproductor. El `1` es el
+  // vecino que ya tiene reproductor montado (`preload` mas abajo): si cambia
+  // esa ventana, cambia aqui tambien.
+  usePrecargaDeVideos(feed.items, indiceActivo, activo, 1);
 
   /*
     CADA PAGINA MIDE UNA PANTALLA. Pero ¿que pantalla?
