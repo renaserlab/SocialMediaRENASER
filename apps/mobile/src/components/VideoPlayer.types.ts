@@ -1,5 +1,7 @@
 import type { ImageSourcePropType, StyleProp, ViewStyle } from 'react-native';
 
+import type { CoordinadorDePrecarga } from '@/lib/precargaDeVideos';
+
 export type VideoPlayerProps = {
   /** URL o fuente del video. */
   uri: string;
@@ -113,4 +115,15 @@ export type VideoPlayerProps = {
    * reproductor no informa de nada.
    */
   medirComo?: { id: string; hls: boolean; bytes?: number | null; almacen?: 'supabase' | 's3' };
+  /**
+   * Posicion de este reproductor respecto al que se ve en el muro de Inicio
+   * (0 el activo, -1 el anterior, 1 y 2 los siguientes). Junto con
+   * `coordinadorDePrecarga` decide cuanto se adelanta la descarga: el activo
+   * mucho, los vecinos lo justo para tener el primer fotograma (ver
+   * `lib/precargaDeVideos`). Sin estas dos props, el reproductor se comporta
+   * como siempre. La web las ignora.
+   */
+  distanciaAlActivo?: number;
+  /** Estado compartido del muro (dedo arrastrando, activo con poco buffer). */
+  coordinadorDePrecarga?: CoordinadorDePrecarga;
 };

@@ -49,7 +49,9 @@ VIDEO
                                       → si no, original (compatibilidad)
 SHORTS
   páginas de 6 (cursor keyset + offset de respaldo)
-  ventana de reproductores: N-1, N, N+1 (máx. 3); el resto, posters
+  ventana de reproductores: N-1, N, N+1, N+2 (máx. 4; web N-1..N+1); el resto, posters
+  buffer: activo 15 s / 12 MB; vecinos 2 s / 1,5 MB; mínimo 0,5 s / 1 MB al arrastrar
+  o con el activo justo de buffer (lib/precargaDeVideos.ts)
   expo-video useCaching para MP4 (segundo visionado sin red)
 ```
 
@@ -291,3 +293,57 @@ más a wifi y el p90 a una red mala), no fila a fila.
    ahí, la actualización sale en modo demo. Hay que comprobarlo antes de
    publicar. Las builds con otra versión (1.2.3 o anteriores) no la reciben:
    necesitan una build nueva.
+
+## Precarga estilo TikTok y portadas sin negro (noviembre 2026)
+
+**App (solo JS, llega por EAS Update).** `src/lib/precargaDeVideos.ts` decide
+la ventana y el buffer de cada reproductor del muro de Inicio:
+
+- Ventana N-1..N+2 en teléfonos (máximo 4 reproductores vivos); la web sigue
+  con N-1..N+1 y sin perfiles de buffer.
+- El activo pide 15 s / 12 MB (como antes). Los vecinos 2 s / 1,5 MB: primer
+  fotograma listo, nada más. Al volverse activo, el mismo reproductor sube en
+  caliente (`player.bufferOptions`), sin recrearse.
+- Mientras el dedo arrastra (o la lista sigue por inercia), todos los vecinos
+  menos el siguiente bajan a 0,5 s / 1 MB. Mientras el activo tiene menos de
+  2 s por delante (se suelta al pasar de 5 s, o si ya está descargado entero),
+  todos los vecinos bajan a ese mínimo.
+
+La telemetría `metricas_de_video` no cambia (mismo `inicioDeGesto` al empezar
+el arrastre y mismos tramos), así que antes/después se compara con las
+consultas de arriba (`primer_fotograma`, `deslizamiento`).
+
+**API.** El poster de los videos nuevos (Supabase y S3) es el primer fotograma
+no negro de los primeros 3 s (`blackframe` + `metadata`, un solo ffmpeg que se
+corta en cuanto encuentra uno). Si todo es negro, respaldo en 1 s, luego 0,1 s
+y luego el principio (clips de menos de 0,1 s). Código en
+`comandos_de_poster` de `apps/api/app/modules/content/media_processing.py`; la
+misma regla está copiada en `extrae_poster` de `scripts/procesar_media.py`.
+Si el teléfono ya subió su propio poster junto al video, se respeta ese
+(el servidor solo genera el que falta).
+
+**Regenerar las portadas YA publicadas: NO hecho, pendiente del OK de Luis.**
+Hoy ningún guion regenera un poster que ya existe (todos se saltan los medios
+con `poster_path`), y hay dos trampas que hacen que «borrar `poster_path` y
+reprocesar» no valga:
+
+1. La app cachea la portada por su RUTA (`cacheKey = poster_path`). Reescribir
+   el mismo archivo no se vería en los teléfonos que ya la tienen en disco: la
+   portada nueva tiene que ir a una ruta nueva.
+2. En S3 la ruta lleva versión (`poster-v<n>.jpg`) y CloudFront la sirve como
+   inmutable. La versión sale del `poster_path` actual; si se vacía, vuelve a
+   `v1` y pisaría un archivo que CloudFront ya tiene en caché.
+
+Procedimiento propuesto (cuando haya OK), primero con `--dry-run` y un solo
+medio:
+
+- **Supabase**: ampliar `scripts/procesar_media.py` con un modo que, para los
+  videos con `poster_path`, suba el poster nuevo a
+  `<dueño>/derived/<media_id>/poster-v2.jpg` y solo entonces actualice
+  `poster_path`. Uso previsto:
+  `python scripts/procesar_media.py --videos --media-id <uuid> --dry-run`.
+- **S3**: un guion en `apps/api/scripts/` que, por cada medio, llame a
+  `_extraer_poster` sobre la URL prefirmada y suba a
+  `rutas_de_derivados(...)[0]` (que ya calcula `v<n+1>` a partir del
+  `poster_path` actual) antes de actualizar la fila.
+

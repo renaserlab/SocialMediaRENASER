@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -18,6 +19,7 @@ import { Text } from '@/components/Text';
 import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
 import { haptics } from '@/lib/haptics';
 import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
+import { crearCoordinadorDePrecarga, enVentanaDePrecarga } from '@/lib/precargaDeVideos';
 import { toast } from '@/lib/toast';
 import type { Superficie } from '@/repositories/RecommendationRepository';
 import {
@@ -31,6 +33,12 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 // Superficie a pantalla completa sobre video → contexto de media (oscuro).
 const media = palette('dark');
+
+/**
+ * La web conserva la ventana y la descarga de antes (N-1..N+1, sin perfiles de
+ * buffer): alli el reproductor es un `<video>` y lo nuevo no se ha medido.
+ */
+const ES_WEB = Platform.OS === 'web';
 
 type Props = {
   feed: FeedDeVideos;
@@ -78,9 +86,11 @@ type Props = {
  * tres veces.
  *
  * Lo que hace que se sienta inmediato, y que conviene no deshacer:
- *  - Solo el video visible reproduce; sus vecinos existen ya preparados. Nunca
- *    hay mas de tres reproductores vivos, que es lo que evita quedarse sin
- *    memoria nativa en Android.
+ *  - Solo el video visible reproduce; sus vecinos (el anterior y los dos
+ *    siguientes) existen ya preparados, con su primer fotograma listo pero
+ *    descargando lo justo (`lib/precargaDeVideos`). Nunca hay mas de cuatro
+ *    reproductores vivos, que es lo que evita quedarse sin memoria nativa ni
+ *    decodificadores en Android.
  *  - El resto de celdas son su poster: una imagen, cero red y cero memoria.
  *  - La siguiente pagina se pide con dos pantallas de antelacion, asi que al
  *    ritmo de un deslizamiento por video llega antes de hacer falta.
@@ -136,6 +146,23 @@ export function FeedVerticalDeVideos({
   const altoDePagina = altoMedido ?? altura;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
+
+  /*
+    Quien reparte el ancho de banda entre el activo y sus vecinos. Uno por
+    feed y estable: viaja a todas las celdas, que estan memoizadas. Lo que
+    cambia dentro (dedo arrastrando, activo con poco buffer) no redibuja nada;
+    cada reproductor se entera por su cuenta.
+  */
+  const coordinador = useRef(crearCoordinadorDePrecarga()).current;
+  /*
+    El dedo empieza a mover la lista. Es tambien el cero de la medicion de
+    «deslizar al siguiente», que no cambia: se sigue llamando igual y en el
+    mismo instante.
+  */
+  const alEmpezarArrastre = useCallback(() => {
+    medicionDeVideo.inicioDeGesto();
+    coordinador.inicioDeArrastre();
+  }, [coordinador]);
 
   /*
     De donde viene lo que se esta viendo, en una referencia.
@@ -356,7 +383,12 @@ export function FeedVerticalDeVideos({
       <FlashList
         data={feed.items}
         keyExtractor={(item: ReelItem) => item.id}
-        renderItem={({ item, index }: { item: ReelItem; index: number }) => (
+        renderItem={({ item, index }: { item: ReelItem; index: number }) => {
+          // Solo dentro de la ventana: fuera no hay reproductor y un numero
+          // cambiante redibujaria celdas que solo ensenan su poster.
+          const distancia =
+            !ES_WEB && activo && enVentanaDePrecarga(index, indiceActivo) ? index - indiceActivo : undefined;
+          return (
           <ShortVideoItem
             short={item}
             /*
@@ -364,7 +396,9 @@ export function FeedVerticalDeVideos({
               "Siguiendo" el video de "Para ti" seguiria sonando por debajo.
             */
             active={activo && index === indiceActivo}
-            preload={activo && Math.abs(index - indiceActivo) <= 1}
+            preload={activo && enVentanaDePrecarga(index, indiceActivo, ES_WEB)}
+            distanciaAlActivo={distancia}
+            coordinadorDePrecarga={ES_WEB ? undefined : coordinador}
             height={altoDePagina}
             muted={silenciado}
             onToggleMuted={alCambiarSilencio}
@@ -376,16 +410,23 @@ export function FeedVerticalDeVideos({
             alVerReacciones={verReacciones}
             medir
           />
-        )}
+          );
+        }}
         pagingEnabled
-        // El siguiente se prepara con una pantalla de antelacion: montarlo justo
-        // al llegar deja un parpadeo en blanco que se percibe como un tiron.
-        drawDistance={altoDePagina}
+        // El siguiente se prepara con antelacion: montarlo justo al llegar deja
+        // un parpadeo en blanco que se percibe como un tiron. En telefonos son
+        // DOS pantallas, para que exista la celda N+2 de la ventana; las
+        // celdas de mas lejos solo pintan su poster.
+        drawDistance={ES_WEB ? altoDePagina : altoDePagina * 2}
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         // El cero de «deslizar al siguiente»: el dedo empieza a mover la
-        // lista. Una funcion estable del modulo, sin estado ni render.
-        onScrollBeginDrag={medicionDeVideo.inicioDeGesto}
+        // lista. Funciones estables, sin estado ni render. Mientras dura el
+        // gesto (arrastre + inercia) los vecinos dejan de pedir mas datos.
+        onScrollBeginDrag={alEmpezarArrastre}
+        onScrollEndDrag={coordinador.finDeArrastre}
+        onMomentumScrollBegin={coordinador.inicioDeInercia}
+        onMomentumScrollEnd={coordinador.finDeInercia}
         viewabilityConfig={viewabilityConfig}
         onEndReached={feed.cargarMas}
         onEndReachedThreshold={2}

@@ -9,6 +9,7 @@ import { useVideoPlayer, VideoView, type VideoSource } from 'expo-video';
 import { VideoScrubber } from '@/components/VideoScrubber';
 import { perfMark } from '@/lib/perf';
 import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
+import { perfilDeBuffer, type PerfilDeBuffer } from '@/lib/precargaDeVideos';
 import { palette } from '@/theme/tokens';
 import type { VideoPlayerProps } from './VideoPlayer.types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -50,6 +51,15 @@ const PROGRESS_INTERVAL_SECONDS = 0.25;
  */
 const MAX_BUFFER_BYTES = 12 * 1024 * 1024;
 const BUFFER_SECONDS = 15;
+
+/**
+ * El perfil de siempre, para todo reproductor que no venga del muro de Inicio
+ * (historias, cursos, publicaciones): ellos no cambian nada.
+ */
+const BUFFER_DE_SIEMPRE: PerfilDeBuffer = {
+  maxBufferBytes: MAX_BUFFER_BYTES,
+  preferredForwardBufferDuration: BUFFER_SECONDS,
+};
 
 /**
  * Ejecuta una accion sobre el reproductor tolerando que ya no exista.
@@ -149,21 +159,32 @@ export function VideoPlayer({
   onEnded,
   onFirstFrame,
   medirComo,
+  distanciaAlActivo,
+  coordinadorDePrecarga,
 }: VideoPlayerProps) {
   const { t } = useTranslation();
+  /*
+    Cuanto se adelanta ESTE reproductor (muro de Inicio, `lib/precargaDeVideos`).
+    Sin las dos props, el perfil de siempre: ningun otro reproductor cambia.
+  */
+  const conPrecarga = distanciaAlActivo !== undefined && coordinadorDePrecarga !== undefined;
+  const perfilActual = (): PerfilDeBuffer =>
+    conPrecarga ? perfilDeBuffer(distanciaAlActivo, coordinadorDePrecarga.estado()) : BUFFER_DE_SIEMPRE;
   /*
     `useCaching` guarda el video en la cache de disco de expo-video: volver a
     un short ya visto no toca la red. Se activa por prop porque la cache no
     soporta HLS en iOS; quien reproduce streams lo deja apagado.
   */
   const source: VideoSource = cacheToDisk ? { uri, useCaching: true } : uri;
+  // Ultimo perfil enviado al reproductor nativo, para no repetir la orden.
+  const perfilAplicado = useRef<PerfilDeBuffer | null>(null);
   const player = useVideoPlayer(source, (p) => {
     p.loop = loop;
     p.muted = muted;
-    p.bufferOptions = {
-      maxBufferBytes: MAX_BUFFER_BYTES,
-      preferredForwardBufferDuration: BUFFER_SECONDS,
-    };
+    // Nace ya con su perfil: un vecino nunca empieza pidiendo 15 s.
+    const perfil = perfilActual();
+    p.bufferOptions = { ...perfil };
+    perfilAplicado.current = perfil;
     if (shortsControls || onProgressSeconds) {
       // Sin esto el reproductor no informa de su avance: la barra se quedaria
       // clavada en el minuto cero y el progreso del curso no se guardaria.
@@ -263,6 +284,71 @@ export function VideoPlayer({
       player.muted = muted;
     });
   }, [muted, player]);
+
+  /*
+    PRECARGA AL ESTILO TIKTOK (`lib/precargaDeVideos`).
+
+    El perfil de buffer se reajusta en caliente cada vez que cambia la
+    distancia al activo (deslizar) o el estado del muro (dedo arrastrando,
+    activo con poco buffer). expo-video lo aplica al instante, sin recrear el
+    reproductor, asi que el vecino que pasa a activo sube de 2 s a 15 s sin
+    perder lo que ya habia descargado.
+
+    La suscripcion al coordinador no pasa por el estado de React: cambiar de
+    perfil no redibuja nada.
+  */
+  useEffect(() => {
+    if (distanciaAlActivo === undefined || !coordinadorDePrecarga) return;
+    const aplicar = () => {
+      const perfil = perfilDeBuffer(distanciaAlActivo, coordinadorDePrecarga.estado());
+      if (perfilAplicado.current === perfil) return;
+      perfilAplicado.current = perfil;
+      safely(() => {
+        player.bufferOptions = { ...perfil };
+      });
+    };
+    aplicar();
+    return coordinadorDePrecarga.suscribir(aplicar);
+  }, [player, distanciaAlActivo, coordinadorDePrecarga]);
+
+  /*
+    El activo avisa al muro de cuanto lleva por delante. Al estrenarse va justo
+    por definicion (los vecinos se frenan hasta que coja aire); al dejar de ser
+    activo, o al desmontarse, deja de pedir sitio. Las limpiezas de un commit
+    corren antes que los efectos nuevos, asi que el «ya no» del anterior llega
+    antes que el «soy nuevo» del siguiente.
+  */
+  const esActivoDelMuro = distanciaAlActivo === 0 && coordinadorDePrecarga !== undefined;
+  useEffect(() => {
+    if (!esActivoDelMuro || !coordinadorDePrecarga) return;
+    coordinadorDePrecarga.nuevoActivo();
+    return () => coordinadorDePrecarga.sinActivo();
+  }, [esActivoDelMuro, coordinadorDePrecarga]);
+
+  const reportaBuffer = useRef<typeof coordinadorDePrecarga>(undefined);
+  reportaBuffer.current = esActivoDelMuro ? coordinadorDePrecarga : undefined;
+  const leerBuffer = (cargando: boolean, currentTime?: number, bufferedPosition?: number) => {
+    const coordinador = reportaBuffer.current;
+    if (!coordinador) return;
+    coordinador.lecturaDelActivo({
+      cargando,
+      currentTime: currentTime ?? readNumber(() => player.currentTime),
+      bufferedPosition: bufferedPosition ?? readNumber(() => player.bufferedPosition),
+      duration: readNumber(() => player.duration),
+    });
+  };
+  useEventListener(player, 'timeUpdate', ({ currentTime, bufferedPosition }) => {
+    if (!reportaBuffer.current) return;
+    let cargando = false;
+    safely(() => {
+      cargando = player.status === 'loading';
+    });
+    leerBuffer(cargando, currentTime, bufferedPosition);
+  });
+  useEventListener(player, 'statusChange', ({ status }) => {
+    if (!reportaBuffer.current) return;
+    leerBuffer(status === 'loading');
+  });
 
   /*
     MEDICION DE VIDEO (Inicio en telefonos). Que reproductor se mide va en una

@@ -509,23 +509,99 @@ async def _descargar_a_disco(client: httpx.AsyncClient, url: str, destino: Path)
                 salida.write(trozo)
 
 
-async def _extraer_poster(ffmpeg: str, entrada: str, destino: Path) -> bool:
-    codigo, _, stderr = await _run(
+#: Hasta donde se busca un fotograma que no sea negro, en segundos. Muchos
+#: videos de telefono (y casi todos los que empiezan con un fundido) arrancan
+#: con varios fotogramas en negro, y el poster fijo en 0.1 s salia como un
+#: rectangulo oscuro en el muro. Tres segundos cubren los fundidos habituales y
+#: limitan lo que se decodifica: en una t3.small es menos de un segundo de CPU
+#: para un 1080p, y se corta en cuanto aparece el primer fotograma bueno.
+POSTER_VENTANA_S = 3
+
+#: Un pixel cuenta como «negro» si su luma esta por debajo de esto (0-255).
+#: 32 es el valor por defecto de `blackframe` y ya cubre el negro con ruido de
+#: compresion de los fundidos.
+POSTER_UMBRAL_PIXEL = 32
+
+#: Un fotograma se descarta si mas de este porcentaje de sus pixeles es negro.
+#: 90 y no 98: un fundido a medio abrir (casi todo oscuro con una franja de
+#: imagen) tambien queda feo de portada. Una escena oscura de verdad que no
+#: pase el filtro cae en el respaldo de 1 s, que es justo lo de antes.
+POSTER_MAX_NEGRO = 90
+
+#: Respaldo si en la ventana todo es negro (o el filtro no da nada): un
+#: fotograma fijo en 1 s y luego en 0.1 s. El 0 del final es para clips de
+#: menos de 0.1 s, que con `-ss 0.1` no tienen ningun fotograma que sacar.
+POSTER_RESPALDOS_S = (1.0, 0.1, 0.0)
+
+
+def comandos_de_poster(ffmpeg: str, entrada: str, destino: Path) -> list[list[str]]:
+    """Los intentos para sacar el poster, en orden; vale el primero que deje
+    un archivo.
+
+    1. El PRIMER fotograma no negro de los primeros `POSTER_VENTANA_S`
+       segundos. `blackframe` con `amount=0` anota en todos los fotogramas que
+       porcentaje es negro, `metadata` deja pasar solo los que estan por
+       debajo de `POSTER_MAX_NEGRO` y `-frames:v 1` se queda con el primero y
+       corta ahi la decodificacion. Si todo es negro, ffmpeg sale bien pero sin
+       escribir nada, y se pasa al siguiente.
+    2. Los respaldos fijos de `POSTER_RESPALDOS_S`. Un video de menos de 1 s
+       no tiene fotograma en 1 s (sale bien y sin archivo) y cae en 0.1 s, que
+       es el comportamiento de siempre.
+
+    Es una funcion pura para poder comprobar los comandos sin lanzar ffmpeg.
+    """
+    escala = f"scale='min({FEED_MAX_SIDE},iw)':-2"
+    salida = ["-frames:v", "1", "-q:v", "3", "-y", str(destino)]
+    sin_negro = [
+        ffmpeg,
+        "-v", "error",
+        # `-t` ANTES de `-i`: limita lo que se LEE, no solo lo que se escribe.
+        # Por HTTP son unos pocos MB por rangos, como antes.
+        "-t", str(POSTER_VENTANA_S),
+        "-i", entrada,
+        "-an", "-sn",
+        "-vf",
+        (
+            f"blackframe=amount=0:threshold={POSTER_UMBRAL_PIXEL},"
+            "metadata=mode=select:key=lavfi.blackframe.pblack:"
+            f"value={POSTER_MAX_NEGRO}:function=less,"
+            f"{escala}"
+        ),
+        *salida,
+    ]
+    fijos = [
         [
             ffmpeg,
             "-v", "error",
-            "-ss", "0.1",
+            "-ss", f"{segundo:g}",
             "-i", entrada,
-            "-frames:v", "1",
-            "-vf", f"scale='min({FEED_MAX_SIDE},iw)':-2",
-            "-q:v", "3",
-            str(destino),
+            "-an", "-sn",
+            "-vf", escala,
+            *salida,
         ]
-    )
-    if codigo != 0 or not destino.exists():
-        logger.warning("No se pudo extraer el poster: %s", stderr[-300:])
-        return False
-    return True
+        for segundo in POSTER_RESPALDOS_S
+    ]
+    return [sin_negro, *fijos]
+
+
+async def _extraer_poster(ffmpeg: str, entrada: str, destino: Path) -> bool:
+    """Saca el poster evitando los fotogramas negros del arranque.
+
+    Lo normal es que baste el primer intento (un solo ffmpeg, como antes). Los
+    respaldos solo corren si el anterior no escribio nada, y un intento que
+    falla del todo (codigo distinto de cero) tampoco para la cadena: un poster
+    de 1 s es mejor que ninguno.
+    """
+    ultimo_error = b""
+    for cmd in comandos_de_poster(ffmpeg, entrada, destino):
+        destino.unlink(missing_ok=True)
+        codigo, _, stderr = await _run(cmd)
+        if codigo == 0 and destino.exists() and destino.stat().st_size > 0:
+            return True
+        ultimo_error = stderr or ultimo_error
+    destino.unlink(missing_ok=True)
+    logger.warning("No se pudo extraer el poster: %s", ultimo_error[-300:])
+    return False
 
 
 async def _transcodificar_mp4(ffmpeg: str, origen: Path, destino: Path) -> bool:

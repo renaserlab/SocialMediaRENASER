@@ -224,15 +224,37 @@ def probe(archivo: Path) -> dict:
 
 
 def extrae_poster(video: Path, destino: Path) -> bool:
-    resultado = subprocess.run(
+    """El primer fotograma NO negro de los 3 primeros segundos; si no hay,
+    respaldo en 1 s, luego en 0.1 s y luego al principio.
+
+    Es la misma regla que la API (`comandos_de_poster` en
+    `apps/api/app/modules/content/media_processing.py`): el poster fijo en
+    0.1 s salia negro en los videos que arrancan con un fundido. Se copia aqui
+    porque este guion corre suelto, sin el paquete de la API.
+    """
+    escala = f"scale='min({FEED_MAX_SIDE},iw)':-2"
+    salida = ["-frames:v", "1", "-q:v", "3", "-y", str(destino)]
+    intentos = [
         [
-            "ffmpeg", "-v", "error", "-ss", "0.1", "-i", str(video),
-            "-frames:v", "1", "-vf", f"scale='min({FEED_MAX_SIDE},iw)':-2",
-            "-q:v", "3", str(destino),
+            "ffmpeg", "-v", "error", "-t", "3", "-i", str(video), "-an", "-sn",
+            "-vf",
+            "blackframe=amount=0:threshold=32,"
+            "metadata=mode=select:key=lavfi.blackframe.pblack:value=90:function=less,"
+            + escala,
+            *salida,
         ],
-        capture_output=True,
-    )
-    return resultado.returncode == 0 and destino.exists()
+        *(
+            ["ffmpeg", "-v", "error", "-ss", segundo, "-i", str(video), "-an", "-sn",
+             "-vf", escala, *salida]
+            for segundo in ("1", "0.1", "0")
+        ),
+    ]
+    for cmd in intentos:
+        destino.unlink(missing_ok=True)
+        resultado = subprocess.run(cmd, capture_output=True)
+        if resultado.returncode == 0 and destino.exists() and destino.stat().st_size > 0:
+            return True
+    return False
 
 
 def _escala(lado_menor: int) -> str:

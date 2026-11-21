@@ -367,7 +367,14 @@ test('el reproductor nativo mide con playingChange y statusChange, sin estado de
 
 test('el feed de Inicio marca el gesto y enciende la medicion; los reels sueltos no', () => {
   const feed = leer('../components/FeedVerticalDeVideos.tsx');
-  assert.match(feed, /onScrollBeginDrag=\{medicionDeVideo\.inicioDeGesto\}/);
+  // El cero del gesto puede ir directo o dentro del manejador que ademas frena
+  // la precarga de los vecinos (`alEmpezarArrastre`); lo que no puede es
+  // perderse.
+  const directo = /onScrollBeginDrag=\{medicionDeVideo\.inicioDeGesto\}/.test(feed);
+  const envuelto =
+    /onScrollBeginDrag=\{alEmpezarArrastre\}/.test(feed) &&
+    /const alEmpezarArrastre = useCallback\(\(\) => \{\s*medicionDeVideo\.inicioDeGesto\(\);/.test(feed);
+  assert.ok(directo || envuelto, 'el inicio del arrastre tiene que marcar el gesto de la medicion');
   assert.match(feed, /\n\s+medir\n/);
   const reels = leer('../../app/reels.tsx');
   assert.doesNotMatch(reels, /medir/);
