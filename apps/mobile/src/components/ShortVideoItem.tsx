@@ -17,6 +17,7 @@ import { haptics } from '@/lib/haptics';
 import { ESCALA_AL_PULSAR } from '@/lib/movimiento';
 import { esVertical } from '@/lib/formaDelVideo';
 import { snapToPage } from '@/lib/snapToPage';
+import type { CoordinadorDePrecarga } from '@/lib/precargaDeVideos';
 import { palette, spacing } from '@/theme/tokens';
 import { irAlPerfil } from '@/lib/irAlPerfil';
 import { useAppStore } from '@/store/useAppStore';
@@ -107,13 +108,21 @@ type Props = {
   /** Solo el item visible reproduce (autoplay por viewport). */
   active: boolean;
   /**
-   * El reproductor existe solo para el video visible y sus vecinos inmediatos
-   * (N-1, N, N+1): asi el siguiente arranca al instante sin que haya nunca mas
-   * de tres reproductores vivos. Los demas muestran su poster, que es una
-   * imagen ligera. Es la misma estrategia de ventana que usan las apps de
-   * video vertical.
+   * El reproductor existe solo para el video visible y sus vecinos (N-1, N,
+   * N+1 y N+2 en telefonos; N-1..N+1 en la web): asi el siguiente arranca al
+   * instante sin que haya nunca mas de cuatro reproductores vivos (ver
+   * `lib/precargaDeVideos`). Los demas muestran su poster, que es una imagen
+   * ligera. Es la misma estrategia de ventana que usan las apps de video
+   * vertical.
    */
   preload: boolean;
+  /**
+   * Posicion respecto al activo (0, -1, 1, 2) mientras esta en la ventana; con
+   * el coordinador decide cuanto descarga el reproductor por adelantado. Fuera
+   * de la ventana no hace falta (no hay reproductor).
+   */
+  distanciaAlActivo?: number;
+  coordinadorDePrecarga?: CoordinadorDePrecarga;
   height: number;
   /**
    * El sonido se decide una vez para todo el feed, no video a video: si cada
@@ -180,6 +189,8 @@ function ShortVideoItemBase({
   alAbrirComentarios,
   alVerReacciones,
   medir = false,
+  distanciaAlActivo,
+  coordinadorDePrecarga,
 }: Props) {
   const { t } = useTranslation();
   /*
@@ -334,6 +345,8 @@ function ShortVideoItemBase({
           controlsBottomInset={espacioInferior}
           onMutedChange={onForcedMute}
           medirComo={medirComo}
+          distanciaAlActivo={distanciaAlActivo}
+          coordinadorDePrecarga={coordinadorDePrecarga}
         />
       ) : (
         /*
