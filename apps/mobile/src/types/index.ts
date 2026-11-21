@@ -1,5 +1,6 @@
 import type { CitaDeMensaje, ReaccionDeMensaje } from '@/lib/reaccionesDeChat';
 import type { TemaDeMensaje } from '@/lib/nombresDeAdjuntos';
+import type { VarianteDeVideo } from '@/lib/elegirVariante';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -189,6 +190,12 @@ export type Post = {
    * no hace falta: ahi la firma se renueva sola con su propia cache.
    */
   urlsExpiran?: string;
+  /**
+   * El mismo video en varias calidades, de menor a mayor (la ultima es
+   * `mediaUrl`). Solo videos de S3 con la bandera de calidades de la API
+   * encendida; sin ellas, la eleccion de fuente es la de siempre.
+   */
+  variantes?: VarianteDeVideo[];
 };
 
 /** Alguien etiquetado en una publicación: lo justo para pintarlo y abrirlo. */
