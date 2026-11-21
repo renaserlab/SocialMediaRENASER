@@ -77,6 +77,13 @@
         ],
         "listUnknownPackages": false
       }
+    },
+    "autolinking": {
+      "android": {
+        "buildFromSource": [
+          "expo-video"
+        ]
+      }
     }
   }
 }

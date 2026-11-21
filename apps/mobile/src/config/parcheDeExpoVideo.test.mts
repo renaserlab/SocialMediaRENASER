@@ -70,6 +70,24 @@ test('Android escribe en la cache del reproductor; iOS en sus mismos archivos', 
   assert.match(parche, /VideoCacheManager\.mediaInfoSuffix/);
 });
 
+/*
+  LA TRAMPA DE ANDROID. Desde el SDK 54, expo-video trae un AAR ya compilado
+  (`local-maven-repo`) y la autovinculacion lo usa EN LUGAR del codigo
+  fuente: el parche de Kotlin se aplicaria en node_modules y la compilacion lo
+  ignoraria sin avisar. `buildFromSource` obliga a compilar el fuente parchado.
+  (En iOS los pods se compilan siempre desde el fuente.)
+*/
+test('Android compila expo-video desde el fuente parchado, no desde el AAR', () => {
+  const movil = leerJson<{ expo?: { autolinking?: { android?: { buildFromSource?: string[] } } } }>(
+    'apps/mobile/package.json',
+  );
+  const desdeFuente = movil.expo?.autolinking?.android?.buildFromSource ?? [];
+  assert.ok(
+    desdeFuente.some((patron) => new RegExp(`^(?:${patron})$`).test('expo-video')),
+    'falta "expo-video" en expo.autolinking.android.buildFromSource de apps/mobile/package.json',
+  );
+});
+
 test('npm install aplica los parches (postinstall con patch-package)', () => {
   const paquete = leerJson<{ scripts?: Record<string, string>; devDependencies?: Record<string, string> }>(
     'package.json',
