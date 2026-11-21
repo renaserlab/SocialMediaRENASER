@@ -8,7 +8,9 @@ llama aquí. Para cada fila con `almacen = 's3'` se rellenan:
 - `poster_url`;
 - `stream_url`, si hay HLS: el endpoint de la API con un token corto, porque
   las listas se reescriben allí (ver `content/router.media_hls_playlist`);
-- `urls_expiran`.
+- `urls_expiran`;
+- `variantes`, si el video tiene calidades extra y `video_calidades_lectura`
+  está encendida (ver `medios/calidades.py`; apagado de fábrica).
 
 SOLO DESPUÉS DEL PREDICADO. Esta función no decide quién ve qué: firma lo que
 le llega. Lo que no se podía ver ya se quedó fuera de la consulta del endpoint
@@ -27,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.modules.medios import banderas, esquema, firma
+from app.modules.medios import banderas, calidades, esquema, firma
 
 if TYPE_CHECKING:
     from app.modules.content.schemas import PostMediaRead
@@ -62,9 +64,19 @@ def url_de_hls(media_id: str, token: str) -> str:
     return f"{prefijo}/media/{media_id}/hls/master.m3u8?t={token}"
 
 
-def firmar_medio(medio: PostMediaRead, vence: int, viewer_id: str | None = None) -> None:
+def firmar_medio(
+    medio: PostMediaRead,
+    vence: int,
+    viewer_id: str | None = None,
+    variantes_guardadas: list[dict] | None = None,
+) -> None:
     """Rellena las URLs de UNA fila `s3`. Sin firma configurada, las deja
-    vacías: la app enseña el error de siempre en vez de una URL rota."""
+    vacías: la app enseña el error de siempre en vez de una URL rota.
+
+    `variantes_guardadas` (calidades extra, apagado de fábrica): se firman con
+    la misma query de carpeta, sin coste de firma adicional."""
+    from app.modules.content.schemas import VarianteDeVideo
+
     carpeta = firma.carpeta_de_clave(medio.storage_path or "")
     if carpeta is None:
         _avisar_firma_fallida("clave_fuera_de_videos", medio.id)
@@ -87,6 +99,19 @@ def firmar_medio(medio: PostMediaRead, vence: int, viewer_id: str | None = None)
         if token:
             medio.stream_url = url_de_hls(medio.id, token)
     medio.urls_expiran = datetime.fromtimestamp(vence, tz=timezone.utc)
+    if variantes_guardadas:
+        con_feed = bool(_de_esta_carpeta(medio.feed_path))
+        armadas = calidades.armar_variantes(
+            variantes_guardadas,
+            url_principal=medio.media_url,
+            lado_principal=calidades.lado_del_principal(medio.width, medio.height, con_feed),
+            bitrate_principal=calidades.bitrate_del_principal(
+                con_feed, medio.bytes, medio.duration_s
+            ),
+            firmar=_de_esta_carpeta,
+        )
+        if armadas:
+            medio.variantes = [VarianteDeVideo(**v) for v in armadas]
 
 
 async def hidratar(
@@ -110,9 +135,23 @@ async def hidratar(
         return
     firmar = banderas.puede_recibir_s3()
     vence = firma.vencimiento_de_ventana()
+    guardadas = await _variantes_o_nada(db, list(en_s3)) if firmar else {}
     for medio in medios:
         if medio.id not in en_s3:
             continue
         medio.almacen = "s3"
         if firmar:
-            firmar_medio(medio, vence, viewer_id)
+            firmar_medio(medio, vence, viewer_id, guardadas.get(medio.id))
+
+
+async def _variantes_o_nada(db: AsyncSession, ids: list[str]) -> dict[str, list[dict]]:
+    """Las calidades extra del lote. Con `video_calidades_lectura` apagada no
+    consulta nada; y un fallo aquí nunca deja sin video: sin variantes, la app
+    usa `media_url` como siempre."""
+    if not calidades.lectura_activa():
+        return {}
+    try:
+        return await calidades.leer(db, ids)
+    except Exception:  # noqa: BLE001
+        logger.warning("No se pudieron leer las calidades extra", exc_info=True)
+        return {}

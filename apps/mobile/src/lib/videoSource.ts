@@ -1,11 +1,22 @@
 import { Platform } from 'react-native';
 
 import { elegirFuenteDeVideo } from '@/lib/elegirFuenteDeVideo';
+import { crearMemoriaDeCalidad, type VarianteDeVideo } from '@/lib/elegirVariante';
+import { medicionDeRedActual } from '@/lib/medidorDeRed';
+
+/**
+ * La calidad elegida para cada video en esta sesion: una vez por video,
+ * aunque la lista se vuelva a armar al renovar las firmas.
+ */
+const memoriaDeCalidad = crearMemoriaDeCalidad();
 
 /**
  * Elige la mejor fuente disponible para reproducir un video.
  *
  * Cadena de respaldo, de mejor a peor:
+ *   0. Una de las `variantes` (480/560/720), si la API las manda: la que da
+ *      la red medida, elegida UNA vez por video. Sin medicion, la de arriba,
+ *      que es el mismo `mediaUrl` de siempre.
  *   1. HLS (streaming por segmentos con calidades adaptativas) — solo en
  *      nativo: el <video> del navegador no reproduce HLS salvo en Safari.
  *   2. MP4 firmado — `mediaUrl` ya apunta a la version optimizada del feed
@@ -20,8 +31,12 @@ import { elegirFuenteDeVideo } from '@/lib/elegirFuenteDeVideo';
  * para HLS no (no esta soportada en iOS y los segmentos ya son incrementales).
  */
 export function bestVideoSource(post: {
+  id?: string;
   streamUrl?: string;
   mediaUrl?: string;
-}): { uri: string; isStream: boolean } | null {
-  return elegirFuenteDeVideo(post, Platform.OS !== 'web');
+  variantes?: readonly VarianteDeVideo[];
+}): { uri: string; isStream: boolean; alto?: number } | null {
+  return elegirFuenteDeVideo(post, Platform.OS !== 'web', (variantes) =>
+    memoriaDeCalidad.elegir(post.id, variantes, medicionDeRedActual()),
+  );
 }

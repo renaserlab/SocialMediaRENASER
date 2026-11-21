@@ -652,8 +652,13 @@ async def _process_video(
     almacen: str = "supabase",
     owner: str | None = None,
     sigue_viva=None,
+    calidades: list[dict] | None = None,
 ) -> None:
     """Poster, MP4 de 720p y —si se pide— HLS.
+
+    `calidades`: una lista vacía si este video puede llevar las calidades
+    extra (`medios/calidades.py`); aquí se rellena con lo generado y
+    `process_media` la guarda. None (lo de siempre) = no se intenta.
 
     QUE CAMBIO Y POR QUE. Antes esto solo sacaba el poster, y ni eso cuando
     faltaba ffmpeg en la imagen (que era siempre). El resultado: un video
@@ -668,6 +673,7 @@ async def _process_video(
     `videos/`, no por el uid) y las URLs prefirmadas para ffmpeg se crean
     JUSTO ANTES de usarse, porque heredan las credenciales temporales del rol.
     """
+    from app.modules.medios import calidades as _calidades
     from app.modules.medios.almacen import CACHE_INMUTABLE, almacen_para
 
     alm = almacen_para(almacen, client)
@@ -720,8 +726,16 @@ async def _process_video(
         and merece_hls(media.duration_s, media.width, media.height)
     )
     falta_poster = not media.poster_path
+    quiere_calidades = (
+        es_s3
+        and calidades is not None
+        and _calidades.merece_calidades(
+            media.duration_s, media.width, media.height,
+            bool(media.feed_path) or quiere_mp4,
+        )
+    )
 
-    if not falta_poster and not quiere_mp4 and not quiere_hls:
+    if not falta_poster and not quiere_mp4 and not quiere_hls and not quiere_calidades:
         return
 
     if owner is None:
@@ -730,7 +744,7 @@ async def _process_video(
 
     # CAMINO BARATO: solo falta el poster. Se saca leyendo por rangos unos
     # cientos de KB, sin bajar el archivo entero y sin ocupar el semaforo.
-    if not quiere_mp4 and not quiere_hls:
+    if not quiere_mp4 and not quiere_hls and not quiere_calidades:
         if es_s3:
             url = await _url()
         with tempfile.TemporaryDirectory() as tmp:
@@ -775,6 +789,21 @@ async def _process_video(
                             destino.stat().st_size / 1048576,
                         )
 
+            if quiere_calidades:
+                # Una mejora: si falla, el video se queda como hoy y el resto
+                # del procesado (HLS) sigue. Que la fila haya desaparecido SÍ
+                # se propaga: lo maneja `process_media`.
+                try:
+                    await _generar_calidades(
+                        ffmpeg, media, local, carpeta, ruta_feed, subir=_subir, salida=calidades
+                    )
+                except MedioDesaparecido:
+                    raise
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Las calidades extra del video %s fallaron", media.id, exc_info=True
+                    )
+
             if quiere_hls:
                 hls = carpeta / "hls"
                 if await _generar_hls(ffmpeg, local, hls, media.width, media.height):
@@ -786,6 +815,63 @@ async def _process_video(
                         )
                     media.stream_path = ruta_hls
                     logger.info("HLS generado para el video %s", media.id)
+
+
+async def _generar_calidades(
+    ffmpeg: str,
+    media: PostMedia,
+    local: Path,
+    carpeta: Path,
+    ruta_feed: str,
+    *,
+    subir,
+    salida: list[dict] | None,
+) -> None:
+    """Las calidades extra (480/560) de un video S3, con el original ya en
+    disco. Todo fallo deja el video como hoy: con su única calidad.
+
+    El principal se decide DESPUÉS del MP4: si acaba de adoptarse el
+    `feed-720`, los peldaños se miden contra 720; si no, contra el original.
+    """
+    from app.modules.medios import calidades as _calidades
+    from app.modules.medios.firma import carpeta_de_clave
+
+    carpeta_del_medio = carpeta_de_clave(media.storage_path)
+    if salida is None or carpeta_del_medio is None:
+        return
+    con_feed = bool(media.feed_path)
+    feed_en_disco = carpeta / "feed.mp4"
+    if not con_feed:
+        tamano_principal: int | None = local.stat().st_size
+    elif media.feed_path == ruta_feed and feed_en_disco.exists():
+        # El `feed-720` se acaba de codificar en esta misma pasada.
+        tamano_principal = feed_en_disco.stat().st_size
+    else:
+        # El `feed-720` es de un procesado anterior y no está en disco: se
+        # compara contra su tamaño nominal.
+        tamano_principal = (
+            round(_calidades.BITRATE_FEED_720 * (media.duration_s or 0) / 8) or None
+        )
+    lado = _calidades.lado_del_principal(media.width, media.height, con_feed)
+    peldanos = _calidades.peldanos_para(lado)
+    try:
+        hechas = await _calidades.generar(ffmpeg, local, carpeta, peldanos, _run)
+    except asyncio.TimeoutError:
+        logger.warning("Las calidades extra del video %s tardaron demasiado", media.id)
+        return
+    for peldano, archivo in hechas:
+        tamano = archivo.stat().st_size
+        if tamano_principal and tamano >= tamano_principal * _calidades.AHORRO_MINIMO:
+            continue
+        clave = _calidades.clave_de(carpeta_del_medio, peldano)
+        await subir(clave, archivo.read_bytes(), "video/mp4")
+        salida.append(_calidades.entrada(peldano, clave, tamano, media.duration_s))
+    if salida:
+        logger.info(
+            "Video %s: calidades extra %s",
+            media.id,
+            ",".join(str(v["alto"]) for v in salida),
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -878,6 +964,15 @@ async def process_media(media_id: str) -> None:
             if almacen == "s3"
             else None
         )
+        # Calidades extra (bandera apagada de fábrica): con la bandera apagada
+        # `puede_generar` no consulta nada y esto queda en None, como siempre.
+        from app.modules.medios import calidades as medios_calidades
+
+        salida_calidades: list[dict] | None = (
+            []
+            if almacen == "s3" and await medios_calidades.puede_generar(db, media.id)
+            else None
+        )
         media.processing_status = "processing"
         await db.commit()
         # Se desliga de la sesion para poder seguir usandolo como un objeto
@@ -901,7 +996,9 @@ async def process_media(media_id: str) -> None:
                             )
                         ) is not None
 
-                await _process_video(client, media, "s3", owner, _sigue_viva)
+                await _process_video(
+                    client, media, "s3", owner, _sigue_viva, calidades=salida_calidades
+                )
             else:
                 await _process_video(client, media)
     except MedioDesaparecido:
@@ -935,4 +1032,6 @@ async def process_media(media_id: str) -> None:
             if valor is not None:
                 setattr(fila, campo, valor)
         fila.processing_status = estado
+        if salida_calidades:
+            await medios_calidades.guardar(db, media_id, salida_calidades)
         await db.commit()
