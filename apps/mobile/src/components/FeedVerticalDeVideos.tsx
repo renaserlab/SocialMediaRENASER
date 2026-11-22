@@ -20,7 +20,7 @@ import type { FeedDeVideos } from '@/hooks/useFeedDeVideos';
 import { usePrecargaDeVideos } from '@/hooks/usePrecargaDeVideos';
 import { haptics } from '@/lib/haptics';
 import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
-import { crearCoordinadorDePrecarga, enVentanaDePrecarga } from '@/lib/precargaDeVideos';
+import { VECINOS_ADELANTE, crearCoordinadorDePrecarga, enVentanaDePrecarga } from '@/lib/precargaDeVideos';
 import { toast } from '@/lib/toast';
 import type { Superficie } from '@/repositories/RecommendationRepository';
 import {
@@ -112,10 +112,11 @@ export function FeedVerticalDeVideos({
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
   const insets = useSafeAreaInsets();
-  // Primer MB de los 5 siguientes en la cache del reproductor. El `1` es el
-  // vecino que ya tiene reproductor montado (`preload` mas abajo): si cambia
-  // esa ventana, cambia aqui tambien.
-  usePrecargaDeVideos(feed.items, indiceActivo, activo, 1);
+  // Primer MB de los 5 siguientes en la cache del reproductor. Los
+  // `VECINOS_ADELANTE` ya tienen reproductor montado (`preload` mas abajo), asi
+  // que la precarga nativa empieza despues de ellos. En la web no hay vecinos
+  // extra, pero alli el hook no hace nada.
+  usePrecargaDeVideos(feed.items, indiceActivo, activo, ES_WEB ? 1 : VECINOS_ADELANTE);
 
   /*
     CADA PAGINA MIDE UNA PANTALLA. Pero ¿que pantalla?
