@@ -541,6 +541,33 @@ class Settings(BaseSettings):
     #: la practica es lo subido desde la web.
     video_bitrate_umbral: int = 3_500_000
 
+    #: Calidades extra por video (480p y 560p bajo el principal de 720p), para
+    #: que la app elija UNA al empezar según su red (`medios/calidades.py`).
+    #: APAGADO de fábrica: con False no se codifica nada extra ni se mira la
+    #: columna de la 0117.
+    #:
+    #: COSTO MEDIDO (21/11/2026, una pasada con `split`, preset veryfast, de un
+    #: original 720x1280 a 2.5 Mbps): ~42 s de CPU por minuto de video en un
+    #: Ryzen 3700X; en la t3.small, del orden de ~85 s por minuto, o sea ~1.4
+    #: créditos de CPU por minuto de video (gana 24 por hora). Va en el MISMO
+    #: semáforo de un video a la vez y con `nice`. Los peldaños pesan ~90 % de
+    #: lo que pesa el original (≈17 MB más por minuto en S3).
+    #:
+    #: Para encenderlo hacen falta la migración 0117 aplicada y lo mismo que
+    #: pide `video_hls_enabled`: la alarma de créditos desplegada y el saldo
+    #: plano con el MP4 de hoy.
+    video_calidades_enabled: bool = False
+    #: Entregar en el feed las calidades ya generadas (`variantes`). Aparte de
+    #: generar para poder frenar la CPU sin perder lo ya hecho, o esconderlas
+    #: si algo sale mal sin dejar de generarlas.
+    video_calidades_lectura: bool = False
+    #: Tope de duración: un video más largo se queda con su única calidad. Es
+    #: el freno del gasto por video (el costo crece lineal con la duración).
+    video_calidades_duracion_maxima_s: float = 180.0
+    #: Hilos de ffmpeg para las calidades. Con 1 deja la otra vCPU libre para
+    #: la API; tarda más en reloj y gasta la misma CPU total.
+    video_calidades_hilos: int = 1
+
     # --- Videos de publicaciones en S3 + CloudFront (spec «opción B») ---
     #: TODO APAGADO DE FÁBRICA. Sin tocar nada de esto, la API se comporta como
     #: antes: los videos van a Supabase y no se firma nada en CloudFront. El

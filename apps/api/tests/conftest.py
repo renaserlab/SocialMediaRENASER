@@ -49,6 +49,7 @@ import pytest
 
 from app.core.config import get_settings
 from app.modules.catalog import esquema as esquema_de_catalogo
+from app.modules.medios import calidades as calidades_de_video
 from app.modules.medios import esquema as esquema_de_medios
 from app.modules.medios import firma as firma_de_medios
 from app.modules.recommendations import cache, esquema
@@ -111,3 +112,5 @@ def _sin_estado_heredado() -> None:
     # y su clave.
     esquema_de_medios.olvidar()
     firma_de_medios.olvidar()
+    # Lo mismo con la columna `variantes` de la 0117 (calidades de video).
+    calidades_de_video.fijar(None)

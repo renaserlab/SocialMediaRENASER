@@ -322,10 +322,13 @@ misma regla está copiada en `extrae_poster` de `scripts/procesar_media.py`.
 Si el teléfono ya subió su propio poster junto al video, se respeta ese
 (el servidor solo genera el que falta).
 
-**Regenerar las portadas YA publicadas: NO hecho, pendiente del OK de Luis.**
-Hoy ningún guion regenera un poster que ya existe (todos se saltan los medios
-con `poster_path`), y hay dos trampas que hacen que «borrar `poster_path` y
-reprocesar» no valga:
+### Regenerar las portadas YA publicadas
+
+Guion: `apps/api/scripts/regenerar_portadas.py`. Llama a las mismas funciones
+de la API (`_extraer_poster`, `comandos_de_poster`, `rutas_de_derivados`,
+`POSTER_MAX_NEGRO`), no a una copia, y sirve para Supabase y para S3.
+
+Por qué no vale «borrar `poster_path` y reprocesar»:
 
 1. La app cachea la portada por su RUTA (`cacheKey = poster_path`). Reescribir
    el mismo archivo no se vería en los teléfonos que ya la tienen en disco: la
@@ -334,18 +337,66 @@ reprocesar» no valga:
    inmutable. La versión sale del `poster_path` actual; si se vacía, vuelve a
    `v1` y pisaría un archivo que CloudFront ya tiene en caché.
 
-Procedimiento propuesto (cuando haya OK), primero con `--dry-run` y un solo
-medio:
+Qué hace con cada video:
 
-- **Supabase**: ampliar `scripts/procesar_media.py` con un modo que, para los
-  videos con `poster_path`, suba el poster nuevo a
-  `<dueño>/derived/<media_id>/poster-v2.jpg` y solo entonces actualice
-  `poster_path`. Uso previsto:
-  `python scripts/procesar_media.py --videos --media-id <uuid> --dry-run`.
-- **S3**: un guion en `apps/api/scripts/` que, por cada medio, llame a
-  `_extraer_poster` sobre la URL prefirmada y suba a
-  `rutas_de_derivados(...)[0]` (que ya calcula `v<n+1>` a partir del
-  `poster_path` actual) antes de actualizar la fila.
+- **Rutas nuevas.** Supabase: `<dueño>/derived/<media_id>/poster-v2.jpg` (v3,
+  v4… si se repite). S3: `videos/<uid>/<media_id>/poster-v<n+1>.jpg`. El
+  original solo se LEE (por URL temporal, unos cientos de KB por rangos).
+- **La base** solo cambia `post_media.poster_path`, con «compara y cambia»: si
+  la fila cambió entre la lectura y la escritura (se reprocesó, se editó, se
+  borró) no se pisa y queda como `conflicto`.
+- **Excluye** publicaciones borradas, datos E2E (ids `e2e…`, autores o textos
+  que terminan en « Prueba») y filas en `pending`/`processing`
+  (`process_media` reescribiría la ruta vieja al terminar).
+- **No empeora**: si la portada nueva también es negra (un video oscuro de
+  verdad, o un diseño de texto blanco sobre negro) y la vieja se podía leer,
+  no la cambia (`saltado_nueva_tambien_negra`).
+- **Respaldo en S3.** La limpieza diaria borra los `poster-v<n>` que la fila ya
+  no nombra en cuanto tienen 7 días de ESCRITOS, o sea, la vieja en la primera
+  pasada. Antes de cambiar la fila se copia a
+  `videos/<uid>/<media_id>/respaldo-portada/`, que la limpieza no toca. En
+  Supabase la vieja se queda donde estaba.
+- **Registro** JSONL (por defecto
+  `~/.local/share/zeta/regenerar_portadas/registro.jsonl`): una línea por paso
+  con `ref_vieja`, `ref_nueva`, `respaldo` y el % de negro de cada una.
+  Reanudar salta lo que el registro da por `aplicado`; cortarlo y relanzarlo
+  sigue donde iba. Guardarlo: es la vuelta atrás.
+
+
+Credenciales: las de la API, leídas del secreto `zexcelencia/produccion/api`
+con el perfil `prod` (DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY;
+nunca se imprimen). El bucket no es secreto. Se corre desde `apps/api` con su
+entorno (`uv venv .venv && uv pip install -r requirements.txt`) y ffmpeg en el
+PATH:
+
+```bash
+cd apps/api
+P="--secreto-aws zexcelencia/produccion/api --perfil-aws prod \
+   --bucket-s3 zexcelencia-medios-produccion-302277511407"
+.venv/bin/python scripts/regenerar_portadas.py $P                  # simulacro (por defecto)
+.venv/bin/python scripts/regenerar_portadas.py $P --guardar-muestras /tmp/portadas  # ver vieja/nueva
+.venv/bin/python scripts/regenerar_portadas.py $P --aplicar --solo-negras --limite 1
+.venv/bin/python scripts/regenerar_portadas.py $P --aplicar --solo-negras
+.venv/bin/python scripts/regenerar_portadas.py $P --aplicar        # todas, si se quiere
+```
+
+El simulacro solo lee: baja las portadas viejas (unos KB) para medir cuáles
+son negras y prueba la extracción en local en `--muestra` videos (5 por
+defecto) para estimar tiempo y tráfico. `--solo-negras` toma las negras, las
+que faltan y las ilegibles (en la app se ven igual). `--informe x.csv` deja el
+detalle por video.
+
+**Revertir**: `... --revertir` lista lo que haría; `... --revertir --aplicar`
+devuelve cada fila a `ref_vieja` (también con «compara y cambia»: si alguien
+la cambió después, no la toca) y, en S3, repone la vieja desde el respaldo si
+la limpieza ya la borró. `--media-id <uuid>` limita a un medio. Los teléfonos
+que ya tenían la vieja en caché la vuelven a usar sin descargar nada.
+
+Simulacro en producción (23/11/2026): 16 videos, 5 de publicaciones borradas,
+ningún E2E; 11 candidatos (5 Supabase, 6 S3). Portadas viejas negras: 3 (2 en
+S3, la misma imagen de un degradado oscuro, que pasa a un fotograma gris; 1 en
+Supabase que es texto blanco sobre negro y que el guardarraíl deja como está).
+Estimación de `--aplicar` completo: ~10 s y ~12 MB de tráfico.
 
 
 ## Latencia celular → API del feed (noviembre 2026)

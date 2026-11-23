@@ -12,6 +12,15 @@ class AuthorSummary(BaseModel):
     avatar_path: str | None = None
 
 
+class VarianteDeVideo(BaseModel):
+    #: Lado menor en píxeles, como en «480p».
+    alto: int
+    #: URL de CloudFront ya firmada (la misma política de carpeta que `media_url`).
+    url: str
+    #: Bits por segundo (video + audio). None si no se conoce.
+    bitrate: int | None = None
+
+
 class PostMediaRead(BaseModel):
     # Identificador del medio: lo usa el movil para pedir la playlist HLS
     # (/media/{id}/hls/...). Opcional por compatibilidad con filas al vuelo.
@@ -40,6 +49,11 @@ class PostMediaRead(BaseModel):
     poster_url: str | None = None
     stream_url: str | None = None
     urls_expiran: datetime | None = None
+    #: Calidades del MISMO video para que la app elija UNA al empezar según su
+    #: red (`medios/calidades.py`). De menor a mayor y la última es siempre
+    #: `media_url`. Solo en filas 's3', con `video_calidades_lectura`
+    #: encendida y si el video las tiene; si no, None y la app hace lo de hoy.
+    variantes: list[VarianteDeVideo] | None = None
 
 
 class PostMediaInput(BaseModel):
