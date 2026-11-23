@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
+import { descartarPrecargaDeInicio } from '@/feed/fuenteDeVideos';
 import { RecommendationRepository } from '@/repositories/RecommendationRepository';
 
 /**
@@ -133,6 +134,8 @@ export const usePreferenciasStore = create<PreferenciasState>((set, get) => ({
   marcarVisto() {
     const { usuarioId } = get();
     if (usuarioId) void escribirCache(usuarioId, 'visto');
+    // La primera pagina pedida en el arranque se ordeno sin estas respuestas.
+    descartarPrecargaDeInicio();
     set({ estado: 'visto' });
   },
 
