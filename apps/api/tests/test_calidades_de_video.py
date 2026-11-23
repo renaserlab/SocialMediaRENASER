@@ -316,3 +316,98 @@ def test_un_id_cualquiera_no_choca(tmp_path):
     assert calidades.clave_de(f"videos/u/{media_id}", peldano) == (
         f"videos/u/{media_id}/calidades-v1/480p.mp4"
     )
+
+
+# --------------------------------------------------------------------------- #
+# 5. Relleno de los videos ya publicados (`medios/rellenar_calidades.py`)
+# --------------------------------------------------------------------------- #
+async def _con_medidas(sesiones, media_id: str, *, duracion=30.0, estado="ready") -> None:
+    async with sesiones() as db:
+        medio = await db.get(PostMedia, media_id)
+        medio.width, medio.height, medio.duration_s = 720, 1280, duracion
+        medio.processing_status = estado
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_relleno_apagado_o_sin_0117_no_hace_nada(entorno, ajustes, monkeypatch, capsys):
+    from app.modules.medios import rellenar_calidades as relleno
+
+    _http, sesiones, _s3 = entorno
+    llamados: list[str] = []
+
+    async def _procesar(media_id):
+        llamados.append(media_id)
+
+    assert await relleno.principal(["--aplicar"], sesiones=sesiones, procesar=_procesar) == 1
+    monkeypatch.setattr(ajustes, "video_calidades_enabled", True)
+    calidades.fijar(None)
+    assert await relleno.principal(["--aplicar"], sesiones=sesiones, procesar=_procesar) == 1
+    assert llamados == []
+    assert "0117" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_relleno_elige_solo_s3_vivos_sin_variantes_y_en_seco_no_procesa(
+    entorno, ajustes, monkeypatch
+):
+    from app.modules.content.models import Post
+    from app.modules.medios import rellenar_calidades as relleno
+    from tests.test_medios_s3 import _post_supabase
+
+    _http, sesiones, s3_ = entorno
+    monkeypatch.setattr(ajustes, "video_calidades_enabled", True)
+    await _con_0117(sesiones)
+    _p1, bueno = await _post_s3(sesiones, s3_)
+    await _con_medidas(sesiones, bueno)
+    _p2, hecho = await _post_s3(sesiones, s3_)
+    await _con_medidas(sesiones, hecho)
+    await _guardar_peldanos(sesiones, hecho)
+    _p3, largo = await _post_s3(sesiones, s3_)
+    await _con_medidas(sesiones, largo, duracion=600.0)
+    p4, borrado = await _post_s3(sesiones, s3_)
+    await _con_medidas(sesiones, borrado)
+    async with sesiones() as db:
+        (await db.get(Post, p4)).status = "deleted"
+        await db.commit()
+    await _post_supabase(sesiones)
+
+    async with sesiones() as db:
+        lista = await relleno.pendientes(db, 50)
+    assert [p.media_id for p in lista] == [bueno]
+
+    llamados: list[str] = []
+
+    async def _procesar(media_id):
+        llamados.append(media_id)
+
+    assert await relleno.principal([], sesiones=sesiones, procesar=_procesar) == 0
+    assert llamados == []
+
+
+@pytest.mark.asyncio
+async def test_relleno_aplicado_procesa_y_devuelve_ready_si_falla(entorno, ajustes, monkeypatch):
+    from app.modules.medios import rellenar_calidades as relleno
+
+    _http, sesiones, s3_ = entorno
+    monkeypatch.setattr(ajustes, "video_calidades_enabled", True)
+    await _con_0117(sesiones)
+    _p1, sale_bien = await _post_s3(sesiones, s3_)
+    await _con_medidas(sesiones, sale_bien)
+    _p2, sale_mal = await _post_s3(sesiones, s3_)
+    await _con_medidas(sesiones, sale_mal)
+
+    async def _procesar(media_id):
+        if media_id == sale_bien:
+            await _guardar_peldanos(sesiones, media_id)
+            return
+        # Como `process_media` ante un corte de red: marca `failed`.
+        async with sesiones() as db:
+            (await db.get(PostMedia, media_id)).processing_status = "failed"
+            await db.commit()
+        raise RuntimeError("sin red")
+
+    assert await relleno.principal(["--aplicar"], sesiones=sesiones, procesar=_procesar) == 1
+    async with sesiones() as db:
+        assert (await db.get(PostMedia, sale_mal)).processing_status == "ready"
+        assert await calidades.puede_generar(db, sale_bien) is False
