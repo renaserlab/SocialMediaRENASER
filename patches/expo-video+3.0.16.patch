@@ -1,0 +1,583 @@
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/PrecargadorDeVideos.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/PrecargadorDeVideos.kt
+new file mode 100644
+index 0000000..46aadd3
+--- /dev/null
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/PrecargadorDeVideos.kt
+@@ -0,0 +1,152 @@
++package expo.modules.video
++
++import android.content.Context
++import android.net.Uri
++import android.util.Log
++import androidx.annotation.OptIn
++import androidx.media3.common.C
++import androidx.media3.common.util.UnstableApi
++import androidx.media3.datasource.DataSpec
++import expo.modules.kotlin.Promise
++import expo.modules.video.records.VideoSource
++import java.util.concurrent.ConcurrentHashMap
++import java.util.concurrent.ExecutorService
++import java.util.concurrent.Executors
++import java.util.concurrent.Future
++import java.util.concurrent.atomic.AtomicBoolean
++
++/**
++ * Precarga NATIVA del inicio de un video en la MISMA cache de disco que lee el
++ * reproductor (parche de la app Zeta sobre expo-video, ver
++ * `patches/expo-video+3.0.16.patch`).
++ *
++ * POR QUE AQUI DENTRO. La cache de expo-video (`VideoManager.cache.instance`,
++ * un `SimpleCache`) solo la llena el `CacheDataSource` del reproductor: un
++ * fetch desde JS no la toca. Aqui se abre ese mismo `CacheDataSource`, armado
++ * con la misma funcion que usa el reproductor (`buildCacheDataSourceFactory`),
++ * y se lee el rango 0..bytes. Al leerlo, el propio `CacheDataSource` va
++ * escribiendo en el `SimpleCache` con la clave por defecto
++ * (`CacheKeyFactory.DEFAULT` = `uri.toString()`), que es la misma que usa el
++ * reproductor porque `VideoSource.toMediaItem` no pone `customCacheKey`.
++ *
++ * POR QUE NO `CacheWriter`. Si el pedido acotado falla al abrir, `CacheWriter`
++ * reintenta SIN limite de longitud y podria bajarse el video entero. Leer a
++ * mano con el `DataSpec` acotado garantiza que nunca se pide mas de `bytes`.
++ * Lo que ya esta en cache se lee de disco sin tocar la red.
++ *
++ * UN SOLO HILO, de prioridad baja: los pedidos se atienden en el orden en que
++ * llegan (el JS manda primero el mas cercano) y nunca hay dos precargas
++ * peleandose el ancho de banda con el video que se esta viendo.
++ *
++ * Si el reproductor esta escribiendo el mismo tramo, `SimpleCache` no presta
++ * el candado (el `CacheDataSource` va sin `FLAG_BLOCK_ON_CACHE`) y la lectura
++ * va directo a la red sin escribir: se gasta, pero no se rompe nada.
++ */
++@OptIn(UnstableApi::class)
++object PrecargadorDeVideos {
++  private const val TAG = "ExpoVideoPrecarga"
++  private const val TAMANO_DE_LECTURA = 64 * 1024
++
++  private val ejecutor: ExecutorService = Executors.newSingleThreadExecutor { tarea ->
++    Thread(tarea, TAG).apply {
++      isDaemon = true
++      priority = Thread.MIN_PRIORITY
++    }
++  }
++
++  private class Trabajo(private val promise: Promise) {
++    @Volatile
++    var cancelado = false
++    var futuro: Future<*>? = null
++    private val resuelto = AtomicBoolean(false)
++
++    fun terminar(listo: Boolean) {
++      if (resuelto.compareAndSet(false, true)) {
++        promise.resolve(listo)
++      }
++    }
++
++    fun cancelar() {
++      cancelado = true
++      // Sin interrumpir el hilo: se corta en el siguiente bloque leido. Si aun no
++      // empezo, ni arranca.
++      futuro?.cancel(false)
++      terminar(false)
++    }
++  }
++
++  private val trabajos = ConcurrentHashMap<String, Trabajo>()
++
++  /** Resuelve `true` si el tramo quedo en cache; `false` si se cancelo o fallo. Nunca rechaza. */
++  fun precargar(context: Context, uri: Uri, bytes: Long, promise: Promise) {
++    val clave = uri.toString()
++    if (bytes <= 0 || uri.scheme?.startsWith("http") != true) {
++      promise.resolve(false)
++      return
++    }
++    val trabajo = Trabajo(promise)
++    trabajos.put(clave, trabajo)?.cancelar()
++    try {
++      trabajo.futuro = ejecutor.submit {
++        var listo = false
++        try {
++          if (!trabajo.cancelado) {
++            listo = leerInicio(context, uri, bytes, trabajo)
++          }
++        } catch (e: Throwable) {
++          Log.w(TAG, "No se pudo precargar el video", e)
++        } finally {
++          trabajos.remove(clave, trabajo)
++          trabajo.terminar(listo)
++        }
++      }
++    } catch (e: Throwable) {
++      trabajos.remove(clave, trabajo)
++      trabajo.terminar(false)
++    }
++  }
++
++  fun cancelar(clave: String) {
++    trabajos.remove(clave)?.cancelar()
++  }
++
++  fun cancelarTodas() {
++    for (clave in trabajos.keys.toList()) {
++      cancelar(clave)
++    }
++  }
++
++  private fun leerInicio(context: Context, uri: Uri, bytes: Long, trabajo: Trabajo): Boolean {
++    // La misma fuente que arma el reproductor para `{ uri, useCaching: true }`:
++    // mismo SimpleCache, mismas banderas, mismo OkHttp y mismo User-Agent.
++    val fuente = VideoSource(uri = uri, useCaching = true)
++    val dataSource = buildCacheDataSourceFactory(context, fuente).createDataSource()
++    val dataSpec = DataSpec.Builder()
++      .setUri(uri)
++      .setPosition(0)
++      .setLength(bytes)
++      .build()
++    val bufer = ByteArray(TAMANO_DE_LECTURA)
++    var leidos = 0L
++    try {
++      dataSource.open(dataSpec)
++      while (!trabajo.cancelado && leidos < bytes) {
++        val pedidos = minOf(bufer.size.toLong(), bytes - leidos).toInt()
++        val n = dataSource.read(bufer, 0, pedidos)
++        if (n == C.RESULT_END_OF_INPUT) {
++          // Video mas corto que `bytes`: quedo entero en cache.
++          return true
++        }
++        leidos += n
++      }
++    } finally {
++      // Cerrar es lo que confirma en el SimpleCache el tramo escrito.
++      try {
++        dataSource.close()
++      } catch (e: Throwable) {
++        Log.w(TAG, "Error al cerrar la precarga", e)
++      }
++    }
++    return !trabajo.cancelado && leidos >= bytes
++  }
++}
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoModule.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoModule.kt
+index 59f4cfc..af67982 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoModule.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoModule.kt
+@@ -59,6 +59,24 @@ class VideoModule : Module() {
+       VideoManager.cache.clear()
+     }
+ 
++    // Parche Zeta: precarga del primer MB en la misma cache del reproductor.
++    AsyncFunction("precargarVideoAsync") { url: Uri, bytes: Long, promise: Promise ->
++      val context = appContext.reactContext?.applicationContext
++      if (context == null) {
++        promise.resolve(false)
++      } else {
++        PrecargadorDeVideos.precargar(context, url, bytes, promise)
++      }
++    }
++
++    Function("cancelarPrecargaDeVideo") { url: Uri ->
++      PrecargadorDeVideos.cancelar(url.toString())
++    }
++
++    Function("cancelarPrecargasDeVideo") {
++      PrecargadorDeVideos.cancelarTodas()
++    }
++
+     View(SurfaceVideoView::class) {
+       VideoViewComponent<SurfaceVideoView>()
+     }
+diff --git a/node_modules/expo-video/ios/Cache/PrecargadorDeVideos.swift b/node_modules/expo-video/ios/Cache/PrecargadorDeVideos.swift
+new file mode 100644
+index 0000000..e22598d
+--- /dev/null
++++ b/node_modules/expo-video/ios/Cache/PrecargadorDeVideos.swift
+@@ -0,0 +1,347 @@
++import Foundation
++import ExpoModulesCore
++
++/**
++ * Precarga NATIVA del inicio de un video en la MISMA cache de disco que lee el
++ * `ResourceLoaderDelegate` (parche de la app Zeta sobre expo-video, ver
++ * `patches/expo-video+3.0.16.patch`).
++ *
++ * COMO GUARDA EXPO-VIDEO. Por cada URL hay dos archivos en
++ * `Caches/expo-video-cache/`:
++ *  - el de datos, `sha256(url.absoluteString).<extension>` (`VideoAsset.pathForUrl`),
++ *    con los bytes escritos en su posicion real;
++ *  - el de informacion, el mismo nombre + `&mediaInfo`: JSON de `MediaInfo`
++ *    con el largo total, el tipo, las cabeceras y los RANGOS ya bajados.
++ * Al crear el `VideoAsset`, `CachedResource` lee ese JSON y responde desde
++ * disco lo que caiga dentro de un rango (incluida la peticion inicial de
++ * informacion de contenido, que es la que hace esperar al primer fotograma).
++ *
++ * Aqui se baja el rango 0..bytes con un pedido `Range` y se escriben los dos
++ * archivos en ese mismo formato. Se usa una estructura propia con las MISMAS
++ * claves en vez de `MediaInfo` porque `MediaInfo` se registra y desregistra en
++ * `openFiles` al crearse y destruirse: con un `Set` compartido, eso podria
++ * borrar la marca que puso el reproductor.
++ *
++ * Reglas para no romper nada:
++ *  - Solo URLs http(s) con extension (las de S3 y Supabase son `.mp4`). Sin
++ *    extension, expo-video calcula la ruta de otra forma: se ignora.
++ *  - Si el reproductor ya tiene abierto ese archivo, no se toca: el ya lo esta
++ *    bajando y su `MediaInfo` en memoria pisaria lo que escribamos.
++ *  - Primero se escriben los bytes y despues el JSON: el JSON nunca promete
++ *    datos que no esten en disco.
++ *  - Un pedido a la vez, en el orden en que llegan (el JS manda primero el mas
++ *    cercano). Cancelar un pedido resuelve su promesa con `false`.
++ */
++final class PrecargadorDeVideos: @unchecked Sendable {
++  static let shared = PrecargadorDeVideos()
++
++  private struct InfoDeMedio: Codable {
++    var expectedContentLength: Int64
++    var supportsByteRangeAccess: Bool
++    var mimeType: String?
++    var loadedDataRangesArr: [[Int]]
++    var headerFields: [String: String]?
++    var savePath: String
++  }
++
++  private struct Entrada {
++    let id: UUID
++    let tarea: Task<Void, Never>
++  }
++
++  private let candado = NSLock()
++  private var tareas: [String: Entrada] = [:]
++  private var ultima: Task<Void, Never>?
++
++  private let sesion: URLSession = {
++    let configuracion = URLSessionConfiguration.default
++    // Los bytes van a la cache de expo-video; duplicarlos en URLCache no sirve.
++    configuracion.urlCache = nil
++    configuracion.requestCachePolicy = .reloadIgnoringLocalCacheData
++    return URLSession(configuration: configuracion)
++  }()
++
++  func precargar(url: URL, bytes: Int, promise: Promise) {
++    let clave = url.absoluteString
++    let id = UUID()
++    candado.lock()
++    tareas[clave]?.tarea.cancel()
++    let anterior = ultima
++    let tarea = Task.detached(priority: .utility) { [weak self] in
++      // En fila: espera a que termine (o se cancele) el pedido anterior.
++      _ = await anterior?.value
++      var listo = false
++      if !Task.isCancelled, let self {
++        listo = await self.ejecutar(url: url, bytes: bytes)
++      }
++      self?.olvidar(clave: clave, id: id)
++      promise.resolve(listo)
++    }
++    tareas[clave] = Entrada(id: id, tarea: tarea)
++    ultima = tarea
++    candado.unlock()
++  }
++
++  func cancelar(clave: String) {
++    candado.lock()
++    let entrada = tareas.removeValue(forKey: clave)
++    candado.unlock()
++    entrada?.tarea.cancel()
++  }
++
++  func cancelarTodas() {
++    candado.lock()
++    let todas = Array(tareas.values)
++    tareas.removeAll()
++    candado.unlock()
++    todas.forEach { $0.tarea.cancel() }
++  }
++
++  private func olvidar(clave: String, id: UUID) {
++    candado.lock()
++    if tareas[clave]?.id == id {
++      tareas.removeValue(forKey: clave)
++    }
++    candado.unlock()
++  }
++
++  // MARK: - Trabajo
++
++  private func ejecutar(url: URL, bytes: Int) async -> Bool {
++    guard bytes > 0, url.scheme?.hasPrefix("http") == true else {
++      return false
++    }
++    let fileExtension = url.pathExtension
++    guard !fileExtension.isEmpty, let rutaDeDatos = VideoAsset.pathForUrl(url: url, fileExtension: fileExtension) else {
++      return false
++    }
++    let rutaDeInfo = rutaDeDatos + VideoCacheManager.mediaInfoSuffix
++
++    // ¿Ya esta, o lo tiene el reproductor?
++    let antes: Bool? = enColaDeCache {
++      if VideoCacheManager.shared.isFileOpen(path: rutaDeDatos) {
++        return false
++      }
++      if let info = Self.leerInfo(rutaDeDatos: rutaDeDatos, rutaDeInfo: rutaDeInfo) {
++        let fin = min(Int64(bytes), info.expectedContentLength)
++        if info.loadedDataRangesArr.contains(where: { $0.count == 2 && $0[0] <= 0 && Int64($0[1]) >= fin }) {
++          return true
++        }
++      }
++      return nil
++    }
++    if let antes {
++      return antes
++    }
++
++    guard let bajado = await bajarInicio(url: url, bytes: bytes) else {
++      return false
++    }
++    if Task.isCancelled {
++      return false
++    }
++
++    return enColaDeCache {
++      self.guardar(bajado, rutaDeDatos: rutaDeDatos, rutaDeInfo: rutaDeInfo)
++    }
++  }
++
++  private struct Bajado {
++    let datos: Data
++    let largoTotal: Int64
++    let mimeType: String
++    let cabeceras: [String: String]
++    let aceptaRangos: Bool
++  }
++
++  private func bajarInicio(url: URL, bytes: Int) async -> Bajado? {
++    var pedido = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
++    pedido.timeoutInterval = 15
++    pedido.setValue("bytes=0-\(bytes - 1)", forHTTPHeaderField: "Range")
++
++    do {
++      let (flujo, respuesta) = try await sesion.bytes(for: pedido)
++      guard let http = respuesta as? HTTPURLResponse else {
++        return nil
++      }
++      // Mismo filtro que el ResourceLoaderDelegate: solo `video/*`.
++      guard let mimeType = http.mimeType, mimeType.starts(with: "video/") else {
++        flujo.task.cancel()
++        return nil
++      }
++
++      let largoTotal: Int64
++      let aceptaRangos: Bool
++      if http.statusCode == 206 {
++        guard let total = Self.largoTotal(de: http) else {
++          flujo.task.cancel()
++          return nil
++        }
++        largoTotal = total
++        aceptaRangos = true
++      } else if http.statusCode == 200 {
++        // El servidor ignoro el rango. Solo vale si el video entero cabe en lo
++        // pedido: nunca se baja un video completo por precargar.
++        guard http.expectedContentLength > 0, http.expectedContentLength <= Int64(bytes) else {
++          flujo.task.cancel()
++          return nil
++        }
++        largoTotal = http.expectedContentLength
++        aceptaRangos = Self.aceptaRangos(http)
++      } else {
++        flujo.task.cancel()
++        return nil
++      }
++
++      let esperados = Int(min(Int64(bytes), largoTotal))
++      var datos = Data()
++      datos.reserveCapacity(esperados)
++      for try await byte in flujo {
++        datos.append(byte)
++        if datos.count >= esperados {
++          break
++        }
++        if datos.count % 65_536 == 0 && Task.isCancelled {
++          flujo.task.cancel()
++          return nil
++        }
++      }
++      flujo.task.cancel()
++      guard datos.count == esperados else {
++        return nil
++      }
++
++      // Cabeceras como si fuera la respuesta 200 completa: es lo que guarda el
++      // ResourceLoaderDelegate y lo que usa para la respuesta simulada.
++      var cabeceras: [String: String] = [:]
++      for (clave, valor) in http.allHeaderFields {
++        guard let clave = clave as? String, let valor = valor as? String else {
++          continue
++        }
++        let minuscula = clave.lowercased()
++        if minuscula == "content-range" || minuscula == "content-length" {
++          continue
++        }
++        cabeceras[clave] = valor
++      }
++      cabeceras["Content-Length"] = String(largoTotal)
++
++      return Bajado(datos: datos, largoTotal: largoTotal, mimeType: mimeType, cabeceras: cabeceras, aceptaRangos: aceptaRangos)
++    } catch {
++      return nil
++    }
++  }
++
++  /// Corre en la cola de la cache de expo-video, la misma del ResourceLoaderDelegate.
++  private func guardar(_ bajado: Bajado, rutaDeDatos: String, rutaDeInfo: String) -> Bool {
++    // Pudo abrirlo el reproductor mientras se bajaba.
++    if VideoCacheManager.shared.isFileOpen(path: rutaDeDatos) {
++      return false
++    }
++    let gestor = FileManager.default
++    let carpeta = (rutaDeDatos as NSString).deletingLastPathComponent
++    try? gestor.createDirectory(atPath: carpeta, withIntermediateDirectories: true)
++
++    var info = Self.leerInfo(rutaDeDatos: rutaDeDatos, rutaDeInfo: rutaDeInfo)
++    if let previa = info, previa.expectedContentLength != bajado.largoTotal || previa.mimeType != bajado.mimeType {
++      // Otro contenido bajo la misma URL: se empieza de cero.
++      info = nil
++    }
++    if info == nil {
++      // Datos sin informacion (o informacion descartada): nada de lo que haya
++      // en el archivo es confiable.
++      try? gestor.removeItem(atPath: rutaDeDatos)
++    }
++
++    if !gestor.fileExists(atPath: rutaDeDatos) {
++      gestor.createFile(atPath: rutaDeDatos, contents: nil)
++    }
++    guard let escritura = FileHandle(forWritingAtPath: rutaDeDatos) else {
++      return false
++    }
++    do {
++      try escritura.seek(toOffset: 0)
++      try escritura.write(contentsOf: bajado.datos)
++      try escritura.synchronize()
++      try escritura.close()
++    } catch {
++      try? escritura.close()
++      return false
++    }
++
++    var nueva = info ?? InfoDeMedio(
++      expectedContentLength: bajado.largoTotal,
++      supportsByteRangeAccess: bajado.aceptaRangos,
++      mimeType: bajado.mimeType,
++      loadedDataRangesArr: [],
++      headerFields: bajado.cabeceras,
++      savePath: rutaDeInfo
++    )
++    nueva.loadedDataRangesArr = Self.unirRango(nueva.loadedDataRangesArr, inicio: 0, fin: bajado.datos.count)
++
++    guard let json = try? JSONEncoder().encode(nueva) else {
++      return false
++    }
++    do {
++      try json.write(to: URL(fileURLWithPath: rutaDeInfo), options: .atomic)
++    } catch {
++      return false
++    }
++    VideoCacheManager.shared.ensureCacheSize()
++    return true
++  }
++
++  // MARK: - Ayudantes
++
++  private func enColaDeCache<T>(_ bloque: () -> T) -> T {
++    return VideoCacheManager.shared.cacheQueue.sync(execute: bloque)
++  }
++
++  private static func leerInfo(rutaDeDatos: String, rutaDeInfo: String) -> InfoDeMedio? {
++    // Igual que `ensureCacheIntegrity`: informacion sin datos no vale.
++    guard FileManager.default.fileExists(atPath: rutaDeDatos),
++      let contenido = FileManager.default.contents(atPath: rutaDeInfo) else {
++      return nil
++    }
++    return try? JSONDecoder().decode(InfoDeMedio.self, from: contenido)
++  }
++
++  /// Misma union de intervalos que `MediaInfo.addDataRange`.
++  private static func unirRango(_ rangos: [[Int]], inicio: Int, fin: Int) -> [[Int]] {
++    var resultado: [[Int]] = []
++    var nuevoInicio = inicio
++    var nuevoFin = fin
++    var colocado = false
++    for rango in rangos where rango.count == 2 {
++      if rango[1] < nuevoInicio {
++        resultado.append(rango)
++      } else if rango[0] > nuevoFin {
++        if !colocado {
++          resultado.append([nuevoInicio, nuevoFin])
++          colocado = true
++        }
++        resultado.append(rango)
++      } else {
++        nuevoInicio = min(nuevoInicio, rango[0])
++        nuevoFin = max(nuevoFin, rango[1])
++      }
++    }
++    if !colocado {
++      resultado.append([nuevoInicio, nuevoFin])
++    }
++    return resultado
++  }
++
++  /// `Content-Range: bytes 0-1048575/12345678` → 12345678.
++  private static func largoTotal(de respuesta: HTTPURLResponse) -> Int64? {
++    let valor = (respuesta.value(forHTTPHeaderField: "Content-Range") ?? "")
++    guard let total = valor.split(separator: "/").last, let numero = Int64(total), numero > 0 else {
++      return nil
++    }
++    return numero
++  }
++
++  private static func aceptaRangos(_ respuesta: HTTPURLResponse) -> Bool {
++    return respuesta.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased() == "bytes"
++  }
++}
+diff --git a/node_modules/expo-video/ios/Cache/VideoCacheManager.swift b/node_modules/expo-video/ios/Cache/VideoCacheManager.swift
+index 1ee8d4d..c9476e7 100644
+--- a/node_modules/expo-video/ios/Cache/VideoCacheManager.swift
++++ b/node_modules/expo-video/ios/Cache/VideoCacheManager.swift
+@@ -30,6 +30,14 @@ class VideoCacheManager {
+     openFiles.remove(url)
+   }
+ 
++  // Parche Zeta: la precarga no toca un archivo que el reproductor tiene abierto.
++  func isFileOpen(path: String) -> Bool {
++    guard let url = URL(string: path) else {
++      return false
++    }
++    return fileIsOpen(url: url)
++  }
++
+   func setMaxCacheSize(newSize: Int) throws {
+     if VideoManager.shared.hasRegisteredPlayers {
+       throw VideoCacheException("Cannot change the cache size while there are active players")
+diff --git a/node_modules/expo-video/ios/VideoModule.swift b/node_modules/expo-video/ios/VideoModule.swift
+index ed29fef..061a30d 100644
+--- a/node_modules/expo-video/ios/VideoModule.swift
++++ b/node_modules/expo-video/ios/VideoModule.swift
+@@ -23,6 +23,19 @@ public final class VideoModule: Module {
+       return try await VideoCacheManager.shared.clearAllCache()
+     }
+ 
++    // Parche Zeta: precarga del primer MB en la misma cache del reproductor.
++    AsyncFunction("precargarVideoAsync") { (url: URL, bytes: Int, promise: Promise) in
++      PrecargadorDeVideos.shared.precargar(url: url, bytes: bytes, promise: promise)
++    }
++
++    Function("cancelarPrecargaDeVideo") { (url: URL) in
++      PrecargadorDeVideos.shared.cancelar(clave: url.absoluteString)
++    }
++
++    Function("cancelarPrecargasDeVideo") {
++      PrecargadorDeVideos.shared.cancelarTodas()
++    }
++
+     View(VideoView.self) {
+       Events(
+         "onPictureInPictureStart",
