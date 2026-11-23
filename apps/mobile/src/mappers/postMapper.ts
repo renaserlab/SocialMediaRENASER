@@ -2,6 +2,7 @@ import { traduceEnElIdiomaActual } from '@/i18n';
 import { API_BASE_URL, API_V1 } from '@/services/api';
 import { profileImageUrl } from '@/services/storage';
 import { camposDeS3 } from '@/lib/mediosS3';
+import { normalizarVariantes } from '@/lib/elegirVariante';
 import type { Comment, Post } from '@/types';
 
 export type PostAuthorDto = {
@@ -48,6 +49,12 @@ export type PostMediaDto = {
   stream_url?: string | null;
   /** ISO 8601: cuando dejan de valer las tres URLs de arriba. */
   urls_expiran?: string | null;
+  /**
+   * El mismo video en varias calidades (480/560/720), ya firmadas, para
+   * elegir UNA al empezar segun la red. Solo filas 's3' con la bandera de la
+   * API encendida; un servidor viejo no lo manda. Ver `lib/elegirVariante.ts`.
+   */
+  variantes?: { alto: number; url: string; bitrate?: number | null }[] | null;
 };
 
 export type PostDto = {
@@ -228,5 +235,9 @@ export function toPost(dto: PostDto, currentUserId?: string | null): Post {
       endpoint contestaria que no) y deja la portada con su clave estable.
     */
     ...camposDeS3(first, API_BASE_URL),
+    // Calidades del video (si la API las manda). Despues de lo de S3 porque
+    // son URLs firmadas igual que `mediaUrl`; sin ellas queda `undefined` y
+    // la eleccion de fuente es la de siempre.
+    variantes: first?.almacen === 's3' ? normalizarVariantes(first.variantes) : undefined,
   };
 }

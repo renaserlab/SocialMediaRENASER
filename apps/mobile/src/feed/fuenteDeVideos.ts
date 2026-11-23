@@ -122,7 +122,8 @@ export function aReel(post: Post): ReelItem | null {
     isStream: source.isStream,
     // El peso solo vale si lo que se reproduce es el archivo medido (ver
     // `mediaBytes` en el tipo); para HLS no hay un archivo que pesar.
-    bytes: source.isStream ? undefined : post.mediaBytes,
+    // Con una calidad distinta de `mediaUrl`, ese peso tampoco es el suyo.
+    bytes: source.isStream || source.uri !== post.mediaUrl ? undefined : post.mediaBytes,
     almacen: post.mediaAlmacen ?? 'supabase',
     posterUrl: post.posterUrl,
     posterPath: post.posterPath,
