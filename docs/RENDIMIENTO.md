@@ -347,3 +347,44 @@ medio:
   `rutas_de_derivados(...)[0]` (que ya calcula `v<n+1>` a partir del
   `poster_path` actual) antes de actualizar la fila.
 
+
+## Latencia celular → API del feed (noviembre 2026)
+
+**Lo medido** (`metricas_de_video`, iPhone, 11 arranques del 20 y 21/11; web,
+14). Los hitos cuentan desde que arranca el JS, así que `feed_respuesta`
+(p50 4,4 s) suma dos cosas distintas:
+
+| Tramo | iPhone | Web |
+|---|---|---|
+| Arranque → Inicio pide el feed (`feed_pedido`) | 55–63 ms en 5 arranques; 3,7–4,4 s en 4; 1,5 s en 1; 27 s en 1 (incluye iniciar sesión a mano) | 40 ms o 0,6–1,2 s (fuentes Inter) |
+| Pide → responde (`feed_respuesta − feed_pedido`) | 0,44–0,86 s, mediana ~0,6 s | 0,19–0,61 s, mediana ~0,45 s |
+| Firmas (`urls_firmadas − feed_respuesta`) | 1–2 ms (S3 ya viene firmado por la API) | 0–0,86 s (Supabase) |
+
+Desde Lima (curl, misma API): DNS+TCP+TLS a CloudFront ~0,16 s (POP MIA50),
+la API responde en ~0,15 s; `/posts` 17 KB y `/recommendations/content` 6 KB
+tardan lo mismo (~0,32 s en caliente). Sin reintentos ni Render en el camino
+(`EXPO_PUBLIC_API_URL` de los tres perfiles es la de CloudFront).
+
+**Conclusión.** La red no es el cuello: el viaje del celular es ~0,15 s más
+lento que la web, no 4 s. Lo que pesa es que la petición salía TARDE (cuando
+Inicio se montaba) y EN FILA detrás de todo el arranque.
+
+**Arreglo** (`feed/precargaDeInicio.ts`, solo JS, llega por EAS Update): en
+cuanto el arranque sabe si hay sesión (`useAuthStore.bootstrap`, lectura local)
+pide ya la primera página de «Para ti» —recomendador con sesión, cronológico
+sin ella— e Inicio la recoge al montarse. Se entrega una vez, caduca a los
+60 s, se descarta si cambia la cuenta o se responde el cuestionario, y si falló
+se pide de nuevo. Solo en el teléfono (en la web se entra mucho por enlace
+directo).
+
+**Cómo verificarlo.** Filtrar por el `build` del OTA nuevo y mirar
+`feed_respuesta − feed_pedido` por sesión: en los arranques lentos debería
+bajar de ~0,6 s a casi 0 (la respuesta ya está cuando Inicio la pide).
+
+**Pendiente.** Los 3,7–4,4 s ANTES de `feed_pedido` siguen sin explicar con
+datos: la telemetría no tiene hitos intermedios del arranque (tienda hidratada,
+sesión resuelta, Inicio montado). El iPhone 14 de las pruebas no tenía sesión
+(no aparece en `auth.sessions` ni renovó token esos días), así que no es la
+renovación del token. Añadir esos hitos exige ampliar el `check` de `tramo`
+(migración) y `Hitos` en la API (que rechaza campos desconocidos: desplegar la
+API ANTES que la app).

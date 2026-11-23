@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 
 import {
@@ -8,6 +9,7 @@ import {
   SignUpResult,
 } from '@/repositories/AuthRepository';
 import { ProfileRepository } from '@/repositories/ProfileRepository';
+import { descartarPrecargaSiNoEsDe, precargarInicio } from '@/feed/fuenteDeVideos';
 import { esEnlaceDeRecuperacion, mensajeDeEnlace } from '@/lib/authLink';
 import { perfMark } from '@/lib/perf';
 import { setAuthTokenProvider, ApiError } from '@/services/api';
@@ -142,6 +144,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     unsubscribeAuth?.();
     unsubscribeAuth = AuthRepository.onAuthStateChange((nextSession, event) => {
       if (event === 'PASSWORD_RECOVERY') set({ passwordRecovery: true, recoveryError: null });
+      // La primera pagina precargada era para la cuenta del arranque: si entra
+      // otra o se cierra sesion, no se le ensena a quien no la pidio.
+      descartarPrecargaSiNoEsDe(nextSession?.user?.id ?? null);
       setTimeout(() => {
         if (nextSession) {
           // Mismo criterio que abajo: la sesion decide, el perfil acompana.
@@ -210,6 +215,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const session = await AuthRepository.getSession();
       perfMark('AUTH_RESTORED');
+      /*
+        La primera pagina de Inicio sale YA, en paralelo con el resto del
+        arranque, en vez de esperar a que Inicio se monte (medido en iPhone:
+        la peticion tarda ~0,6 s, pero salia a los 3,7–4,4 s de arrancar en la
+        mitad de los arranques). Ver `feed/precargaDeInicio.ts`.
+
+        Solo en el telefono: en la web se entra a menudo por un enlace directo
+        (una publicacion, las politicas) y ahi seria una peticion de mas.
+      */
+      if (Platform.OS !== 'web') {
+        precargarInicio(session?.user?.id ?? null, { personalizar: Boolean(session) });
+      }
       if (session) {
         // La sesion basta para entrar. El perfil se pide en paralelo y no se
         // espera: es informacion para pintar la pantalla, no permiso de acceso.

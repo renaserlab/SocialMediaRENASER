@@ -213,6 +213,15 @@ export function useFeedDeVideos(
       .cargar(null, VIDEOS_POR_PAGINA)
       .then((lote) => {
         if (!vigente) return;
+        /*
+          Si la primera pagina vino de la precarga del arranque, pudo llegar
+          ANTES de `feed_pedido` y entonces la fuente no pudo marcar sus hitos
+          (cada uno exige el anterior). Para Inicio la respuesta esta lista
+          AHORA. En el caso normal ya estan marcados y esto no cambia nada:
+          cada hito guarda solo su primer valor.
+        */
+        medicionDeVideo.hito('feed_respuesta');
+        medicionDeVideo.hito('urls_firmadas');
         // Lo que de verdad se mide del Inicio: cuanto tarda en haber algo que
         // reproducir. Se marca una sola vez por sesion.
         perfMark('INICIO_PRIMERA_PAGINA', { once: true });

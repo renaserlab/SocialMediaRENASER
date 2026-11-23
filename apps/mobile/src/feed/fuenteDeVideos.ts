@@ -1,4 +1,5 @@
 import { decidirLote } from '@/feed/decisionDeFuente';
+import { crearPrecargaDeInicio } from '@/feed/precargaDeInicio';
 import { reelNecesitaUrls, renovarUrls } from '@/feed/urlsDeMedios';
 import { PostRepository, resolveMediaUrls, type FeedKind } from '@/repositories/PostRepository';
 import { RecommendationRepository } from '@/repositories/RecommendationRepository';
@@ -213,6 +214,16 @@ function fuenteRecomendada(usuarioId: string | null | undefined): FuenteDeVideos
     // guardada cada vez que el recomendador dejara de estar disponible.
     clave: 'paraTi',
     async cargar(cursor, limite) {
+      /*
+        Un cursor con fecha o id solo lo produce la fuente cronologica: el
+        recomendador pagina por posicion. Si llega uno, la primera pagina salio
+        del respaldo aunque la pidiera OTRA instancia de esta fuente (la
+        precarga del arranque, ver `precargarInicio`), y mezclar ahora el
+        recomendador repetiria y saltaria videos.
+      */
+      if (cursor && (cursor.creadoEn !== undefined || cursor.id !== undefined)) {
+        usarRespaldo = true;
+      }
       if (usarRespaldo) return respaldo.cargar(cursor, limite);
       const desplazamiento = cursor?.desplazamiento ?? 0;
       try {
@@ -296,9 +307,64 @@ export function fuenteDeInicio(
     «Para ti» sin sesion tampoco: el recomendador necesita saber para quien
     recomienda, y sin token no hay a quien preguntar.
   */
+  const base = fuenteParaTi(usuarioId, personalizar);
+  const firma = firmaDeLaPrecarga(personalizar);
+  return {
+    clave: base.clave,
+    cargar(cursor, limite) {
+      // La primera pagina puede estar ya pedida desde el arranque. Si la
+      // precarga fallo, se pide de nuevo aqui: para quien mira es lo mismo que
+      // antes, sin la ventaja.
+      if (cursor === null && limite === VIDEOS_POR_PAGINA) {
+        const precargada = precarga.tomar(firma);
+        if (precargada) return precargada.catch(() => base.cargar(cursor, limite));
+      }
+      return base.cargar(cursor, limite);
+    },
+  };
+}
+
+function fuenteParaTi(usuarioId: string | null | undefined, personalizar: boolean): FuenteDeVideos {
   return personalizar
     ? fuenteRecomendada(usuarioId)
     : fuenteDelBackend('paraTi', 'all', usuarioId);
+}
+
+function firmaDeLaPrecarga(personalizar: boolean): string {
+  return personalizar ? 'paraTi:recomendado' : 'paraTi:cronologico';
+}
+
+/** Una sola precarga por arranque (ver `precargaDeInicio.ts`). */
+const precarga = crearPrecargaDeInicio();
+
+/**
+ * Pide YA la primera pagina de «Para ti», sin esperar a que Inicio se monte.
+ *
+ * La llama el arranque en cuanto sabe si hay sesion. Tiene que pedir el MISMO
+ * feed que pedira Inicio: con sesion, el recomendador (con su respaldo); sin
+ * ella, el cronologico. Si al final Inicio quiere otro (se inicio o se cerro
+ * sesion entretanto), la firma no coincide y se pide de nuevo.
+ */
+export function precargarInicio(
+  usuarioId: string | null,
+  { personalizar }: { personalizar: boolean },
+): void {
+  precarga.lanzar(firmaDeLaPrecarga(personalizar), usuarioId, () =>
+    fuenteParaTi(usuarioId, personalizar).cargar(null, VIDEOS_POR_PAGINA),
+  );
+}
+
+/** Lo precargado para otra cuenta no se le ensena a esta. */
+export function descartarPrecargaSiNoEsDe(usuarioId: string | null): void {
+  precarga.descartarSiNoEsDe(usuarioId);
+}
+
+/**
+ * Tras responder (o saltar) el cuestionario, el recomendador ordena con otras
+ * preferencias: lo precargado antes ya no es lo que le toca ver.
+ */
+export function descartarPrecargaDeInicio(): void {
+  precarga.descartar();
 }
 
 /**
