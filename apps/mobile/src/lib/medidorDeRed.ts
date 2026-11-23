@@ -4,14 +4,18 @@
  * NO DESCARGA NADA PARA MEDIR: una prueba de velocidad gasta datos de quien
  * mira justo cuando su red es mala. Quien baja bytes de verdad (la precarga
  * de los primeros bytes de un video, por ejemplo) llama a
- * `registrarMuestraDeRed(bytes, ms)` y aquí se lleva una media móvil.
+ * `registrarMuestraDeRed(bytes, ms)` y aquí se lleva una media móvil. En
+ * iPhone y Android esa fuente es la precarga nativa del primer MB
+ * (`hooks/usePrecargaDeVideos.ts` → `services/precargaDeVideos.ts`), que ya
+ * descuenta la espera en la fila del nativo y las lecturas de disco.
  *
  * En la web, además, el navegador da gratis su estimación
  * (`navigator.connection`: `downlink`, `effectiveType`, `saveData`); en
  * iPhone y Android eso no existe sin un módulo nativo nuevo, y esto tiene
  * que poder llegar por EAS Update (ver `medicionDeVideoEnApp.ts`).
  *
- * Sin React Native a propósito: se prueba en Node (`medidorDeRed.test.mts`).
+ * Sin React Native a propósito: se prueba en Node (sus pruebas viven en
+ * `elegirVariante.test.mts`).
  */
 import type { MedicionDeRed } from './elegirVariante.ts';
 

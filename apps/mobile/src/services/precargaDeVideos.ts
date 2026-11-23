@@ -24,6 +24,12 @@
  * nuevo y lo huerfano lo expulsa la cache por antiguedad. Se pierde la
  * ventaja, no se rompe nada. Por eso no se precarga lo que esta por vencer: se
  * renovaria antes de reproducirse.
+ *
+ * MEDIR LA RED DE PASO. Cada primer MB que baja de verdad es una muestra de
+ * throughput gratis para `lib/medidorDeRed.ts` (que elige la calidad de los
+ * videos). El nativo solo devuelve `true`/`false`, asi que el tiempo se toma
+ * aqui, con cuidado de no medir lo que no es red (ver `crearColaNativa` y
+ * `muestraCreible`). Sin cambiar el nativo: esto llega por EAS Update.
  */
 
 /** Cuanto del inicio de cada video se precarga: 1 MB, como TikTok. */
@@ -106,6 +112,84 @@ export function urlsAPrecargar(
   return urls;
 }
 
+/**
+ * Por encima de esto, 1 MB «bajado» no vino de la red sino del disco.
+ *
+ * El nativo responde `true` tambien cuando el tramo YA estaba en cache (iOS
+ * casi al instante; Android lo relee del disco en milisegundos). Esa muestra
+ * diria «cientos de Mbps» y subiria la calidad sin motivo. Un primer MB por
+ * una conexion nueva necesita varias idas y vueltas (arranque lento de TCP),
+ * asi que 100 Mbps es un techo que un telefono rara vez supera de verdad; y
+ * descartar una muestra rapida real no cuesta nada: con red de sobra ya se
+ * elige la calidad de arriba.
+ */
+export const KBPS_MAXIMOS_CREIBLES = 100_000;
+
+/** Si `(bytes, ms)` parece una descarga de red y no una lectura de disco. */
+export function muestraCreible(bytes: number, ms: number): boolean {
+  if (!Number.isFinite(bytes) || !Number.isFinite(ms) || bytes <= 0 || ms <= 0) return false;
+  return (bytes * 8) / ms <= KBPS_MAXIMOS_CREIBLES;
+}
+
+/** Cuantas URLs bajadas se recuerdan para no medir dos veces la misma. */
+const URLS_RECORDADAS = 300;
+
+/**
+ * Modelo, en JS, de la fila del modulo nativo, para saber cuanto tardo DE
+ * VERDAD cada pedido.
+ *
+ * POR QUE. El nativo atiende UN pedido a la vez, en el orden de llegada
+ * (Android: un solo hilo; iOS: cada tarea espera a la anterior). Se mandan
+ * hasta 5 juntos, asi que el quinto resuelve cuando terminan los cuatro de
+ * delante: medido desde que se pidio, pareceria cinco veces mas lento. El
+ * tiempo que cuenta es desde que llego a la CABEZA de la fila (cuando
+ * termino o se cancelo el anterior) hasta que resolvio.
+ *
+ * Una sola para todos los feeds porque el modulo nativo es uno solo.
+ */
+export function crearColaNativa() {
+  const fila: string[] = [];
+  let cabezaDesde = 0;
+  const bajadas = new Set<string>();
+  return {
+    entrar(clave: string, t: number): void {
+      fila.push(clave);
+      if (fila.length === 1) cabezaDesde = t;
+    },
+    /**
+     * Sale un pedido (resolvio o se cancelo). Devuelve desde cuando lo
+     * atendia el nativo si era la cabeza, o `null` si no lo era (no se mide).
+     */
+    salir(clave: string, t: number): number | null {
+      const i = fila.indexOf(clave);
+      if (i < 0) return null;
+      fila.splice(i, 1);
+      if (i !== 0) return null;
+      const inicio = cabezaDesde;
+      // El siguiente empieza a atenderse justo ahora.
+      cabezaDesde = t;
+      return inicio;
+    },
+    yaBajada(url: string): boolean {
+      return bajadas.has(url);
+    },
+    recordarBajada(url: string): void {
+      if (bajadas.has(url)) return;
+      if (bajadas.size >= URLS_RECORDADAS) {
+        const primera = bajadas.values().next().value;
+        if (primera !== undefined) bajadas.delete(primera);
+      }
+      bajadas.add(url);
+    },
+  };
+}
+
+export type ColaNativa = ReturnType<typeof crearColaNativa>;
+
+/** La fila del unico modulo nativo de la app. */
+const colaNativa = crearColaNativa();
+let precargadoresCreados = 0;
+
 export type Precargador = {
   /** Deja precargadas exactamente estas URLs: cancela lo que sobra, pide lo que falta. */
   actualizar: (urls: readonly string[]) => void;
@@ -125,16 +209,32 @@ export type Precargador = {
 export function crearPrecargador(
   nativo: ModuloNativoDePrecarga | null,
   bytes: number = BYTES_A_PRECARGAR,
+  {
+    alMedir,
+    ahora = Date.now,
+    cola = colaNativa,
+  }: {
+    /** Recibe `(bytes, ms)` de cada tramo que muy probablemente bajo de la red. */
+    alMedir?: (bytes: number, ms: number) => void;
+    ahora?: () => number;
+    cola?: ColaNativa;
+  } = {},
 ): Precargador {
   /** URL → numero de pedido. El numero evita que la respuesta de un pedido
    *  cancelado borre el pedido nuevo de la misma URL. */
   const enCurso = new Map<string, number>();
+  const idDePrecargador = ++precargadoresCreados;
   /** Ya en cache. Solo se recuerda lo que sigue en la ventana: volver atras
    *  y pedirlo otra vez cuesta una consulta a disco, no una descarga. */
   const listas = new Set<string>();
   let siguientePedido = 0;
 
+  /** Numero de pedido → clave en la cola nativa compartida. */
+  const claveEnCola = (pedido: number) => `${idDePrecargador}:${pedido}`;
+
   const cancelar = (url: string) => {
+    const pedido = enCurso.get(url);
+    if (pedido !== undefined) cola.salir(claveEnCola(pedido), ahora());
     enCurso.delete(url);
     try {
       nativo?.cancelarPrecargaDeVideo(url);
@@ -164,14 +264,30 @@ export function crearPrecargador(
           enCurso.delete(url);
           continue;
         }
+        cola.entrar(claveEnCola(pedido), ahora());
         promesa.then(
           (listo) => {
             if (enCurso.get(url) !== pedido) return;
             enCurso.delete(url);
-            if (listo === true) listas.add(url);
+            const fin = ahora();
+            const inicio = cola.salir(claveEnCola(pedido), fin);
+            if (listo !== true) return;
+            listas.add(url);
+            // Una URL que ya quedo en cache antes se lee de disco: no es red.
+            const repetida = cola.yaBajada(url);
+            cola.recordarBajada(url);
+            if (alMedir && inicio !== null && !repetida && muestraCreible(bytes, fin - inicio)) {
+              try {
+                alMedir(bytes, fin - inicio);
+              } catch {
+                // Medir nunca puede romper la precarga.
+              }
+            }
           },
           () => {
-            if (enCurso.get(url) === pedido) enCurso.delete(url);
+            if (enCurso.get(url) !== pedido) return;
+            enCurso.delete(url);
+            cola.salir(claveEnCola(pedido), ahora());
           },
         );
       }

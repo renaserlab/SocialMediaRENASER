@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo';
 
 import { reelNecesitaUrls } from '@/feed/urlsDeMedios';
+import { registrarMuestraDeRed } from '@/lib/medidorDeRed';
 import {
   crearPrecargador,
   esModuloDePrecarga,
@@ -33,7 +34,7 @@ function moduloDePrecarga(): ModuloNativoDePrecarga | null {
  * Mantiene precargado el primer MB de los 5 videos siguientes al que se ve.
  *
  * La logica (que pedir, que cancelar) vive en `services/precargaDeVideos.ts`;
- * aqui solo se engancha al ciclo de vida del feed. Con el feed inactivo
+ * aqui solo se engancha al ciclo de vida del feed y al medidor de red. Con el feed inactivo
  * (otra pestana, otra seccion) se cancela todo lo suyo.
  *
  * `conReproductor`: cuantos de los siguientes ya tienen reproductor montado y
@@ -47,7 +48,12 @@ export function usePrecargaDeVideos(
 ): void {
   const precargador = useRef<Precargador | null>(null);
   if (precargador.current === null) {
-    precargador.current = crearPrecargador(moduloDePrecarga());
+    // Cada primer MB que baja de la red es tambien una medicion de cuanto da
+    // la red: en nativo es la UNICA (la web tiene `navigator.connection`), y
+    // con ella se elige la calidad de los videos (`lib/elegirVariante.ts`).
+    precargador.current = crearPrecargador(moduloDePrecarga(), undefined, {
+      alMedir: registrarMuestraDeRed,
+    });
   }
 
   useEffect(() => {

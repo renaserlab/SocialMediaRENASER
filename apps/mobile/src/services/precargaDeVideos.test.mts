@@ -7,15 +7,21 @@
  *  - al deslizar se cancela lo que sale de la ventana y se pide solo lo nuevo;
  *  - la respuesta tardia de un pedido cancelado no pisa el pedido nuevo;
  *  - sin modulo nativo (web, binario viejo por OTA) todo es no-op y no lanza;
- *  - un modulo que lanza o rechaza no rompe el feed.
+ *  - un modulo que lanza o rechaza no rompe el feed;
+ *  - cada primer MB bajado de la red se mide sin contar la espera en la fila
+ *    del nativo, y lo que viene del disco no se mide.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { crearMedidorDeRed } from '../lib/medidorDeRed.ts';
 import {
   BYTES_A_PRECARGAR,
+  KBPS_MAXIMOS_CREIBLES,
   VIDEOS_A_PRECARGAR,
+  crearColaNativa,
   crearPrecargador,
+  muestraCreible,
   esModuloDePrecarga,
   sePuedePrecargar,
   urlsAPrecargar,
@@ -235,5 +241,123 @@ describe('crearPrecargador', () => {
     await new Promise((r) => setImmediate(r));
     otra.actualizar(['a']);
     assert.equal(pedidos, 2);
+  });
+});
+
+describe('medir la red con la precarga', () => {
+  /** Reloj a mano y una cola nueva por prueba (la de la app es compartida). */
+  function montar(modulo: ModuloNativoDePrecarga) {
+    let t = 0;
+    const muestras: Array<[number, number]> = [];
+    const cola = crearPrecargador(modulo, BYTES_A_PRECARGAR, {
+      ahora: () => t,
+      cola: crearColaNativa(),
+      alMedir: (bytes, ms) => muestras.push([bytes, ms]),
+    });
+    return { cola, muestras, avanzar: (ms: number) => (t += ms) };
+  }
+
+  it('mide desde que el pedido llega a la cabeza de la fila nativa, no desde que se pidio', async () => {
+    const n = nativoFalso();
+    const { cola, muestras, avanzar } = montar(n.modulo);
+    cola.actualizar(['a', 'b', 'c']);
+    avanzar(800);
+    await n.resolver('a', true);
+    avanzar(500);
+    await n.resolver('b', true);
+    avanzar(1200);
+    await n.resolver('c', true);
+    assert.deepEqual(muestras, [
+      [BYTES_A_PRECARGAR, 800],
+      [BYTES_A_PRECARGAR, 500],
+      [BYTES_A_PRECARGAR, 1200],
+    ]);
+  });
+
+  it('cancelar la cabeza hace avanzar la fila; cancelar otro no', async () => {
+    const n = nativoFalso();
+    const { cola, muestras, avanzar } = montar(n.modulo);
+    cola.actualizar(['a', 'b', 'c']);
+    avanzar(300);
+    cola.actualizar(['b', 'c']); // cancela 'a', que era la cabeza: 'b' empieza ahora
+    avanzar(400);
+    cola.actualizar(['b']); // cancela 'c', que esperaba: no cambia nada
+    avanzar(100);
+    await n.resolver('b', true);
+    assert.deepEqual(muestras, [[BYTES_A_PRECARGAR, 500]]);
+  });
+
+  it('no mide fallos, cancelaciones ni respuestas tardias', async () => {
+    const n = nativoFalso();
+    const { cola, muestras, avanzar } = montar(n.modulo);
+    cola.actualizar(['a']);
+    avanzar(700);
+    await n.resolver('a', false);
+    cola.actualizar(['b']);
+    cola.actualizar([]);
+    avanzar(700);
+    await n.resolver('b', true); // llega tarde la del cancelado
+    assert.deepEqual(muestras, []);
+  });
+
+  it('no mide lo que vino del disco: demasiado rapido o una URL ya bajada', async () => {
+    const n = nativoFalso();
+    const { cola, muestras, avanzar } = montar(n.modulo);
+    cola.actualizar(['a']);
+    avanzar(5); // 1 MB en 5 ms = ~1,7 Gbps: cache
+    await n.resolver('a', true);
+    assert.deepEqual(muestras, []);
+
+    cola.actualizar(['b']);
+    avanzar(600);
+    await n.resolver('b', true);
+    cola.actualizar([]); // sale de la ventana...
+    cola.actualizar(['b']); // ...y vuelve: ya esta en disco
+    avanzar(600);
+    await n.resolver('b', true);
+    assert.deepEqual(muestras, [[BYTES_A_PRECARGAR, 600]]);
+  });
+
+  it('un medidor que lanza no rompe la precarga', async () => {
+    const n = nativoFalso();
+    let t = 0;
+    const cola = crearPrecargador(n.modulo, BYTES_A_PRECARGAR, {
+      ahora: () => t,
+      cola: crearColaNativa(),
+      alMedir: () => {
+        throw new Error('medidor roto');
+      },
+    });
+    cola.actualizar(['a', 'b']);
+    t = 900;
+    await n.resolver('a', true);
+    cola.actualizar(['a', 'b']);
+    assert.deepEqual(n.pedidas(), ['a', 'b']);
+  });
+
+  it('muestraCreible pone el techo en KBPS_MAXIMOS_CREIBLES', () => {
+    const mb = 1024 * 1024;
+    assert.equal(muestraCreible(mb, 1000), true);
+    assert.equal(muestraCreible(mb, Math.ceil((mb * 8) / KBPS_MAXIMOS_CREIBLES)), true);
+    assert.equal(muestraCreible(mb, 10), false);
+    assert.equal(muestraCreible(mb, 0), false);
+    assert.equal(muestraCreible(0, 100), false);
+    assert.equal(muestraCreible(Number.NaN, 100), false);
+  });
+
+  it('con el medidor de red de verdad, la precarga da una medicion en kbps', async () => {
+    const n = nativoFalso();
+    const medidor = crearMedidorDeRed(() => 0);
+    let t = 0;
+    const cola = crearPrecargador(n.modulo, BYTES_A_PRECARGAR, {
+      ahora: () => t,
+      cola: crearColaNativa(),
+      alMedir: medidor.registrar,
+    });
+    assert.equal(medidor.kbps(), null);
+    cola.actualizar(['a']);
+    t = 1000; // 1 MB en 1 s
+    await n.resolver('a', true);
+    assert.equal(Math.round(medidor.kbps()!), Math.round((BYTES_A_PRECARGAR * 8) / 1000));
   });
 });
