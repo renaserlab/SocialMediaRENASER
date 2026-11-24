@@ -225,6 +225,17 @@ export function VideoPlayer({
     descargaba lo suficiente para empezar.
   */
   const [firstFrame, setFirstFrame] = useState(false);
+  /*
+    El reproductor ya reprodujo alguna vez (`playingChange` con `true`).
+
+    POR QUE. En el muro, al llegar a un video, la portada se quitaba en cuanto
+    pasaba a «iniciado» si ya tenia primer fotograma, y en Android la
+    superficie de un reproductor que aun no arranca puede verse NEGRA un
+    instante: el parpadeo a negro al empezar cada video. En el muro la portada
+    se queda hasta que de verdad reproduce; lo que se ve mientras tanto es la
+    misma imagen quieta que ya habia.
+  */
+  const [arranco, setArranco] = useState(false);
 
   /*
     APAGAR ANTES DE QUE SE LO LLEVEN. La unica pausa que llega a tiempo.
@@ -391,6 +402,7 @@ export function VideoPlayer({
 
   useEventListener(player, 'playingChange', ({ isPlaying }) => {
     setPlaying(isPlaying);
+    if (isPlaying) setArranco(true);
     if (isPlaying && medida.current) medicionDeVideo.reproduciendo(medida.current.id);
   });
   useEventListener(player, 'statusChange', ({ status }) => {
@@ -539,6 +551,15 @@ export function VideoPlayer({
       ? { ...(poster as { uri?: string }), cacheKey: posterCacheKey }
       : poster;
 
+  /*
+    Portada encima del video:
+    - esperando turno en el muro (`hidePlayButton` sin iniciar);
+    - iniciado sin primer fotograma todavia;
+    - y en el muro, ademas, hasta que de verdad reproduce (ver `arranco`).
+  */
+  const portadaVisible =
+    (!started && hidePlayButton) || (started && (!firstFrame || (hidePlayButton && !arranco)));
+
   return (
     <View style={[styles.wrap, style]}>
       <VideoView
@@ -562,7 +583,14 @@ export function VideoPlayer({
         toques: los controles de debajo siguen funcionando. La transicion corta
         hace que el paso poster→video se sienta continuo y no como un salto.
       */}
-      {started && !firstFrame ? (
+      {/*
+        UNA SOLA capa de portada para «esperando turno» y «arrancando». Antes
+        eran dos elementos distintos: al volverse activo se desmontaba uno y se
+        montaba el otro, que entraba con fundido desde transparente, y en ese
+        hueco asomaba la superficie negra del video. Siendo el mismo elemento,
+        la imagen no se vuelve a cargar ni a fundir: sigue ahi sin cortes.
+      */}
+      {portadaVisible ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {posterSource ? (
             <ExpoImage
@@ -571,23 +599,19 @@ export function VideoPlayer({
               contentFit={contentFit === 'fill' ? 'cover' : contentFit}
               cachePolicy="disk"
               recyclingKey={posterCacheKey}
-              transition={80}
+              transition={started ? 80 : 120}
             />
-          ) : (
+          ) : started && !firstFrame ? (
             /*
               Sin miniatura guardada no hay nada que ensenar todavia, y un
               rectangulo negro y quieto se lee como algo roto. Un indicador
               dice lo que de verdad pasa: esta cargando. Desaparece en cuanto
               llega el primer fotograma.
-
-              Los videos subidos antes del pipeline de miniaturas son los
-              unicos que pasan por aqui; en cuanto se reprocesan, entran por
-              la rama de arriba y el salto a negro desaparece del todo.
             */
             <View style={styles.centered}>
               <ActivityIndicator color={media.textMuted} />
             </View>
-          )}
+          ) : null}
         </View>
       ) : null}
       {showShortsControls ? (
@@ -627,20 +651,6 @@ export function VideoPlayer({
         en la captura del documento —el segundo video con un play enorme
         encima— y lo que hacia que pareciera roto.
       */}
-      {!started && hidePlayButton ? (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {posterSource ? (
-            <ExpoImage
-              source={posterSource}
-              style={StyleSheet.absoluteFill}
-              contentFit={contentFit === 'fill' ? 'cover' : contentFit}
-              cachePolicy="disk"
-              recyclingKey={posterCacheKey}
-              transition={120}
-            />
-          ) : null}
-        </View>
-      ) : null}
       {!started && !hidePlayButton && (
         <Pressable
           style={styles.posterLayer}
