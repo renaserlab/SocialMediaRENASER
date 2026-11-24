@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 import {
   crearMedicion,
+  textoDelEquipo,
   MS_MAXIMO,
   TOPE_DE_EVENTOS,
   VENTANA_DEL_GESTO_MS,
@@ -404,4 +405,48 @@ test('marca el almacen de cada video (Supabase por defecto, S3 cuando viene de C
   m.aSegundoPlano();
   const almacenes = b.lote().tramos.map((t) => t.almacen);
   assert.deepEqual(almacenes, ['supabase', 's3', 'supabase']);
+});
+
+/*
+  ANDROID SIN FILAS. La API rechaza el lote entero si un texto del equipo trae
+  un caracter que no admite. En los telefonos Android con una actualizacion del
+  sistema, `Device.osName` es la huella de la version base (`BASE_OS`), con `:`.
+*/
+test('los textos del equipo salen limpios: solo lo que admite la API y recortados', () => {
+  assert.equal(textoDelEquipo('Android 16', 32), 'Android 16');
+  assert.equal(textoDelEquipo('samsung/a54xnsxx/a54x:14/UP1A.231005.007', 32), 'samsung/a54xnsxx/a54x14/UP1A.231');
+  assert.equal(textoDelEquipo('moto g(60) #1', 64), 'moto g(60) 1');
+  assert.equal(textoDelEquipo('   ', 64), null);
+  assert.equal(textoDelEquipo(null, 64), null);
+  assert.equal(textoDelEquipo(42, 64), null);
+  const API = /^[\w .,()+/-]*$/;
+  for (const raro of ['a:b', 'Pixel™ 8', 'x\ny', 'SM-A546E', '小米 14']) {
+    const limpio = textoDelEquipo(raro, 64);
+    assert.ok(limpio === null || API.test(limpio), `${raro} -> ${limpio}`);
+  }
+});
+
+test('un equipo con datos raros no tumba el lote', () => {
+  const b = banco({
+    contexto: () => ({
+      plataforma: 'android',
+      version_app: '1.2.4',
+      build: 'embebido',
+      modelo: 'SM-A546E',
+      sistema: 'samsung/a54xnsxx/a54x:14/UP1A.231005.007 14',
+      red: null,
+    }),
+  });
+  b.medicion.hito('feed_pedido');
+  b.medicion.aSegundoPlano();
+  const lote = b.lote();
+  assert.match(lote.contexto.sistema ?? '', /^[\w .,()+/-]*$/);
+  assert.ok((lote.contexto.sistema ?? '').length <= 32);
+  assert.equal(lote.contexto.modelo, 'SM-A546E');
+});
+
+test('en Android el nombre del sistema no sale de Device.osName (BASE_OS)', () => {
+  const app = leer('./medicionDeVideoEnApp.ts');
+  assert.match(app, /if \(Platform\.OS === 'android'\) return 'Android';/);
+  assert.doesNotMatch(app, /\$\{Device\.osName/);
 });

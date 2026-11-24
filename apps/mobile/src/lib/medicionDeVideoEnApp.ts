@@ -62,14 +62,33 @@ function tipoDeRed(): string | null {
   }
 }
 
+/*
+  EL NOMBRE DEL SISTEMA, EN ANDROID, NO SE LEE DE expo-device.
+
+  `Device.osName` en Android es `Build.VERSION.BASE_OS` si viene relleno, y en
+  los telefonos que ya recibieron una actualizacion del sistema viene relleno
+  con la HUELLA de la version base, del estilo
+  `samsung/a54xnsxx/a54x:14/UP1A...`. Recortada a 32 caracteres sigue
+  llevando `:`, que la API no admite, y la API rechazaba el lote entero (422):
+  por eso no habia ni una fila de Android en `metricas_de_video`. En el
+  emulador `BASE_OS` va vacio y sale «Android», asi que alli si llegaban. Lo
+  que interesa es la version, asi que en Android se dice «Android» y punto.
+*/
+function nombreDelSistema(): string | null {
+  if (Platform.OS === 'android') return 'Android';
+  return Device.osName ?? null;
+}
+
 function contexto(): ContextoDelEquipo {
   const plataforma = Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'web';
+  // Los topes y el juego de caracteres de la API los aplica `crearMedicion`
+  // (`textoDelEquipo`) al construir el lote.
   return {
     plataforma,
-    version_app: Constants.expoConfig?.version?.slice(0, 32) ?? null,
+    version_app: Constants.expoConfig?.version ?? null,
     build: versionDelPaquete(),
-    modelo: Device.modelName?.slice(0, 64) ?? null,
-    sistema: Device.osVersion ? `${Device.osName ?? ''} ${Device.osVersion}`.trim().slice(0, 32) : null,
+    modelo: Device.modelName ?? null,
+    sistema: Device.osVersion ? `${nombreDelSistema() ?? ''} ${Device.osVersion}` : null,
     red: tipoDeRed(),
   };
 }

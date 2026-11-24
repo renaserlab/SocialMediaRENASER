@@ -5,10 +5,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  activoArrancoConColchon,
   activoConPocoBuffer,
   BUFFER_ACTIVO,
   BUFFER_MINIMO,
+  BUFFER_SIGUIENTE,
   BUFFER_VECINO,
+  COLCHON_PARA_PRECARGAR_S,
   crearCoordinadorDePrecarga,
   enVentanaDePrecarga,
   ESPERA_DE_INERCIA_MS,
@@ -23,7 +26,15 @@ import {
   fotograma, y nunca hay mas de cuatro reproductores vivos.
 */
 
-const LIBRE: EstadoDePrecarga = { arrastrando: false, activoConPocoBuffer: false };
+const LIBRE: EstadoDePrecarga = { arrastrando: false, activoConPocoBuffer: false, precargaLiberada: true };
+const ESTADOS: EstadoDePrecarga[] = [];
+for (const arrastrando of [true, false]) {
+  for (const activoConPoco of [true, false]) {
+    for (const precargaLiberada of [true, false]) {
+      ESTADOS.push({ arrastrando, activoConPocoBuffer: activoConPoco, precargaLiberada });
+    }
+  }
+}
 
 test('la ventana en telefonos es el anterior, el activo y los dos siguientes', () => {
   const vivos = [];
@@ -47,29 +58,52 @@ test('la web conserva la ventana de antes (N-1..N+1)', () => {
 });
 
 test('el activo pide 15 s / 12 MB, como antes, pase lo que pase', () => {
-  for (const arrastrando of [true, false]) {
-    for (const activoConPoco of [true, false]) {
-      assert.equal(perfilDeBuffer(0, { arrastrando, activoConPocoBuffer: activoConPoco }), BUFFER_ACTIVO);
-    }
-  }
+  for (const estado of ESTADOS) assert.equal(perfilDeBuffer(0, estado), BUFFER_ACTIVO);
   assert.equal(BUFFER_ACTIVO.preferredForwardBufferDuration, 15);
   assert.equal(BUFFER_ACTIVO.maxBufferBytes, 12 * 1024 * 1024);
 });
 
-test('los vecinos piden poco: unos 2 s y 1,5 MB', () => {
-  for (const d of [-1, 1, 2]) assert.equal(perfilDeBuffer(d, LIBRE), BUFFER_VECINO);
+test('los vecinos lejanos piden poco: unos 2 s y 1,5 MB', () => {
+  for (const d of [-1, 2]) assert.equal(perfilDeBuffer(d, LIBRE), BUFFER_VECINO);
   assert.ok(BUFFER_VECINO.preferredForwardBufferDuration <= 2);
   assert.ok(BUFFER_VECINO.maxBufferBytes <= 1.5 * 1024 * 1024);
 });
 
-test('con el activo justo de buffer, todos los vecinos se quedan en el minimo', () => {
-  const estado = { arrastrando: false, activoConPocoBuffer: true };
-  for (const d of [-1, 1, 2]) assert.equal(perfilDeBuffer(d, estado), BUFFER_MINIMO);
+/*
+  EL CORTE AL INICIAR CADA VIDEO (APK 88). El siguiente llegaba sin estar
+  listo: lo frenaban al minimo al estrenarse cada activo, y su tope de bytes no
+  dejaba a ExoPlayer llegar al audio de los MP4 sin intercalar.
+*/
+test('el siguiente (+1) nunca baja de un vecino: ni con el activo justo, ni arrastrando', () => {
+  for (const estado of ESTADOS) {
+    const perfil = perfilDeBuffer(1, estado);
+    assert.equal(perfil, estado.activoConPocoBuffer ? BUFFER_VECINO : BUFFER_SIGUIENTE);
+    assert.ok(perfil.preferredForwardBufferDuration >= BUFFER_VECINO.preferredForwardBufferDuration);
+    assert.ok(perfil.maxBufferBytes >= BUFFER_VECINO.maxBufferBytes);
+  }
+});
+
+test('el siguiente manda por tiempo y su tope de bytes deja llegar al audio de un MP4 sin intercalar', () => {
+  // Mismo tiempo que un vecino: con un MP4 normal no baja mas que antes.
+  assert.equal(BUFFER_SIGUIENTE.preferredForwardBufferDuration, BUFFER_VECINO.preferredForwardBufferDuration);
+  // ExoPlayer lee hasta 10 MB de video por delante antes de saltar al audio
+  // (`MAXIMUM_READ_AHEAD_BYTES_STREAM` de `Mp4Extractor`): por debajo de eso,
+  // un MP4 con el audio al final se queda en «cargando» para siempre.
+  assert.ok(BUFFER_SIGUIENTE.maxBufferBytes > 10 * 1024 * 1024);
+  // Y nunca mas que el activo: es solo un techo de memoria.
+  assert.ok(BUFFER_SIGUIENTE.maxBufferBytes <= BUFFER_ACTIVO.maxBufferBytes);
+});
+
+test('con el activo justo de buffer, los demas vecinos al minimo y el siguiente se queda en vecino', () => {
+  const estado = { arrastrando: false, activoConPocoBuffer: true, precargaLiberada: false };
+  for (const d of [-1, 2]) assert.equal(perfilDeBuffer(d, estado), BUFFER_MINIMO);
+  // No se lleva los ~10 MB de un MP4 sin intercalar mientras el que se ve va justo.
+  assert.equal(perfilDeBuffer(1, estado), BUFFER_VECINO);
 });
 
 test('arrastrando, se frenan todos los vecinos menos el siguiente', () => {
-  const estado = { arrastrando: true, activoConPocoBuffer: false };
-  assert.equal(perfilDeBuffer(1, estado), BUFFER_VECINO);
+  const estado = { arrastrando: true, activoConPocoBuffer: false, precargaLiberada: true };
+  assert.equal(perfilDeBuffer(1, estado), BUFFER_SIGUIENTE);
   assert.equal(perfilDeBuffer(-1, estado), BUFFER_MINIMO);
   assert.equal(perfilDeBuffer(2, estado), BUFFER_MINIMO);
 });
@@ -114,6 +148,25 @@ test('si el reproductor no sabe cuanto lleva, los vecinos no se quedan frenados'
       false,
     );
   }
+});
+
+test('la precarga nativa espera a que el activo reproduzca con colchon', () => {
+  const base = { currentTime: 0, bufferedPosition: 0, duration: 60, cargando: false, reproduciendo: true };
+  // Aun sin reproducir, aunque tenga buffer de sobra: no.
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: 30, reproduciendo: false }), false);
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: 30, reproduciendo: undefined }), false);
+  // Esperando datos: no.
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: 30, cargando: true }), false);
+  // Reproduciendo con poco por delante: no.
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: 1 }), false);
+  // Reproduciendo con colchon: si.
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: COLCHON_PARA_PRECARGAR_S }), true);
+  // Descargado entero (video corto): si.
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: 4, duration: 4 }), true);
+  // Ya lleva esos segundos reproducidos aunque su tope no le deje juntar mas: si.
+  assert.equal(activoArrancoConColchon({ ...base, currentTime: 3.2, bufferedPosition: 4 }), true);
+  // Sin dato de buffer y recien empezado: no.
+  assert.equal(activoArrancoConColchon({ ...base, bufferedPosition: Number.NaN }), false);
 });
 
 /** Temporizador falso: se dispara a mano. */
@@ -194,6 +247,25 @@ test('un activo nuevo frena a los vecinos hasta que coge aire; al irse, los suel
   assert.equal(c.estado().activoConPocoBuffer, false);
 });
 
+test('cada activo nuevo vuelve a cerrar la precarga, y una vez abierta no se cierra por un bache', () => {
+  const c = crearCoordinadorDePrecarga(reloj().temporizador);
+  const vistos: boolean[] = [];
+  c.suscribir((e) => vistos.push(e.precargaLiberada));
+  assert.equal(c.estado().precargaLiberada, false);
+  c.nuevoActivo();
+  c.lecturaDelActivo({ currentTime: 0, bufferedPosition: 10, duration: 30, cargando: false, reproduciendo: false });
+  assert.equal(c.estado().precargaLiberada, false, 'aun no reproduce');
+  c.lecturaDelActivo({ currentTime: 0.3, bufferedPosition: 10, duration: 30, cargando: false, reproduciendo: true });
+  assert.equal(c.estado().precargaLiberada, true);
+  c.lecturaDelActivo({ currentTime: 0.6, bufferedPosition: 0.6, duration: 30, cargando: true, reproduciendo: false });
+  assert.equal(c.estado().precargaLiberada, true, 'un bache no relanza la espera');
+  c.sinActivo();
+  assert.equal(c.estado().precargaLiberada, false);
+  c.nuevoActivo();
+  assert.equal(c.estado().precargaLiberada, false);
+  assert.deepEqual(vistos.filter((v, i) => i === 0 || v !== vistos[i - 1]), [false, true, false]);
+});
+
 /*
   Cableado: se mira el CODIGO FUENTE, como el resto de pruebas de componentes.
   Lo que no se puede perder es que el muro use esta ventana, que la telemetria
@@ -208,6 +280,17 @@ test('el muro usa la ventana nueva y reparte el buffer con el coordinador', () =
   assert.match(feed, /coordinadorDePrecarga=\{ES_WEB \? undefined : coordinador\}/);
   assert.match(feed, /onMomentumScrollEnd=\{coordinador\.finDeInercia\}/);
   assert.match(feed, /drawDistance=\{ES_WEB \? altoDePagina : altoDePagina \* 2\}/);
+});
+
+test('la precarga nativa escucha al coordinador del muro y el activo le dice si reproduce', () => {
+  const feed = leer('components/FeedVerticalDeVideos.tsx');
+  assert.match(feed, /usePrecargaDeVideos\(feed\.items, indiceActivo, activo, ES_WEB \? 1 : VECINOS_ADELANTE, coordinador\)/);
+  const hook = leer('hooks/usePrecargaDeVideos.ts');
+  assert.match(hook, /precargaLiberada/);
+  assert.match(hook, /cola\.actualizar\(urls, \{ enEspera \}\)/);
+  const reproductor = leer('components/VideoPlayer.tsx');
+  assert.match(reproductor, /reproduciendo = player\.playing/);
+  assert.match(reproductor, /useEventListener\(player, 'playingChange', \(\) => \{\s*if \(!reportaBuffer\.current\) return;/);
 });
 
 test('el reproductor nace con su perfil y lo cambia en caliente', () => {

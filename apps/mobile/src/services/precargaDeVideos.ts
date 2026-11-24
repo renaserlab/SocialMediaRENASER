@@ -191,8 +191,15 @@ const colaNativa = crearColaNativa();
 let precargadoresCreados = 0;
 
 export type Precargador = {
-  /** Deja precargadas exactamente estas URLs: cancela lo que sobra, pide lo que falta. */
-  actualizar: (urls: readonly string[]) => void;
+  /**
+   * Deja precargadas exactamente estas URLs: cancela lo que sobra, pide lo que
+   * falta. Con `enEspera`, cancela todo lo que este bajando y no pide nada:
+   * el video que se acaba de poner delante esta arrancando y la precarga no
+   * debe competir con el por la red (ver `activoArrancoConColchon` en
+   * `lib/precargaDeVideos.ts`). Lo que ya quedo en cache se recuerda; lo
+   * cancelado a medias se vuelve a pedir cuando se suelte la espera.
+   */
+  actualizar: (urls: readonly string[], opciones?: { enEspera?: boolean }) => void;
   /** Cancela todo lo que pidio ESTE precargador (no lo de otros feeds). */
   detener: () => void;
 };
@@ -244,15 +251,17 @@ export function crearPrecargador(
   };
 
   return {
-    actualizar(urls) {
+    actualizar(urls, opciones = {}) {
       if (!nativo) return;
+      const enEspera = opciones.enEspera === true;
       const deseadas = new Set(urls);
       for (const url of [...enCurso.keys()]) {
-        if (!deseadas.has(url)) cancelar(url);
+        if (enEspera || !deseadas.has(url)) cancelar(url);
       }
       for (const url of [...listas]) {
         if (!deseadas.has(url)) listas.delete(url);
       }
+      if (enEspera) return;
       for (const url of urls) {
         if (enCurso.has(url) || listas.has(url)) continue;
         const pedido = ++siguientePedido;

@@ -17,7 +17,9 @@
  *    `bufferOptions` al instante en Android e iOS), sin recrearse.
  *  - Mientras el activo va justo de buffer, o mientras el dedo arrastra la
  *    lista, los vecinos se quedan en el MINIMO: no sueltan lo que ya tienen,
- *    pero dejan de pedir mas.
+ *    pero dejan de pedir mas. Todos MENOS EL SIGUIENTE (+1): ese nunca baja
+ *    de un vecino, y con el activo holgado sube a `BUFFER_SIGUIENTE` (ver
+ *    alli por que).
  *
  * Y la ventana pasa de N-1..N+1 a N-1..N+2: cuatro reproductores como mucho
  * (ver `MAX_REPRODUCTORES`), que es el techo que aguantan bien los
@@ -59,6 +61,46 @@ export const BUFFER_VECINO: PerfilDeBuffer = {
 };
 
 /**
+ * El SIGUIENTE (+1) con el activo holgado: el mismo tiempo que un vecino, pero
+ * sin tope de bytes pequeno.
+ *
+ * POR QUE (medido en el emulador con el APK 88, noviembre 2026). Al deslizar
+ * habia un corte al iniciar CADA video: se quedaba el primer fotograma quieto
+ * y sin sonido hasta 1,2-1,6 s con la red del PC, y varios segundos con datos.
+ * Dos causas, y las dos dejaban al siguiente SIN ESTAR LISTO cuando llegaba:
+ *
+ *  1. Los MP4 que sube la app de Android NO estan intercalados: todo el video
+ *     primero y todo el audio al final del archivo (medido con ffprobe: en
+ *     uno de 18 MB, el primer paquete de audio esta en el byte 17,6 MB).
+ *     ExoPlayer lee el video seguido hasta ir 10 MB por delante del audio
+ *     (`MAXIMUM_READ_AHEAD_BYTES_STREAM` de su `Mp4Extractor`) y solo entonces
+ *     salta a buscar el audio. Con un tope de 1-1,5 MB se para ANTES de llegar
+ *     a ningun audio: tiene imagen (por eso se ve el primer fotograma) pero 0 s
+ *     reproducibles, y se queda en `loading` para siempre (el logcat lo dice:
+ *     «Target buffer size reached with less than 500ms of buffered media
+ *     data», mas de 1600 veces en dos minutos). Al volverse activo tenia que
+ *     bajar el resto en ese momento: ese era el corte.
+ *  2. Aunque el video estuviera bien hecho, al estrenarse cada activo los
+ *     vecinos bajaban todos al MINIMO (0,5 s): si se deslizaba rapido, el
+ *     siguiente llegaba con medio segundo, arrancaba y se quedaba sin datos.
+ *
+ * Por eso el tope que manda aqui es el TIEMPO (2 s, igual que un vecino): con
+ * un MP4 normal se para a los 2 s, como antes. El tope de bytes es el del
+ * activo, solo como techo de memoria, para que uno sin intercalar pueda llegar
+ * a su audio. Esos bytes no se tiran: son los mismos que el activo tendria que
+ * bajar antes de poder arrancar, y el siguiente es casi siempre el que se ve.
+ *
+ * Solo con el activo HOLGADO: con un MP4 sin intercalar son hasta ~10 MB, y
+ * bajarlos mientras el que se ve va justo era quitarle la red (en el emulador
+ * se vio un video ya arrancado quedarse 2 s sin datos por eso). Mientras va
+ * justo, el siguiente se queda en `BUFFER_VECINO`, nunca menos.
+ */
+export const BUFFER_SIGUIENTE: PerfilDeBuffer = {
+  preferredForwardBufferDuration: BUFFER_VECINO.preferredForwardBufferDuration,
+  maxBufferBytes: BUFFER_ACTIVO.maxBufferBytes,
+};
+
+/**
  * Un vecino en espera: lo minimo para no perder el primer fotograma.
  *
  * Medio segundo NO es arbitrario: es el suelo que ExoPlayer aplica de todas
@@ -89,22 +131,30 @@ export type EstadoDePrecarga = {
   arrastrando: boolean;
   /** Al activo le queda poco por delante (o aun no ha arrancado). */
   activoConPocoBuffer: boolean;
+  /**
+   * El activo ya arranco con colchon: la precarga nativa del primer MB de los
+   * siguientes puede empezar (ver `activoArrancoConColchon`).
+   */
+  precargaLiberada: boolean;
 };
 
 /**
  * El perfil de buffer de un reproductor segun su distancia al activo.
  *
  * - 0: el activo, siempre lo maximo.
- * - El activo va justo: TODOS los vecinos al minimo. Es cuando cada byte que
+ * - +1: el SIGUIENTE nunca baja de `BUFFER_VECINO`, ni arrastrando ni con el
+ *   activo justo: es a donde va el dedo casi siempre, y bajarlo al minimo era
+ *   justo lo que hacia que llegara sin estar listo. Con el activo holgado,
+ *   `BUFFER_SIGUIENTE` (ver alli por que).
+ * - El activo va justo: los DEMAS vecinos al minimo. Es cuando cada byte que
  *   se lleva un vecino se nota como un tiron en el que se ve.
- * - Arrastrando: al minimo todos menos el SIGUIENTE (+1), que es a donde va el
- *   dedo casi siempre; frenarlo justo ahora retrasaria su arranque.
+ * - Arrastrando: los demas vecinos al minimo.
  * - Si no, el perfil de vecino.
  */
 export function perfilDeBuffer(distancia: number, estado: EstadoDePrecarga): PerfilDeBuffer {
   if (distancia === 0) return BUFFER_ACTIVO;
-  if (estado.activoConPocoBuffer) return BUFFER_MINIMO;
-  if (estado.arrastrando && distancia !== 1) return BUFFER_MINIMO;
+  if (distancia === 1) return estado.activoConPocoBuffer ? BUFFER_VECINO : BUFFER_SIGUIENTE;
+  if (estado.activoConPocoBuffer || estado.arrastrando) return BUFFER_MINIMO;
   return BUFFER_VECINO;
 }
 
@@ -127,6 +177,8 @@ export type LecturaDelActivo = {
   duration: number;
   /** El reproductor dice que esta esperando datos (`status === 'loading'`). */
   cargando: boolean;
+  /** El reproductor esta reproduciendo de verdad (`player.playing`). */
+  reproduciendo?: boolean;
 };
 
 /**
@@ -147,6 +199,35 @@ export function activoConPocoBuffer(lectura: LecturaDelActivo, antes: boolean): 
   const porDelante = bufferedPosition - (Number.isFinite(currentTime) ? currentTime : 0);
   if (antes) return porDelante < BUFFER_HOLGADO_S;
   return porDelante < POCO_BUFFER_S;
+}
+
+/**
+ * Colchon que tiene que tener el activo, ya reproduciendo, antes de que la
+ * precarga nativa empiece a pedir el primer MB de los siguientes.
+ */
+export const COLCHON_PARA_PRECARGAR_S = 3;
+
+/**
+ * ¿Ya puede empezar la precarga nativa? Solo cuando el activo REPRODUCE, no
+ * espera datos y tiene colchon: `COLCHON_PARA_PRECARGAR_S` por delante, el
+ * video entero descargado, o esos mismos segundos ya reproducidos (por si su
+ * tope de bytes no le deja juntar tanto por delante: a esas alturas el
+ * arranque ya paso).
+ *
+ * POR QUE. Antes la precarga lanzaba el primer MB de los siguientes en el
+ * mismo instante en que cambiaba el indice, es decir, compitiendo por la red
+ * con el arranque del video que se acaba de poner delante. TikTok hace lo
+ * contrario (Dashlet, NSDI'23, §2.2): la precarga nunca compite con el
+ * arranque. Aqui, igual.
+ */
+export function activoArrancoConColchon(lectura: LecturaDelActivo): boolean {
+  if (lectura.cargando || lectura.reproduciendo !== true) return false;
+  const { currentTime, bufferedPosition, duration } = lectura;
+  const ahora = Number.isFinite(currentTime) ? currentTime : 0;
+  if (ahora >= COLCHON_PARA_PRECARGAR_S) return true;
+  if (!Number.isFinite(bufferedPosition) || bufferedPosition < 0) return false;
+  if (Number.isFinite(duration) && duration > 0 && bufferedPosition >= duration - 0.25) return true;
+  return bufferedPosition - ahora >= COLCHON_PARA_PRECARGAR_S;
 }
 
 /** Cuanto se espera, tras soltar el dedo, a que empiece la inercia. */
@@ -171,7 +252,7 @@ const temporizadorReal: Temporizador = {
  * reproductor se suscribe y ajusta su `bufferOptions` directamente, sin render.
  */
 export function crearCoordinadorDePrecarga(temporizador: Temporizador = temporizadorReal) {
-  let estado: EstadoDePrecarga = { arrastrando: false, activoConPocoBuffer: false };
+  let estado: EstadoDePrecarga = { arrastrando: false, activoConPocoBuffer: false, precargaLiberada: false };
   const oyentes = new Set<(estado: EstadoDePrecarga) => void>();
   let finPendiente: unknown = null;
 
@@ -179,7 +260,8 @@ export function crearCoordinadorDePrecarga(temporizador: Temporizador = temporiz
     const siguiente = { ...estado, ...parcial };
     if (
       siguiente.arrastrando === estado.arrastrando &&
-      siguiente.activoConPocoBuffer === estado.activoConPocoBuffer
+      siguiente.activoConPocoBuffer === estado.activoConPocoBuffer &&
+      siguiente.precargaLiberada === estado.precargaLiberada
     ) {
       return;
     }
@@ -229,18 +311,26 @@ export function crearCoordinadorDePrecarga(temporizador: Temporizador = temporiz
     },
     /**
      * Hay un activo nuevo: aun no ha arrancado, asi que va justo por
-     * definicion hasta que diga lo contrario con su primer aviso de avance.
+     * definicion hasta que diga lo contrario con su primer aviso de avance, y
+     * la precarga nativa espera a que arranque.
      */
     nuevoActivo() {
-      cambiar({ activoConPocoBuffer: true });
+      cambiar({ activoConPocoBuffer: true, precargaLiberada: false });
     },
-    /** Un aviso del activo (avance o cambio de estado). */
+    /**
+     * Un aviso del activo (avance o cambio de estado). La precarga, una vez
+     * liberada, no se vuelve a frenar con este activo: un bache de un momento
+     * no debe cancelar y relanzar las descargas de los siguientes.
+     */
     lecturaDelActivo(lectura: LecturaDelActivo) {
-      cambiar({ activoConPocoBuffer: activoConPocoBuffer(lectura, estado.activoConPocoBuffer) });
+      cambiar({
+        activoConPocoBuffer: activoConPocoBuffer(lectura, estado.activoConPocoBuffer),
+        precargaLiberada: estado.precargaLiberada || activoArrancoConColchon(lectura),
+      });
     },
     /** El activo se fue (salir del muro): nadie a quien dejar sitio. */
     sinActivo() {
-      cambiar({ activoConPocoBuffer: false });
+      cambiar({ activoConPocoBuffer: false, precargaLiberada: false });
     },
   };
 }

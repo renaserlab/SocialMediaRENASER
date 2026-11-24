@@ -112,11 +112,6 @@ export function FeedVerticalDeVideos({
   const [indiceActivo, setIndiceActivo] = useState(0);
   const [refrescando, setRefrescando] = useState(false);
   const insets = useSafeAreaInsets();
-  // Primer MB de los 5 siguientes en la cache del reproductor. Los
-  // `VECINOS_ADELANTE` ya tienen reproductor montado (`preload` mas abajo), asi
-  // que la precarga nativa empieza despues de ellos. En la web no hay vecinos
-  // extra, pero alli el hook no hace nada.
-  usePrecargaDeVideos(feed.items, indiceActivo, activo, ES_WEB ? 1 : VECINOS_ADELANTE);
 
   /*
     CADA PAGINA MIDE UNA PANTALLA. Pero ¿que pantalla?
@@ -160,6 +155,12 @@ export function FeedVerticalDeVideos({
     cada reproductor se entera por su cuenta.
   */
   const coordinador = useRef(crearCoordinadorDePrecarga()).current;
+  // Primer MB de los 5 siguientes en la cache del reproductor. Los
+  // `VECINOS_ADELANTE` ya tienen reproductor montado (`preload` mas abajo), asi
+  // que la precarga nativa empieza despues de ellos, y solo cuando el activo ya
+  // arranco con colchon (el coordinador lo dice). En la web no hay vecinos
+  // extra, pero alli el hook no hace nada.
+  usePrecargaDeVideos(feed.items, indiceActivo, activo, ES_WEB ? 1 : VECINOS_ADELANTE, coordinador);
   /*
     El dedo empieza a mover la lista. Es tambien el cero de la medicion de
     «deslizar al siguiente», que no cambia: se sigue llamando igual y en el
