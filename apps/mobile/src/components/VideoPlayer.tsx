@@ -330,8 +330,13 @@ export function VideoPlayer({
   const leerBuffer = (cargando: boolean, currentTime?: number, bufferedPosition?: number) => {
     const coordinador = reportaBuffer.current;
     if (!coordinador) return;
+    let reproduciendo = false;
+    safely(() => {
+      reproduciendo = player.playing;
+    });
     coordinador.lecturaDelActivo({
       cargando,
+      reproduciendo,
       currentTime: currentTime ?? readNumber(() => player.currentTime),
       bufferedPosition: bufferedPosition ?? readNumber(() => player.bufferedPosition),
       duration: readNumber(() => player.duration),
@@ -348,6 +353,17 @@ export function VideoPlayer({
   useEventListener(player, 'statusChange', ({ status }) => {
     if (!reportaBuffer.current) return;
     leerBuffer(status === 'loading');
+  });
+  // Empezar a reproducir tambien es una lectura: es lo que puede liberar la
+  // precarga de los siguientes (`activoArrancoConColchon`) sin esperar al
+  // siguiente aviso de avance.
+  useEventListener(player, 'playingChange', () => {
+    if (!reportaBuffer.current) return;
+    let cargando = false;
+    safely(() => {
+      cargando = player.status === 'loading';
+    });
+    leerBuffer(cargando);
   });
 
   /*

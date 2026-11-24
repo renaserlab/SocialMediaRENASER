@@ -50,8 +50,10 @@ VIDEO
 SHORTS
   páginas de 6 (cursor keyset + offset de respaldo)
   ventana de reproductores: N-1, N, N+1, N+2 (máx. 4; web N-1..N+1); el resto, posters
-  buffer: activo 15 s / 12 MB; vecinos 2 s / 1,5 MB; mínimo 0,5 s / 1 MB al arrastrar
-  o con el activo justo de buffer (lib/precargaDeVideos.ts)
+  buffer: activo 15 s / 12 MB; siguiente 2 s / 12 MB (2 s / 1,5 MB con el activo
+  justo); demás vecinos 2 s / 1,5 MB; mínimo 0,5 s / 1 MB al arrastrar o con el
+  activo justo de buffer (lib/precargaDeVideos.ts)
+  precarga nativa del primer MB: solo con el activo ya reproduciendo con colchón
   expo-video useCaching para MP4 (segundo visionado sin red)
 ```
 
@@ -308,6 +310,29 @@ la ventana y el buffer de cada reproductor del muro de Inicio:
   menos el siguiente bajan a 0,5 s / 1 MB. Mientras el activo tiene menos de
   2 s por delante (se suelta al pasar de 5 s, o si ya está descargado entero),
   todos los vecinos bajan a ese mínimo.
+
+**Corrección (24-11-2026, APK 88).** Había un corte al iniciar cada video al
+deslizar: el primer fotograma quieto y sin sonido. Medido en el emulador con
+el APK 88 y un bundle instrumentado:
+
+- Los MP4 que sube la app de Android **no están intercalados** (todo el video
+  y después todo el audio; en uno de 18 MB el primer audio está en el byte
+  17,6 MB). ExoPlayer lee hasta 10 MB de video antes de saltar al audio, así
+  que con el tope de 1-1,5 MB de un vecino el siguiente se quedaba en
+  `loading` con 0 s reproducibles («Target buffer size reached with less than
+  500ms», más de mil avisos por sesión) y, al volverse activo, tardaba
+  1,2-2,7 s en arrancar con la red del PC (y hasta >12 s con la caché fría).
+- Al estrenarse cada activo, TODOS los vecinos bajaban al mínimo, también el
+  siguiente.
+
+Ahora el siguiente (+1) nunca baja de 2 s / 1,5 MB y, con el activo holgado,
+pide 2 s con techo de 12 MB (el tiempo manda en un MP4 normal; el techo deja
+llegar al audio de uno sin intercalar). La precarga nativa del primer MB no
+pide nada hasta que el activo reproduce con 3 s de colchón (o 3 s ya
+reproducidos, o descargado entero), y al deslizar cancela lo que estuviera
+bajando. **Pendiente de fondo (servidor):** remuxar los MP4 con
+`-movflags +faststart` intercalado al subirlos y en los ya publicados; con eso
+el siguiente vuelve a necesitar solo ~1 MB.
 
 La telemetría `metricas_de_video` no cambia (mismo `inicioDeGesto` al empezar
 el arrastre y mismos tramos), así que antes/después se compara con las

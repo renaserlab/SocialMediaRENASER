@@ -123,6 +123,29 @@ describe('sePuedePrecargar y esModuloDePrecarga', () => {
 });
 
 describe('crearPrecargador', () => {
+  it('en espera (el activo arrancando) cancela lo que bajaba y no pide nada', async () => {
+    const n = nativoFalso();
+    const cola = crearPrecargador(n.modulo);
+    cola.actualizar(['a', 'b']);
+    await n.resolver('a', true);
+    cola.actualizar(['a', 'b', 'c'], { enEspera: true });
+    assert.deepEqual(n.pedidas(), ['a', 'b'], 'en espera no se pide nada nuevo');
+    assert.deepEqual(n.canceladas(), ['b'], 'lo que bajaba se cancela');
+    // Al soltarse, se retoma lo que faltaba; lo que ya estaba en cache, no.
+    cola.actualizar(['a', 'b', 'c']);
+    assert.deepEqual(n.pedidas(), ['a', 'b', 'b', 'c']);
+  });
+
+  it('en espera tambien olvida lo que sale de la ventana', async () => {
+    const n = nativoFalso();
+    const cola = crearPrecargador(n.modulo);
+    cola.actualizar(['a']);
+    await n.resolver('a', true);
+    cola.actualizar(['b'], { enEspera: true });
+    cola.actualizar(['a', 'b']);
+    assert.deepEqual(n.pedidas(), ['a', 'a', 'b'], 'a salio de la ventana: al volver se pide otra vez');
+  });
+
   it('pide 1 MB de cada URL, en el orden dado', () => {
     const n = nativoFalso();
     const cola = crearPrecargador(n.modulo);

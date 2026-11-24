@@ -4,6 +4,7 @@ import { requireOptionalNativeModule } from 'expo';
 
 import { reelNecesitaUrls } from '@/feed/urlsDeMedios';
 import { registrarMuestraDeRed } from '@/lib/medidorDeRed';
+import type { CoordinadorDePrecarga } from '@/lib/precargaDeVideos';
 import {
   crearPrecargador,
   esModuloDePrecarga,
@@ -39,12 +40,20 @@ function moduloDePrecarga(): ModuloNativoDePrecarga | null {
  *
  * `conReproductor`: cuantos de los siguientes ya tienen reproductor montado y
  * se bufferizan solos (ver `preload` en el feed).
+ *
+ * `coordinador`: el del muro. Con el, nada se pide hasta que el video que se
+ * ve arranca con colchon (`precargaLiberada`), y al deslizar se cancela lo que
+ * estuviera bajando: la precarga nunca compite con el arranque del activo. Se
+ * escucha FUERA de React, igual que los reproductores: liberar la precarga no
+ * redibuja el muro. Sin coordinador, se pide al instante, como antes (en la
+ * web no hay modulo nativo y el hook no hace nada de todos modos).
  */
 export function usePrecargaDeVideos(
   items: readonly VideoDelFeed[],
   indiceActivo: number,
   activo: boolean,
   conReproductor: number,
+  coordinador?: CoordinadorDePrecarga,
 ): void {
   const precargador = useRef<Precargador | null>(null);
   if (precargador.current === null) {
@@ -63,10 +72,22 @@ export function usePrecargaDeVideos(
       cola.detener();
       return;
     }
-    cola.actualizar(
-      urlsAPrecargar(items, indiceActivo, { conReproductor, necesitaUrls: reelNecesitaUrls }),
-    );
-  }, [items, indiceActivo, activo, conReproductor]);
+    const urls = urlsAPrecargar(items, indiceActivo, { conReproductor, necesitaUrls: reelNecesitaUrls });
+    const aplicar = () => {
+      const enEspera = coordinador ? !coordinador.estado().precargaLiberada : false;
+      cola.actualizar(urls, { enEspera });
+    };
+    aplicar();
+    if (!coordinador) return;
+    // Cualquier cambio del muro avisa; `actualizar` es idempotente, asi que
+    // repetirlo con lo mismo no pide nada dos veces.
+    let liberada = coordinador.estado().precargaLiberada;
+    return coordinador.suscribir((estado) => {
+      if (estado.precargaLiberada === liberada) return;
+      liberada = estado.precargaLiberada;
+      aplicar();
+    });
+  }, [items, indiceActivo, activo, conReproductor, coordinador]);
 
   useEffect(() => () => precargador.current?.detener(), []);
 }
