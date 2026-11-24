@@ -184,6 +184,42 @@ type Activo = {
   primero: boolean;
 };
 
+/** Topes de cada texto del equipo: los mismos que acepta la API (`schemas.py`). */
+const TOPES_DEL_CONTEXTO = { version_app: 32, build: 32, modelo: 64, sistema: 32, red: 16 } as const;
+
+/**
+ * Un texto del equipo tal como lo acepta la API: solo letras, digitos y
+ * `_ .,()+/-`, recortado a su tope; vacio pasa a `null`.
+ *
+ * POR QUE. La API rechaza el lote ENTERO (422) si un solo texto trae un
+ * caracter fuera de ese juego, y eso es justo lo que pasaba en Android: ni una
+ * fila de un telefono Android llego a `metricas_de_video`. Un dato del equipo
+ * raro (un fabricante que pone `:` o `#` en el modelo) no puede costar la
+ * medicion de toda la sesion. Se limpia aqui, que es puro y se prueba en
+ * Node, y no en cada sitio que lee el equipo.
+ */
+export function textoDelEquipo(valor: unknown, maximo: number): string | null {
+  if (typeof valor !== 'string') return null;
+  const limpio = valor
+    .replace(/[^A-Za-z0-9_ .,()+/-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximo)
+    .trim();
+  return limpio.length > 0 ? limpio : null;
+}
+
+function contextoLimpio(c: ContextoDelEquipo): ContextoDelEquipo {
+  return {
+    plataforma: c.plataforma === 'ios' || c.plataforma === 'android' ? c.plataforma : 'web',
+    version_app: textoDelEquipo(c.version_app, TOPES_DEL_CONTEXTO.version_app),
+    build: textoDelEquipo(c.build, TOPES_DEL_CONTEXTO.build),
+    modelo: textoDelEquipo(c.modelo, TOPES_DEL_CONTEXTO.modelo),
+    sistema: textoDelEquipo(c.sistema, TOPES_DEL_CONTEXTO.sistema),
+    red: textoDelEquipo(c.red, TOPES_DEL_CONTEXTO.red),
+  };
+}
+
 /** Un valor en ms acotado a lo que tiene sentido, o `null`. */
 function acotar(ms: number): number | null {
   if (!Number.isFinite(ms) || ms < 0 || ms > MS_MAXIMO) return null;
@@ -283,7 +319,7 @@ export function crearMedicion(deps: DependenciasDeMedicion): Medicion {
   function construirLote(): LoteDeMedicion {
     // El que se esta viendo al enviar tambien cuenta, tal como vaya.
     const todos = activo && tramos.length < tope ? [...tramos, tramoDe(activo)] : [...tramos];
-    return { sesion, contexto: deps.contexto(), hitos: { ...hitos }, tramos: todos };
+    return { sesion, contexto: contextoLimpio(deps.contexto()), hitos: { ...hitos }, tramos: todos };
   }
 
   function enviar(): void {
