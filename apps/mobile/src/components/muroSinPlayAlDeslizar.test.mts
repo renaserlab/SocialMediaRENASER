@@ -34,9 +34,10 @@ test('el video del muro de Inicio esconde el play mientras se prepara', () => {
 
 test('con hidePlayButton, un video sin arrancar solo enseña la portada y el play vuelve solo tras pausar', () => {
   const fuente = leer('VideoPlayer.tsx');
-  assert.match(fuente, /\(!started && hidePlayButton\) \|\|/, 'sin arrancar: solo portada, sin botón');
-  // La misma capa de portada sigue hasta que reproduce de verdad: sin
-  // desmontarse ni volver a fundirse (el parpadeo a negro al llegar al video).
-  assert.match(fuente, /hidePlayButton && !arranco/, 'en el muro la portada sigue hasta que reproduce');
+  // En el muro, una sola capa de portada que se va con el primer fotograma
+  // (pintado en pausa en el vecino): al llegar al video no se cambia nada, ni
+  // se espera al aviso de «reproduciendo» con la imagen quieta encima.
+  assert.match(fuente, /portadaVisible = hidePlayButton \? !firstFrame :/, 'sin arrancar: solo portada, sin botón');
+  assert.doesNotMatch(fuente, /!arranco/, 'la portada no espera a que reproduzca');
   assert.match(fuente, /!playing && \(!hidePlayButton \|\| userPaused\)/, 'el círculo vuelve solo si la persona pausa');
 });

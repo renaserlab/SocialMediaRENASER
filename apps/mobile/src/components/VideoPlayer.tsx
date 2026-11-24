@@ -225,17 +225,6 @@ export function VideoPlayer({
     descargaba lo suficiente para empezar.
   */
   const [firstFrame, setFirstFrame] = useState(false);
-  /*
-    El reproductor ya reprodujo alguna vez (`playingChange` con `true`).
-
-    POR QUE. En el muro, al llegar a un video, la portada se quitaba en cuanto
-    pasaba a «iniciado» si ya tenia primer fotograma, y en Android la
-    superficie de un reproductor que aun no arranca puede verse NEGRA un
-    instante: el parpadeo a negro al empezar cada video. En el muro la portada
-    se queda hasta que de verdad reproduce; lo que se ve mientras tanto es la
-    misma imagen quieta que ya habia.
-  */
-  const [arranco, setArranco] = useState(false);
 
   /*
     APAGAR ANTES DE QUE SE LO LLEVEN. La unica pausa que llega a tiempo.
@@ -402,7 +391,6 @@ export function VideoPlayer({
 
   useEventListener(player, 'playingChange', ({ isPlaying }) => {
     setPlaying(isPlaying);
-    if (isPlaying) setArranco(true);
     if (isPlaying && medida.current) medicionDeVideo.reproduciendo(medida.current.id);
   });
   useEventListener(player, 'statusChange', ({ status }) => {
@@ -552,13 +540,27 @@ export function VideoPlayer({
       : poster;
 
   /*
-    Portada encima del video:
-    - esperando turno en el muro (`hidePlayButton` sin iniciar);
-    - iniciado sin primer fotograma todavia;
-    - y en el muro, ademas, hasta que de verdad reproduce (ver `arranco`).
+    Portada encima del video.
+
+    - En el MURO (`hidePlayButton`): solo hasta que el reproductor pinta su
+      primer fotograma, que en el vecino precargado ocurre EN PAUSA, antes de
+      llegar a el. Desde ahi lo que se ve al deslizar es el propio video
+      quieto en su primer fotograma, y al volverse activo empieza a moverse
+      desde esa misma imagen: en el momento de llegar no se cambia nada.
+
+      POR QUE (Luis, APK 88 con #63: «sigue lo del inicio raro»). Con #63 la
+      portada se quedaba encima hasta `playingChange: true`, y ese aviso
+      cruza al JS y vuelve en un render: el audio ya sonaba y el video ya
+      avanzaba por debajo mientras se veia la imagen quieta, y luego saltaba.
+      Ademas la portada es el primer fotograma NO NEGRO (ver
+      `comandos_de_poster` en la API), no el 0: en un video que abre con
+      fundido, portada y video no coinciden y el cambio se ve siempre. Lo que
+      #63 arreglo de verdad (una sola capa, sin desmontar una portada y fundir
+      otra con el video aun sin imagen) se mantiene.
+    - Fuera del muro: iniciado y sin primer fotograma todavia (la portada en
+      espera la pinta la capa pulsable de abajo, con su boton).
   */
-  const portadaVisible =
-    (!started && hidePlayButton) || (started && (!firstFrame || (hidePlayButton && !arranco)));
+  const portadaVisible = hidePlayButton ? !firstFrame : started && !firstFrame;
 
   return (
     <View style={[styles.wrap, style]}>

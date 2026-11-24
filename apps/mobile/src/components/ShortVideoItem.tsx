@@ -308,6 +308,14 @@ function ShortVideoItemBase({
     <View style={[styles.container, snapToPage, { height }]}>
       {active || preload ? (
         <VideoPlayer
+          /*
+            Un reproductor por FUENTE. Si la URL cambia (renovar una firma de
+            S3, o FlashList reciclando la celda para otro video), el
+            reproductor nativo se crea de nuevo igual, pero sin la clave el
+            estado de la celda (primer fotograma ya pintado) seria el del
+            video anterior: no habria portada mientras carga el nuevo.
+          */
+          key={short.uri}
           uri={short.uri}
           poster={short.posterUrl ? { uri: short.posterUrl } : undefined}
           posterCacheKey={short.posterPath}

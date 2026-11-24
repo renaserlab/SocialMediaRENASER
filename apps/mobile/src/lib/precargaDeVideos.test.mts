@@ -64,7 +64,7 @@ test('el activo pide 15 s / 12 MB, como antes, pase lo que pase', () => {
 });
 
 test('los vecinos lejanos piden poco: unos 2 s y 1,5 MB', () => {
-  for (const d of [-1, 2]) assert.equal(perfilDeBuffer(d, LIBRE), BUFFER_VECINO);
+  assert.equal(perfilDeBuffer(2, LIBRE), BUFFER_VECINO);
   assert.ok(BUFFER_VECINO.preferredForwardBufferDuration <= 2);
   assert.ok(BUFFER_VECINO.maxBufferBytes <= 1.5 * 1024 * 1024);
 });
@@ -74,12 +74,14 @@ test('los vecinos lejanos piden poco: unos 2 s y 1,5 MB', () => {
   listo: lo frenaban al minimo al estrenarse cada activo, y su tope de bytes no
   dejaba a ExoPlayer llegar al audio de los MP4 sin intercalar.
 */
-test('el siguiente (+1) nunca baja de un vecino: ni con el activo justo, ni arrastrando', () => {
+test('el siguiente (+1) y el anterior (-1) nunca bajan de un vecino: ni con el activo justo, ni arrastrando', () => {
   for (const estado of ESTADOS) {
-    const perfil = perfilDeBuffer(1, estado);
-    assert.equal(perfil, estado.activoConPocoBuffer ? BUFFER_VECINO : BUFFER_SIGUIENTE);
-    assert.ok(perfil.preferredForwardBufferDuration >= BUFFER_VECINO.preferredForwardBufferDuration);
-    assert.ok(perfil.maxBufferBytes >= BUFFER_VECINO.maxBufferBytes);
+    for (const d of [1, -1]) {
+      const perfil = perfilDeBuffer(d, estado);
+      assert.equal(perfil, estado.activoConPocoBuffer ? BUFFER_VECINO : BUFFER_SIGUIENTE);
+      assert.ok(perfil.preferredForwardBufferDuration >= BUFFER_VECINO.preferredForwardBufferDuration);
+      assert.ok(perfil.maxBufferBytes >= BUFFER_VECINO.maxBufferBytes);
+    }
   }
 });
 
@@ -96,15 +98,16 @@ test('el siguiente manda por tiempo y su tope de bytes deja llegar al audio de u
 
 test('con el activo justo de buffer, los demas vecinos al minimo y el siguiente se queda en vecino', () => {
   const estado = { arrastrando: false, activoConPocoBuffer: true, precargaLiberada: false };
-  for (const d of [-1, 2]) assert.equal(perfilDeBuffer(d, estado), BUFFER_MINIMO);
-  // No se lleva los ~10 MB de un MP4 sin intercalar mientras el que se ve va justo.
+  assert.equal(perfilDeBuffer(2, estado), BUFFER_MINIMO);
+  // No se llevan los ~10 MB de un MP4 sin intercalar mientras el que se ve va justo.
   assert.equal(perfilDeBuffer(1, estado), BUFFER_VECINO);
+  assert.equal(perfilDeBuffer(-1, estado), BUFFER_VECINO);
 });
 
-test('arrastrando, se frenan todos los vecinos menos el siguiente', () => {
+test('arrastrando, se frenan todos los vecinos menos los pegados (+1 y -1)', () => {
   const estado = { arrastrando: true, activoConPocoBuffer: false, precargaLiberada: true };
   assert.equal(perfilDeBuffer(1, estado), BUFFER_SIGUIENTE);
-  assert.equal(perfilDeBuffer(-1, estado), BUFFER_MINIMO);
+  assert.equal(perfilDeBuffer(-1, estado), BUFFER_SIGUIENTE);
   assert.equal(perfilDeBuffer(2, estado), BUFFER_MINIMO);
 });
 

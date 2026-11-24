@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-import { elegirFuenteDeVideo } from '@/lib/elegirFuenteDeVideo';
+import { elegirFuenteDeVideo, elegirFuenteDelMuro } from '@/lib/elegirFuenteDeVideo';
 import { crearMemoriaDeCalidad, type VarianteDeVideo } from '@/lib/elegirVariante';
 import { medicionDeRedActual } from '@/lib/medidorDeRed';
 
@@ -37,6 +37,22 @@ export function bestVideoSource(post: {
   variantes?: readonly VarianteDeVideo[];
 }): { uri: string; isStream: boolean; alto?: number } | null {
   return elegirFuenteDeVideo(post, Platform.OS !== 'web', (variantes) =>
+    memoriaDeCalidad.elegir(post.id, variantes, medicionDeRedActual()),
+  );
+}
+
+/**
+ * Igual que `bestVideoSource`, pero para el muro de Inicio: prefiere el MP4
+ * del feed al HLS (ver `elegirFuenteDelMuro` por que).
+ */
+export function fuenteDelMuro(post: {
+  id?: string;
+  streamUrl?: string;
+  mediaUrl?: string;
+  mediaPath?: string;
+  variantes?: readonly VarianteDeVideo[];
+}): { uri: string; isStream: boolean; alto?: number } | null {
+  return elegirFuenteDelMuro(post, Platform.OS !== 'web', (variantes) =>
     memoriaDeCalidad.elegir(post.id, variantes, medicionDeRedActual()),
   );
 }
