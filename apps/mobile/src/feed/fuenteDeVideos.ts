@@ -3,7 +3,7 @@ import { crearPrecargaDeInicio } from '@/feed/precargaDeInicio';
 import { reelNecesitaUrls, renovarUrls } from '@/feed/urlsDeMedios';
 import { PostRepository, resolveMediaUrls, type FeedKind } from '@/repositories/PostRepository';
 import { RecommendationRepository } from '@/repositories/RecommendationRepository';
-import { bestVideoSource } from '@/lib/videoSource';
+import { fuenteDelMuro } from '@/lib/videoSource';
 import { medicionDeVideo } from '@/lib/medicionDeVideoEnApp';
 import type { ReelItem } from '@/components/ShortVideoItem';
 import { useAppStore } from '@/store/useAppStore';
@@ -111,7 +111,8 @@ function sembrarReacciones(posts: Post[]): void {
 
 /** Publicacion con video → elemento del feed vertical. */
 export function aReel(post: Post): ReelItem | null {
-  const source = bestVideoSource(post);
+  // En el muro, el MP4 del feed antes que el HLS (ver `elegirFuenteDelMuro`).
+  const source = fuenteDelMuro(post);
   if (!source) return null;
   return {
     id: post.id,

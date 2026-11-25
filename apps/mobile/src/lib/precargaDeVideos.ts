@@ -17,9 +17,9 @@
  *    `bufferOptions` al instante en Android e iOS), sin recrearse.
  *  - Mientras el activo va justo de buffer, o mientras el dedo arrastra la
  *    lista, los vecinos se quedan en el MINIMO: no sueltan lo que ya tienen,
- *    pero dejan de pedir mas. Todos MENOS EL SIGUIENTE (+1): ese nunca baja
- *    de un vecino, y con el activo holgado sube a `BUFFER_SIGUIENTE` (ver
- *    alli por que).
+ *    pero dejan de pedir mas. Todos MENOS LOS PEGADOS (+1 y -1): esos nunca
+ *    bajan de un vecino, y con el activo holgado suben a `BUFFER_SIGUIENTE`
+ *    (ver alli por que).
  *
  * Y la ventana pasa de N-1..N+1 a N-1..N+2: cuatro reproductores como mucho
  * (ver `MAX_REPRODUCTORES`), que es el techo que aguantan bien los
@@ -142,10 +142,10 @@ export type EstadoDePrecarga = {
  * El perfil de buffer de un reproductor segun su distancia al activo.
  *
  * - 0: el activo, siempre lo maximo.
- * - +1: el SIGUIENTE nunca baja de `BUFFER_VECINO`, ni arrastrando ni con el
- *   activo justo: es a donde va el dedo casi siempre, y bajarlo al minimo era
- *   justo lo que hacia que llegara sin estar listo. Con el activo holgado,
- *   `BUFFER_SIGUIENTE` (ver alli por que).
+ * - +1 y -1: el SIGUIENTE y el ANTERIOR nunca bajan de `BUFFER_VECINO`, ni
+ *   arrastrando ni con el activo justo: son a donde va el dedo, y bajarlos al
+ *   minimo era justo lo que hacia que llegaran sin estar listos. Con el
+ *   activo holgado, `BUFFER_SIGUIENTE` (ver alli por que).
  * - El activo va justo: los DEMAS vecinos al minimo. Es cuando cada byte que
  *   se lleva un vecino se nota como un tiron en el que se ve.
  * - Arrastrando: los demas vecinos al minimo.
@@ -153,7 +153,25 @@ export type EstadoDePrecarga = {
  */
 export function perfilDeBuffer(distancia: number, estado: EstadoDePrecarga): PerfilDeBuffer {
   if (distancia === 0) return BUFFER_ACTIVO;
-  if (distancia === 1) return estado.activoConPocoBuffer ? BUFFER_VECINO : BUFFER_SIGUIENTE;
+  /*
+    El ANTERIOR (-1) sigue la misma regla que el siguiente.
+
+    POR QUE (Luis, APK 88: «cuando regreso a un video anterior demora, como si
+    volviera a descargar»). Al retroceder un video, el de dos mas atras entra
+    en la ventana con reproductor NUEVO y, como vecino, con 1-1,5 MB de tope
+    (o 1 MB con el activo justo, que es siempre al estrenarse). En los MP4 sin
+    intercalar que sube Android eso es quedarse antes del audio: imagen pero 0 s
+    reproducibles, exactamente el corte que #62 arreglo para el +1. Al volver
+    otra vez atras, ese video no estaba listo y bajaba todo al llegar.
+
+    No cuesta red en el caso comun: deslizando hacia adelante, el -1 es el que
+    se acaba de ver y ya tiene de sobra por delante (el perfil manda por
+    tiempo, 2 s, asi que no pide nada mas). Y retrocediendo, lo que pide suele
+    estar ya en la cache de disco del reproductor, porque ese video se vio.
+  */
+  if (distancia === 1 || distancia === -1) {
+    return estado.activoConPocoBuffer ? BUFFER_VECINO : BUFFER_SIGUIENTE;
+  }
   if (estado.activoConPocoBuffer || estado.arrastrando) return BUFFER_MINIMO;
   return BUFFER_VECINO;
 }
