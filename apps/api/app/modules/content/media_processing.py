@@ -722,6 +722,52 @@ def rutas_de_derivados(
     return f"{base}/poster.jpg", f"{base}/feed.mp4", f"{base}/hls"
 
 
+def ruta_de_remux(media: PostMedia, almacen: str, owner: str) -> str:
+    """Donde se escribe el MP4 remuxado (`content/remux.py`).
+
+    Nombre propio y no el del `feed-720`, porque NO es 720p: conserva la
+    resolucion del original, y las calidades miden el principal por el nombre
+    (`calidades.con_feed_720`). Empieza por `feed` para que la app lo trate
+    como el MP4 del feed (`esMp4DelFeed`). En S3 va versionado como el resto
+    (CloudFront guarda cada objeto un año).
+    """
+    from app.modules.content.remux import MARCA_REMUX
+
+    if almacen == "s3":
+        return f"videos/{owner}/{media.id}/{MARCA_REMUX}-v{_version(media.feed_path) + 1}.mp4"
+    return f"{owner}/derived/{media.id}/{MARCA_REMUX}.mp4"
+
+
+def _lector_remoto(client: httpx.AsyncClient, url: str):
+    """Lee rangos de una URL firmada: para mirar el orden de los bloques del
+    MP4 sin bajarlo entero."""
+
+    async def _leer(inicio: int, n: int) -> bytes:
+        respuesta = await client.get(
+            url, headers={"Range": f"bytes={inicio}-{inicio + n - 1}"}
+        )
+        if respuesta.status_code not in (200, 206):
+            return b""
+        return respuesta.content[:n]
+
+    return _leer
+
+
+async def diagnosticar_url(client: httpx.AsyncClient, url: str):
+    """Diagnostico de intercalado de un MP4 remoto (solo lectura). None si no
+    hay ffprobe o no se pudo leer."""
+    from app.modules.content import remux as _remux
+
+    ffprobe = _ffprobe()
+    if not ffprobe:
+        return None
+    try:
+        return await _remux.diagnosticar(_run, ffprobe, url, _lector_remoto(client, url))
+    except Exception:  # noqa: BLE001 — es una mejora: ante la duda, el original
+        logger.warning("No se pudo medir el intercalado del video", exc_info=True)
+        return None
+
+
 async def _process_video(
     client: httpx.AsyncClient,
     media: PostMedia,
@@ -807,11 +853,32 @@ async def _process_video(
         and calidades is not None
         and _calidades.merece_calidades(
             media.duration_s, media.width, media.height,
-            bool(media.feed_path) or quiere_mp4,
+            _calidades.con_feed_720(media) or quiere_mp4,
         )
     )
+    # REMUX: lo que la app va a reproducir es el ORIGINAL (no hay feed ni se
+    # va a hacer), y el original de Android viene sin intercalar. Se mide
+    # ANTES de bajar nada (unos pocos rangos) para no descargar entero lo que
+    # ya esta bien, como lo subido desde un iPhone.
+    quiere_remux = False
+    if ajustes.video_remux_enabled and not media.feed_path and not quiere_mp4:
+        if es_s3:
+            url = await _url()
+        diagnostico = await diagnosticar_url(client, url)
+        quiere_remux = bool(diagnostico and diagnostico.necesita_remux)
+        if quiere_remux:
+            logger.info(
+                "Video %s: %s (audio a %s bytes del video); se remuxa",
+                media.id, diagnostico.motivo, diagnostico.desfase_bytes,
+            )
 
-    if not falta_poster and not quiere_mp4 and not quiere_hls and not quiere_calidades:
+    if (
+        not falta_poster
+        and not quiere_mp4
+        and not quiere_hls
+        and not quiere_calidades
+        and not quiere_remux
+    ):
         return
 
     if owner is None:
@@ -820,7 +887,7 @@ async def _process_video(
 
     # CAMINO BARATO: solo falta el poster. Se saca leyendo por rangos unos
     # cientos de KB, sin bajar el archivo entero y sin ocupar el semaforo.
-    if not quiere_mp4 and not quiere_hls and not quiere_calidades:
+    if not quiere_mp4 and not quiere_hls and not quiere_calidades and not quiere_remux:
         if es_s3:
             url = await _url()
         with tempfile.TemporaryDirectory() as tmp:
@@ -865,6 +932,9 @@ async def _process_video(
                             destino.stat().st_size / 1048576,
                         )
 
+            if quiere_remux and not media.feed_path:
+                await _remuxar_y_subir(ffmpeg, media, local, carpeta, almacen, owner, _subir)
+
             if quiere_calidades:
                 # Una mejora: si falla, el video se queda como hoy y el resto
                 # del procesado (HLS) sigue. Que la fila haya desaparecido SÍ
@@ -893,6 +963,38 @@ async def _process_video(
                     logger.info("HLS generado para el video %s", media.id)
 
 
+async def _remuxar_y_subir(
+    ffmpeg: str, media: PostMedia, local: Path, carpeta: Path, almacen: str, owner: str, subir
+) -> bool:
+    """Remux del original ya en disco a `feed-remux` y lo anota en `feed_path`.
+
+    Lo comparten el procesado de lo nuevo y el relleno de lo publicado
+    (`rellenar_remux`). Si el resultado no pasa las comprobaciones de
+    `remux.remuxar`, no se sube nada y el video sigue con su original.
+    """
+    from app.modules.content import remux as _remux
+
+    ffprobe = _ffprobe()
+    if not ffprobe:
+        return False
+    destino = carpeta / "remux.mp4"
+    try:
+        hecho = await _remux.remuxar(_run, ffmpeg, ffprobe, local, destino)
+    except asyncio.TimeoutError:
+        logger.warning("El remux del video %s tardo demasiado", media.id)
+        return False
+    if hecho is None:
+        return False
+    ruta = ruta_de_remux(media, almacen, owner)
+    await subir(ruta, destino.read_bytes(), "video/mp4")
+    media.feed_path = ruta
+    logger.info(
+        "Video %s: remux intercalado (%.1f MB) en %s",
+        media.id, destino.stat().st_size / 1048576, "s3" if almacen == "s3" else "supabase",
+    )
+    return True
+
+
 async def _generar_calidades(
     ffmpeg: str,
     media: PostMedia,
@@ -915,7 +1017,7 @@ async def _generar_calidades(
     carpeta_del_medio = carpeta_de_clave(media.storage_path)
     if salida is None or carpeta_del_medio is None:
         return
-    con_feed = bool(media.feed_path)
+    con_feed = _calidades.con_feed_720(media)
     feed_en_disco = carpeta / "feed.mp4"
     if not con_feed:
         tamano_principal: int | None = local.stat().st_size

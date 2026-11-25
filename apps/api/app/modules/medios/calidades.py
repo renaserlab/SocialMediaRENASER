@@ -398,4 +398,17 @@ def armar_variantes(
 
 
 def con_feed_720(medio: PostMedia | Any) -> bool:
-    return bool(getattr(medio, "feed_path", None))
+    """¿Lo que sirve `media_url` es el `feed-720` RECODIFICADO?
+
+    No basta con que haya `feed_path`: el remux (`content/remux.py`) tambien se
+    anota ahi y conserva la resolucion del original. Tomarlo por 720 haria que
+    un original de 1080p se quedara sin el peldaño de 720 y que su bitrate se
+    diera por el nominal del `feed-720`.
+    """
+    return es_feed_720(getattr(medio, "feed_path", None))
+
+
+def es_feed_720(ruta: str | None) -> bool:
+    from app.modules.content.remux import es_remux
+
+    return bool(ruta) and not es_remux(ruta)

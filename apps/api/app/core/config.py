@@ -501,6 +501,16 @@ class Settings(BaseSettings):
     #: propia maquina o en una cola aparte, sin compartir CPU con las peticiones.
     video_hls_enabled: bool = False
 
+    #: Remux SIN recodificar de los MP4 sin intercalar (o con el indice al
+    #: final) a un derivado `feed-remux` intercalado y con `+faststart`
+    #: (`content/remux.py`). ENCENDIDO: el compresor de Android escribe todo
+    #: el video y despues todo el audio, y ExoPlayer tenia que bajarse casi el
+    #: archivo entero para arrancar. Cuesta casi nada (se copian bytes, ~0,1 s
+    #: de CPU y ~60 MB de memoria por un video de un minuto), pero baja el
+    #: original entero: va en el mismo semaforo de un video a la vez. Con
+    #: False, todo como antes (se sirve el original).
+    video_remux_enabled: bool = True
+
     #: Duracion minima para que un video merezca escalera HLS.
     #:
     #: HLS son tres codificaciones a cambio de calidad ADAPTATIVA, y adaptarse

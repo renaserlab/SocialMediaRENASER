@@ -4,7 +4,8 @@ Todo endpoint que devuelve `PostRead` arma sus medios con
 `content/router._load_media_map` (o `_media_read` al crear), y esa función
 llama aquí. Para cada fila con `almacen = 's3'` se rellenan:
 
-- `media_url`: `feed-720-v<n>.mp4` si existe; si no, el original;
+- `media_url`: `feed_path` si existe (`feed-720-v<n>.mp4` o el remux
+  intercalado `feed-remux-v<n>.mp4`); si no, el original;
 - `poster_url`;
 - `stream_url`, si hay HLS: el endpoint de la API con un token corto, porque
   las listas se reescriben allí (ver `content/router.media_hls_playlist`);
@@ -100,7 +101,10 @@ def firmar_medio(
             medio.stream_url = url_de_hls(medio.id, token)
     medio.urls_expiran = datetime.fromtimestamp(vence, tz=timezone.utc)
     if variantes_guardadas:
-        con_feed = bool(_de_esta_carpeta(medio.feed_path))
+        # El remux también va en `feed_path`, pero no es 720p.
+        con_feed = bool(_de_esta_carpeta(medio.feed_path)) and calidades.es_feed_720(
+            medio.feed_path
+        )
         armadas = calidades.armar_variantes(
             variantes_guardadas,
             url_principal=medio.media_url,

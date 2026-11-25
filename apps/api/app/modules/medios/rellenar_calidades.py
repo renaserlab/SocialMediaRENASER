@@ -100,7 +100,7 @@ async def pendientes(db, limite: int) -> list[Pendiente]:
     for f in filas:
         if f.id not in en_s3 or f.id in con_variantes:
             continue
-        if not calidades.merece_calidades(f.duration_s, f.width, f.height, bool(f.feed_path)):
+        if not calidades.merece_calidades(f.duration_s, f.width, f.height, calidades.es_feed_720(f.feed_path)):
             continue
         salida.append(Pendiente(f.id, float(f.duration_s or 0), f.processing_status))
         if len(salida) >= limite:
