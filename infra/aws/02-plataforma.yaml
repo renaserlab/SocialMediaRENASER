@@ -2175,6 +2175,42 @@ Resources:
   # ---------------------------------------------------------------------------
   # Frente HTTPS de emergencia (CloudFront)
   # ---------------------------------------------------------------------------
+  # Cache SOLO para las listas HLS de Supabase (`/api/v1/media/<id>/hls/*`).
+  #
+  # POR QUE (medido el 24/11/2026): las listas salian con `max-age=300` y aun
+  # asi CloudFront respondia siempre `x-cache: Miss`, porque todo el frente usa
+  # la politica gestionada CachingDisabled. Desde que la API firma las listas
+  # por ventana (`content/hls_supabase.py`) su texto es el mismo para todos
+  # durante la ventana, y guardarlas aqui ahorra el viaje hasta la API.
+  #
+  # QUE ENTRA EN LA CLAVE: la ruta y TODA la query (el `?t=` de los HLS de S3
+  # separa a cada persona). Ninguna cabecera ni cookie: la ruta es publica y
+  # no mira la sesion. Los HLS de S3 responden `private`, y CloudFront no
+  # guarda lo privado: siguen pasando por la API en cada pedido, que es lo
+  # que exige su predicado de visibilidad.
+  #
+  # TTL: lo decide la API (`max-age`, como mucho 300 s y nunca mas alla de su
+  # ventana de firma). Por defecto 0: sin cabecera, no se guarda nada.
+  PoliticaDeCacheDeListasHls:
+    Type: AWS::CloudFront::CachePolicy
+    Condition: HayFrenteHttps
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${PrefijoDeRecursos}-${Entorno}-listas-hls'
+        Comment: 'Listas HLS: cache segun max-age de la API, clave = ruta + query'
+        MinTTL: 0
+        DefaultTTL: 0
+        MaxTTL: 300
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          HeadersConfig:
+            HeaderBehavior: none
+          CookiesConfig:
+            CookieBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: all
+
   FrenteHttps:
     Type: AWS::CloudFront::Distribution
     Condition: HayFrenteHttps
@@ -2209,6 +2245,18 @@ Resources:
               - - HeaderName: X-Origen-Verificado
                   HeaderValue: !Sub '{{resolve:secretsmanager:${NombreDelSecreto}:SecretString:CLOUDFRONT_ORIGIN_SECRET}}'
               - !Ref 'AWS::NoValue'
+        CacheBehaviors:
+          # Las listas HLS, con su propia cache (ver PoliticaDeCacheDeListasHls).
+          # Mismo origen y misma politica de reenvio que el resto: solo cambia
+          # que CloudFront puede guardar lo que la API marque como publico.
+          - PathPattern: /api/v1/media/*/hls/*
+            TargetOriginId: balanceador
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: !Ref PoliticaDeCacheDeListasHls
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
         DefaultCacheBehavior:
           TargetOriginId: balanceador
           # Redirige, no bloquea: quien llegue por http acaba en https en vez
