@@ -464,3 +464,45 @@ sesión resuelta, Inicio montado). El iPhone 14 de las pruebas no tenía sesión
 renovación del token. Añadir esos hitos exige ampliar el `check` de `tramo`
 (migración) y `Hitos` en la API (que rechaza campos desconocidos: desplegar la
 API ANTES que la app).
+
+## MP4 intercalados y firmas HLS por ventana (noviembre 2026)
+
+**Medido el 24/11/2026.** Los MP4 que comprime la app en Android (MediaMuxer)
+salen SIN intercalar: todo el video primero y todo el audio al final (un MP4
+de 18,8 MB tenía su primer paquete de audio en el byte 17,6 MB). ExoPlayer
+necesita audio y video del mismo instante para arrancar, así que se bajaba
+casi el archivo entero. Los buffers grandes del móvil (#62/#64) lo tapaban;
+la causa es el archivo.
+
+**Remux sin recodificar** (`apps/api/app/modules/content/remux.py`). Al
+procesar un video que NO tiene `feed_path` ni lo va a tener (lo de la app, que
+ya llega a ~2,5 Mbps), se mide el original con ffprobe sobre su URL firmada
+(unos pocos rangos: el primer paquete de cada pista y el orden de los
+bloques). Si está sin intercalar o con el índice al final, se baja, se hace
+`ffmpeg -c copy -movflags +faststart` y el resultado se sube como derivado
+NUEVO (`<uid>/derived/<id>/feed-remux.mp4` en Supabase,
+`videos/<uid>/<id>/feed-remux-v<n>.mp4` en S3) anotado en `feed_path`. El
+original no se toca; rollback = borrar la referencia. Costo medido (19 MB,
+60 s): 0,12 s de CPU, 57 MB de memoria. Va en el mismo semáforo de un video a
+la vez. Bandera `VIDEO_REMUX_ENABLED` (encendida; `false` = como antes).
+El `feed-720` recodificado y las calidades 480/560 ya salían intercaladas.
+
+Relleno de lo publicado (dentro del contenedor):
+
+```bash
+docker exec renaser-api nice -n 19 python -m app.modules.content.rellenar_remux            # en seco: lista
+docker exec renaser-api nice -n 19 python -m app.modules.content.rellenar_remux --variantes # + calidades S3
+docker exec renaser-api nice -n 19 python -m app.modules.content.rellenar_remux --aplicar
+```
+
+**Firmas HLS de Supabase por ventana** (`content/hls_supabase.py`). Cada
+pedido de lista refirmaba los segmentos con una hora de emisión nueva, y la
+firma es parte de la clave de caché del CDN de Supabase: el primer segmento
+daba siempre `MISS` (1,1 s al primer byte contra 0,13 s con acierto). Ahora
+la lista firmada se guarda en memoria por ventana de 30 min (firma hasta el
+final de la ventana + 1 h) y se entrega idéntica a todos; sale con
+`Cache-Control: public, max-age<=300` sin cruzar la ventana. CloudFront no la
+guardaba porque todo el frente usa CachingDisabled: la pila 02 añade un
+comportamiento `/api/v1/media/*/hls/*` con su propia política (clave = ruta +
+query, sin cabeceras). Los HLS de S3 siguen `private` (predicado en cada
+pedido) y sus segmentos ya iban firmados por ventana.

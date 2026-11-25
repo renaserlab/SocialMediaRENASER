@@ -8,6 +8,7 @@ mas el estado propio (liked_by_me / saved_by_me) cuando hay sesion.
 """
 
 import re
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
@@ -19,6 +20,7 @@ from app.core.config import get_settings
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationAppError
 from app.core.security import AuthUser, get_current_user, get_optional_user
 from app.modules.content import hashtags, menciones, reposts, visibilidad
+from app.modules.content import hls_supabase as _hls_supabase
 from app.modules.content import media_processing as _mp
 from app.modules.content.media_processing import process_media, processing_configured
 from app.modules.content.models import (
@@ -1162,45 +1164,62 @@ async def media_hls_playlist(
     if not _mp.processing_configured():
         raise NotFoundError("Streaming no configurado en este servidor.")
 
-    # El cliente del proceso (`shared/cliente_http.py`): cada video que
-    # arranca pide esta playlist, y abrir un cliente por peticion costaba un
-    # contexto TLS nuevo con el bucle parado y dos saludos TLS a Storage.
-    async with cliente_http(30.0) as client:
-        firmada = await _mp._signed_url(client, f"{media.stream_path}/{playlist}")
-        respuesta = await client.get(firmada)
-        if respuesta.status_code != 200:
-            raise NotFoundError("Playlist no encontrada.")
-        lineas = respuesta.text.splitlines()
+    # FIRMAS ESTABLES POR VENTANA (`content/hls_supabase.py`): la lista se
+    # firma una vez por ventana de 30 min y se entrega identica a todos. Asi
+    # la URL de cada segmento no cambia en cada pedido y el CDN de Supabase
+    # puede acertar (antes fallaba siempre: la firma es parte de su clave).
+    ruta_hls = media.stream_path
 
-        segmentos = [l.strip() for l in lineas if _SEGMENT_LINE.match(l.strip())]
-        firmas: dict[str, str] = {}
-        if segmentos:
-            base = get_settings().supabase_url
-            r = await client.post(
-                f"{base}/storage/v1/object/sign/{_mp.BUCKET}",
-                headers=_mp._headers(),
-                json={
-                    "paths": [f"{media.stream_path}/{s}" for s in segmentos],
-                    "expiresIn": 3600,
-                },
-            )
-            r.raise_for_status()
-            for item in r.json():
-                if item.get("path") and item.get("signedURL"):
-                    firmas[item["path"].rsplit("/", 1)[-1]] = (
-                        f"{base}/storage/v1{item['signedURL']}"
-                    )
+    async def _armar(expira_en: int) -> str | None:
+        # El cliente del proceso (`shared/cliente_http.py`): abrir uno por
+        # peticion costaba un contexto TLS nuevo con el bucle parado.
+        async with cliente_http(30.0) as client:
+            return await _armar_lista_supabase(client, ruta_hls, playlist, expira_en)
 
-    cuerpo = "\n".join(
-        firmas.get(linea.strip(), linea) for linea in lineas
-    )
+    cuerpo = await _hls_supabase.LISTAS.obtener(ruta_hls, playlist, _armar)
+    if cuerpo is None:
+        raise NotFoundError("Playlist no encontrada.")
     return Response(
         content=cuerpo,
         media_type="application/vnd.apple.mpegurl",
-        # Corta pero cacheable: las firmas duran una hora; la playlist puede
-        # reutilizarse unos minutos sin volver a firmar nada.
-        headers={"Cache-Control": "public, max-age=300"},
+        # PUBLICA y hasta el final de la ventana (tope 5 min): el texto es el
+        # mismo para todos durante la ventana, asi que CloudFront puede
+        # guardarlo (comportamiento `/api/v1/media/*/hls/*` de la pila 02) y
+        # la firma que lleva vale al menos una hora mas.
+        headers={"Cache-Control": f"public, max-age={_hls_supabase.max_age(time.time())}"},
     )
+
+
+async def _armar_lista_supabase(
+    client, stream_path: str, playlist: str, expira_en: int
+) -> str | None:
+    """Baja la lista de Storage y firma sus segmentos EN UN SOLO LOTE, todos
+    con el mismo vencimiento. None si la lista no existe."""
+    firmada = await _mp._signed_url(client, f"{stream_path}/{playlist}")
+    respuesta = await client.get(firmada)
+    if respuesta.status_code != 200:
+        return None
+    lineas = respuesta.text.splitlines()
+
+    segmentos = [l.strip() for l in lineas if _SEGMENT_LINE.match(l.strip())]
+    firmas: dict[str, str] = {}
+    if segmentos:
+        base = get_settings().supabase_url
+        r = await client.post(
+            f"{base}/storage/v1/object/sign/{_mp.BUCKET}",
+            headers=_mp._headers(),
+            json={
+                "paths": [f"{stream_path}/{s}" for s in segmentos],
+                "expiresIn": expira_en,
+            },
+        )
+        r.raise_for_status()
+        for item in r.json():
+            if item.get("path") and item.get("signedURL"):
+                firmas[item["path"].rsplit("/", 1)[-1]] = (
+                    f"{base}/storage/v1{item['signedURL']}"
+                )
+    return "\n".join(firmas.get(linea.strip(), linea) for linea in lineas)
 
 
 #: `URI="..."` dentro de una etiqueta (`#EXT-X-MAP`, `#EXT-X-MEDIA`...).

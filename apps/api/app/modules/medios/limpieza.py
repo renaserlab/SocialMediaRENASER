@@ -130,7 +130,9 @@ def _es_derivado_viejo(nombre_relativo: str, fila: dict) -> bool:
     clave = f"{fila['carpeta']}/{nombre_relativo}"
     if nombre_relativo.startswith("poster-v"):
         return clave != fila["poster_path"]
-    if nombre_relativo.startswith("feed-720-v"):
+    if nombre_relativo.startswith(("feed-720-v", "feed-remux-v")):
+        # El remux (`content/remux.py`) se versiona igual que el `feed-720` y
+        # comparte columna: el que no nombra la fila es viejo.
         return clave != fila["feed_path"]
     if nombre_relativo.startswith("hls-v"):
         carpeta_hls = f"{fila['carpeta']}/{nombre_relativo.split('/', 1)[0]}"

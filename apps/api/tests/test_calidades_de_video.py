@@ -155,6 +155,9 @@ async def test_sin_la_lista_el_procesado_no_codifica_nada_extra(s3, monkeypatch)
                       poster_path="videos/ana/m1/poster-v1.jpg")
     s3.put_object(Bucket=BUCKET, Key=medio.storage_path, Body=b"v" * 100_000)
     monkeypatch.setattr(get_settings(), "video_calidades_enabled", True)
+    # Aqui se cuentan las pasadas de las calidades: el remux (que antes mide
+    # el original con ffprobe) se prueba aparte, en test_remux_intercalado.
+    monkeypatch.setattr(get_settings(), "video_remux_enabled", False)
     llamadas: list[list[str]] = []
     monkeypatch.setattr(mp, "_ffmpeg", lambda: "/usr/bin/ffmpeg")
     monkeypatch.setattr(mp, "_run", _ffmpeg_simulado(llamadas))
@@ -170,6 +173,9 @@ async def test_encendido_sube_los_peldanos_a_s3(s3, monkeypatch):
                       poster_path="videos/ana/m2/poster-v1.jpg")
     s3.put_object(Bucket=BUCKET, Key=medio.storage_path, Body=b"v" * 100_000)
     monkeypatch.setattr(get_settings(), "video_calidades_enabled", True)
+    # Aqui se cuentan las pasadas de las calidades: el remux (que antes mide
+    # el original con ffprobe) se prueba aparte, en test_remux_intercalado.
+    monkeypatch.setattr(get_settings(), "video_remux_enabled", False)
     llamadas: list[list[str]] = []
     monkeypatch.setattr(mp, "_ffmpeg", lambda: "/usr/bin/ffmpeg")
     monkeypatch.setattr(mp, "_run", _ffmpeg_simulado(llamadas))
